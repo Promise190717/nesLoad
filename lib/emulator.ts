@@ -1,0 +1,406 @@
+'use client';
+
+import { Nostalgist } from 'nostalgist';
+import { installAudioTap } from './audio-tap';
+
+/*
+ * 音频旁路要赶在核心启动之前装好 —— 核心一启动就会建 AudioContext 并把音频节点
+ * 接到 destination 上，晚了就截不到那一次 connect。
+ * 放在模块顶层就够了：这里是唯一会 launch 的地方，而且补丁本身是惰性的
+ * （没有节点往 destination 连过就什么都不做）；服务端没有 AudioNode，会直接返回。
+ */
+installAudioTap();
+
+export type ConsoleType = 'nes' | 'snes';
+
+export interface LoadedRom {
+  name: string;
+  console: ConsoleType;
+  size: number;
+}
+
+/**
+ * 机种识别失败。
+ * 这里只带错误码、不带成品文案 —— 文案由界面层按当前语言翻译，
+ * 否则中文串会被写死在引擎层，切到英文时仍显示中文。
+ */
+export class UnsupportedRomError extends Error {
+  constructor() {
+    super('unsupported-rom');
+    this.name = 'UnsupportedRomError';
+  }
+}
+
+const CORE_MAP: Record<ConsoleType, string> = {
+  nes: 'fceumm',
+  snes: 'snes9x',
+};
+
+/** 扩展名 → 机种。仅在文件头识别失败时作为回退。 */
+const EXTENSION_MAP: Record<string, ConsoleType> = {
+  nes: 'nes',
+  fds: 'nes',
+  unf: 'nes',
+  unif: 'nes',
+  sfc: 'snes',
+  smc: 'snes',
+  swc: 'snes',
+  fig: 'snes',
+  bs: 'snes',
+};
+
+const SNES_MIN_SIZE = 0x8000; // 32 KiB
+const SNES_MAX_SIZE = 8 * 1024 * 1024;
+
+/**
+ * RetroArch 键盘映射。
+ * 1P：方向键 / Z X / A S / Q E / Shift / Enter
+ * 2P：I J K L / U O / N M / G H / 1 / 2
+ * 两套按键完全不重叠，避免双人同屏时互相抢键。
+ */
+const INPUT_CONFIG = {
+  // Player 1
+  input_player1_up: 'up',
+  input_player1_down: 'down',
+  input_player1_left: 'left',
+  input_player1_right: 'right',
+  input_player1_b: 'z',
+  input_player1_a: 'x',
+  input_player1_y: 'a',
+  input_player1_x: 's',
+  input_player1_l: 'q',
+  input_player1_r: 'e',
+  input_player1_select: 'shift',
+  input_player1_start: 'enter',
+  // Player 2
+  input_player2_up: 'i',
+  input_player2_down: 'k',
+  input_player2_left: 'j',
+  input_player2_right: 'l',
+  input_player2_b: 'u',
+  input_player2_a: 'o',
+  input_player2_y: 'n',
+  input_player2_x: 'm',
+  input_player2_l: 'g',
+  input_player2_r: 'h',
+  // 数字键在 RetroArch 的键名表里写作 `keypad0`..`keypad9`（小键盘才是 `num0`..`num9`）。
+  // 这里不能直接写 `'1'`：Nostalgist 解析键名时，单字符一律拼成 `Key${x}`，
+  // 于是 `'1'` 会变成 `Key1` —— 那不是合法的 DOM code（数字行是 `Digit1`），
+  // 按键会被静默丢弃（本地和转发两条路都失效）。
+  input_player2_select: 'keypad1',
+  input_player2_start: 'keypad2',
+};
+
+/** 音量档位上限：0 档是静音，这个档位是最大音量。 */
+export const VOLUME_MAX = 6;
+
+/**
+ * 最大档的增益，单位 dB（0 dB = 原音量）。
+ *
+ * 刻意**不设成 0**：0 dB 是 RetroArch 的默认满音量，在浏览器里放 NES 游戏明显偏吵
+ * —— 用户实测「最大档和倒数第二大档声音都很大」。低 6 dB 差不多就是响度砍半。
+ */
+const VOLUME_TOP_DB = -6;
+
+/**
+ * 相邻两档之间差多少 dB。这是**设计选择**，不是 RetroArch 的步长（见下）。
+ *
+ * 原来是 4 dB，用户反馈「音量控制不明显」—— 4 dB 的差距确实容易被当成没反应。
+ * 6 dB 才是「一耳朵能听出来」的量级，1 档到 6 档总共 30 dB。
+ */
+const LEVEL_STEP_DB = 6;
+
+/**
+ * RetroArch 的 VOLUME_UP / VOLUME_DOWN 每次只走 0.5 dB —— 这是它的实现细节，
+ * 和上面的**档位间距**是两码事，别混用（一步 6 dB 要发 12 条命令）。
+ *
+ * 而且**没有** SET_VOLUME 这类能直接赋值的命令（查过核心构建的命令名表，
+ * 音量只有 VOLUME_UP / VOLUME_DOWN / MUTE），所以运行时只能按差值补够步数，
+ * 当前值必须由我们自己记着。
+ */
+const RA_VOLUME_STEP_DB = 0.5;
+
+/**
+ * 档位 → dB。0 档不走这里（它靠静音开关表达），调用方一律传 Math.max(1, level)。
+ * 6 档 = -6 dB（最大），1 档 = -36 dB（最小可听档）。
+ */
+function levelToDb(level: number): number {
+  return VOLUME_TOP_DB - (VOLUME_MAX - level) * LEVEL_STEP_DB;
+}
+
+function ascii(bytes: Uint8Array, from: number, len: number): string {
+  let out = '';
+  for (let i = from; i < from + len && i < bytes.length; i += 1) {
+    out += String.fromCharCode(bytes[i]);
+  }
+  return out;
+}
+
+/**
+ * SNES ROM 在 0x7FC0 处存有一对互为反码的校验和。
+ * base 为 0 表示无 copier header，为 0x200 表示带 512 字节 header。
+ */
+function hasSnesChecksum(bytes: Uint8Array, base: number): boolean {
+  const off = base + 0x7fc0;
+  if (off + 0x20 > bytes.length) return false;
+  const complement = bytes[off + 0x1c] | (bytes[off + 0x1d] << 8);
+  const checksum = bytes[off + 0x1e] | (bytes[off + 0x1f] << 8);
+  return ((checksum ^ complement) & 0xffff) === 0xffff;
+}
+
+function looksLikeSnes(bytes: Uint8Array, size: number): boolean {
+  if (size < SNES_MIN_SIZE || size > SNES_MAX_SIZE) return false;
+  if (size % 0x8000 === 0 && hasSnesChecksum(bytes, 0)) return true;
+  if ((size - 0x200) % 0x8000 === 0 && hasSnesChecksum(bytes, 0x200)) return true;
+  return false;
+}
+
+export function consoleFromExtension(fileName: string): ConsoleType | null {
+  const ext = fileName.toLowerCase().split('.').pop() ?? '';
+  return EXTENSION_MAP[ext] ?? null;
+}
+
+/**
+ * 识别 ROM 机种：优先看文件头 magic number，认不出再回退到扩展名。
+ * 这样即便 ROM 被改过名，也不会挂错核心。
+ */
+export async function detectConsole(file: File): Promise<ConsoleType | null> {
+  const head = new Uint8Array(await file.slice(0, 0x10000).arrayBuffer());
+
+  // iNES / NES 2.0
+  if (head[0] === 0x4e && head[1] === 0x45 && head[2] === 0x53 && head[3] === 0x1a) {
+    return 'nes';
+  }
+  // Famicom Disk System
+  if (ascii(head, 0, 3) === 'FDS' && head[3] === 0x1a) return 'nes';
+  // UNIF
+  if (ascii(head, 0, 4) === 'UNIF') return 'nes';
+
+  if (looksLikeSnes(head, file.size)) return 'snes';
+
+  return consoleFromExtension(file.name);
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export class EmulatorController {
+  private instance: Nostalgist | null = null;
+  private currentRom: LoadedRom | null = null;
+  private paused = false;
+
+  /** 音量档位（0 = 静音，VOLUME_MAX = 原音量）。没有实例时也留着，插卡带时生效。 */
+  private volumeLevel = VOLUME_MAX;
+  /** 我们自己记着的当前 dB —— RetroArch 没有能读回音量的命令 */
+  private volumeDb = levelToDb(VOLUME_MAX);
+  private muted = false;
+
+  get rom() {
+    return this.currentRom;
+  }
+
+  get isPaused() {
+    return this.paused;
+  }
+
+  get isRunning() {
+    return this.instance !== null;
+  }
+
+  async loadRom(file: File, canvas: HTMLCanvasElement) {
+    // 先退出正在运行的实例，避免多个核心叠加占用内存
+    await this.exit();
+
+    const consoleType = await detectConsole(file);
+    if (!consoleType) {
+      throw new UnsupportedRomError();
+    }
+
+    const nostalgist = await Nostalgist.launch({
+      element: canvas,
+      core: CORE_MAP[consoleType],
+      rom: file,
+      retroarchConfig: {
+        ...INPUT_CONFIG,
+        video_aspect_ratio_auto: true,
+        video_windowed_fullscreen: false,
+        // 单位是 dB，0 即原音量。此前设为 6.0（+6dB）会削波爆音。
+        // 静音档刻意不用 -80 dB 表达，而是把音量停在最小可听档 + 打开静音开关 ——
+        // 否则取消静音时要爬一百多步 VOLUME_UP 才回得来。
+        audio_volume: levelToDb(Math.max(1, this.volumeLevel)),
+        audio_mute_enable: this.volumeLevel === 0,
+        input_overlay_enable: false,
+      },
+      size: { width: canvas.width, height: canvas.height },
+      style: {
+        width: '100%',
+        height: '100%',
+      },
+    });
+
+    this.instance = nostalgist;
+    this.currentRom = {
+      name: file.name,
+      console: consoleType,
+      size: file.size,
+    };
+    this.paused = false;
+
+    // 记下这次启动实际用的音量 —— 运行时的 VOLUME_UP / VOLUME_DOWN 都是相对调整，
+    // 基准必须和启动配置对上，否则档位和实际响度会越走越偏。
+    this.volumeDb = levelToDb(Math.max(1, this.volumeLevel));
+    this.muted = this.volumeLevel === 0;
+  }
+
+  /**
+   * 抓一份快照交给调用方。
+   * **存哪儿不归引擎管** —— 存档槽（每 ROM 五份、超出顶掉最早的）由 lib/saves.ts 负责，
+   * 引擎只做两件事：产出一份 Blob、吃下一份 Blob。
+   */
+  async saveState(): Promise<Blob | null> {
+    if (!this.instance) return null;
+    const { state } = await this.instance.saveState();
+    return state;
+  }
+
+  /** 载入一份快照。从槽位里取出来的是 Blob，导入的文件是 File —— File 也是 Blob。 */
+  async loadStateFrom(data: Blob | ArrayBuffer): Promise<boolean> {
+    if (!this.instance) return false;
+    try {
+      await this.instance.loadState(data);
+      return true;
+    } catch (e) {
+      console.error('读取存档失败', e);
+      return false;
+    }
+  }
+
+  /** 导出存档。传入已有的快照可避免重复抓取。 */
+  async downloadState(blob?: Blob): Promise<void> {
+    if (!this.instance || !this.currentRom) return;
+    const state = blob ?? (await this.instance.saveState()).state;
+    downloadBlob(
+      new Blob([state], { type: 'application/octet-stream' }),
+      `${this.currentRom.name.replace(/\.[^.]+$/, '')}.state`
+    );
+  }
+
+  async togglePause(): Promise<void> {
+    if (!this.instance) return;
+    // pause / resume 是同步的，返回 void
+    if (this.paused) {
+      this.instance.resume();
+      this.paused = false;
+    } else {
+      this.instance.pause();
+      this.paused = true;
+    }
+  }
+
+  async reset(): Promise<void> {
+    if (!this.instance) return;
+    // Nostalgist 暴露的是 restart()，并没有 reset()
+    this.instance.restart();
+  }
+
+  /**
+   * 设定音量档位（0 = 静音，VOLUME_MAX = 原音量），返回夹紧后的档位。
+   * 没有正在运行的实例时只记下来 —— 下次 loadRom 会把它作为 audio_volume 的初值。
+   */
+  setVolume(level: number): number {
+    const next = Math.max(0, Math.min(VOLUME_MAX, Math.round(level)));
+    this.volumeLevel = next;
+
+    const instance = this.instance;
+    if (!instance) return next;
+
+    // 静音用 MUTE 开关表达，而不是把 dB 拉到 -80：
+    // 后者要一百多步 VOLUME_DOWN 才爬得到，取消静音时还得再爬回来。
+    if (next === 0) {
+      if (!this.muted) {
+        instance.sendCommand('MUTE');
+        this.muted = true;
+      }
+      return next;
+    }
+
+    if (this.muted) {
+      instance.sendCommand('MUTE');
+      this.muted = false;
+    }
+
+    const target = levelToDb(next);
+    const delta = target - this.volumeDb;
+    // 按 RetroArch 的 0.5 dB/步补够条数：跨一档（6 dB）就是 12 条
+    const steps = Math.round(Math.abs(delta) / RA_VOLUME_STEP_DB);
+    if (steps > 0) {
+      const command = delta > 0 ? 'VOLUME_UP' : 'VOLUME_DOWN';
+      for (let i = 0; i < steps; i += 1) instance.sendCommand(command);
+    }
+    this.volumeDb = target;
+
+    return next;
+  }
+
+  /**
+   * 把某个手柄钮按下 / 松开。联机时用来把**对方**的输入打进本机的另一个玩家位。
+   *
+   * 注意这是事件级注入（Nostalgist 没有帧级钩子），所以只能做到「对方一按这边就跟着按」，
+   * 做不到逐帧锁步。局域网内 RTT 通常在个位数毫秒，实际手感够用；
+   * 但两端一旦不同步（比如一边暂停了），错误不会自己纠正 —— 这是当前方案的天花板。
+   */
+  pressButton(button: string, player: number, down: boolean): void {
+    const instance = this.instance;
+    if (!instance) return;
+    // 必须传对象形式 `{ button, player }`。
+    // 上层 Nostalgist.pressDown 只接受**一个**参数：
+    //   pressDown(options) {
+    //     if (typeof options === "string") return emulator.pressDown(options);
+    //     return emulator.pressDown(options.button, options.player);
+    //   }
+    // 写成 pressDown(button, player) 会命中字符串分支，player 被静默丢掉、
+    // 在底层退回默认值 1 —— 表现就是「对方怎么按都没用」。
+    const options = { button, player };
+    if (down) instance.pressDown(options);
+    else instance.pressUp(options);
+  }
+
+  async exit(): Promise<void> {
+    const instance = this.instance;
+
+    // 先把引用清干净再动手：下面任何一步抛异常，控制器也不会留着一个半死的实例，
+    // isRunning 立刻变 false，界面不会卡在「还插着卡带」的状态。
+    this.instance = null;
+    this.currentRom = null;
+    this.paused = false;
+
+    if (!instance) return;
+
+    try {
+      // 先发一次 PAUSE_TOGGLE 再退出。
+      // 这条命令和面板上的「暂停」走的是同一条路径，一定能停住画面和声音；
+      // 万一核心构建的 exit() 没有真正终止 runtime（nostalgist 内部用
+      // try/catch 把 exit 的异常吞掉了，出错时它照样会把状态标成 terminated），
+      // 至少不会让用户看到游戏还在跑。
+      instance.pause();
+    } catch (e) {
+      console.warn('退出前暂停失败', e);
+    }
+
+    try {
+      // removeCanvas 必须为 false：canvas 由 React 渲染和管理，
+      // 若让 Nostalgist 把它从 DOM 移除，React 后续会拿到脱离文档的节点。
+      instance.exit({ removeCanvas: false });
+    } catch (e) {
+      console.warn('退出模拟器时出错', e);
+    }
+  }
+}
