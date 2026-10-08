@@ -90,11 +90,18 @@ export interface NetplayCallbacks {
   onRemoteStream: (stream: MediaStream | null) => void;
 }
 
-/** 线上传的按键事件：按钮名 + 按下还是松开 */
-interface ButtonMessage {
+/**
+ * 线上传的按键事件：按钮名 + 按下还是松开。
+ *
+ * 这里必须用 `type` 而不是 `interface`：Trystero 的 `makeAction<T>` 把 T 约束到
+ * `DataPayload`（含 `{ [key: string]: JsonValue }`），而 **TS 只给对象字面量类型的
+ * 类型别名补隐式索引签名，interface 不给** —— 写成 interface 会报
+ * 「Index signature for type 'string' is missing」。
+ */
+type ButtonMessage = {
   b: string;
   d: 0 | 1;
-}
+};
 
 /**
  * 线上传的会话状态：房主当前在不在出画面、出的是哪盘。
@@ -102,12 +109,14 @@ interface ButtonMessage {
  * 为什么不能只靠媒体流判断「有没有画面」：Trystero 没有「远端流结束」的回调，
  * 房主弹卡之后加入者那边的 `<video>` 会冻在最后一帧上，看着像游戏卡住了。
  * 所以「有没有画面」由这条消息说了算，媒体流只负责像素。
+ *
+ * 和 ButtonMessage 一样，必须是 `type` 而非 `interface`（隐式索引签名，见上）。
  */
-interface SessionMessage {
+type SessionMessage = {
   p: 0 | 1;
   n?: string;
   c?: ConsoleType;
-}
+};
 
 /** 空状态。界面拿它做初值，控制器也拿它做复位。 */
 export const IDLE_NETPLAY_STATE: NetplayState = {

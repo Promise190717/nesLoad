@@ -15,18 +15,33 @@
  * 中间串了多少增益节点 —— 最后一定要连到 `ctx.destination`，那一步跑不掉。
  * 而且只是**多接一路**，本机的声音一点不受影响（本机那份照旧走 ctx.destination）。
  *
- * 唯一的前提是必须在核心建 AudioContext 之前把原型改好 —— 所以
- * `installAudioTap()` 在 `loadRom` 里、`Nostalgist.launch` 之前调用。
+ * 唯一的前提是必须在核心建 AudioContext 之前把原型改好 —— 所以 `installAudioTap()`
+ * 在 `lib/emulator.ts` 的**模块顶层**调用（不是 loadRom 里），早于任何一次 launch。
  */
 
 /** 全局只需要改一次原型；改两次会把上一次的补丁套在里面 */
 let installed = false;
 /** 最近一次被旁路的那个 destination 节点。核心重建 AudioContext 时会被换掉 */
 let latest: MediaStreamAudioDestinationNode | null = null;
-/** 一个 AudioContext 只能有一个旁路节点，重复建会让声音变成两路叠着 */
-const taps = new WeakMap<BaseAudioContext, MediaStreamAudioDestinationNode>();
+/**
+ * 一个 AudioContext 只能有一个旁路节点，重复建会让声音变成两路叠着。
+ *
+ * key 收窄到 `AudioContext` 而不是 `BaseAudioContext`：`createMediaStreamDestination`
+ * 只声明在 `AudioContext` 上 —— `OfflineAudioContext` 同样继承 `BaseAudioContext`，
+ * 但它没有真实输出设备，也就没有这个方法。
+ */
+const taps = new WeakMap<AudioContext, MediaStreamAudioDestinationNode>();
 
-function ensureTap(context: BaseAudioContext): MediaStreamAudioDestinationNode {
+/**
+ * 取（或建）某个 context 的旁路节点。
+ * 不是 `AudioContext`（比如离线渲染的 OfflineAudioContext）就返回 null —— 那种上下文
+ * 没有输出设备，截它没有意义，调用方跳过即可。
+ */
+function ensureTap(context: BaseAudioContext): MediaStreamAudioDestinationNode | null {
+  if (typeof AudioContext === 'undefined' || !(context instanceof AudioContext)) {
+    return null;
+  }
+
   let tap = taps.get(context);
   if (!tap) {
     tap = context.createMediaStreamDestination();
@@ -70,10 +85,13 @@ export function installAudioTap(): void {
       typeof AudioDestinationNode !== 'undefined' &&
       destination instanceof AudioDestinationNode
     ) {
-      try {
-        original.call(this, ensureTap(destination.context));
-      } catch {
-        // 同一个节点重复连同一路会抛，忽略即可 —— 该接的已经接上了
+      const tap = ensureTap(destination.context);
+      if (tap) {
+        try {
+          original.call(this, tap);
+        } catch {
+          // 同一个节点重复连同一路会抛，忽略即可 —— 该接的已经接上了
+        }
       }
     }
 
