@@ -106,7 +106,14 @@ const en = {
     'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Keys: I, J, K, L, U, O, N, M, G, H, 1, 2.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
-  'netplay.failed': 'Could not reach the relay. Check the network and try again.',
+  'netplay.errInsecure':
+    'Netplay needs HTTPS or localhost. This page is on plain http, so the browser withholds the crypto API it relies on.',
+  'netplay.errNoDirect':
+    'Both sides reached the relay, but no direct connection could be opened — usually NAT or a firewall. Same LAN works best.',
+  'netplay.errPassword': 'Room code mismatch.',
+  'netplay.errHandshake': 'Handshake timed out — the other player may have left.',
+  'netplay.errUnknown':
+    'Could not connect to the other player. The browser console has the exact reason.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -174,7 +181,13 @@ const zh: Record<MessageKey, string> = {
     '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。你的键位：I、J、K、L、U、O、N、M、G、H、1、2。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
-  'netplay.failed': '连不上中继，检查网络后重试。',
+  'netplay.errInsecure':
+    '联机需要 HTTPS 或 localhost。当前页面是普通 http，浏览器不提供它依赖的加密接口。',
+  'netplay.errNoDirect':
+    '双方都连上了中继，但建不起直连 —— 通常是 NAT 或防火墙。同一个局域网成功率最高。',
+  'netplay.errPassword': '房间码对不上。',
+  'netplay.errHandshake': '握手超时，对方可能已经离开了。',
+  'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
 };
 
 const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };

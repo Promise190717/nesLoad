@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { NetplayState } from '@/lib/netplay';
+import type { NetplayError, NetplayState } from '@/lib/netplay';
+import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
 interface NetplayPanelProps {
@@ -13,6 +14,21 @@ interface NetplayPanelProps {
   onJoin: (code: string) => void;
   onLeave: () => void;
 }
+
+/**
+ * 错误码 → 文案。
+ *
+ * 写成 `Record<NetplayError, MessageKey>` 是为了拿穷尽性检查：以后在 `netplay.ts`
+ * 里加了新的错误码，这里漏一条就直接编译不过，不会退化成一句含糊的兜底。
+ */
+const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
+  'bad-code': 'netplay.badCode',
+  'insecure-context': 'netplay.errInsecure',
+  'no-direct-connection': 'netplay.errNoDirect',
+  'room-password': 'netplay.errPassword',
+  handshake: 'netplay.errHandshake',
+  'join-failed': 'netplay.errUnknown',
+};
 
 /**
  * 联机面板。和存档列表一样浮在房间上、**不进屏幕** ——
@@ -50,11 +66,7 @@ export default function NetplayPanel({
   if (!open) return null;
 
   const inRoom = state.status !== 'idle';
-  const errorText = state.error
-    ? state.error === 'bad-code'
-      ? t('netplay.badCode')
-      : t('netplay.failed')
-    : null;
+  const errorText = state.error ? t(ERROR_MESSAGE[state.error]) : null;
 
   const copyCode = async () => {
     if (!state.code) return;

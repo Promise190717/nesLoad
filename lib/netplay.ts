@@ -1,6 +1,6 @@
 'use client';
 
-import type { MessageAction, Room } from '@trystero-p2p/mqtt';
+import type { MessageAction, Room, TurnServerConfig } from '@trystero-p2p/mqtt';
 import type { ConsoleType } from './emulator';
 
 /**
@@ -45,6 +45,41 @@ const CONFUSABLE: Record<string, string> = { O: '0', I: '1', L: '1', U: 'V' };
  */
 const APP_ID = 'nesload';
 
+/**
+ * 可选的 TURN 服务器。
+ *
+ * Trystero 默认只带 STUN（`stun1-3.l.google.com` + `stun.cloudflare.com`），**没有 TURN**。
+ * 两端只要不能直连 —— 对称 NAT、企业网络封 UDP、路由器开了客户端隔离 —— 就必然失败，
+ * 报 `could not connect to peer … configure TURN servers`。这种情况唯一的解法是给一条
+ * 中继链路，也就是 TURN。它需要一台自己的服务器（自建 coturn，或用付费服务），
+ * 所以做成环境变量：**不配就完全走原来的 STUN-only 路径，行为一点不变**。
+ *
+ *   NEXT_PUBLIC_TURN_URL=turn:turn.example.com:3478
+ *   NEXT_PUBLIC_TURN_USERNAME=user       （可选）
+ *   NEXT_PUBLIC_TURN_CREDENTIAL=pass     （可选）
+ *
+ * 多个地址用逗号分隔。注意这几个变量**必须原样写成字面量** —— Next 只在构建期对
+ * `process.env.NEXT_PUBLIC_*` 做静态替换，写成 `process.env[name]` 取不到值。
+ */
+function turnConfig(): TurnServerConfig[] {
+  const raw = process.env.NEXT_PUBLIC_TURN_URL;
+  if (!raw) return [];
+
+  const urls = raw
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+  if (urls.length === 0) return [];
+
+  return [
+    {
+      urls,
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL,
+    },
+  ];
+}
+
 export type NetplayRole = 'host' | 'guest';
 
 /**
@@ -53,6 +88,39 @@ export type NetplayRole = 'host' | 'guest';
  * connected—— 双方 DataChannel 已通
  */
 export type NetplayStatus = 'idle' | 'waiting' | 'connected';
+
+/**
+ * 失败原因。存的是**稳定码**而不是库抛的英文原文 —— 界面按码选文案，
+ * 原文只进 console。
+ *
+ * 为什么需要分这么细：Trystero 的 `onJoinError` **只在点对点环节**触发
+ * （SDP 交换完连不上、握手超时、房间密码解不开），**MQTT 中继连不上不走它**。
+ * 之前所有原因都被界面上那一句「连不上中继」盖住了，指向完全错误的方向。
+ */
+export type NetplayError =
+  /** 房间码格式不对 */
+  | 'bad-code'
+  /** 页面不是安全上下文（既非 https 也非 localhost），`crypto.subtle` 拿不到 */
+  | 'insecure-context'
+  /** SDP 换完了但两端建不起直连 —— NAT / 防火墙。Trystero 默认只有 STUN，没有 TURN */
+  | 'no-direct-connection'
+  /** 房间密码对不上（我们没设密码，正常不该出现） */
+  | 'room-password'
+  /** 握手超时或失败，通常是对端刚离开 */
+  | 'handshake'
+  /** 其他，原文见 console */
+  | 'join-failed';
+
+/**
+ * 把 Trystero 抛的英文原文归成稳定码。原文一律 `console.warn` 出去，方便排查。
+ * 判据取自 `@trystero-p2p/core` 里那几处 `onJoinError` 的实际文案。
+ */
+function classifyJoinError(raw: string): NetplayError {
+  if (raw.includes('could not connect to peer')) return 'no-direct-connection';
+  if (raw.includes('password')) return 'room-password';
+  if (raw.includes('handshake') || raw.includes('timed out')) return 'handshake';
+  return 'join-failed';
+}
 
 /** 房主插着的那盘卡带。加入者拿它显示机身上的卡带和面板上的「房主正在玩」。 */
 export interface RemoteGame {
@@ -68,8 +136,8 @@ export interface NetplayState {
   peerId: string | null;
   /** 到对方的往返延迟（毫秒），未测出时为 null */
   rtt: number | null;
-  /** 建连失败的原因，正常时为 null */
-  error: string | null;
+  /** 建连失败的原因码，正常时为 null */
+  error: NetplayError | null;
   /** 房主是否正在出画面。加入者据此决定屏幕显示雪花还是视频 */
   remotePlaying: boolean;
   /** 房主插着的那盘卡带，房主没插卡时为 null */
@@ -352,6 +420,19 @@ export class NetplayController {
     // 换房间前先清干净，避免两个 room 同时活着互相抢事件
     await this.leave();
 
+    /*
+     * 安全上下文预检。
+     *
+     * Trystero 建房时就要用 `crypto.subtle` 算 topic 哈希（SHA-1）和信令密钥
+     * （SHA-256 → AES-GCM），而这个 API 只在安全上下文（https / localhost）下暴露。
+     * 局域网里用 http://192.168.x.x 打开时它是 undefined，库内部会抛错，
+     * 界面只会停在「等待中」或报一句看不懂的原因。这里提前拦掉，给出能照着做的提示。
+     */
+    if (typeof crypto === 'undefined' || !crypto.subtle) {
+      this.fail('insecure-context');
+      return;
+    }
+
     // Trystero 在模块顶层就会摸 WebSocket，必须动态 import，
     // 否则 Next 的服务端渲染阶段会直接炸。
     const { joinRoom } = await import('@trystero-p2p/mqtt');
@@ -366,13 +447,16 @@ export class NetplayController {
 
     let room: Room;
     try {
-      room = joinRoom({ appId: APP_ID }, code, {
+      room = joinRoom({ appId: APP_ID, turnConfig: turnConfig() }, code, {
         onJoinError: (details) => {
-          this.fail(`join:${details.error}`);
+          // 原文只进 console —— 界面按稳定码选文案（见 classifyJoinError）
+          console.warn('[netplay] join error:', details.error, details);
+          this.fail(classifyJoinError(details.error));
         },
       });
     } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'join-failed');
+      console.warn('[netplay] joinRoom threw:', e);
+      this.fail('join-failed');
       return;
     }
 
@@ -456,7 +540,7 @@ export class NetplayController {
       .catch(() => undefined);
   }
 
-  private fail(reason: string): void {
+  private fail(reason: NetplayError): void {
     this.state = { ...this.state, status: 'idle', error: reason };
     this.callbacks.onState(this.state);
   }

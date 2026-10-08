@@ -112,6 +112,27 @@ pnpm dev
 
 所以严格说是「没有**我们自己的**服务器」，而不是「完全没有服务器」。局域网内直连延迟通常在个位数毫秒。代价是双方都要能访问那个公共 broker——完全断网的内网里连不上。
 
+### 直连失败时：TURN
+
+Trystero 默认只带 STUN（`stun1-3.l.google.com` + `stun.cloudflare.com`），**没有 TURN**。STUN 只负责告诉对方「我的公网地址长这样」，真正打洞还得两端自己能通。下面这些情况就会失败：
+
+- 路由器开了 **AP 隔离 / 客户端隔离**（同一个 WiFi，但设备之间根本不能互访）
+- 第三方安全软件（360 / 火绒 / 电脑管家）拦入站 UDP —— 它和 Windows 自带防火墙是两回事，系统防火墙默认不拦出站、对 UDP 还有状态跟踪，一般不是主因
+- 企业或校园网只放行 TCP 443
+- 跨网络的对称 NAT / 运营商 CGNAT
+
+失败时面板会提示「双方都连上了中继，但建不起直连」，控制台里另有 Trystero 的英文原文（`[netplay] join error: …`）。想确认卡在哪一段，开 `chrome://webrtc-internals` 看 `ICE candidate pairs`：全是 `failed` 就是网络层被挡了，有一条 `succeeded` 就说明网络是通的、问题在别处。
+
+**要跨过这一层只能配一台 TURN 服务器**（自建 coturn，或用付费服务），由它把流量中继过去。填三个环境变量即可，不填就还是原来的 STUN-only 路径、行为一点不变：
+
+```bash
+NEXT_PUBLIC_TURN_URL=turn:turn.example.com:3478   # 多个地址用逗号分隔
+NEXT_PUBLIC_TURN_USERNAME=user                    # 可选
+NEXT_PUBLIC_TURN_CREDENTIAL=pass                  # 可选
+```
+
+这些值在**构建期**被内联进客户端代码（`NEXT_PUBLIC_` 前缀的固有行为），改了要重新构建。另外 TURN 是**中继**，走它会明显增加延迟——能用直连就别配。
+
 ### 画面和声音是怎么过去的
 
 - **画面**：`canvas.captureStream(60)` 把模拟器画布直接抓成一条 `MediaStream`。
