@@ -35,10 +35,13 @@ const BUTTON_LABELS: Record<ButtonName, string> = {
   start: 'START',
 };
 
-/** 面板底部的提示条。error 是「没绑上」，warn 是「绑上了但要注意」。 */
+/**
+ * 面板底部的提示条。
+ *
+ * 只有「没绑上」一种 —— 跨玩家撞键改成拒绝之后，就没有「绑上了但要注意」这档了。
+ */
 interface Notice {
   key: MessageKey;
-  tone: 'error' | 'warn';
   button?: ButtonName;
   player?: string;
 }
@@ -53,10 +56,19 @@ interface KeyBindingsPanelProps {
    *
    * 房主天然是 true（他就是在本机跑模拟器的那个人），所以只对**加入者**有意义：
    * 加入者在房主出画面之前可以自己先插一盘玩，那时本机跑着模拟器、按 P1 键位读键盘，
-   * 改完要重插卡带 —— 和「加入者改完立刻生效」是两回事，提示必须分开说。
+   * 改完要重载卡带 —— 和「加入者改完立刻生效」是两回事，提示必须分开说。
+   *
+   * 顺带也是「重载卡带」按钮的可用条件：没有本地卡带就没有可重载的东西。
    */
   localPlaying: boolean;
   onChange: (next: KeyBindings) => void;
+  /**
+   * 重载当前卡带，让新键位生效。
+   *
+   * 返回 Promise 是为了让面板知道什么时候能收工关掉自己 —— 重新 launch 要几秒，
+   * 面板留在屏幕上只会挡着游戏。
+   */
+  onReload: () => Promise<void>;
   onClose: () => void;
 }
 
@@ -73,6 +85,7 @@ export default function KeyBindingsPanel({
   role,
   localPlaying,
   onChange,
+  onReload,
   onClose,
 }: KeyBindingsPanelProps) {
   const { t } = useI18n();
@@ -80,6 +93,8 @@ export default function KeyBindingsPanel({
   /** 正在等新键的那个钮。null 表示不在捕获态。 */
   const [capturing, setCapturing] = useState<ButtonName | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  /** 正在重载卡带。重新 launch 要几秒，这期间别让按钮再被按一次。 */
+  const [reloading, setReloading] = useState(false);
 
   // 每次打开都重置：默认落在「你自己那组」，捕获态和上一条提示都清掉
   useEffect(() => {
@@ -87,6 +102,7 @@ export default function KeyBindingsPanel({
     setPlayer(role === 'guest' ? 'p2' : 'p1');
     setCapturing(null);
     setNotice(null);
+    setReloading(false);
   }, [open, role]);
 
   /**
@@ -134,7 +150,7 @@ export default function KeyBindingsPanel({
       const code = e.code;
       // Nostalgist 认不出的键不接受 —— 绑上去只会在联机注入时静默失效
       if (!codeToRetroArch(code)) {
-        setNotice({ key: 'keybind.unsupported', tone: 'error' });
+        setNotice({ key: 'keybind.unsupported' });
         return;
       }
 
@@ -142,24 +158,34 @@ export default function KeyBindingsPanel({
       // 同一位玩家内部撞键 = 一个键同时是两个钮，没有意义，直接拒绝
       const same = conflictInPlayer(table, capturing, code);
       if (same) {
-        setNotice({ key: 'keybind.conflictSame', tone: 'error', button: same });
+        setNotice({ key: 'keybind.conflictSame', button: same });
         return;
       }
 
-      // 跨玩家撞键允许（联机时两人各在自己的机器上），但单机双人会互相抢键，提醒一句
+      /*
+       * 跨玩家撞键也拒绝。
+       *
+       * 单机双人时两人共用一块键盘，重叠就是互相抢键；联机时房主的 P2 一旦和自己的
+       * P1 撞上，注入会连带驱动他自己的 P1 —— 注入合成的事件由**核心启动时读的那张表**
+       * 解析（`fireKeyboardEvent` 直接调 emscripten 的处理函数，不派发真 DOM 事件），
+       * 同一个 code 会同时算给两个玩家。
+       *
+       * 与其留一个「能用但会出怪事」的状态，不如当场说不行。默认那两套本来就不重叠，
+       * 真撞上了多半是配错。
+       */
       const other = conflictInOtherPlayer(bindings, player, code);
+      if (other) {
+        setNotice({
+          key: 'keybind.conflictOther',
+          button: buttonHolding(bindings[other], code) ?? undefined,
+          player: other === 'p1' ? '1' : '2',
+        });
+        return;
+      }
+
       onChange({ ...bindings, [player]: { ...table, [capturing]: code } });
       setCapturing(null);
-      setNotice(
-        other
-          ? {
-              key: 'keybind.conflictOther',
-              tone: 'warn',
-              button: buttonHolding(bindings[other], code) ?? undefined,
-              player: other === 'p1' ? '1' : '2',
-            }
-          : null
-      );
+      setNotice(null);
     };
 
     window.addEventListener('keydown', onKey, true);
@@ -172,12 +198,32 @@ export default function KeyBindingsPanel({
   /*
    * 提示按「改完什么时候生效」分四种，不能只按角色分：
    * 加入者本机没模拟器时是立刻生效，可他要是自己在房主出画面之前插了一盘，
-   * 那盘走的是本机 RetroArch 读 P1 的老路 —— 一样要重插卡带。
+   * 那盘走的是本机 RetroArch 读 P1 的老路 —— 一样要重载卡带。
    */
   let hint: MessageKey;
   if (role === 'guest') hint = localPlaying ? 'keybind.guestLocalHint' : 'keybind.guestHint';
   else if (role === 'host') hint = 'keybind.hostHint';
   else hint = 'keybind.hint';
+
+  /**
+   * 重载卡带，让新键位生效。
+   *
+   * 做完就把面板关掉：重新 launch 要几秒，而面板只要还开着就会吞掉所有键盘事件
+   * （见上面那个捕获阶段监听），留着它只会挡着游戏。
+   */
+  const reload = async () => {
+    setCapturing(null);
+    setReloading(true);
+    try {
+      await onReload();
+      onClose();
+    } catch (e) {
+      // onReload 自己会吞，这里是兜底 —— 真抛出来也不能让面板卡在「重载中」
+      console.warn('重载卡带失败', e);
+    } finally {
+      setReloading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-6" onClick={onClose}>
@@ -262,7 +308,7 @@ export default function KeyBindingsPanel({
           </div>
 
           {notice && (
-            <p className={`text-[11px] ${notice.tone === 'error' ? 'text-danger' : 'text-accent'}`}>
+            <p className="text-[11px] text-danger">
               {t(notice.key, {
                 button: notice.button ? BUTTON_LABELS[notice.button] : '',
                 player: notice.player ?? '',
@@ -272,19 +318,35 @@ export default function KeyBindingsPanel({
 
           <p className="text-[11px] leading-relaxed text-ink-500">{t(hint)}</p>
 
-          {/* 恢复默认是**两组一起**回到默认，不是只复位当前这一栏 —— 标签没写「本组」，
-              而且「把键位弄回一个已知状态」本来就是这个按钮的用途 */}
-          <button
-            type="button"
-            onClick={() => {
-              onChange(cloneDefaultBindings());
-              setCapturing(null);
-              setNotice(null);
-            }}
-            className="pixel-edge pxw-2 pxc-500 block w-full bg-ink-700 py-2 text-[12px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
-          >
-            {t('keybind.reset')}
-          </button>
+          {/*
+            重载卡带 = 「改完键位要重新插一次卡带」这件事的一键版。
+            没有本地卡带时（加入者、或还没插卡）没什么可重载的，所以禁用而不是藏起来
+            —— 按钮在、灰着，配上上面那句提示，能说清「为什么现在用不了」。
+
+            恢复默认是**两组一起**回到默认，不是只复位当前这一栏 —— 标签没写「本组」，
+            而且「把键位弄回一个已知状态」本来就是这个按钮的用途。
+          */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!localPlaying || reloading}
+              onClick={() => void reload()}
+              className="pixel-edge pxw-2 pxc-600 flex-1 bg-accent py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              {reloading ? t('keybind.reloading') : t('keybind.reload')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onChange(cloneDefaultBindings());
+                setCapturing(null);
+                setNotice(null);
+              }}
+              className="pixel-edge pxw-2 pxc-500 flex-1 bg-ink-700 py-2 text-[12px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
+            >
+              {t('keybind.reset')}
+            </button>
+          </div>
         </div>
       </div>
     </div>

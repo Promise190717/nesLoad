@@ -127,18 +127,19 @@ const en = {
   'keybind.p2': 'Player 2',
   'keybind.pressKey': 'PRESS…',
   'keybind.reset': 'Restore defaults',
+  'keybind.reload': 'Reload cartridge',
+  'keybind.reloading': 'Reloading…',
   'keybind.unsupported': 'That key cannot be used — try another one.',
   'keybind.conflictSame': 'Already bound to {button} — try another one.',
-  'keybind.conflictOther':
-    'Also bound to player {player} ({button}). On one keyboard the two of you will fight over it.',
+  'keybind.conflictOther': 'Already bound to player {player} ({button}) — try another one.',
   'keybind.hint':
-    'The keyboard map is read once, when a cartridge loads — load one again for changes to apply. In one-keyboard two-player, keep the two sets from overlapping.',
+    'The keyboard map is read once, when a cartridge loads — reload it for changes to apply. The two players cannot share a key.',
   'keybind.hostHint':
-    'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. Load a cartridge again after changing either.',
+    'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. They cannot share a key, or the injected input would also drive your Player 1. Reload a cartridge after changing either.',
   'keybind.guestHint':
-    'You are the guest and play with the Player 2 keys. Changes take effect right away — no need to load a cartridge again.',
+    'You are the guest and play with the Player 2 keys. Changes take effect right away — no need to reload the cartridge.',
   'keybind.guestLocalHint':
-    'You are the guest, and a cartridge of your own is running here too. Player 1 drives that local cartridge — load it again after changing. Player 2 is what gets sent to the host and applies right away.',
+    'You are the guest, and a cartridge of your own is running here too. Player 1 drives that local cartridge — reload it after changing. Player 2 is what gets sent to the host and applies right away.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -221,16 +222,17 @@ const zh: Record<MessageKey, string> = {
   'keybind.p2': '玩家 2',
   'keybind.pressKey': '按下新键…',
   'keybind.reset': '恢复默认',
+  'keybind.reload': '重载卡带',
+  'keybind.reloading': '重载中…',
   'keybind.unsupported': '这个键不能用，换一个。',
   'keybind.conflictSame': '已经绑给「{button}」了，换一个。',
-  'keybind.conflictOther': '和玩家 {player} 的「{button}」重复了 —— 单机双人时两个人会抢这个键。',
-  'keybind.hint':
-    '键盘映射只在插卡带时读一次，改完要重新插一次才生效。单机双人时，两套键位不要重叠。',
+  'keybind.conflictOther': '已经绑给玩家 {player} 的「{button}」了，换一个。',
+  'keybind.hint': '键盘映射只在插卡带时读一次，改完要重载卡带才生效。两位玩家不能共用同一个键。',
   'keybind.hostHint':
-    '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组改完都要重新插一次卡带。',
-  'keybind.guestHint': '你是加入者，用玩家 2 的键位。改完立刻生效，不用重新插卡带。',
+    '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组不能共用一个键，否则注入会连带驱动你的玩家 1。改完要重载卡带。',
+  'keybind.guestHint': '你是加入者，用玩家 2 的键位。改完立刻生效，不用重载卡带。',
   'keybind.guestLocalHint':
-    '你是加入者，本机还跑着一盘自己的卡带。玩家 1 给本机那盘用，改完要重新插卡带；玩家 2 是发给房主的，立刻生效。',
+    '你是加入者，本机还跑着一盘自己的卡带。玩家 1 给本机那盘用，改完要重载卡带；玩家 2 是发给房主的，立刻生效。',
 };
 
 const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };

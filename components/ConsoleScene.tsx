@@ -252,6 +252,36 @@ export default function ConsoleScene() {
     [loadFile]
   );
 
+  /**
+   * 重载当前卡带 —— 「改完键位要重新插一次卡带」这件事的一键版。
+   *
+   * 为什么必须整个重来：RetroArch 的键盘映射只在核心启动时读一次，而 Nostalgist
+   * **没有公开的「写配置」接口**（`getCurrentRetroarchConfig` 在 Emulator 上是 private，
+   * `restart()` 只会拿旧配置重启核心），所以新键位只能靠重新 launch 带进去。
+   *
+   * 重来之前先把当前进度存成快照、回来再读回去：改个键位就把游戏打回标题画面太亏。
+   * 读档失败不算致命 —— 最差就是回到标题画面，卡带还是插着的。
+   *
+   * 走的是 loadFile，所以「加入者（房主正在出画面）不接受本地载入」那道闸照样生效：
+   * 他本来就插不了卡带，也就无所谓重载。房主不受影响 —— `remotePlaying` 是加入者
+   * 才有的状态（只有加入者会收到 `'s'` 消息）。
+   */
+  const reloadRom = useCallback(async () => {
+    if (!controller.isRunning || !activeId) return;
+    setBusy(true);
+    try {
+      const snapshot = await controller.saveState();
+      const file = await readCartridge(activeId);
+      if (!file) return;
+      await loadFile(file);
+      if (snapshot && controller.isRunning) await controller.loadStateFrom(snapshot);
+    } catch (e) {
+      console.warn('重载卡带失败', e);
+    } finally {
+      setBusy(false);
+    }
+  }, [controller, activeId, loadFile]);
+
   /* ---------------- 卡带架 ---------------- */
 
   useEffect(() => {
@@ -976,8 +1006,8 @@ export default function ConsoleScene() {
       {/*
         自定义按键面板。和上面两块一样浮在房间上、不进屏幕。
         role + localPlaying 决定底部那句提示：加入者用的是 2P 键位、改完立刻生效；
-        但他要是自己在房主出画面之前插了一盘，那盘按 P1 读键盘，一样要重插卡带。
-        `rom !== null` 就是「本机跑着一盘自己的卡带」。
+        但他要是自己在房主出画面之前插了一盘，那盘按 P1 读键盘，一样要重载卡带。
+        `rom !== null` 就是「本机跑着一盘自己的卡带」，同时也是重载按钮的可用条件。
       */}
       <KeyBindingsPanel
         open={keybindOpen}
@@ -985,6 +1015,7 @@ export default function ConsoleScene() {
         role={netplayState.role}
         localPlaying={rom !== null}
         onChange={applyBindings}
+        onReload={reloadRom}
         onClose={() => setKeybindOpen(false)}
       />
 
