@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type DragEvent, type RefObject } from 'react';
+import packageJson from '@/package.json';
 import { VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
 import CartridgeSprite from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
@@ -174,8 +175,8 @@ export default function RetroTv({
           机身顶沿：一条凹进去的散热缝。
           原本顶沿是一条光边，机身读起来「只有屏幕没有壳」，加这一条才立得住。
           缝用 ink-950 并配一道顶沿亮边 —— 和下面插卡舱的凹影同一个方向。
-          右端原来有一块 NESLOAD 铭牌，已按用户要求去掉；这里只剩散热缝，
-          所以也不再需要 ml-auto 把东西推到右边。
+          右端原来有一块 NESLOAD 铭牌（去掉过），现在换成**版本号铭牌** ——
+          用 ml-auto 推到右端，和左边的散热缝各占一头。
         */}
         <div className="relative flex h-[30px] items-center border-b-2 border-ink-800 bg-ink-850 px-5">
           <span className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-ink-950/45" />
@@ -183,6 +184,16 @@ export default function RetroTv({
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <span key={i} className="h-[5px] w-[9px] bg-ink-950/70" />
             ))}
+          </span>
+          {/*
+            版本号铭牌（机身右上角）。版本取自 package.json，不手写 —— 免得两处各存一份、
+            改了一处忘了另一处。
+            走 font-pixel：机身上所有铭牌（PWR / VOL / LOADING / INSERT CARTRIDGE）都是这套字，
+            且内容只有 ASCII，没有掉字形的问题，所以不进 i18n 文案表。
+            pointer-events-none：纯装饰，别让它成为拖拽的落点 / relatedTarget。
+          */}
+          <span className="pointer-events-none relative ml-auto font-pixel text-[9px] tracking-[0.1em] text-ink-500">
+            BETA v{packageJson.version}
           </span>
         </div>
 
