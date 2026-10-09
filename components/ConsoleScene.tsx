@@ -14,10 +14,16 @@ import type { Locale } from '@/lib/i18n';
 import {
   IDLE_NETPLAY_STATE,
   NetplayController,
-  PLAYER_KEYS,
   remotePlayer,
   type NetplayState,
 } from '@/lib/netplay';
+import {
+  codeToButton,
+  DEFAULT_BINDINGS,
+  loadBindings,
+  saveBindings,
+  type KeyBindings,
+} from '@/lib/keybindings';
 import {
   listCartridges,
   pruneCartridges,
@@ -30,9 +36,10 @@ import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/s
 import CartridgeRack, { CART_WIDTH } from './CartridgeRack';
 import CartridgeSprite from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
+import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
 import RetroTv, { TV_WIDTH } from './RetroTv';
-import { ExpandIcon, LinkIcon, MoonIcon, SunIcon } from './icons';
+import { ExpandIcon, KeyboardIcon, LinkIcon, MoonIcon, SunIcon } from './icons';
 
 interface DragGhost {
   x: number;
@@ -158,6 +165,38 @@ export default function ConsoleScene() {
         },
         onRemoteStream: (stream) => setRemoteStream(stream),
       })
+  );
+
+  /* ---------------- 按键 ---------------- */
+
+  const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
+  const [keybindOpen, setKeybindOpen] = useState(false);
+
+  /**
+   * 键位在挂载后读，不用 `useState(() => loadBindings())` 惰性初始化。
+   *
+   * 客户端组件在服务端也会渲染一遍，那时没有 localStorage，惰性初始化拿到的是默认值；
+   * 客户端 hydration 再跑一次才拿到用户存的那份 —— 两次结果不同就是 hydration 不一致。
+   * 放到 effect 里读，服务端和首帧客户端都从默认值出发，一致。
+   */
+  useEffect(() => {
+    const stored = loadBindings();
+    setBindings(stored);
+    controller.setBindings(stored);
+  }, [controller]);
+
+  /**
+   * 改键位的唯一出口：写回引擎（**下次插卡带**才生效）、存盘、更新界面。
+   *
+   * 加入者那边还会顺带改到转发映射 —— 他没有模拟器，所以那条路是立刻生效的。
+   */
+  const applyBindings = useCallback(
+    (next: KeyBindings) => {
+      setBindings(next);
+      controller.setBindings(next);
+      saveBindings(next);
+    },
+    [controller]
   );
 
   /* ---------------- 载入 ---------------- */
@@ -548,10 +587,11 @@ export default function ConsoleScene() {
 
       // 有面板开着的时候只认 Esc。否则在面板上按 P / R / F5 会顺手把游戏
       // 暂停、重置、或者又存一份 —— 全是意外。
-      if (saveOpen || netplayOpen) {
+      if (saveOpen || netplayOpen || keybindOpen) {
         if (e.key === 'Escape') {
           setSaveOpen(false);
           setNetplayOpen(false);
+          setKeybindOpen(false);
         }
         return;
       }
@@ -573,7 +613,7 @@ export default function ConsoleScene() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePause, reset, saveState, openLoad, saveOpen, netplayOpen]);
+  }, [togglePause, reset, saveState, openLoad, saveOpen, netplayOpen, keybindOpen]);
 
   /**
    * 把本地按键转发给对方。**只有加入者转发。**
@@ -586,12 +626,21 @@ export default function ConsoleScene() {
    *
    * 也正因如此，这个方案要求**双人游戏**：加入者按的是 2P 键位，而单人游戏只认 P1。
    *
-   * 依赖 role：不在房间里就整段不生效，连监听都不挂。
+   * 依赖 role：不在房间里就整段不生效，连监听都不挂。面板开着时也不挂 ——
+   * 改键位的过程中按下的键不该被当成游戏输入送到对面去。
    */
   useEffect(() => {
     if (netplayState.role !== 'guest') return;
+    if (saveOpen || netplayOpen || keybindOpen) return;
 
-    const keys = PLAYER_KEYS.guest;
+    /*
+     * 「物理键 → 钮」由**加入者自己的 2P 键位**反查得到。
+     *
+     * 房主怎么配 P2 跟加入者无关：加入者只把钮名发过去，房主那边按自己的表
+     * 合成一个按键事件喂给核心。所以加入者改完键位是**立刻生效**的 ——
+     * 他没有模拟器，不需要重插卡带（房主那边才需要）。
+     */
+    const keys = codeToButton(bindings.p2);
     /** 本地正按着的按钮 —— 切走窗口时靠它把欠下的 keyup 补上 */
     const held = new Set<string>();
 
@@ -625,8 +674,15 @@ export default function ConsoleScene() {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('blur', onBlur);
+      /*
+       * 摘监听时把欠着的 keyup 补上。不只为了关页面：开面板 / 改键位都会让这段
+       * effect 重跑（依赖里有 bindings 和面板开关），正按着方向键的那一刻打开面板，
+       * 后面那个 keyup 就再也没人转发了 —— 房主那边会一直以为你按着。
+       */
+      for (const button of held) netplay.sendButton(button, false);
+      held.clear();
     };
-  }, [netplayState.role, netplay]);
+  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen]);
 
   /**
    * 面板关掉之后，把焦点从按钮上摘掉。
@@ -641,10 +697,10 @@ export default function ConsoleScene() {
    * 摘掉焦点后事件目标落回 body，核心才会重新读键盘。
    */
   useEffect(() => {
-    if (saveOpen || netplayOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) active.blur();
-  }, [saveOpen, netplayOpen]);
+  }, [saveOpen, netplayOpen, keybindOpen]);
 
   /**
    * 点完按钮就把焦点摘掉。
@@ -745,6 +801,17 @@ export default function ConsoleScene() {
           }`}
         >
           <LinkIcon size={13} />
+        </button>
+
+        {/* 自定义按键。单机双人也用得上，所以不跟着联机状态走 */}
+        <button
+          type="button"
+          onClick={() => setKeybindOpen(true)}
+          title={t('keybind.open')}
+          aria-label={t('keybind.open')}
+          className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+        >
+          <KeyboardIcon size={13} />
         </button>
       </div>
 
@@ -904,6 +971,19 @@ export default function ConsoleScene() {
         onCreate={() => void createRoom()}
         onJoin={(code) => void joinRoom(code)}
         onLeave={() => void leaveRoom()}
+      />
+
+      {/*
+        自定义按键面板。和上面两块一样浮在房间上、不进屏幕。
+        role 传进去是为了给对文案：加入者用的就是 2P 键位、且改完立刻生效，
+        房主 / 单机则是「改完要重新插卡带」。
+      */}
+      <KeyBindingsPanel
+        open={keybindOpen}
+        bindings={bindings}
+        role={netplayState.role}
+        onChange={applyBindings}
+        onClose={() => setKeybindOpen(false)}
       />
 
       {/*

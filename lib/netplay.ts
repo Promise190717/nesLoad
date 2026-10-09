@@ -223,47 +223,19 @@ export function normalizeRoomCode(raw: string): string | null {
   return cleaned;
 }
 
-/**
- * 键位 → RetroArch 按钮名。
+/*
+ * 「哪个物理键 = 哪个钮」的映射不在这里写死。
  *
- * 用 `e.code` 而不是 `e.key`：code 认的是物理键位，不受输入法、大小写、
+ * 加入者转发按键时，那张表由**加入者自己的 P2 键位**反查得到
+ * （`lib/keybindings.ts` 的 `codeToButton(bindings.p2)`），所以用户在按键面板里
+ * 改了 2P 键位，转发立刻跟着变 —— 加入者本机没有模拟器，不需要重插卡带。
+ *
+ * 为什么用 `e.code` 而不是 `e.key`：code 认的是物理键位，不受输入法、大小写、
  * 以及中文输入状态下 `e.key` 变成 `Process` 的影响。
  *
- * 1P / 2P 两套键位必须和 `lib/emulator.ts` 的 INPUT_CONFIG 保持一致 ——
- * 那里配的是 RetroArch 从键盘读什么，这里配的是我们转发什么，对不上就会
- * 「本地能动、对面不动」。
+ * 也正因如此，这里不再需要「host 那张表」—— 房主不转发任何按键，他的输入由
+ * RetroArch 自己按 `input_player1_*` 读。
  */
-export const PLAYER_KEYS: Record<NetplayRole, Record<string, string>> = {
-  host: {
-    ArrowUp: 'up',
-    ArrowDown: 'down',
-    ArrowLeft: 'left',
-    ArrowRight: 'right',
-    KeyZ: 'b',
-    KeyX: 'a',
-    KeyA: 'y',
-    KeyS: 'x',
-    KeyQ: 'l',
-    KeyE: 'r',
-    ShiftLeft: 'select',
-    ShiftRight: 'select',
-    Enter: 'start',
-  },
-  guest: {
-    KeyI: 'up',
-    KeyK: 'down',
-    KeyJ: 'left',
-    KeyL: 'right',
-    KeyU: 'b',
-    KeyO: 'a',
-    KeyN: 'y',
-    KeyM: 'x',
-    KeyG: 'l',
-    KeyH: 'r',
-    Digit1: 'select',
-    Digit2: 'start',
-  },
-};
 
 /**
  * 对手柄的哪一号玩家。创建者是 1P，加入者是 2P。

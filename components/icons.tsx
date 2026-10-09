@@ -91,3 +91,33 @@ export function LinkIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * 键盘：一圈 1px 外壳 + 一排键帽 + 一条空格。
+ * 用「空心」表达，所以外壳是四条边而不是一个实心块 —— 实心块会糊成一个黑方块。
+ */
+export function KeyboardIcon({ size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      <rect x="1" y="4" width="14" height="1" />
+      <rect x="1" y="11" width="14" height="1" />
+      <rect x="1" y="4" width="1" height="8" />
+      <rect x="14" y="4" width="1" height="8" />
+      <rect x="3" y="6" width="1" height="1" />
+      <rect x="5" y="6" width="1" height="1" />
+      <rect x="7" y="6" width="1" height="1" />
+      <rect x="9" y="6" width="1" height="1" />
+      <rect x="11" y="6" width="1" height="1" />
+      <rect x="3" y="8" width="1" height="1" />
+      <rect x="5" y="8" width="6" height="1" />
+      <rect x="12" y="8" width="1" height="1" />
+    </svg>
+  );
+}

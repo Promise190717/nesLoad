@@ -2,6 +2,7 @@
 
 import { Nostalgist } from 'nostalgist';
 import { installAudioTap } from './audio-tap';
+import { bindingsToRetroArch, DEFAULT_BINDINGS, type KeyBindings } from './keybindings';
 
 /*
  * 音频旁路要赶在核心启动之前装好 —— 核心一启动就会建 AudioContext 并把音频节点
@@ -52,44 +53,14 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
 const SNES_MIN_SIZE = 0x8000; // 32 KiB
 const SNES_MAX_SIZE = 8 * 1024 * 1024;
 
-/**
- * RetroArch 键盘映射。
- * 1P：方向键 / Z X / A S / Q E / Shift / Enter
- * 2P：I J K L / U O / N M / G H / 1 / 2
- * 两套按键完全不重叠，避免双人同屏时互相抢键。
+/*
+ * 键盘映射不再写死在这里 —— 它现在是用户可改的，默认值和换算规则都在
+ * `lib/keybindings.ts`（默认 1P：方向键 / Z X / A S / Q E / Shift / Enter，
+ * 2P：I J K L / U O / N M / G H / 数字行 1 2，两套完全不重叠）。
+ *
+ * 为什么这一张表是唯一的着力点：RetroArch 自己读键走它，联机注入
+ * （`pressDown` → `getKeyboardCode` → 查同一张表）也走它，改一处两条路一起变。
  */
-const INPUT_CONFIG = {
-  // Player 1
-  input_player1_up: 'up',
-  input_player1_down: 'down',
-  input_player1_left: 'left',
-  input_player1_right: 'right',
-  input_player1_b: 'z',
-  input_player1_a: 'x',
-  input_player1_y: 'a',
-  input_player1_x: 's',
-  input_player1_l: 'q',
-  input_player1_r: 'e',
-  input_player1_select: 'shift',
-  input_player1_start: 'enter',
-  // Player 2
-  input_player2_up: 'i',
-  input_player2_down: 'k',
-  input_player2_left: 'j',
-  input_player2_right: 'l',
-  input_player2_b: 'u',
-  input_player2_a: 'o',
-  input_player2_y: 'n',
-  input_player2_x: 'm',
-  input_player2_l: 'g',
-  input_player2_r: 'h',
-  // 数字键在 RetroArch 的键名表里写作 `keypad0`..`keypad9`（小键盘才是 `num0`..`num9`）。
-  // 这里不能直接写 `'1'`：Nostalgist 解析键名时，单字符一律拼成 `Key${x}`，
-  // 于是 `'1'` 会变成 `Key1` —— 那不是合法的 DOM code（数字行是 `Digit1`），
-  // 按键会被静默丢弃（本地和转发两条路都失效）。
-  input_player2_select: 'keypad1',
-  input_player2_start: 'keypad2',
-};
 
 /** 音量档位上限：0 档是静音，这个档位是最大音量。 */
 export const VOLUME_MAX = 6;
@@ -197,6 +168,15 @@ export class EmulatorController {
   private currentRom: LoadedRom | null = null;
   private paused = false;
 
+  /**
+   * 当前这套键位。只在 `loadRom` 里被写进 retroarchConfig。
+   *
+   * 也就是说**改完要重新插一次卡带才生效** —— RetroArch 的按键映射是启动时一次性
+   * 读进核心的，没有能在运行时重载配置的接口（`getKeyboardCode` 虽然每次都会去
+   * 读配置文件的 mtime，但那只影响我们自己发起的注入，改不了核心自己读键盘用的内存副本）。
+   */
+  private bindings: KeyBindings = DEFAULT_BINDINGS;
+
   /** 音量档位（0 = 静音，VOLUME_MAX = 原音量）。没有实例时也留着，插卡带时生效。 */
   private volumeLevel = VOLUME_MAX;
   /** 我们自己记着的当前 dB —— RetroArch 没有能读回音量的命令 */
@@ -215,6 +195,14 @@ export class EmulatorController {
     return this.instance !== null;
   }
 
+  /**
+   * 换一套键位。**不会**作用于正在跑的实例（见 `bindings` 的注释），
+   * 下次 `loadRom` 才会带上新键位。
+   */
+  setBindings(bindings: KeyBindings): void {
+    this.bindings = bindings;
+  }
+
   async loadRom(file: File, canvas: HTMLCanvasElement) {
     // 先退出正在运行的实例，避免多个核心叠加占用内存
     await this.exit();
@@ -229,7 +217,7 @@ export class EmulatorController {
       core: CORE_MAP[consoleType],
       rom: file,
       retroarchConfig: {
-        ...INPUT_CONFIG,
+        ...bindingsToRetroArch(this.bindings),
         video_aspect_ratio_auto: true,
         video_windowed_fullscreen: false,
         // 单位是 dB，0 即原音量。此前设为 6.0（+6dB）会削波爆音。

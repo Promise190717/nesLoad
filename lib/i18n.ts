@@ -75,9 +75,9 @@ const en = {
    * 行首的 1P / 2P / 快捷键 直接写在串里，省得再拆一层。
    */
   'legend.p1':
-    '1P  D-pad moves · Z=B · X=A · A/S=Y/X · Q/E=L/R · Shift=Select · Enter=Start',
-  'legend.p2': '2P  I/J/K/L moves · U=B · O=A · N/M=Y/X · G/H=L/R · 1=Select · 2=Start',
-  'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load',
+    '1P (default)  D-pad moves · Z=B · X=A · A/S=Y/X · Q/E=L/R · Shift=Select · Enter=Start',
+  'legend.p2': '2P (default)  I/J/K/L moves · U=B · O=A · N/M=Y/X · G/H=L/R · 1=Select · 2=Start',
+  'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load — bindings are customizable (top right)',
 
   /*
    * 联机面板。同样浮在房间上、不进屏幕。
@@ -101,9 +101,9 @@ const en = {
   'netplay.waitingGame': 'Connected — waiting for the host to load a cartridge',
   'netplay.hostPlaying': 'Host is playing',
   'netplay.youAreHost':
-    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Keys: D-pad, Z, X, A, S, Q, E, Shift, Enter.',
+    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: D-pad, Z, X, A, S, Q, E, Shift, Enter — customizable at the top right.',
   'netplay.youAreGuest':
-    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Keys: I, J, K, L, U, O, N, M, G, H, 1, 2.',
+    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: I, J, K, L, U, O, N, M, G, H, 1, 2 — customizable at the top right.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
   'netplay.errInsecure':
@@ -114,6 +114,29 @@ const en = {
   'netplay.errHandshake': 'Handshake timed out — the other player may have left.',
   'netplay.errUnknown':
     'Could not connect to the other player. The browser console has the exact reason.',
+
+  /*
+   * 自定义按键面板。同样浮在房间上、不进屏幕。
+   * 钮名（B/A/Y/X/L/R/SELECT/START）刻意不进文案表 —— 它们是手柄上的丝印，
+   * 由 `KeyBindingsPanel` 的 BUTTON_LABELS 直接给出，翻了反而对不上页脚。
+   */
+  'keybind.title': 'Key bindings',
+  'keybind.open': 'Customize keys',
+  'keybind.close': 'Close',
+  'keybind.p1': 'Player 1',
+  'keybind.p2': 'Player 2',
+  'keybind.pressKey': 'PRESS…',
+  'keybind.reset': 'Restore defaults',
+  'keybind.unsupported': 'That key cannot be used — try another one.',
+  'keybind.conflictSame': 'Already bound to {button} — try another one.',
+  'keybind.conflictOther':
+    'Also bound to player {player} ({button}). On one keyboard the two of you will fight over it.',
+  'keybind.hint':
+    'The keyboard map is read once, when a cartridge loads — load one again for changes to apply. In one-keyboard two-player, keep the two sets from overlapping.',
+  'keybind.hostHint':
+    'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. Load a cartridge again after changing either.',
+  'keybind.guestHint':
+    'You are the guest and play with the Player 2 keys. Changes take effect right away — no need to load a cartridge again.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -154,9 +177,9 @@ const zh: Record<MessageKey, string> = {
   'library.launchTitle': '{name}\n点击载入，或拖到电视机卡槽里',
   'library.removeLabel': '移除 {name}',
 
-  'legend.p1': '1P  方向键移动 · Z=B · X=A · A/S=Y/X · Q/E=L/R · Shift=选择 · Enter=开始',
-  'legend.p2': '2P  I/J/K/L 移动 · U=B · O=A · N/M=Y/X · G/H=L/R · 1=选择 · 2=开始',
-  'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档',
+  'legend.p1': '1P（默认）方向键移动 · Z=B · X=A · A/S=Y/X · Q/E=L/R · Shift=选择 · Enter=开始',
+  'legend.p2': '2P（默认）I/J/K/L 移动 · U=B · O=A · N/M=Y/X · G/H=L/R · 1=选择 · 2=开始',
+  'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档 —— 键位可在右上角自定义',
 
   'netplay.title': '联机',
   'netplay.open': '联机对战',
@@ -176,9 +199,9 @@ const zh: Record<MessageKey, string> = {
   'netplay.waitingGame': '已连接，等房主插上卡带',
   'netplay.hostPlaying': '房主正在玩',
   'netplay.youAreHost':
-    '你是 1P。插上卡带后画面会自动推给对方。你的键位：方向键、Z、X、A、S、Q、E、Shift、Enter。',
+    '你是 1P。插上卡带后画面会自动推给对方。默认键位：方向键、Z、X、A、S、Q、E、Shift、Enter —— 可在右上角自定义。',
   'netplay.youAreGuest':
-    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。你的键位：I、J、K、L、U、O、N、M、G、H、1、2。',
+    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：I、J、K、L、U、O、N、M、G、H、1、2 —— 可在右上角自定义。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
   'netplay.errInsecure':
@@ -188,6 +211,22 @@ const zh: Record<MessageKey, string> = {
   'netplay.errPassword': '房间码对不上。',
   'netplay.errHandshake': '握手超时，对方可能已经离开了。',
   'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
+
+  'keybind.title': '自定义按键',
+  'keybind.open': '自定义按键',
+  'keybind.close': '关闭',
+  'keybind.p1': '玩家 1',
+  'keybind.p2': '玩家 2',
+  'keybind.pressKey': '按下新键…',
+  'keybind.reset': '恢复默认',
+  'keybind.unsupported': '这个键不能用，换一个。',
+  'keybind.conflictSame': '已经绑给「{button}」了，换一个。',
+  'keybind.conflictOther': '和玩家 {player} 的「{button}」重复了 —— 单机双人时两个人会抢这个键。',
+  'keybind.hint':
+    '键盘映射只在插卡带时读一次，改完要重新插一次才生效。单机双人时，两套键位不要重叠。',
+  'keybind.hostHint':
+    '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组改完都要重新插一次卡带。',
+  'keybind.guestHint': '你是加入者，用玩家 2 的键位。改完立刻生效，不用重新插卡带。',
 };
 
 const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };
