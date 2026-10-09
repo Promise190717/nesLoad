@@ -44,6 +44,14 @@ interface Notice {
   key: MessageKey;
   button?: ButtonName;
   player?: string;
+  /**
+   * 用户按下、但已被占用的那个键的显示标签。
+   *
+   * 必须带上：`button` 是**手柄上的钮名**（B / A / Y / X …），可它长得和键名一模一样 ——
+   * 只说「已经绑给「X」了」，用户会读成「X 键被占用」，然后问「我明明按的是 S」。
+   * 把「你按的键」也写进去，两个名字才分得开。
+   */
+  pressed?: string;
 }
 
 interface KeyBindingsPanelProps {
@@ -158,7 +166,7 @@ export default function KeyBindingsPanel({
       // 同一位玩家内部撞键 = 一个键同时是两个钮，没有意义，直接拒绝
       const same = conflictInPlayer(table, capturing, code);
       if (same) {
-        setNotice({ key: 'keybind.conflictSame', button: same });
+        setNotice({ key: 'keybind.conflictSame', button: same, pressed: codeLabel(code) });
         return;
       }
 
@@ -179,6 +187,7 @@ export default function KeyBindingsPanel({
           key: 'keybind.conflictOther',
           button: buttonHolding(bindings[other], code) ?? undefined,
           player: other === 'p1' ? '1' : '2',
+          pressed: codeLabel(code),
         });
         return;
       }
@@ -312,6 +321,7 @@ export default function KeyBindingsPanel({
               {t(notice.key, {
                 button: notice.button ? BUTTON_LABELS[notice.button] : '',
                 player: notice.player ?? '',
+                pressed: notice.pressed ?? '',
               })}
             </p>
           )}

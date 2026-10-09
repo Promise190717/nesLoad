@@ -130,8 +130,9 @@ const en = {
   'keybind.reload': 'Reload cartridge',
   'keybind.reloading': 'Reloading…',
   'keybind.unsupported': 'That key cannot be used — try another one.',
-  'keybind.conflictSame': 'Already bound to {button} — try another one.',
-  'keybind.conflictOther': 'Already bound to player {player} ({button}) — try another one.',
+  'keybind.conflictSame': '{pressed} is already bound to the {button} button — try another key.',
+  'keybind.conflictOther':
+    '{pressed} is already bound to the {button} button on player {player} — try another key.',
   'keybind.hint':
     'The keyboard map is read once, when a cartridge loads — reload it for changes to apply. The two players cannot share a key.',
   'keybind.hostHint':
@@ -225,8 +226,8 @@ const zh: Record<MessageKey, string> = {
   'keybind.reload': '重载卡带',
   'keybind.reloading': '重载中…',
   'keybind.unsupported': '这个键不能用，换一个。',
-  'keybind.conflictSame': '已经绑给「{button}」了，换一个。',
-  'keybind.conflictOther': '已经绑给玩家 {player} 的「{button}」了，换一个。',
+  'keybind.conflictSame': '「{pressed}」已经绑给「{button}」钮了，换一个键。',
+  'keybind.conflictOther': '「{pressed}」已经绑给玩家 {player} 的「{button}」钮了，换一个键。',
   'keybind.hint': '键盘映射只在插卡带时读一次，改完要重载卡带才生效。两位玩家不能共用同一个键。',
   'keybind.hostHint':
     '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组不能共用一个键，否则注入会连带驱动你的玩家 1。改完要重载卡带。',
