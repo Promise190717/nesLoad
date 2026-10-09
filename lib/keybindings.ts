@@ -10,9 +10,9 @@ import type { Translate } from './i18n';
  * 这个项目里按键有两条路，但它们**共用同一张 RetroArch 配置表**：
  *
  *   1. 本地：RetroArch 自己读键盘，查 `input_playerN_<button>`。
- *   2. 联机注入：`Nostalgist.pressDown({ button, player })` 内部先
- *      `getKeyboardCode(button, player)` 去查**同一张表**拿到键名，再合成键盘事件，
- *      由 RetroArch 读回去（`nostalgist.js` 的 `pressDown` 就是这么实现的）。
+ *   2. 联机注入：`Nostalgist.pressDown({ button, player })` 先查**同一张表**拿到键名，
+ *      再合成键盘事件，由 RetroArch 读回去。查表那一步的解码器被我们换成了自己的
+ *      （见 `lib/emulator.ts` 的 `overrideInjectionKeyMap` —— Nostalgist 自带那份有 bug）。
  *
  * 所以「改键位」这件事只有一个着力点：把 `input_playerN_*` 换成用户要的键。
  * 两条路一起变，不需要各写一套。
@@ -33,18 +33,19 @@ import type { Translate } from './i18n';
  *   `keypad0`..`keypad9` → RETROK_KP0..RETROK_KP9  ← 小键盘
  *   其余               → 具名表（left / enter / shift / kp_enter …）
  *
- * **别被 Nostalgist 带偏**：它的 `getKeyboardCode`（把配置值反解成 DOM code，只用于联机
+ * **别被 Nostalgist 带偏**：它的 `getKeyboardCode`（把配置值反解成 DOM code，原本只用于联机
  * 注入）把上面这两组**写反了** —— 它认为 `num*` 是小键盘、`keypad*` 是数字行，正好和
  * RetroArch 相反。照它去写配置，本地键盘就会错位：小键盘按了没反应、反倒是数字行在动
  * （P2 的面键踩过这个坑，默认键位就落在小键盘上）。
  *
- * 代价：**小键盘键没法用于联机注入**。注入走 Nostalgist 的 getKeyboardCode，它会把
- * `keypad4` 解成 `Digit4`（数字行），合成出来的事件和绑定对不上。本地双人不受影响
- * （RetroArch 直读键盘）。
+ * 联机注入**已经不走它了**：`EmulatorController` 启动时会把这个解码器换成我们自己的
+ * （见 `lib/emulator.ts` 的 `overrideInjectionKeyMap`）—— 换之前，注入会把 `keypad4`
+ * 解成 `Digit4`，小键盘面键在联机里全是死的（方向键走具名表，所以只有面键不动，
+ * 看着像「方向能用、按键不行」）。现在小键盘键联机也能用。
  *
- * **反过来推不出名字的键一律不接受**。典型的是 `Backslash`：Nostalgist 的具名表里
- * `backslash` 对应的是空串，拿它做注入会静默失效 —— 与其让用户配一个「按了没反应」
- * 的键，不如在面板上直接拒绝。
+ * **反过来推不出名字的键一律不接受**。典型的是 `Backslash`：RetroArch 其实认它，
+ * 但 Nostalgist 的具名表里 `backslash` 对应空串（`NAMED_KEYS` 干脆剔掉了），配置层面
+ * 就写不出去 —— 与其让用户配一个「按了没反应」的键，不如在面板上直接拒绝。
  */
 
 /**

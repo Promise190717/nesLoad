@@ -117,7 +117,7 @@ const en = {
   'netplay.youAreHost':
     'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: W/A/S/D, J, K, L, U, I, O, B, Enter — customizable at the top right.',
   'netplay.youAreGuest':
-    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: arrows, Num 1-6, Del, Num 0 — customizable at the top right.',
+    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: arrows, Num 1 2 4 5 7 8, Del, Num 0 — customizable at the top right.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
   'netplay.errInsecure':
@@ -281,7 +281,7 @@ const zh: Record<MessageKey, string> = {
   'netplay.youAreHost':
     '你是 1P。插上卡带后画面会自动推给对方。默认键位：W/A/S/D、J、K、L、U、I、O、B、Enter —— 可在右上角自定义。',
   'netplay.youAreGuest':
-    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：方向键、小键盘 1-6、Delete、小键盘 0 —— 可在右上角自定义。',
+    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：方向键、小键盘 1 2 4 5 7 8、Del、小键盘 0 —— 可在右上角自定义。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
   'netplay.errInsecure':

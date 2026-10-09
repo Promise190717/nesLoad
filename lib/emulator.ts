@@ -3,7 +3,12 @@
 import { Nostalgist } from 'nostalgist';
 import { installAudioTap } from './audio-tap';
 import { NEOGEO_BIOS_NAME } from './bios';
-import { bindingsToRetroArch, DEFAULT_BINDINGS, type KeyBindings } from './keybindings';
+import {
+  bindingsToRetroArch,
+  DEFAULT_BINDINGS,
+  type ButtonName,
+  type KeyBindings,
+} from './keybindings';
 
 /*
  * 音频旁路要赶在核心启动之前装好 —— 核心一启动就会建 AudioContext 并把音频节点
@@ -86,11 +91,11 @@ const SNES_MAX_SIZE = 8 * 1024 * 1024;
 
 /*
  * 键盘映射不再写死在这里 —— 它现在是用户可改的，默认值和换算规则都在
- * `lib/keybindings.ts`（默认 1P：方向键 / Z X / A S / Q E / Shift / Enter，
- * 2P：I J K L / U O / N M / G H / 数字行 1 2，两套完全不重叠）。
+ * `lib/keybindings.ts`，那里也写清了「为什么换算以 RetroArch 为准」。
  *
  * 为什么这一张表是唯一的着力点：RetroArch 自己读键走它，联机注入
- * （`pressDown` → `getKeyboardCode` → 查同一张表）也走它，改一处两条路一起变。
+ * （`pressDown` → 我们换掉的解码器，见 `overrideInjectionKeyMap`）也走它，
+ * 改一处两条路一起变。
  */
 
 /** 音量档位上限：0 档是静音，这个档位是最大音量。 */
@@ -288,6 +293,41 @@ function watchCoreDownload(onProgress: (loaded: number, total: number) => void):
   };
 }
 
+/**
+ * 注入用的「配置键名 → DOM code」解码器。`Emulator.getKeyboardCode` 在 d.ts 里是
+ * private，而我们只是**替换**它、不碰任何内部状态，所以用最小结构类型绕开可见性检查，
+ * 而不是去改 Nostalgist 的类型定义。
+ */
+type KeyboardCodeHook = {
+  getKeyboardCode: (button: string, player?: number) => string | undefined;
+};
+
+/**
+ * 把 Nostalgist 的解码器换成我们自己的。**只影响联机注入这条路。**
+ *
+ * Nostalgist 自己那份（`getKeyboardCode`）把 `num*` / `keypad*` **解反了** —— 认为
+ * `num4` 是小键盘、`keypad4` 是字母上方那排数字行，正好和 RetroArch
+ * （`input/input_keymaps.c`）相反。而联机注入**全靠它**：房主把对方的钮名喂给
+ * `pressDown`，它去查配置拿到键名、再解成一个 DOM code，最后合成键盘事件给核心。
+ * 于是默认键位里 P2 那几个**小键盘**面键（`keypad1`…）被它解成 `Digit1`…，
+ * 合成出来的事件和核心认的键对不上 —— 表现就是**联机时方向键能动、面键全死**
+ * （方向键走具名表，解出来是 `ArrowUp` 这类，恰好没被解错）。
+ *
+ * 不跟它的解码表绕：注入要的 DOM code 本来就是**这次启动写进配置的那份键位**，
+ * 而 `KeyBindings` 里存的值就是 `KeyboardEvent.code`，直接取，一步到位。
+ * 这也顺带把「配置里写了什么、注入就合成什么」钉死在自己手里 —— 以后加机种 / 加钮，
+ * 都不用再去管它的解码表。
+ *
+ * `launched` 必须是**启动那一刻**的快照：`setBindings` 会在运行中立刻改
+ * `this.bindings`（键位面板就是直接调的），而核心读的是启动时那份配置，两者会短暂
+ * 不一致。注入要是跟着新的走，就会合成一个核心根本不认的键 —— 那还不如原来。
+ */
+function overrideInjectionKeyMap(nostalgist: Nostalgist, launched: KeyBindings): void {
+  const hook = nostalgist.getEmulator() as unknown as KeyboardCodeHook;
+  hook.getKeyboardCode = (button, player = 1) =>
+    (player === 1 ? launched.p1 : launched.p2)[button as ButtonName];
+}
+
 export class EmulatorController {
   private instance: Nostalgist | null = null;
   private currentRom: LoadedRom | null = null;
@@ -473,6 +513,12 @@ export class EmulatorController {
     }
 
     this.instance = nostalgist;
+    /*
+     * 注入用的解码器在这里换掉（见 `overrideInjectionKeyMap`）。
+     * 快照必须**在这里**取：`this.bindings` 之后随时会被键位面板改掉，
+     * 而核心认的始终是这次启动写进去的那份。
+     */
+    overrideInjectionKeyMap(nostalgist, this.bindings);
     this.currentRom = {
       name: file.name,
       console: consoleType,
@@ -578,6 +624,9 @@ export class EmulatorController {
 
   /**
    * 把某个手柄钮按下 / 松开。联机时用来把**对方**的输入打进本机的另一个玩家位。
+   *
+   * 钮名 → 键名的换算由 `overrideInjectionKeyMap` 换过的那份解码器负责（启动时装的），
+   * 所以这里喂进来的钮名只要在键位表里，就一定能合成出核心认的那个键。
    *
    * 注意这是事件级注入（Nostalgist 没有帧级钩子），所以只能做到「对方一按这边就跟着按」，
    * 做不到逐帧锁步。局域网内 RTT 通常在个位数毫秒，实际手感够用；
