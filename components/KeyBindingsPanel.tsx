@@ -48,6 +48,14 @@ interface KeyBindingsPanelProps {
   bindings: KeyBindings;
   /** 当前联机角色。加入者只用 2P 键位，提示文案也不一样。 */
   role: NetplayRole | null;
+  /**
+   * 本机是否跑着一盘自己的卡带。
+   *
+   * 房主天然是 true（他就是在本机跑模拟器的那个人），所以只对**加入者**有意义：
+   * 加入者在房主出画面之前可以自己先插一盘玩，那时本机跑着模拟器、按 P1 键位读键盘，
+   * 改完要重插卡带 —— 和「加入者改完立刻生效」是两回事，提示必须分开说。
+   */
+  localPlaying: boolean;
   onChange: (next: KeyBindings) => void;
   onClose: () => void;
 }
@@ -63,6 +71,7 @@ export default function KeyBindingsPanel({
   open,
   bindings,
   role,
+  localPlaying,
   onChange,
   onClose,
 }: KeyBindingsPanelProps) {
@@ -160,8 +169,15 @@ export default function KeyBindingsPanel({
   if (!open) return null;
 
   const table = player === 'p1' ? bindings.p1 : bindings.p2;
-  const hint: MessageKey =
-    role === 'guest' ? 'keybind.guestHint' : role === 'host' ? 'keybind.hostHint' : 'keybind.hint';
+  /*
+   * 提示按「改完什么时候生效」分四种，不能只按角色分：
+   * 加入者本机没模拟器时是立刻生效，可他要是自己在房主出画面之前插了一盘，
+   * 那盘走的是本机 RetroArch 读 P1 的老路 —— 一样要重插卡带。
+   */
+  let hint: MessageKey;
+  if (role === 'guest') hint = localPlaying ? 'keybind.guestLocalHint' : 'keybind.guestHint';
+  else if (role === 'host') hint = 'keybind.hostHint';
+  else hint = 'keybind.hint';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-6" onClick={onClose}>

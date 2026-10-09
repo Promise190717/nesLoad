@@ -975,13 +975,15 @@ export default function ConsoleScene() {
 
       {/*
         自定义按键面板。和上面两块一样浮在房间上、不进屏幕。
-        role 传进去是为了给对文案：加入者用的就是 2P 键位、且改完立刻生效，
-        房主 / 单机则是「改完要重新插卡带」。
+        role + localPlaying 决定底部那句提示：加入者用的是 2P 键位、改完立刻生效；
+        但他要是自己在房主出画面之前插了一盘，那盘按 P1 读键盘，一样要重插卡带。
+        `rom !== null` 就是「本机跑着一盘自己的卡带」。
       */}
       <KeyBindingsPanel
         open={keybindOpen}
         bindings={bindings}
         role={netplayState.role}
+        localPlaying={rom !== null}
         onChange={applyBindings}
         onClose={() => setKeybindOpen(false)}
       />

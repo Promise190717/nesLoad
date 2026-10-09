@@ -137,6 +137,8 @@ const en = {
     'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. Load a cartridge again after changing either.',
   'keybind.guestHint':
     'You are the guest and play with the Player 2 keys. Changes take effect right away — no need to load a cartridge again.',
+  'keybind.guestLocalHint':
+    'You are the guest, and a cartridge of your own is running here too. Player 1 drives that local cartridge — load it again after changing. Player 2 is what gets sent to the host and applies right away.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -227,6 +229,8 @@ const zh: Record<MessageKey, string> = {
   'keybind.hostHint':
     '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组改完都要重新插一次卡带。',
   'keybind.guestHint': '你是加入者，用玩家 2 的键位。改完立刻生效，不用重新插卡带。',
+  'keybind.guestLocalHint':
+    '你是加入者，本机还跑着一盘自己的卡带。玩家 1 给本机那盘用，改完要重新插卡带；玩家 2 是发给房主的，立刻生效。',
 };
 
 const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };
