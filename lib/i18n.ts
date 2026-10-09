@@ -73,10 +73,12 @@ const en = {
    * 而这几条是给人读懂的说明（原版 `1P ARROWS / Z X / A S / Q E / SHIFT / ENTER`
    * 只列键名不说对应关系，等于没说明），所以走系统字体。
    * 行首的 1P / 2P / 快捷键 直接写在串里，省得再拆一层。
+   * 钮名走街机叫法：A B C（下排）/ X Y Z（上排）/ 投币 / 开始。
    */
   'legend.p1':
-    '1P (default)  D-pad moves · Z=B · X=A · A/S=Y/X · Q/E=L/R · Shift=Select · Enter=Start',
-  'legend.p2': '2P (default)  I/J/K/L moves · U=B · O=A · N/M=Y/X · G/H=L/R · 1=Select · 2=Start',
+    '1P (default)  W/A/S/D moves · J=A · K=B · L=C · U=X · I=Y · O=Z · B=Coin · Enter=Start',
+  'legend.p2':
+    '2P (default)  Arrows move · Num1=A · Num2=B · Num3=C · Num4=X · Num5=Y · Num6=Z · Del=Coin · Num0=Start',
   'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load — bindings are customizable (top right)',
 
   /*
@@ -101,9 +103,9 @@ const en = {
   'netplay.waitingGame': 'Connected — waiting for the host to load a cartridge',
   'netplay.hostPlaying': 'Host is playing',
   'netplay.youAreHost':
-    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: D-pad, Z, X, A, S, Q, E, Shift, Enter — customizable at the top right.',
+    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: W/A/S/D, J, K, L, U, I, O, B, Enter — customizable at the top right.',
   'netplay.youAreGuest':
-    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: I, J, K, L, U, O, N, M, G, H, 1, 2 — customizable at the top right.',
+    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: arrows, Num 1-6, Del, Num 0 — customizable at the top right.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
   'netplay.errInsecure':
@@ -117,8 +119,8 @@ const en = {
 
   /*
    * 自定义按键面板。同样浮在房间上、不进屏幕。
-   * 钮名（B/A/Y/X/L/R/SELECT/START）刻意不进文案表 —— 它们是手柄上的丝印，
-   * 由 `KeyBindingsPanel` 的 BUTTON_LABELS 直接给出，翻了反而对不上页脚。
+   * 钮名走街机叫法（A B C X Y Z），由 `KeyBindingsPanel` 的 BUTTON_LABELS 直接给出
+   * —— 它们是手柄上的丝印、不进文案表。只有「开始 / 投币」是词，跟着语言走。
    */
   'keybind.title': 'Key bindings',
   'keybind.open': 'Customize keys',
@@ -126,6 +128,8 @@ const en = {
   'keybind.p1': 'Player 1',
   'keybind.p2': 'Player 2',
   'keybind.pressKey': 'PRESS…',
+  'keybind.btnStart': 'START',
+  'keybind.btnCoin': 'COIN',
   'keybind.reset': 'Restore defaults',
   'keybind.reload': 'Reload cartridge',
   'keybind.reloading': 'Reloading…',
@@ -181,8 +185,9 @@ const zh: Record<MessageKey, string> = {
   'library.launchTitle': '{name}\n点击载入，或拖到电视机卡槽里',
   'library.removeLabel': '移除 {name}',
 
-  'legend.p1': '1P（默认）方向键移动 · Z=B · X=A · A/S=Y/X · Q/E=L/R · Shift=选择 · Enter=开始',
-  'legend.p2': '2P（默认）I/J/K/L 移动 · U=B · O=A · N/M=Y/X · G/H=L/R · 1=选择 · 2=开始',
+  'legend.p1': '1P（默认）W/A/S/D 移动 · J=A · K=B · L=C · U=X · I=Y · O=Z · B=投币 · Enter=开始',
+  'legend.p2':
+    '2P（默认）方向键移动 · 小键盘1=A · 小键盘2=B · 小键盘3=C · 小键盘4=X · 小键盘5=Y · 小键盘6=Z · Del=投币 · 小键盘0=开始',
   'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档 —— 键位可在右上角自定义',
 
   'netplay.title': '联机',
@@ -203,9 +208,9 @@ const zh: Record<MessageKey, string> = {
   'netplay.waitingGame': '已连接，等房主插上卡带',
   'netplay.hostPlaying': '房主正在玩',
   'netplay.youAreHost':
-    '你是 1P。插上卡带后画面会自动推给对方。默认键位：方向键、Z、X、A、S、Q、E、Shift、Enter —— 可在右上角自定义。',
+    '你是 1P。插上卡带后画面会自动推给对方。默认键位：W/A/S/D、J、K、L、U、I、O、B、Enter —— 可在右上角自定义。',
   'netplay.youAreGuest':
-    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：I、J、K、L、U、O、N、M、G、H、1、2 —— 可在右上角自定义。',
+    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：方向键、小键盘 1-6、Delete、小键盘 0 —— 可在右上角自定义。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
   'netplay.errInsecure':
@@ -222,6 +227,8 @@ const zh: Record<MessageKey, string> = {
   'keybind.p1': '玩家 1',
   'keybind.p2': '玩家 2',
   'keybind.pressKey': '按下新键…',
+  'keybind.btnStart': '开始',
+  'keybind.btnCoin': '投币',
   'keybind.reset': '恢复默认',
   'keybind.reload': '重载卡带',
   'keybind.reloading': '重载中…',

@@ -35,7 +35,13 @@
  * 的键，不如在面板上直接拒绝。
  */
 
-/** NES / SNES 手柄上的钮。和 RetroArch 的 `input_playerN_<button>` 一一对应。 */
+/**
+ * RetroArch retropad 的钮名，和 `input_playerN_<button>` 一一对应，三种机种共用。
+ *
+ * **这不是面板上显示的名字。** 面板走街机叫法（A B C X Y Z / 开始 / 投币），映射按街机惯例：
+ * 面板 A→`b`、B→`a`、C→`y`、X→`x`、Y→`l`、Z→`r`、投币→`select`、开始→`start`。
+ * 显示名在 `KeyBindingsPanel` 的 `BUTTON_LABELS` / `buttonLabel`。
+ */
 export type ButtonName =
   | 'up'
   | 'down'
@@ -50,7 +56,7 @@ export type ButtonName =
   | 'select'
   | 'start';
 
-/** 面板上的展示顺序：方向 → 面键 → 肩键 → 功能键。 */
+/** 面板上的展示顺序：方向 → 面键（A B C / X Y Z）→ 投币 / 开始。 */
 export const BUTTONS: readonly ButtonName[] = [
   'up',
   'down',
@@ -75,38 +81,41 @@ export interface KeyBindings {
 }
 
 /**
- * 默认键位 —— 和改动前写死的 `INPUT_CONFIG` 完全一致，老用户升级后手感不变。
+ * 默认键位 —— 一套街机 / 格斗向的键盘布局。
+ *
+ *   P1  W A S D 移动 · 面键 J K L（面板 A B C）/ U I O（面板 X Y Z）· 投币 B · 开始 Enter
+ *   P2  方向键移动 · 小键盘 1-6 面键（A B C / X Y Z）· 投币 Delete · 开始 小键盘 0
  *
  * 两套按键刻意完全不重叠：单机双人时两个人共用一块键盘，重叠的键会让双方互相抢输入。
  */
 export const DEFAULT_BINDINGS: KeyBindings = {
   p1: {
+    up: 'KeyW',
+    down: 'KeyS',
+    left: 'KeyA',
+    right: 'KeyD',
+    b: 'KeyJ',
+    a: 'KeyK',
+    y: 'KeyL',
+    x: 'KeyU',
+    l: 'KeyI',
+    r: 'KeyO',
+    select: 'KeyB',
+    start: 'Enter',
+  },
+  p2: {
     up: 'ArrowUp',
     down: 'ArrowDown',
     left: 'ArrowLeft',
     right: 'ArrowRight',
-    b: 'KeyZ',
-    a: 'KeyX',
-    y: 'KeyA',
-    x: 'KeyS',
-    l: 'KeyQ',
-    r: 'KeyE',
-    select: 'ShiftLeft',
-    start: 'Enter',
-  },
-  p2: {
-    up: 'KeyI',
-    down: 'KeyK',
-    left: 'KeyJ',
-    right: 'KeyL',
-    b: 'KeyU',
-    a: 'KeyO',
-    y: 'KeyN',
-    x: 'KeyM',
-    l: 'KeyG',
-    r: 'KeyH',
-    select: 'Digit1',
-    start: 'Digit2',
+    b: 'Numpad1',
+    a: 'Numpad2',
+    y: 'Numpad3',
+    x: 'Numpad4',
+    l: 'Numpad5',
+    r: 'Numpad6',
+    select: 'Delete',
+    start: 'Numpad0',
   },
 };
 

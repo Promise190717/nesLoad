@@ -13,27 +13,37 @@ import {
   type KeyBindings,
 } from '@/lib/keybindings';
 import type { NetplayRole } from '@/lib/netplay';
-import type { MessageKey } from '@/lib/i18n';
+import type { MessageKey, Translate } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
 /**
- * 面板上的钮名。**刻意不翻译**：方向箭头和 B/A/Y/X/L/R/SELECT/START 是手柄上的丝印，
- * 中英两版页脚（`legend.*`）用的也是这套叫法，翻了反而对不上。
+ * 面板上的钮名，走**街机叫法**：方向箭头 + A B C X Y Z + 开始 / 投币。
+ *
+ * 内部仍是 RetroArch 的 retropad 钮名（`b/a/y/x/l/r/select/start`），映射见 `lib/keybindings.ts`。
+ * A B C X Y Z 和箭头是手柄丝印、**刻意不翻译**；开始 / 投币是词，跟着语言走
+ * （`keybind.btnStart` / `keybind.btnCoin`），所以下面这两项只是英文兜底。
  */
 const BUTTON_LABELS: Record<ButtonName, string> = {
   up: '↑',
   down: '↓',
   left: '←',
   right: '→',
-  b: 'B',
-  a: 'A',
-  y: 'Y',
+  b: 'A',
+  a: 'B',
+  y: 'C',
   x: 'X',
-  l: 'L',
-  r: 'R',
-  select: 'SELECT',
+  l: 'Y',
+  r: 'Z',
+  select: 'COIN',
   start: 'START',
 };
+
+/** 取钮名：开始 / 投币 跟着语言走，其余固定。 */
+function buttonLabel(button: ButtonName, t: Translate): string {
+  if (button === 'select') return t('keybind.btnCoin');
+  if (button === 'start') return t('keybind.btnStart');
+  return BUTTON_LABELS[button];
+}
 
 /**
  * 面板底部的提示条。
@@ -281,24 +291,25 @@ export default function KeyBindingsPanel({
           </div>
 
           {/*
-            12 个钮分两列：正好配成 上/下、左/右、B/A、Y/X、L/R、SELECT/START。
+            12 个钮分两列：正好配成 上/下、左/右、A/B、C/X、Y/Z、投币/开始。
 
-            键值走系统字体、11px，**不用 font-pixel**：值里会出现 ↑↓←→，
-            而 Press Start 2P 没有箭头字形 —— 那四个会掉回系统字体，和旁边的
-            `Z`、`Shift` 混排出两种字形。和页脚（legend.*）同一个理由。
+            键值走系统字体、11px，**不用 font-pixel**：值里会出现 ↑↓←→ 和小键盘名，
+            而 Press Start 2P 没有箭头字形 —— 那几个会掉回系统字体，和旁边的
+            `J`、`Enter` 混排出两种字形。和页脚（legend.*）同一个理由。
           */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
             {BUTTONS.map((button) => {
               const active = capturing === button;
+              const name = buttonLabel(button, t);
               const label = codeLabel(table[button]);
               return (
                 <div key={button} className="flex items-center gap-2">
                   <span className="w-[54px] shrink-0 text-[11px] text-ink-400">
-                    {BUTTON_LABELS[button]}
+                    {name}
                   </span>
                   <button
                     type="button"
-                    aria-label={`${BUTTON_LABELS[button]} — ${label}`}
+                    aria-label={`${name} — ${label}`}
                     onClick={() => {
                       setCapturing(button);
                       setNotice(null);
@@ -319,7 +330,7 @@ export default function KeyBindingsPanel({
           {notice && (
             <p className="text-[11px] text-danger">
               {t(notice.key, {
-                button: notice.button ? BUTTON_LABELS[notice.button] : '',
+                button: notice.button ? buttonLabel(notice.button, t) : '',
                 player: notice.player ?? '',
                 pressed: notice.pressed ?? '',
               })}
