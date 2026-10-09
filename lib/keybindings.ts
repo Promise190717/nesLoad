@@ -1,5 +1,7 @@
 'use client';
 
+import type { Translate } from './i18n';
+
 /**
  * 可自定义的键位。
  *
@@ -20,15 +22,25 @@
  * 一律用 `KeyboardEvent.code`（物理键位）。`key` 会被输入法、大小写、以及中文输入
  * 状态影响（`e.key` 会变成 `Process`），不能用来做键位。
  *
- * ## 和 Nostalgist 的换算必须严格对齐
+ * ## 换算以 RetroArch 为准，不是以 Nostalgist 为准
  *
- * `getKeyboardCode` 的规则（照抄自 `nostalgist.js`）：
+ * 这张表写出去的值是给 **RetroArch 自己**读的（本地键盘输入那条路），所以键名必须用
+ * RetroArch 的命名 —— 见 `input/input_keymaps.c`：
  *
- *   单字符         → `Key${大写}`          → 我们反过来存成小写单字符
- *   `f1`..`f12`   → `F1`..`F12`
- *   `num0`..`num9`→ `Numpad0`..`Numpad9`
- *   `keypad0`..`keypad9` → `Digit0`..`Digit9`   ← 注意：数字行叫 keypad，小键盘才叫 num
- *   其余          → 查具名表
+ *   单字符              → `a`..`z`、`0`..`9`
+ *   `f1`..`f12`        → 功能键
+ *   `num0`..`num9`     → RETROK_0..RETROK_9        ← 字母上方那排数字行
+ *   `keypad0`..`keypad9` → RETROK_KP0..RETROK_KP9  ← 小键盘
+ *   其余               → 具名表（left / enter / shift / kp_enter …）
+ *
+ * **别被 Nostalgist 带偏**：它的 `getKeyboardCode`（把配置值反解成 DOM code，只用于联机
+ * 注入）把上面这两组**写反了** —— 它认为 `num*` 是小键盘、`keypad*` 是数字行，正好和
+ * RetroArch 相反。照它去写配置，本地键盘就会错位：小键盘按了没反应、反倒是数字行在动
+ * （P2 的面键踩过这个坑，默认键位就落在小键盘上）。
+ *
+ * 代价：**小键盘键没法用于联机注入**。注入走 Nostalgist 的 getKeyboardCode，它会把
+ * `keypad4` 解成 `Digit4`（数字行），合成出来的事件和绑定对不上。本地双人不受影响
+ * （RetroArch 直读键盘）。
  *
  * **反过来推不出名字的键一律不接受**。典型的是 `Backslash`：Nostalgist 的具名表里
  * `backslash` 对应的是空串，拿它做注入会静默失效 —— 与其让用户配一个「按了没反应」
@@ -84,9 +96,17 @@ export interface KeyBindings {
  * 默认键位 —— 一套街机 / 格斗向的键盘布局。
  *
  *   P1  W A S D 移动 · 面键 J K L（面板 A B C）/ U I O（面板 X Y Z）· 投币 B · 开始 Enter
- *   P2  方向键移动 · 小键盘 1-6 面键（A B C / X Y Z）· 投币 Delete · 开始 小键盘 0
+ *   P2  方向键移动 · 小键盘 1 2 4 5 7 8 面键（A B C / X Y Z）· 投币 Delete · 开始 小键盘 0
  *
  * 两套按键刻意完全不重叠：单机双人时两个人共用一块键盘，重叠的键会让双方互相抢输入。
+ *
+ * P2 的面键跳过了小键盘的 3 和 6，取的是**三行各左边两个**：
+ *
+ *     7 8 9      ← 面板 Y Z
+ *     4 5 6      ← 面板 C X
+ *     1 2 3      ← 面板 A B
+ *
+ * 这样六个面键在小键盘上是一块紧凑的 2×3 矩形，盲按不容易串行。
  */
 export const DEFAULT_BINDINGS: KeyBindings = {
   p1: {
@@ -110,14 +130,67 @@ export const DEFAULT_BINDINGS: KeyBindings = {
     right: 'ArrowRight',
     b: 'Numpad1',
     a: 'Numpad2',
-    y: 'Numpad3',
-    x: 'Numpad4',
-    l: 'Numpad5',
-    r: 'Numpad6',
+    y: 'Numpad4',
+    x: 'Numpad5',
+    l: 'Numpad7',
+    r: 'Numpad8',
     select: 'Delete',
     start: 'Numpad0',
   },
 };
+
+/**
+ * 历次发布过的默认键位。
+ *
+ * 为什么需要留这个：`loadBindings()` 一读到 localStorage 里存的那份就整份用它 —— 这是对的，
+ * 不能拿新默认值去覆盖用户的自定义。但副作用是**只改 `DEFAULT_BINDINGS` 对老用户无效**：
+ * 他本地存着旧默认值，界面上看着就是「改了没生效」，而他其实一个键都没动过。
+ *
+ * 所以这里留一份历史：存的那份如果和某个历史默认值**完全一致**，说明他从没改过键位，
+ * 那就跟着当前默认值走；只要动过一个键，就整份保留他的。
+ *
+ * **改 `DEFAULT_BINDINGS` 时把旧的那份挪进来**，老用户才会跟着升。
+ */
+const LEGACY_DEFAULTS: readonly KeyBindings[] = [
+  {
+    // 街机布局之前那一版：P1 方向键 / Z X / A S / Q E / Shift / Enter
+    p1: {
+      up: 'ArrowUp',
+      down: 'ArrowDown',
+      left: 'ArrowLeft',
+      right: 'ArrowRight',
+      b: 'KeyZ',
+      a: 'KeyX',
+      y: 'KeyA',
+      x: 'KeyS',
+      l: 'KeyQ',
+      r: 'KeyE',
+      select: 'ShiftLeft',
+      start: 'Enter',
+    },
+    p2: {
+      up: 'KeyI',
+      down: 'KeyK',
+      left: 'KeyJ',
+      right: 'KeyL',
+      b: 'KeyU',
+      a: 'KeyO',
+      y: 'KeyN',
+      x: 'KeyM',
+      l: 'KeyG',
+      r: 'KeyH',
+      select: 'Digit1',
+      start: 'Digit2',
+    },
+  },
+];
+
+/** 两份键位表是不是一模一样（12 个钮逐一比）。 */
+function sameBindings(a: KeyBindings, b: KeyBindings): boolean {
+  return (['p1', 'p2'] as const).every((player) =>
+    BUTTONS.every((button) => a[player][button] === b[player][button])
+  );
+}
 
 /**
  * RetroArch 具名键 → DOM code。
@@ -182,11 +255,12 @@ const REVERSE_NAMED: Record<string, string> = Object.fromEntries(
  * **不能用于注入**（联机时房主那边会静默丢掉）。
  */
 export function codeToRetroArch(code: string): string | null {
-  // KeyA..KeyZ → 'a'..'z'。Nostalgist 对单字符键名会拼回 `Key${大写}`。
+  // KeyA..KeyZ → 'a'..'z'。RetroArch 接受 "a".."z" 作单字符键名。
   if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
-  // 数字行：RetroArch 叫 keypad，不是 num（num 是小键盘）。
-  if (/^Digit[0-9]$/.test(code)) return `keypad${code.slice(5)}`;
-  if (/^Numpad[0-9]$/.test(code)) return `num${code.slice(6)}`;
+  // 数字行。RetroArch 的 `num*` 是字母上方那排（input_keymaps.c: "num4" → RETROK_4）。
+  if (/^Digit[0-9]$/.test(code)) return `num${code.slice(5)}`;
+  // 小键盘。RetroArch 的 `keypad*` 才是小键盘（"keypad4" → RETROK_KP4）。
+  if (/^Numpad[0-9]$/.test(code)) return `keypad${code.slice(6)}`;
   if (/^F([1-9]|1[0-2])$/.test(code)) return code.toLowerCase();
   return REVERSE_NAMED[code] ?? null;
 }
@@ -241,6 +315,70 @@ export function codeLabel(code: string): string {
   if (/^Numpad[0-9]$/.test(code)) return `Num ${code.slice(6)}`;
   if (/^F([1-9]|1[0-2])$/.test(code)) return code;
   return NAMED_LABELS[code] ?? code;
+}
+
+/**
+ * 面板上的钮名，走**街机叫法**：方向箭头 + A B C X Y Z + 开始 / 投币。
+ *
+ * 内部仍是 RetroArch 的 retropad 钮名（`b/a/y/x/l/r/select/start`，见 `ButtonName`），
+ * 面板 A→`b`、B→`a`、C→`y`、X→`x`、Y→`l`、Z→`r`。
+ *
+ * A B C X Y Z 和箭头是手柄丝印、**刻意不翻译**；开始 / 投币是词，跟着语言走
+ * （`keybind.btnStart` / `keybind.btnCoin`），所以下面这两项只是英文兜底。
+ *
+ * 放在这里而不是面板组件里：页脚那行键位说明也要用它，两处必须同源。
+ */
+export const BUTTON_LABELS: Record<ButtonName, string> = {
+  up: '↑',
+  down: '↓',
+  left: '←',
+  right: '→',
+  b: 'A',
+  a: 'B',
+  y: 'C',
+  x: 'X',
+  l: 'Y',
+  r: 'Z',
+  select: 'COIN',
+  start: 'START',
+};
+
+/** 取钮名：开始 / 投币 跟着语言走，其余固定。 */
+export function buttonLabel(button: ButtonName, t: Translate): string {
+  if (button === 'select') return t('keybind.btnCoin');
+  if (button === 'start') return t('keybind.btnStart');
+  return BUTTON_LABELS[button];
+}
+
+/** 面键在页脚 / 面板上的排列顺序：面板 A B C（下排）→ X Y Z（上排）。 */
+export const FACE_BUTTONS: readonly ButtonName[] = ['b', 'a', 'y', 'x', 'l', 'r'];
+
+/** 方向键在页脚里的排列顺序，对应键盘上「上左下右」的读法。 */
+export const DIRECTION_BUTTONS: readonly ButtonName[] = ['up', 'left', 'down', 'right'];
+
+/**
+ * 把一位玩家的键位渲染成页脚那一行说明。
+ *
+ * **必须从实际的 bindings 生成，不能写死文案。** 写死过一次，代价是：页脚描述的是
+ * `DEFAULT_BINDINGS`，而面板读的是 localStorage 里那份（改过默认值也不会自动跟随），
+ * 于是老用户看到「页脚说 W/A/S/D、面板里却是方向键」——两边都觉得自己是对的。
+ */
+export function playerLegend(
+  table: PlayerBindings,
+  player: 1 | 2,
+  t: Translate
+): string {
+  const moves = DIRECTION_BUTTONS.map((button) => codeLabel(table[button])).join('/');
+  const faces = FACE_BUTTONS.map(
+    (button) => `${codeLabel(table[button])}=${buttonLabel(button, t)}`
+  ).join(' · ');
+  const coin = codeLabel(table.select);
+  const start = codeLabel(table.start);
+
+  return (
+    `${player}P  ${moves} ${t('legend.moves')} · ${faces}` +
+    ` · ${coin}=${buttonLabel('select', t)} · ${start}=${buttonLabel('start', t)}`
+  );
 }
 
 /**
@@ -349,7 +487,16 @@ export function loadBindings(): KeyBindings {
     const p1 = sanitizePlayer(record.p1);
     const p2 = sanitizePlayer(record.p2);
     if (!p1 || !p2) return DEFAULT_BINDINGS;
-    return { p1, p2 };
+
+    const stored: KeyBindings = { p1, p2 };
+    /*
+     * 存的那份正好是某个历史默认值 → 用户从没改过键位，跟着当前默认值走。
+     * 这不算「覆盖用户设置」：一个键都没动过，那就不是他的设置，只是旧默认值的残留。
+     */
+    if (LEGACY_DEFAULTS.some((legacy) => sameBindings(stored, legacy))) {
+      return DEFAULT_BINDINGS;
+    }
+    return stored;
   } catch {
     return DEFAULT_BINDINGS;
   }

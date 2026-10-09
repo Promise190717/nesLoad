@@ -49,53 +49,20 @@ const run = <T,>(
 ): Promise<T | null> => runOn<T>(db, STORE_BIOS, mode, action);
 
 /**
- * neogeo.zip 里必有的几个文件名。
- *
- * `sfix.sfix`（图形 ROM）和 `sm1.sm1`（Z80 程序）是每一份 neogeo.zip 都有的，
- * 拿它们判断足够，也不会误伤普通 romset —— 游戏自己的 zip 里不会出现这两个名字。
- */
-const BIOS_MEMBERS = [
-  'sfix.sfix',
-  'sm1.sm1',
-  '000-lo.lo',
-  'sp-s2.sp1',
-  'sp-s.sp1',
-  'sp-u2.sp1',
-];
-
-/** 在字节里找一段 ASCII（zip 的文件名是明文存的，不压缩）。 */
-function containsAscii(bytes: Uint8Array, needle: string): boolean {
-  const first = needle.charCodeAt(0);
-  const limit = bytes.length - needle.length;
-
-  outer: for (let i = 0; i <= limit; i += 1) {
-    if (bytes[i] !== first) continue;
-    for (let j = 1; j < needle.length; j += 1) {
-      if (bytes[i + j] !== needle.charCodeAt(j)) continue outer;
-    }
-    return true;
-  }
-
-  return false;
-}
-
-/**
  * 判断拖进来的是不是 Neo Geo BIOS。
  *
- * 先看文件名（`neogeo.zip` 是最常见的拿法），认不出再翻内容 —— zip 的本地文件头在开头、
- * 中央目录在结尾，两段各取 128 KB 就够覆盖到那些特征文件名了，不必把整个文件读进来。
+ * **只看文件名，不翻内容。** 这条规则是刻意收窄的。
+ *
+ * 翻内容（找 `sfix.sfix` / `sm1.sm1` 这类特征成员）看着更聪明，但会把「把 BIOS 合进
+ * 包里的整合版 romset」整盘认成 BIOS —— 文件被存进 `bios` store、游戏却没启动，
+ * 界面上就是「拖进去毫无反应」。**误判比漏判难查得多**：漏判只是走回原来的失败路径
+ * （页脚会提示需要 neogeo.zip），误判是把一盘本来能玩的卡带藏起来。
+ *
+ * `startsWith` 而不是全等：`neogeo.zip` / `neogeo-bios.zip` / `neogeo(1).zip` 都算。
+ * 游戏 romset 不会用 neogeo 开头命名，所以不会误伤。
  */
-export async function isNeoGeoBios(file: File): Promise<boolean> {
-  const base = file.name.toLowerCase().replace(/\.[^.]+$/, '');
-  if (base === 'neogeo' || base === 'neogeo-bios' || base === 'neogeo_bios') return true;
-
-  const chunk = 0x20000;
-  const head = new Uint8Array(await file.slice(0, chunk).arrayBuffer());
-  const tail = new Uint8Array(await file.slice(Math.max(0, file.size - chunk)).arrayBuffer());
-
-  return BIOS_MEMBERS.some(
-    (member) => containsAscii(head, member) || containsAscii(tail, member)
-  );
+export function isNeoGeoBios(file: File): boolean {
+  return file.name.toLowerCase().replace(/\.[^.]+$/, '').startsWith('neogeo');
 }
 
 export async function putBios(file: File): Promise<BiosInfo | null> {

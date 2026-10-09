@@ -21,9 +21,10 @@ import { useI18n } from './I18nProvider';
 /**
  * 机身宽度 = 屏幕 720 + 屏幕外边距 15×2 + 内圈外边距 8×2 = 766。
  *
- * 组件里**没有**写死 width（宽度是上面那套尺寸自己撑出来的），这里只是把它导出去 ——
- * ConsoleScene 的键位表要按**机身**对中，而不是按「机身 + 卡带架」整排对中。
- * 改屏幕尺寸或那两道外边距，必须同步这个值，否则键位表会偏。
+ * 组件里**没有**写死 width（宽度是上面那套尺寸自己撑出来的），这里只是把它导出去。
+ * 早先 ConsoleScene 的键位表要按**机身**对中（而不是按「机身 + 卡带架」整排对中）时
+ * 用过它；键位表 2026-10-09 挪到右上角之后已无人引用，保留是为了让机身宽度有个
+ * 唯一出处 —— 改屏幕尺寸或那两道外边距时，对着这个值核一遍。
  */
 export const TV_WIDTH = 766;
 
@@ -46,7 +47,7 @@ interface RetroTvProps {
    * 正在插卡带。null = 没在载入。
    *
    * `ratio` 是核心包的下载进度（0..1），null 表示拿不到字节数（核心已在
-   * CacheStorage 里、或响应没有 Content-Length）—— 这时插卡舱画一条来回滑的
+   * CacheStorage 里、或响应没有 Content-Length）—— 这时**屏幕上**画一条来回滑的
    * 「不确定」进度条，总之必须让用户看到「在动」。
    */
   loading: { ratio: number | null } | null;
@@ -230,6 +231,35 @@ export default function RetroTv({
             {!hasPicture && <div className="noise absolute inset-0 opacity-[0.72]" />}
 
             {/*
+              载入进度。**从插卡舱挪到屏幕里**的 —— 用户要求进度条出现在电视上，
+              机身下沿那一格不再画它。屏幕里没画面时本来是一片雪花，进度条叠在雪花之上，
+              让「正在读卡带」这件事看得见。
+
+              刻意**不写 z-index**：要盖住雪花，又必须落在 .crt 的扫描线（z-5）/ 暗角（z-6）
+              之下，否则会把显像管质感糊掉。配色走 crt-* 而不是 ink-*（屏幕底永远是黑的，
+              ink-* 会随主题翻转，浅色主题下就成了黑底黑字）。
+              百分数是**读数**、不是文案 —— 和 EXIT FULLSCREEN 同性质，是屏幕里唯一的例外。
+            */}
+            {loading && (
+              <div className="absolute inset-x-0 bottom-[52px] flex items-center justify-center gap-3">
+                <div className="relative h-[10px] w-[300px] overflow-hidden border-2 border-crt-ink-500 bg-crt-950/90">
+                  {loadPct === null ? (
+                    <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-crt-accent/70" />
+                  ) : (
+                    <span
+                      className="absolute inset-y-0 left-0 bg-crt-accent"
+                      style={{ width: `${loadPct}%` }}
+                    />
+                  )}
+                </div>
+                {/* 百分数全是数字，font-pixel 没有掉字形的问题；宽度写死，位数变化时不抖 */}
+                <span className="w-[34px] shrink-0 font-pixel text-[9px] text-crt-ink-300">
+                  {loadPct === null ? '' : `${loadPct}%`}
+                </span>
+              </div>
+            )}
+
+            {/*
               全屏时唯一的退出口。它是功能件不是文案 —— 平时（非全屏）不显示，
               屏幕里就真的什么都没有。
             */}
@@ -346,30 +376,13 @@ export default function RetroTv({
 
           {loading ? (
             /*
-              正在插卡带。这是唯一一处「机身替屏幕说话」的地方 —— 屏幕里仍然只有雪花
-              （「没插卡带 = 雪花」这条规矩没变），进度只由插卡舱表达。
-              三行结构刻意和空舱态对齐（标签 → 槽 → 指示），所以舱高不用改。
+              正在插卡带。**进度条不在这里** —— 用户要求它挪进屏幕（见上面 `.screen` 里那段），
+              机身下沿这一格只留状态标签和槽本身。
               槽按钮必须留着：拎着卡带拖过来时靠它的矩形做命中判定，摘掉就没法换卡带了。
             */
             <>
               <span className="font-pixel text-[9px] text-accent">LOADING</span>
               {slotButton}
-              <div className="flex w-[375px] items-center gap-3">
-                <div className="relative h-[8px] flex-1 overflow-hidden bg-ink-950 pixel-edge pxw-2 pxc-700">
-                  {loadPct === null ? (
-                    <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
-                  ) : (
-                    <span
-                      className="absolute inset-y-0 left-0 bg-accent"
-                      style={{ width: `${loadPct}%` }}
-                    />
-                  )}
-                </div>
-                {/* 百分数全是数字，font-pixel 没有掉字形的问题；宽度写死，位数变化时不抖 */}
-                <span className="w-[32px] shrink-0 text-right font-pixel text-[9px] text-ink-400">
-                  {loadPct === null ? '' : `${loadPct}%`}
-                </span>
-              </div>
             </>
           ) : shownRom ? (
             /*

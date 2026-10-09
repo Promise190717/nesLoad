@@ -72,20 +72,26 @@ const en = {
    * 键位表。刻意**不用** font-pixel：Press Start 2P 没有中日韩字形，
    * 而这几条是给人读懂的说明（原版 `1P ARROWS / Z X / A S / Q E / SHIFT / ENTER`
    * 只列键名不说对应关系，等于没说明），所以走系统字体。
-   * 行首的 1P / 2P / 快捷键 直接写在串里，省得再拆一层。
-   * 钮名走街机叫法：A B C（下排）/ X Y Z（上排）/ 投币 / 开始。
+   *
+   * 1P / 2P 那两行**不是文案** —— 由 `playerLegend()`（lib/keybindings.ts）从
+   * 当前生效的键位现算出来，所以这里只有「移动」这一个词要翻译，键名和钮名
+   * （W/A/S/D、A B C X Y Z）都是丝印，中英一样。
    */
-  'legend.p1':
-    '1P (default)  W/A/S/D moves · J=A · K=B · L=C · U=X · I=Y · O=Z · B=Coin · Enter=Start',
-  'legend.p2':
-    '2P (default)  Arrows move · Num1=A · Num2=B · Num3=C · Num4=X · Num5=Y · Num6=Z · Del=Coin · Num0=Start',
+  'legend.moves': 'moves',
   'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load — bindings are customizable (top right)',
   /*
-   * BIOS 状态。只在「架子上有街机卡带 / 正在玩街机 / 已经装了 BIOS」时才出现 ——
-   * 玩 NES / SFC 的人不需要被这一行打扰。
+   * 页脚的状态行。这两组都只在**跟街机有关**时才出现 ——
+   * 玩 NES / SFC 的人不需要被它们打扰。
+   *
+   * BIOS 那行有三档：没装 / 装了 / 装了但还是失败（后者要把矛头指向 romset 版本，
+   * 否则用户会一直以为是 BIOS 没装好，白折腾）。
    */
   'legend.biosReady': 'BIOS  neogeo.zip installed — Neo Geo arcade games can run',
   'legend.biosMissing': 'BIOS  Neo Geo arcade games need neogeo.zip — drop the file here to install it',
+  'legend.biosReadyFailed':
+    'BIOS  neogeo.zip is installed, yet that arcade game still did not start — the romset version probably does not match this core',
+  'legend.needZip':
+    'Format  FBNeo only reads .zip — this one looks like {ext}. Repack it, or grab a .zip build',
 
   /*
    * 联机面板。同样浮在房间上、不进屏幕。
@@ -191,12 +197,13 @@ const zh: Record<MessageKey, string> = {
   'library.launchTitle': '{name}\n点击载入，或拖到电视机卡槽里',
   'library.removeLabel': '移除 {name}',
 
-  'legend.p1': '1P（默认）W/A/S/D 移动 · J=A · K=B · L=C · U=X · I=Y · O=Z · B=投币 · Enter=开始',
-  'legend.p2':
-    '2P（默认）方向键移动 · 小键盘1=A · 小键盘2=B · 小键盘3=C · 小键盘4=X · 小键盘5=Y · 小键盘6=Z · Del=投币 · 小键盘0=开始',
+  'legend.moves': '移动',
   'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档 —— 键位可在右上角自定义',
   'legend.biosReady': 'BIOS  neogeo.zip 已装上 —— 街机的 Neo Geo 游戏可以跑了',
   'legend.biosMissing': 'BIOS  街机的 Neo Geo 游戏需要 neogeo.zip —— 把这个文件拖进页面即可装上',
+  'legend.biosReadyFailed':
+    'BIOS  neogeo.zip 已装上，但这盘街机还是没起来 —— 多半是 romset 版本和核心对不上',
+  'legend.needZip': '格式  FBNeo 只吃 .zip —— 这个是 {ext}，重新打包一下（或换一个 .zip 版）',
 
   'netplay.title': '联机',
   'netplay.open': '联机对战',

@@ -10,7 +10,14 @@ import {
 } from 'react';
 import { getAudioTrack } from '@/lib/audio-tap';
 import { getBios, getBiosInfo, isNeoGeoBios, putBios, type BiosInfo } from '@/lib/bios';
-import { EmulatorController, VOLUME_MAX, detectConsole, type ConsoleType, type LoadedRom } from '@/lib/emulator';
+import {
+  EmulatorController,
+  VOLUME_MAX,
+  detectConsole,
+  unsupportedArchive,
+  type ConsoleType,
+  type LoadedRom,
+} from '@/lib/emulator';
 import type { Locale } from '@/lib/i18n';
 import {
   IDLE_NETPLAY_STATE,
@@ -22,6 +29,7 @@ import {
   codeToButton,
   DEFAULT_BINDINGS,
   loadBindings,
+  playerLegend,
   saveBindings,
   type KeyBindings,
 } from '@/lib/keybindings';
@@ -39,7 +47,7 @@ import CartridgeSprite from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
-import RetroTv, { TV_WIDTH } from './RetroTv';
+import RetroTv from './RetroTv';
 import { ExpandIcon, KeyboardIcon, LinkIcon, MoonIcon, SunIcon } from './icons';
 
 interface DragGhost {
@@ -165,6 +173,15 @@ export default function ConsoleScene() {
    */
   const [biosHint, setBiosHint] = useState(false);
 
+  /**
+   * 刚拖进来的文件是 `.7z` / `.rar` 这类 FBNeo 吃不下的压缩格式。
+   *
+   * 这一条必须单独记：机种认不出时 `consoleType` 是 null，上面那行 BIOS 提示
+   * **不会**亮（它只认街机），于是整条失败在界面上是完全静默的 —— 用户看到的就是
+   * 「拖进去毫无反应」。存 null 表示没这回事。
+   */
+  const [archiveHint, setArchiveHint] = useState<'7z' | 'rar' | null>(null);
+
   const [fileOver, setFileOver] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [ghost, setGhost] = useState<DragGhost | null>(null);
@@ -243,6 +260,17 @@ export default function ConsoleScene() {
 
   const loadFile = useCallback(
     async (file: File) => {
+      /*
+       * 拖进来的第一件事就是留个痕。载入失败在屏幕上是静默的（这是刻意的），
+       * 所以「拖了没反应」到底是没走到这儿、还是走到了又失败，只能靠这行日志区分
+       * —— 连它都没有，问题就在拖拽事件那一层，不在载入流程。
+       */
+      console.info(
+        `[nesload] 收到文件：${file.name}（${file.size} 字节，type=${file.type || '空'}）`
+      );
+      // 每次拖入都重置上一条格式提示 —— 它说的是「刚才那个文件」，不是历史状态
+      setArchiveHint(null);
+
       // 房主正在出画面时不接受本地载入：屏幕上已经有画面了，再插一盘只会打架。
       // 用 netplay.current 而不是 state，省得把 netplayState 拖进依赖、让这个
       // 回调每次状态变化都换一次身份（拖拽那套 effect 依赖它）。
@@ -256,14 +284,15 @@ export default function ConsoleScene() {
       /*
        * 拖进来的可能不是游戏，而是街机 BIOS（Neo Geo 的 neogeo.zip）。
        *
-       * 它和 romset 一样是个 zip、文件头也一模一样，光看头分不出来，只能问内容
-       * （见 lib/bios.ts）。认出来就存成系统文件 —— 不进卡带架、不启动模拟器。
-       * 这条路刻意做得和拖卡带一样：用户不需要知道「BIOS」这个概念，
-       * 拖进来就算装上了。
+       * 它和 romset 一样是个 zip、文件头一模一样，只能靠文件名分（见 lib/bios.ts）。
+       * 认出来就存成系统文件 —— 不进卡带架、不启动模拟器。
+       * 这条路刻意做得和拖卡带一样：用户不需要知道「BIOS」这个概念，拖进来就算装上了。
        */
-      if (await isNeoGeoBios(file)) {
+      if (isNeoGeoBios(file)) {
         const info = await putBios(file);
         setBios(info);
+        // 那条「需要 BIOS」的提示到此为止 —— 它的全部使命就是让用户去装 BIOS
+        setBiosHint(false);
         console.info(
           `[nesload] 街机 BIOS 已装上：${file.name}。` +
             'Neo Geo 游戏（合金弹头、拳皇、侍魂…）现在能跑了 —— 重新拖一次那盘卡带即可。'
@@ -338,6 +367,11 @@ export default function ConsoleScene() {
          * 「Neo Geo 游戏需要 neogeo.zip」的通道。
          */
         if (!bios && consoleType === 'arcade') setBiosHint(true);
+        /*
+         * 机种认不出（`consoleType` 是 null）时上面那条不会亮，得单独给一句准话。
+         * 最常见的原因就是压缩格式：街机 romset 大量以 7z / rar 流通，而 FBNeo 只吃 zip。
+         */
+        if (consoleType === null) setArchiveHint(await unsupportedArchive(file));
         setRom(null);
         setSaves([]);
         setActiveId(null);
@@ -952,6 +986,48 @@ export default function ConsoleScene() {
         </button>
       </div>
 
+      {/*
+        键位说明。原先挂在电视机**下方**（页脚），现在挪到右上角那排按钮底下。
+
+        内容仍是**从当前键位现算**（`playerLegend`），不是写死的文案 —— 写死过一次，
+        结果是说明描述默认值、面板显示 localStorage 里存的那份，两边说的不是一回事
+        （老用户看到「说明说 W/A/S/D、面板里却是方向键」）。
+
+        `pointer-events-none` 不能省：这块现在压在电视机右上角上方，若吃指针事件，
+        点屏幕就点不到了。宽度写死是为了让长句在这里换行、整体右对齐。
+        `top-[60px]` = 按钮那排的 top-6（24）+ 行高（约 25）+ 一点间距。
+      */}
+      <div className="stage pointer-events-none absolute right-6 top-[60px] z-40 flex w-[340px] flex-col items-end gap-1 text-right text-[11px] leading-snug text-ink-500">
+        <p>{playerLegend(bindings.p1, 1, t)}</p>
+        <p>{playerLegend(bindings.p2, 2, t)}</p>
+        <p>{t('legend.shortcut')}</p>
+        {/*
+          BIOS 状态行。只在**跟街机有关**的时候出现：已经装了 BIOS、刚有街机载入失败、
+          架子上有街机卡带、或者正在玩街机。玩 NES / SFC 的人不需要被这一行打扰。
+
+          这是唯一能告诉用户「Neo Geo 缺 neogeo.zip」的通道 —— 屏幕里不放文案，
+          核心失败又是静默的（见 RetroTv）。「装了还失败」那档指向 romset 版本，
+          免得用户一直以为是 BIOS 没装好。
+        */}
+        {(bios ||
+          biosHint ||
+          rom?.console === 'arcade' ||
+          library.some((c) => c.console === 'arcade')) && (
+          <p>
+            {bios
+              ? biosHint
+                ? t('legend.biosReadyFailed')
+                : t('legend.biosReady')
+              : t('legend.biosMissing')}
+          </p>
+        )}
+        {/*
+          压缩格式提示。只有 `.7z` / `.rar` 会走到这儿 —— 那种情况下机种根本认不出，
+          上面那行 BIOS 提示不会亮，所以这一条必须独立存在。
+        */}
+        {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
+      </div>
+
       <div
         className="stage flex flex-col items-center"
         onDragOver={(e) => e.preventDefault()}
@@ -1013,47 +1089,6 @@ export default function ConsoleScene() {
           />
         </div>
 
-        {/*
-          键位表。三行竖排，一行一套（1P / 2P / 快捷键）。
-
-          刻意**不用** font-pixel：Press Start 2P 没有中日韩字形，而这版是中文说明 ——
-          原文 `1P ARROWS / Z X / A S / Q E / SHIFT / ENTER` 只列键名、不说对应手柄上的
-          哪个钮（Z=B、X=A、A/S=Y/X、Q/E=L/R 全都没写），等于没说明白。
-          所以这里走系统字体、11px，和面板按钮同一套字。
-
-          `relative` 不能省：地板那一层是 absolute + 不透明，从「场景底边往上 150px」
-          一直铺到 200vh，正好把这个页脚也罩在里面 —— 页脚不是定位元素，会被地板
-          **盖在下面**，ink-500 的字压在地板色上几乎看不见。
-          relative 让它进入定位层、画在地板之上。
-
-          `self-start` + `width: TV_WIDTH` 是「对中在机身上」的做法：
-          外层 `.stage` 是 `items-center`，而 stage 的宽度是**整排**
-          （机身 766 + 间距 16 + 卡带架 220 = 1002），居中会居到整排的中线（x=501）上；
-          机身的中心在 x=383 —— 差 118px，看着就是歪的。
-          给页脚量出机身那一栏的宽度、再让它从 stage 左边起排，文字就落在机身的轴上。
-        */}
-        <footer
-          className="relative mt-8 flex flex-col items-center gap-1 self-start text-[11px] leading-snug text-ink-500"
-          style={{ width: TV_WIDTH }}
-        >
-          <p>{t('legend.p1')}</p>
-          <p>{t('legend.p2')}</p>
-          <p>{t('legend.shortcut')}</p>
-          {/*
-            BIOS 状态行。只在**跟街机有关**的时候出现：已经装了 BIOS、刚有街机载入失败、
-            架子上有街机卡带、或者正在玩街机。玩 NES / SFC 的人不需要被这一行打扰。
-
-            为什么非要有这一行：Neo Geo 游戏缺 neogeo.zip 时，核心既不报错也不黑屏提示，
-            表现就是「拖进去没反应」—— 用户根本无从知道该做什么。这是唯一能告诉他
-            「拖个 neogeo.zip 进来就好」的地方（屏幕里放不下文案，见 RetroTv）。
-          */}
-          {(bios ||
-            biosHint ||
-            rom?.console === 'arcade' ||
-            library.some((c) => c.console === 'arcade')) && (
-            <p>{bios ? t('legend.biosReady') : t('legend.biosMissing')}</p>
-          )}
-        </footer>
       </div>
 
       {/*
