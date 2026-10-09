@@ -3,12 +3,14 @@ import type { ConsoleType } from '@/lib/emulator';
 const CONSOLE_LABEL: Record<ConsoleType, string> = {
   nes: 'NES',
   snes: 'SFC',
+  arcade: 'ARC',
 };
 
 /** 端头色块：一眼区分机种，同时不破坏整体灰阶 */
 const CONSOLE_TINT: Record<ConsoleType, string> = {
   nes: '#e8b339',
   snes: '#6fa8c9',
+  arcade: '#c96f6f',
 };
 
 /** 标贴高度。名字印在这一条上。 */

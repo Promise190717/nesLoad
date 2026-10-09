@@ -12,7 +12,7 @@ import { bindingsToRetroArch, DEFAULT_BINDINGS, type KeyBindings } from './keybi
  */
 installAudioTap();
 
-export type ConsoleType = 'nes' | 'snes';
+export type ConsoleType = 'nes' | 'snes' | 'arcade';
 
 export interface LoadedRom {
   name: string;
@@ -32,9 +32,21 @@ export class UnsupportedRomError extends Error {
   }
 }
 
+/**
+ * 机种 → libretro 核心名。核心由 Nostalgist 从它自己的 CDN 拉
+ * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2`），拉过一次之后进 CacheStorage。
+ *
+ * 街机刻意只挂 **fbneo** 一个：它一套 romset 覆盖 CPS1 / CPS2 / Neo Geo / 大量 8-16 位基板，
+ * 是「一个核心管一大片」的那个。MAME 系（`mame2003_plus` 等）在同一个 CDN 上也有，
+ * 但各自的 romset 版本互相不认，多挂一个只会多一类「拖进来没反应」。
+ *
+ * ⚠️ FBNeo 的 romset 是**版本锁死**的：zip 里的文件必须和核心期望的版本对得上，
+ * 对不上就直接不加载（表现和「格式不支持」一样是静默的）。这不是这个项目能绕开的。
+ */
 const CORE_MAP: Record<ConsoleType, string> = {
   nes: 'fceumm',
   snes: 'snes9x',
+  arcade: 'fbneo',
 };
 
 /** 扩展名 → 机种。仅在文件头识别失败时作为回退。 */
@@ -48,6 +60,7 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
   swc: 'snes',
   fig: 'snes',
   bs: 'snes',
+  zip: 'arcade',
 };
 
 const SNES_MIN_SIZE = 0x8000; // 32 KiB
@@ -147,6 +160,17 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
   // UNIF
   if (ascii(head, 0, 4) === 'UNIF') return 'nes';
 
+  /*
+   * 街机 romset 本身就是一个 zip（本地文件头 `PK\x03\x04`）。
+   *
+   * 刻意读文件头而不是只看扩展名：romset 被人改过名字的情况太常见了。
+   * 代价是「把一盘 NES ROM 压成 zip」也会被认成街机 —— 这种玩法在这个项目里
+   * 不支持，会静默失败（FBNeo 读不出 .nes）。README 的「已知限制」里写明了。
+   */
+  if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) {
+    return 'arcade';
+  }
+
   if (looksLikeSnes(head, file.size)) return 'snes';
 
   return consoleFromExtension(file.name);
@@ -161,6 +185,55 @@ function downloadBlob(blob: Blob, filename: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * 偷看核心包的下载进度。
+ *
+ * 核心是 Nostalgist 从 CDN 拉的（第一次几 MB，之后进 CacheStorage 就快了），
+ * 而它**不给任何进度回调** —— 拖进一盘卡带后界面会静默好几秒，这就是「没反应」的来源。
+ *
+ * 拿进度的办法是 `Response.clone()` 的分流能力：克隆出来的那一份专门读字节数，
+ * **原始那一份原封不动还回去**，所以 Nostalgist 走的那条路一个字节都没变 ——
+ * 最坏情况（读失败、拿不到长度）也只是没有进度，不会影响载入本身。
+ *
+ * 只认 URL 里带 `_libretro.zip` 的请求（核心包的固定命名），其余请求原样放行。
+ * 核心已经在 CacheStorage 里时根本不会有这个请求，回调不触发，界面据此退回「不确定」进度。
+ */
+function watchCoreDownload(onProgress: (loaded: number, total: number) => void): () => void {
+  const original = window.fetch;
+
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const response = await original.call(window, input, init);
+
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.includes('_libretro.zip') || !response.body) return response;
+
+    const total = Number(response.headers.get('content-length')) || 0;
+    const mirror = response.clone();
+
+    void (async () => {
+      const reader = mirror.body?.getReader();
+      if (!reader) return;
+      let loaded = 0;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          loaded += value.byteLength;
+          onProgress(loaded, total);
+        }
+      } catch {
+        // 读失败就当作没有进度 —— 别影响已经还回去的那一份
+      }
+    })();
+
+    return response;
+  };
+
+  return () => {
+    window.fetch = original;
+  };
 }
 
 export class EmulatorController {
@@ -203,7 +276,17 @@ export class EmulatorController {
     this.bindings = bindings;
   }
 
-  async loadRom(file: File, canvas: HTMLCanvasElement) {
+  /**
+   * 插上卡带并启动。
+   *
+   * `onProgress` 是可选的：核心第一次要从 CDN 下几 MB，界面靠它画进度条
+   * （实现见 `watchCoreDownload`）。不传就完全按老样子走。
+   */
+  async loadRom(
+    file: File,
+    canvas: HTMLCanvasElement,
+    onProgress?: (loaded: number, total: number) => void
+  ) {
     // 先退出正在运行的实例，避免多个核心叠加占用内存
     await this.exit();
 
@@ -211,6 +294,12 @@ export class EmulatorController {
     if (!consoleType) {
       throw new UnsupportedRomError();
     }
+
+    /*
+     * 只在下核心包那段时间挂上观测，launch 一结束就摘掉 ——
+     * 别让一个全局的 fetch 补丁一直留在页面上。
+     */
+    const stopWatching = onProgress ? watchCoreDownload(onProgress) : null;
 
     const nostalgist = await Nostalgist.launch({
       element: canvas,
@@ -232,7 +321,7 @@ export class EmulatorController {
         width: '100%',
         height: '100%',
       },
-    });
+    }).finally(() => stopWatching?.());
 
     this.instance = nostalgist;
     this.currentRom = {

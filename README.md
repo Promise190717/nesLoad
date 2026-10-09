@@ -27,7 +27,7 @@ pnpm dev
 
 界面只有三个东西：**电视机**、机身下沿的**插卡口**、电视机右侧的**卡带架**。载入游戏有三种方式：
 
-1. 把 `.nes` / `.sfc` 文件直接拖到电视机上；
+1. 把 `.nes` / `.sfc` / 街机 `.zip` 文件直接拖到电视机上；
 2. 点机身下沿的插卡口，在文件选择框里挑；
 3. 点架子里已经存过的卡带（也可以把它拎起来拖到插卡口上）。
 
@@ -94,8 +94,14 @@ pnpm dev
 
 - **NES**：`.nes` `.fds` `.unf` `.unif`
 - **SNES**：`.sfc` `.smc` `.swc` `.fig` `.bs`
+- **街机**：`.zip`（romset）
 
-机种识别会优先读取文件头（iNES / UNIF / FDS 的 magic number，以及 SNES 校验和的启发式判断），只有识别不出来时才回退到扩展名。因此即使 ROM 被改过名，也能挂载到正确的核心。
+机种识别会优先读取文件头（iNES / UNIF / FDS 的 magic number、SNES 校验和的启发式判断，以及 zip 的本地文件头 `PK\x03\x04`），只有识别不出来时才回退到扩展名。因此即使 ROM 被改过名，也能挂载到正确的核心。
+
+街机挂的是 **FBNeo** 核心——一套 romset 覆盖 CPS1 / CPS2 / Neo Geo 和大量 8-16 位基板，是「一个核心管一大片」的那个。两点必须提前知道：
+
+- **romset 是版本锁死的**。zip 里的文件必须和 FBNeo 期望的版本对得上，对不上就直接不加载——表现和「格式不支持」一样是静默的（屏幕继续出雪花）。
+- **Neo Geo 需要 BIOS**（`neogeo.zip`），而目前**没有**附加 BIOS 的入口，所以 Neo Geo 的游戏暂时跑不起来。
 
 ## 存档
 
@@ -193,7 +199,7 @@ NEXT_PUBLIC_TURN_CREDENTIAL=pass                  # 可选
 
 > 语言是在根布局里用 `cookies()` / `headers()` 读的，所以这个路由是动态渲染 —— 换来的是首屏文案直接就是对的，不会先渲染英文再翻成中文。代价是不能再用 `output: 'export'` 做纯静态托管。
 
-界面上所有 `font-pixel` 的文案（`PWR` / `VOL` / `INSERT CARTRIDGE` / `RELEASE TO LOAD` / `EXIT FULLSCREEN` / `DESKTOP ONLY`，以及 NES·SFC 机种标签）刻意保持英文：Press Start 2P 没有中日韩字形，塞中文会掉进等宽字体兜底，和像素风不搭。
+界面上所有 `font-pixel` 的文案（`PWR` / `VOL` / `INSERT CARTRIDGE` / `RELEASE TO LOAD` / `LOADING` / `EXIT FULLSCREEN` / `DESKTOP ONLY`，以及 NES·SFC·ARC 机种标签和进度条的百分数）刻意保持英文：Press Start 2P 没有中日韩字形，塞中文会掉进等宽字体兜底，和像素风不搭。
 
 电视机下方的**键位表**（`legend.p1` / `legend.p2` / `legend.shortcut`）是这条规矩的例外：它是给人读懂的说明，所以走系统字体、做了中英两版。原先那版是 `font-pixel` 的英文，只列键名不说对应关系（`1P ARROWS / Z X / A S / Q E / SHIFT / ENTER`），等于没说明白。
 
@@ -228,8 +234,9 @@ lib/
 
 ## 已知限制
 
-- Nostalgist 从 CDN 拉取 WASM 核心，**首次运行需要联网**，且首次启动要等十几秒（实测约 18 秒）。
+- Nostalgist 从 CDN 拉取 WASM 核心，**首次运行需要联网**，且首次启动要等十几秒（实测约 18 秒）。插卡带的这段时间插卡舱会显示进度条：拿得到核心包的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条（核心进过 CacheStorage 之后基本就是后者）。
 - 字体 Press Start 2P 通过 `<link>` 在运行时加载。这里刻意没用 `next/font`（它会在构建时下载字体，无网络环境下会让构建直接失败）；加载失败时优雅退化为等宽字体，不影响功能。
 - 卡带和存档都放在 IndexedDB 里；拿不到 IndexedDB 时（隐私模式等）卡带架会空着，此时点「存档」会自动降级为下载 `.state` 文件。
 - 只支持桌面端：窗口窄于 1100px 时整个场景会被替换成一句提示。这个断点是被场景宽度撑出来的——电视机 766px + 间隙 + 卡带架 220px，再窄就会被 `overflow` 裁掉右边。
 - 联机要求双方都能访问公共 MQTT broker（默认 `broker.emqx.io`），**完全断网的内网用不了**。没有房间列表——房间码只能口头或手动传递。玩什么由房主决定，加入者只收画面、不能自己换游戏。详见上面的「联机」一节。
+- 任何 `.zip` 都被当作街机 romset。把一盘 NES / SNES ROM 压成 zip 拖进来**不支持**——它会被交给 FBNeo，然后静默失败。

@@ -111,6 +111,14 @@ export default function ConsoleScene() {
 
   const dragCartridgeRef = useRef<Cartridge | null>(null);
   const dragOriginRef = useRef({ x: 0, y: 0 });
+  /**
+   * 「正在载入」的同步标记。
+   *
+   * `loading` 是异步 state，挡不住「载入还没完又拖一盘进来」—— 那会再走一遍 loadRom
+   * （内部先 exit 再 launch），白等一次还容易把两边的状态搅在一起。
+   * 用 ref 而不是把 `loading` 放进 useCallback 依赖：那样拖拽那套 effect 会跟着重订阅。
+   */
+  const loadingRef = useRef(false);
 
   // 用 state 的惰性初始化持有实例：只会创建一次，
   // 同时避免在渲染期间读写 ref（react-hooks/refs 规则禁止）
@@ -119,6 +127,15 @@ export default function ConsoleScene() {
   const [rom, setRom] = useState<LoadedRom | null>(null);
   const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
+  /*
+   * 正在插卡带。`ratio` 是核心包的下载进度（0..1），null 表示「拿不到字节数」——
+   * 核心已经躺在 CacheStorage 里、或者响应没有 Content-Length 时就是 null，
+   * 界面据此退回一条来回滑动的「不确定」进度条。
+   *
+   * 单独一个 state 而不是复用 busy：busy 是面板六个按钮共用的禁用开关，
+   * 存档 / 读档也会把它置起来，而那些操作不该在插卡舱上冒出进度条。
+   */
+  const [loading, setLoading] = useState<{ ratio: number | null } | null>(null);
   // 当前这盘卡带的存档槽，新的在前。「有没有存档可读」就是 saves.length > 0，
   // 不再单独维护一个布尔 —— 两份状态迟早会对不上。
   const [saves, setSaves] = useState<SaveSlot[]>([]);
@@ -210,10 +227,31 @@ export default function ConsoleScene() {
 
       const canvas = canvasRef.current;
       if (!canvas) return;
+      // 载入中再丢一盘进来：直接忽略，别把正在跑的那次搅了
+      if (loadingRef.current) return;
 
+      loadingRef.current = true;
       setBusy(true);
+      // 进度条立刻出现（此刻还是「不确定」态）—— 用户刚把文件丢进来，
+      // 界面必须在同一帧给出反应，不能等他看到几秒雪花之后才动。
+      setLoading({ ratio: null });
       try {
-        await controller.loadRom(file, canvas);
+        /*
+         * 每 1% 才更新一次 state：几 MB 的核心包会有几百个 chunk，
+         * 每个都 setState 会把整个场景重渲染几百次。
+         *
+         * `total <= 0` 直接不更新，state 停在初值那条「不确定」进度上。
+         * 下完（pct 到 100）也退回「不确定」—— 后面还有核心启动那一段，
+         * 否则进度条会卡在 100% 一动不动。
+         */
+        let lastPct = -1;
+        await controller.loadRom(file, canvas, (loaded, total) => {
+          if (total <= 0) return;
+          const pct = Math.floor((loaded / total) * 100);
+          if (pct === lastPct) return;
+          lastPct = pct;
+          setLoading({ ratio: pct >= 100 ? null : loaded / total });
+        });
         const loaded = controller.rom;
         setRom(loaded);
         setPaused(false);
@@ -237,7 +275,9 @@ export default function ConsoleScene() {
         setSaves([]);
         setActiveId(null);
       } finally {
+        loadingRef.current = false;
         setBusy(false);
+        setLoading(null);
       }
     },
     [controller, netplay]
@@ -877,6 +917,7 @@ export default function ConsoleScene() {
             remoteRom={netplayState.remoteGame}
             paused={paused}
             busy={busy}
+            loading={loading}
             canLoad={saves.length > 0}
             volume={volume}
             fileOver={fileOver}
@@ -1042,7 +1083,7 @@ export default function ConsoleScene() {
       <input
         ref={romInputRef}
         type="file"
-        accept=".nes,.fds,.unf,.unif,.sfc,.smc,.swc,.fig,.bs"
+        accept=".nes,.fds,.unf,.unif,.sfc,.smc,.swc,.fig,.bs,.zip"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];

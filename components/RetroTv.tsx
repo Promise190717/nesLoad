@@ -42,6 +42,14 @@ interface RetroTvProps {
   remoteRom: { name: string; console: LoadedRom['console'] } | null;
   paused: boolean;
   busy: boolean;
+  /**
+   * 正在插卡带。null = 没在载入。
+   *
+   * `ratio` 是核心包的下载进度（0..1），null 表示拿不到字节数（核心已在
+   * CacheStorage 里、或响应没有 Content-Length）—— 这时插卡舱画一条来回滑的
+   * 「不确定」进度条，总之必须让用户看到「在动」。
+   */
+  loading: { ratio: number | null } | null;
   /** 有存档可读 —— 一个槽都没有时「读档」按钮是灰的 */
   canLoad: boolean;
   /** 音量档位：0 = 静音，VOLUME_MAX = 原音量（0 dB） */
@@ -87,6 +95,7 @@ export default function RetroTv({
   remoteRom,
   paused,
   busy,
+  loading,
   canLoad,
   volume,
   fileOver,
@@ -107,6 +116,8 @@ export default function RetroTv({
 }: RetroTvProps) {
   const { t } = useI18n();
   const hot = fileOver || slotHot;
+  /** 载入进度（整数百分比）。null = 拿不到字节数，插卡舱画不确定进度条 */
+  const loadPct = loading && loading.ratio !== null ? Math.round(loading.ratio * 100) : null;
 
   /*
    * 有画面 = 本机插着卡带，或者房主推了画面过来。两者只会有一个成立：
@@ -132,6 +143,7 @@ export default function RetroTv({
       type="button"
       ref={slotRef}
       onClick={onPickFile}
+      disabled={loading !== null}
       title={t('slot.pick')}
       className={`block relative h-[16px] w-[375px] pixel-edge pxw-2 transition-colors ${
         hot ? 'bg-accent/30 pxc-accent' : 'bg-ink-950 pxc-700'
@@ -332,7 +344,34 @@ export default function RetroTv({
           {/* 舱口的暗影，让它读起来是凹进去的一格而不是又一块面板 */}
           <span className="pointer-events-none absolute inset-x-0 top-0 h-[4px] bg-ink-950/55" />
 
-          {shownRom ? (
+          {loading ? (
+            /*
+              正在插卡带。这是唯一一处「机身替屏幕说话」的地方 —— 屏幕里仍然只有雪花
+              （「没插卡带 = 雪花」这条规矩没变），进度只由插卡舱表达。
+              三行结构刻意和空舱态对齐（标签 → 槽 → 指示），所以舱高不用改。
+              槽按钮必须留着：拎着卡带拖过来时靠它的矩形做命中判定，摘掉就没法换卡带了。
+            */
+            <>
+              <span className="font-pixel text-[9px] text-accent">LOADING</span>
+              {slotButton}
+              <div className="flex w-[375px] items-center gap-3">
+                <div className="relative h-[8px] flex-1 overflow-hidden bg-ink-950 pixel-edge pxw-2 pxc-700">
+                  {loadPct === null ? (
+                    <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
+                  ) : (
+                    <span
+                      className="absolute inset-y-0 left-0 bg-accent"
+                      style={{ width: `${loadPct}%` }}
+                    />
+                  )}
+                </div>
+                {/* 百分数全是数字，font-pixel 没有掉字形的问题；宽度写死，位数变化时不抖 */}
+                <span className="w-[32px] shrink-0 text-right font-pixel text-[9px] text-ink-400">
+                  {loadPct === null ? '' : `${loadPct}%`}
+                </span>
+              </div>
+            </>
+          ) : shownRom ? (
             /*
               卡带就插在卡槽的位置上，和槽重叠 —— 不是排在槽下面。
               槽 375 宽、卡带 359 宽，所以槽在左右各露出 8px；卡带 30px 比槽 16px 高，
