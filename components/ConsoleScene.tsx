@@ -9,7 +9,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { getAudioTrack } from '@/lib/audio-tap';
-import { EmulatorController, VOLUME_MAX, type ConsoleType, type LoadedRom } from '@/lib/emulator';
+import { getBios, getBiosInfo, isNeoGeoBios, putBios, type BiosInfo } from '@/lib/bios';
+import { EmulatorController, VOLUME_MAX, detectConsole, type ConsoleType, type LoadedRom } from '@/lib/emulator';
 import type { Locale } from '@/lib/i18n';
 import {
   IDLE_NETPLAY_STATE,
@@ -147,6 +148,23 @@ export default function ConsoleScene() {
   const [library, setLibrary] = useState<Cartridge[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
+  /**
+   * 已装上的街机 BIOS（Neo Geo 的 neogeo.zip），null 表示没装。
+   *
+   * 只用来画页脚那一行状态 —— 真正递给模拟器的那份由 loadFile 现取（`getBios()`），
+   * 免得把一个几 MB 的 File 长期挂在 React state 上。
+   */
+  const [bios, setBios] = useState<BiosInfo | null>(null);
+
+  /**
+   * 「刚失败的那次是街机」。
+   *
+   * 失败的卡带不会进卡带架（`putCartridge` 在载入成功之后才跑），所以光看架子和当前
+   * 卡带都判断不出用户刚才拖的是街机 —— 而没有这个，页脚那行 BIOS 提示就永远不会出现，
+   * 用户也就永远不知道 Neo Geo 游戏要 neogeo.zip。只置位、不清零。
+   */
+  const [biosHint, setBiosHint] = useState(false);
+
   const [fileOver, setFileOver] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [ghost, setGhost] = useState<DragGhost | null>(null);
@@ -189,6 +207,11 @@ export default function ConsoleScene() {
   const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
   const [keybindOpen, setKeybindOpen] = useState(false);
 
+  // 刷新页面后，已经装过的 BIOS 还得在页脚那行状态里体现出来
+  useEffect(() => {
+    void getBiosInfo().then(setBios);
+  }, []);
+
   /**
    * 键位在挂载后读，不用 `useState(() => loadBindings())` 惰性初始化。
    *
@@ -230,12 +253,35 @@ export default function ConsoleScene() {
       // 载入中再丢一盘进来：直接忽略，别把正在跑的那次搅了
       if (loadingRef.current) return;
 
+      /*
+       * 拖进来的可能不是游戏，而是街机 BIOS（Neo Geo 的 neogeo.zip）。
+       *
+       * 它和 romset 一样是个 zip、文件头也一模一样，光看头分不出来，只能问内容
+       * （见 lib/bios.ts）。认出来就存成系统文件 —— 不进卡带架、不启动模拟器。
+       * 这条路刻意做得和拖卡带一样：用户不需要知道「BIOS」这个概念，
+       * 拖进来就算装上了。
+       */
+      if (await isNeoGeoBios(file)) {
+        const info = await putBios(file);
+        setBios(info);
+        console.info(
+          `[nesload] 街机 BIOS 已装上：${file.name}。` +
+            'Neo Geo 游戏（合金弹头、拳皇、侍魂…）现在能跑了 —— 重新拖一次那盘卡带即可。'
+        );
+        return;
+      }
+
       loadingRef.current = true;
       setBusy(true);
       // 进度条立刻出现（此刻还是「不确定」态）—— 用户刚把文件丢进来，
       // 界面必须在同一帧给出反应，不能等他看到几秒雪花之后才动。
       setLoading({ ratio: null });
+
+      // 载入失败时要靠它决定页脚给不给 BIOS 提示，所以在 try 里先认一次机种。
+      // （loadRom 内部还会再认一次 —— 只读文件头，不值得为省这一次把签名搅乱。）
+      let consoleType: ConsoleType | null = null;
       try {
+        consoleType = await detectConsole(file);
         /*
          * 每 1% 才更新一次 state：几 MB 的核心包会有几百个 chunk，
          * 每个都 setState 会把整个场景重渲染几百次。
@@ -245,13 +291,23 @@ export default function ConsoleScene() {
          * 否则进度条会卡在 100% 一动不动。
          */
         let lastPct = -1;
-        await controller.loadRom(file, canvas, (loaded, total) => {
-          if (total <= 0) return;
-          const pct = Math.floor((loaded / total) * 100);
-          if (pct === lastPct) return;
-          lastPct = pct;
-          setLoading({ ratio: pct >= 100 ? null : loaded / total });
-        });
+        await controller.loadRom(
+          file,
+          canvas,
+          (loaded, total) => {
+            if (total <= 0) return;
+            const pct = Math.floor((loaded / total) * 100);
+            if (pct === lastPct) return;
+            lastPct = pct;
+            setLoading({ ratio: pct >= 100 ? null : loaded / total });
+          },
+          /*
+           * 街机要带上 BIOS（Neo Geo 的 neogeo.zip）。没装就是 null，照常启动 ——
+           * CPS1 / CPS2 那类本来就不需要，缺了只是 Neo Geo 游戏会静默失败。
+           * 先用 state 短路一下，没装过就不必去翻一次 IndexedDB。
+           */
+          bios ? await getBios() : null
+        );
         const loaded = controller.rom;
         setRom(loaded);
         setPaused(false);
@@ -268,9 +324,20 @@ export default function ConsoleScene() {
           setLibrary(await listCartridges());
           if (meta) setActiveId(meta.id);
         }
-      } catch {
-        // 屏幕里不显示任何文案，所以失败是「静默」的：
-        // 表现为卡带没插上 —— 没画面，电视机继续出雪花。
+      } catch (e) {
+        /*
+         * 屏幕里不显示任何文案，所以失败是「静默」的：
+         * 表现为卡带没插上 —— 没画面，电视机继续出雪花。
+         *
+         * 但日志必须留一条：街机失败最常见的原因就两个 —— romset 版本和核心对不上、
+         * 或者 Neo Geo 缺 neogeo.zip —— 少了这条连往哪儿查都不知道。
+         */
+        console.error('[nesload] 载入失败：', file.name, e);
+        /*
+         * 街机失败时把页脚那行 BIOS 提示叫出来 —— 这是唯一能告诉用户
+         * 「Neo Geo 游戏需要 neogeo.zip」的通道。
+         */
+        if (!bios && consoleType === 'arcade') setBiosHint(true);
         setRom(null);
         setSaves([]);
         setActiveId(null);
@@ -280,7 +347,7 @@ export default function ConsoleScene() {
         setLoading(null);
       }
     },
-    [controller, netplay]
+    [bios, controller, netplay]
   );
 
   const loadFromLibrary = useCallback(
@@ -972,6 +1039,20 @@ export default function ConsoleScene() {
           <p>{t('legend.p1')}</p>
           <p>{t('legend.p2')}</p>
           <p>{t('legend.shortcut')}</p>
+          {/*
+            BIOS 状态行。只在**跟街机有关**的时候出现：已经装了 BIOS、刚有街机载入失败、
+            架子上有街机卡带、或者正在玩街机。玩 NES / SFC 的人不需要被这一行打扰。
+
+            为什么非要有这一行：Neo Geo 游戏缺 neogeo.zip 时，核心既不报错也不黑屏提示，
+            表现就是「拖进去没反应」—— 用户根本无从知道该做什么。这是唯一能告诉他
+            「拖个 neogeo.zip 进来就好」的地方（屏幕里放不下文案，见 RetroTv）。
+          */}
+          {(bios ||
+            biosHint ||
+            rom?.console === 'arcade' ||
+            library.some((c) => c.console === 'arcade')) && (
+            <p>{bios ? t('legend.biosReady') : t('legend.biosMissing')}</p>
+          )}
         </footer>
       </div>
 

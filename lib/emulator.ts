@@ -2,6 +2,7 @@
 
 import { Nostalgist } from 'nostalgist';
 import { installAudioTap } from './audio-tap';
+import { NEOGEO_BIOS_NAME } from './bios';
 import { bindingsToRetroArch, DEFAULT_BINDINGS, type KeyBindings } from './keybindings';
 
 /*
@@ -281,11 +282,16 @@ export class EmulatorController {
    *
    * `onProgress` 是可选的：核心第一次要从 CDN 下几 MB，界面靠它画进度条
    * （实现见 `watchCoreDownload`）。不传就完全按老样子走。
+   *
+   * `bios` 也是可选的，目前只有街机用得上：FBNeo 跑 Neo Geo 游戏时要去 system 目录
+   * 找 `neogeo.zip`，拿不到就直接不加载。这盘 BIOS 由用户自己拖进来（见 lib/bios.ts），
+   * 引擎只负责把它交给 Nostalgist —— 存哪儿、从哪儿取，不归引擎管。
    */
   async loadRom(
     file: File,
     canvas: HTMLCanvasElement,
-    onProgress?: (loaded: number, total: number) => void
+    onProgress?: (loaded: number, total: number) => void,
+    bios?: File | null
   ) {
     // 先退出正在运行的实例，避免多个核心叠加占用内存
     await this.exit();
@@ -296,32 +302,72 @@ export class EmulatorController {
     }
 
     /*
+     * 街机不带 BIOS 时不拦 —— CPS1 / CPS2 那类本来就不需要，拦了反而把它们也挡住。
+     * 只在 console 里说一句，因为 Neo Geo 游戏缺 BIOS 的失败是**完全静默**的
+     * （核心不报错、界面照常出雪花），没有这句话就彻底没有排查入口。
+     */
+    if (consoleType === 'arcade' && !bios) {
+      console.warn(
+        '[nesload] 街机 ROM 启动时没有 BIOS。如果这是 Neo Geo 游戏（合金弹头、拳皇、侍魂…），' +
+          '它需要 neogeo.zip —— 把 neogeo.zip 拖进页面就能装上；CPS1 / CPS2 那类不需要。'
+      );
+    }
+
+    /*
      * 只在下核心包那段时间挂上观测，launch 一结束就摘掉 ——
      * 别让一个全局的 fetch 补丁一直留在页面上。
      */
     const stopWatching = onProgress ? watchCoreDownload(onProgress) : null;
 
-    const nostalgist = await Nostalgist.launch({
-      element: canvas,
-      core: CORE_MAP[consoleType],
-      rom: file,
-      retroarchConfig: {
-        ...bindingsToRetroArch(this.bindings),
-        video_aspect_ratio_auto: true,
-        video_windowed_fullscreen: false,
-        // 单位是 dB，0 即原音量。此前设为 6.0（+6dB）会削波爆音。
-        // 静音档刻意不用 -80 dB 表达，而是把音量停在最小可听档 + 打开静音开关 ——
-        // 否则取消静音时要爬一百多步 VOLUME_UP 才回得来。
-        audio_volume: levelToDb(Math.max(1, this.volumeLevel)),
-        audio_mute_enable: this.volumeLevel === 0,
-        input_overlay_enable: false,
-      },
-      size: { width: canvas.width, height: canvas.height },
-      style: {
-        width: '100%',
-        height: '100%',
-      },
-    }).finally(() => stopWatching?.());
+    // 用 `| null` 初值而不是裸声明：catch 分支必然 rethrow，赋值一定发生，
+    // 但这样写省得跟 TS 的 try/catch 控制流分析较劲。
+    let nostalgist: Nostalgist | null = null;
+    try {
+      nostalgist = await Nostalgist.launch({
+        element: canvas,
+        core: CORE_MAP[consoleType],
+        rom: file,
+        /*
+         * BIOS 只能以 `{ fileName, fileContent }` 的形式给。
+         *
+         * 直接传 File 对象会走 ResolvableFile 的 `isBlob` 分支，而那条路**不读 File.name**
+         * （`isBlob` 在 `loadFileSystemFileHandle` 之前），最后落到 `generateValidFileName()`
+         * 生成一个随机名（`data<随机>.zip`）—— 文件被写进 system 目录时名字不对，
+         * FBNeo 照样找不到。所以名字必须自己钉死。
+         *
+         * （nostalgist.d.ts 里那段注释写成 `filename` 是笔误，实现读的是 `fileName`。）
+         */
+        bios: bios ? { fileName: NEOGEO_BIOS_NAME, fileContent: bios } : undefined,
+        retroarchConfig: {
+          ...bindingsToRetroArch(this.bindings),
+          video_aspect_ratio_auto: true,
+          video_windowed_fullscreen: false,
+          // 单位是 dB，0 即原音量。此前设为 6.0（+6dB）会削波爆音。
+          // 静音档刻意不用 -80 dB 表达，而是把音量停在最小可听档 + 打开静音开关 ——
+          // 否则取消静音时要爬一百多步 VOLUME_UP 才回得来。
+          audio_volume: levelToDb(Math.max(1, this.volumeLevel)),
+          audio_mute_enable: this.volumeLevel === 0,
+          input_overlay_enable: false,
+        },
+        size: { width: canvas.width, height: canvas.height },
+        style: {
+          width: '100%',
+          height: '100%',
+        },
+      });
+    } catch (e) {
+      /*
+       * 屏幕里没有任何地方能报错，日志是唯一的排查入口 —— 少了它，
+       * 「拖进去没反应」就只剩雪花屏这一条线索。
+       */
+      console.error(
+        `[nesload] 启动核心失败：${file.name}（${consoleType} / ${CORE_MAP[consoleType]}）`,
+        e
+      );
+      throw e;
+    } finally {
+      stopWatching?.();
+    }
 
     this.instance = nostalgist;
     this.currentRom = {

@@ -14,11 +14,12 @@
 
 const DB_NAME = 'nesload';
 
-/** 版本 1 只有 cartridges；版本 2 加了 saves（存档槽）。 */
-const DB_VERSION = 2;
+/** 版本 1 只有 cartridges；版本 2 加了 saves（存档槽）；版本 3 加了 bios（街机 BIOS）。 */
+const DB_VERSION = 3;
 
 export const STORE_CARTRIDGES = 'cartridges';
 export const STORE_SAVES = 'saves';
+export const STORE_BIOS = 'bios';
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
@@ -50,6 +51,10 @@ export function openDb(): Promise<IDBDatabase | null> {
         const store = db.createObjectStore(STORE_SAVES, { keyPath: 'id' });
         // 存档是按 ROM 文件名分组的，列表要靠这个索引按游戏取。
         store.createIndex('romName', 'romName');
+      }
+      if (!db.objectStoreNames.contains(STORE_BIOS)) {
+        // BIOS 全项目只存一份，key 固定（见 lib/bios.ts），不需要索引。
+        db.createObjectStore(STORE_BIOS, { keyPath: 'id' });
       }
     };
     request.onsuccess = () => resolve(request.result);

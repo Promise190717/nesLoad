@@ -80,6 +80,12 @@ const en = {
   'legend.p2':
     '2P (default)  Arrows move · Num1=A · Num2=B · Num3=C · Num4=X · Num5=Y · Num6=Z · Del=Coin · Num0=Start',
   'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load — bindings are customizable (top right)',
+  /*
+   * BIOS 状态。只在「架子上有街机卡带 / 正在玩街机 / 已经装了 BIOS」时才出现 ——
+   * 玩 NES / SFC 的人不需要被这一行打扰。
+   */
+  'legend.biosReady': 'BIOS  neogeo.zip installed — Neo Geo arcade games can run',
+  'legend.biosMissing': 'BIOS  Neo Geo arcade games need neogeo.zip — drop the file here to install it',
 
   /*
    * 联机面板。同样浮在房间上、不进屏幕。
@@ -189,6 +195,8 @@ const zh: Record<MessageKey, string> = {
   'legend.p2':
     '2P（默认）方向键移动 · 小键盘1=A · 小键盘2=B · 小键盘3=C · 小键盘4=X · 小键盘5=Y · 小键盘6=Z · Del=投币 · 小键盘0=开始',
   'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档 —— 键位可在右上角自定义',
+  'legend.biosReady': 'BIOS  neogeo.zip 已装上 —— 街机的 Neo Geo 游戏可以跑了',
+  'legend.biosMissing': 'BIOS  街机的 Neo Geo 游戏需要 neogeo.zip —— 把这个文件拖进页面即可装上',
 
   'netplay.title': '联机',
   'netplay.open': '联机对战',
