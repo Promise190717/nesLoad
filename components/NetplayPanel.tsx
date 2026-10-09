@@ -32,7 +32,7 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
 
 /**
  * 联机面板。和存档列表一样浮在房间上、**不进屏幕** ——
- * 「屏幕里不放任何文案」是这个项目的硬规矩（见 RetroTv）。
+ * 屏幕里跑的是游戏画面，这张面板要写字、还要输入房间码。
  *
  * 三个状态各自成屏：
  *   idle      → 创建 / 输入码加入

@@ -18,22 +18,14 @@ const LABEL_HEIGHT = 20;
 /** 塑料前缘的厚度。卡带是立体的，露出来的这一面必须看得见它的厚度。 */
 const EDGE_HEIGHT = 10;
 
-/** 一盘卡带露出来的那一面有多高。卡带架按这个高度分格。 */
-export const CART_HEIGHT = LABEL_HEIGHT + EDGE_HEIGHT;
-
-/**
- * 标贴右端留给移除键的空白宽度（架子里悬停时才出现的那一键）。
- * 之所以要**永久**留出来而不是悬停时才腾：后者会让名字在悬停瞬间重排、看起来像抖了一下。
- */
-export const REMOVE_ZONE = 20;
+/** 标贴右端的留白：名字和机种字都排在它左边，整块标贴右侧因此不贴边。 */
+const LABEL_PAD_RIGHT = 20;
 
 interface CartridgeSpriteProps {
   name: string;
   consoleType: ConsoleType;
   /** 当前正在运行的这盘 */
   active?: boolean;
-  /** 被鼠标拎起来时的那份克隆 */
-  floating?: boolean;
 }
 
 /**
@@ -43,29 +35,30 @@ interface CartridgeSpriteProps {
  * 下面是塑料前缘的厚度。所以卡带不是「一条色块」，而是「标贴 + 厚度」两段，
  * 两段之间不留缝 —— 卡带是贴着的。
  *
- * 宽度交给父容器（w-full），两个父容器各定各的：机身卡槽里那盘 288px，
- * 卡带架里那盘和拎在手上的那份 CART_WIDTH（见 CartridgeRack）。
- * 注意拎在手上那份是 fixed 定位，父容器必须显式给宽度 —— 否则 w-full
- * 会以「收缩到内容」的宽度为基准，直接算成 0。
+ * 宽度交给父容器（w-full）自己定。
+ * 注意父容器必须**显式**给宽度 —— sprite 是 w-full，父容器要是 flex-col + items-center
+ * 就不会横向拉伸子项，w-full 会一路算到机身宽度上。
+ *
+ * **2026-10-09 起默认导出已经没人引用了**：插卡舱撤掉之后，机身上不再有卡带可见物
+ * （现在「插着哪盘」由屏幕里的画面表达）。还在被用的是上面的 `CONSOLE_LABEL`
+ * （`AdminConsole` / `GameLibraryPanel` 拿它当机种标签），所以文件留着。
+ * 要彻底清掉的话，把默认导出和 `CONSOLE_TINT` / `LABEL_*` / props 一起删。
  */
 export default function CartridgeSprite({
   name,
   consoleType,
   active = false,
-  floating = false,
 }: CartridgeSpriteProps) {
   return (
-    <div className={`w-full ${floating ? 'opacity-95' : ''}`}>
+    <div className="w-full">
       {/*
-        标贴。右端永久留出 REMOVE_ZONE 的空白：架子里悬停会在这里出现移除键，
-        名字和机种字都排在它左边 —— 那一键因此压不到任何字上，
-        也不用靠「让卡带挪位」或「把机种字藏起来」来腾地方。
+        标贴。右端留出 LABEL_PAD_RIGHT 的空白，名字和机种字都排在它左边。
       */}
       <div
         className={`relative flex items-center bg-ink-200 pixel-edge pxw-2 ${
           active ? 'pxc-accent' : 'pxc-600'
         }`}
-        style={{ height: LABEL_HEIGHT, paddingRight: REMOVE_ZONE }}
+        style={{ height: LABEL_HEIGHT, paddingRight: LABEL_PAD_RIGHT }}
       >
         <span
           className="h-full w-[5px] shrink-0"
@@ -79,9 +72,8 @@ export default function CartridgeSprite({
 
       {/*
         塑料前缘：卡带的厚度。
-        本体用 ink-600 而不是更深的灰 —— 架子是不刷底色的，卡带后面透过去就是
-        墙和地板（ink-950 一档），用深灰的话卡带下半截会直接消失在背景里，
-        整架只剩十条悬空的标贴。
+        本体用 ink-600 而不是更深的灰：下半截要跟机身的深灰（ink-850 / ink-950 一档）
+        拉开，再深下去就只剩上面那条标贴了。
       */}
       <div className="relative bg-ink-600" style={{ height: EDGE_HEIGHT }}>
         <span className="pointer-events-none absolute inset-x-0 top-0 h-[1px] bg-ink-400/60" />

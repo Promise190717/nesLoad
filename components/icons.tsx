@@ -140,3 +140,23 @@ export function LibraryIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/** 像素问号，表示「按键说明」 */
+export function HelpIcon({ size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      <rect x="4" y="2" width="8" height="2" />
+      <rect x="10" y="4" width="2" height="4" />
+      <rect x="6" y="8" width="6" height="2" />
+      <rect x="7" y="10" width="2" height="2" />
+      <rect x="7" y="13" width="2" height="2" />
+    </svg>
+  );
+}

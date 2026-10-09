@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ConsoleType } from '@/lib/emulator';
+import { formatTime, type MessageKey } from '@/lib/i18n';
+import type { Cartridge } from '@/lib/library';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
@@ -23,6 +25,25 @@ export interface LibraryGame {
 }
 
 type LoadState = 'loading' | 'ready' | 'error';
+
+/**
+ * 两个 tab：在线库（R2 + D1 上传的那批）和本机历史（载入过的卡带）。
+ * 默认落在「游戏库」——弹窗的主要用途还是去挑一盘没玩过的。
+ */
+type Tab = 'library' | 'history';
+
+const TABS: { value: Tab; label: MessageKey }[] = [
+  { value: 'library', label: 'games.tabLibrary' },
+  { value: 'history', label: 'games.tabHistory' },
+];
+
+/**
+ * 在线库列表的机种筛选。`'all'` 单独列一档而不是用 null —— 渲染时不用再绕一层判断。
+ * 标签：`'all'` 走 i18n，其余三个用 `CONSOLE_LABEL`（NES / SFC / ARC，丝印，不进文案表）。
+ */
+type ConsoleFilter = ConsoleType | 'all';
+
+const CONSOLE_FILTERS: readonly ConsoleFilter[] = ['all', 'nes', 'snes', 'arcade'];
 
 /**
  * 游戏库列表的**进程内缓存**。
@@ -62,24 +83,65 @@ interface GameLibraryPanelProps {
   loadingId: string | null;
   /** ROM 下载进度（0..1）；null = 拿不到总字节数，画不确定进度条 */
   progress: number | null;
+  /** 本机载入过的卡带，「历史」tab 用 */
+  cartridges: Cartridge[];
+  /** 当前插着的那盘卡带的 id，历史里给它上高亮 */
+  activeId: string | null;
   onPick: (game: LibraryGame) => void;
+  /** 从「历史」里挑一盘本机卡带（走 IndexedDB，不用下载） */
+  onPickCartridge: (id: string) => void;
+  /** 从「历史」里移除一盘。原先这个 × 只在卡带架上，架子撤掉后挪到这儿 */
+  onRemoveCartridge: (id: string) => void;
   onClose: () => void;
 }
 
 /**
  * 在线游戏库：全屏弹窗，列出后台上传到 R2/D1 的游戏，点一个直接载入。
  * 和存档 / 联机 / 按键三块面板同一套视觉 —— 浮在房间上、**不进屏幕**。
+ *
+ * 「历史」tab 列出本机载入过的卡带（`cartridges`），数据由父级从 IndexedDB 现取 ——
+ * 面板自己不去读库：载入完那一盘要刷新历史，而父级本来就持有这份 state
+ * （卡带历史那份就是它），两处各拉一次迟早会不同步。
  */
 export default function GameLibraryPanel({
   loadingId,
   progress,
+  cartridges,
+  activeId,
   onPick,
+  onPickCartridge,
+  onRemoveCartridge,
   onClose,
 }: GameLibraryPanelProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const [tab, setTab] = useState<Tab>('library');
   // 有缓存时**首帧就是 ready** —— 惰性初始化直接吃缓存，连一次「载入中」都不闪。
   const [games, setGames] = useState<LibraryGame[]>(() => gamesCache ?? []);
   const [state, setState] = useState<LoadState>(() => (gamesCache ? 'ready' : 'loading'));
+
+  /* ---------------- 在线库的筛选（纯本地，不再打接口） ---------------- */
+
+  const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
+  const [searchDraft, setSearchDraft] = useState('');
+  /*
+   * 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来，不边打字边过滤 ——
+   * 列表里全是封面图，每敲一个字就重排一遍网格太抖。和后台那份同一套写法。
+   */
+  const [keyword, setKeyword] = useState('');
+
+  /** 机种 + 关键词过滤后的列表。数据源就是已经拉回来的 `games`。 */
+  const matchedGames = useMemo(() => {
+    const needle = keyword.toLowerCase();
+    return games.filter((game) => {
+      if (consoleFilter !== 'all' && game.consoleType !== consoleFilter) return false;
+      if (!needle) return true;
+      return [game.title, game.developer, game.series].some((field) =>
+        field?.toLowerCase().includes(needle)
+      );
+    });
+  }, [games, consoleFilter, keyword]);
+
+  const applySearch = () => setKeyword(searchDraft.trim());
 
   // 只有第一次打开（缓存为空）才真的打接口；之后每次打开都命中缓存、这里直接返回。
   // setState 一律放在 .then/.catch 回调里 —— 直接在 effect 体里同步 setState
@@ -122,8 +184,29 @@ export default function GameLibraryPanel({
         className="relative flex h-[min(720px,86vh)] w-[min(1000px,92vw)] flex-col bg-ink-800 pixel-edge pxw-4 pxc-600"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
-          <span className="text-[12px] text-ink-200">{t('games.title')}</span>
+        {/*
+          tab 直接占掉标题的位置：两个 tab 名（游戏库 / 历史）本身就是这块面板的标题，
+          再单起一行写「游戏库」会和一个 tab 名重复。样式跟键位面板的 1P / 2P 同一套。
+        */}
+        <div className="flex items-center gap-2 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
+          {/* 两个 tab 自己包一层：外面那层 gap 还要管到右边的关闭钮，这里只调 tab 之间的距离 */}
+          <div className="flex items-center gap-3">
+            {TABS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={tab === value}
+                onClick={() => setTab(value)}
+                className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-3 text-[11px] transition-colors ${
+                  tab === value
+                    ? 'bg-accent text-ink-950'
+                    : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
+                }`}
+              >
+                {t(label)}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             aria-label={t('games.close')}
@@ -134,70 +217,180 @@ export default function GameLibraryPanel({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {state === 'loading' && <p className="text-[12px] text-ink-400">{t('games.loading')}</p>}
-          {state === 'error' && <p className="text-[12px] text-danger">{t('games.failed')}</p>}
-          {state === 'ready' && games.length === 0 && (
-            <p className="text-[12px] text-ink-400">{t('games.empty')}</p>
-          )}
+        {/*
+          在线库的筛选条：机种 + 搜索。**只在「游戏库」tab 出现** ——
+          两者筛的都是那份在线列表；「历史」是本机卡带、最多 10 盘，不值得再压一排控件。
+          两处都**只过滤已经拉回来的 `games`**（数据本来就在本机），不会再打接口。
+        */}
+        {tab === 'library' && (
+          <div className="flex flex-wrap items-center gap-2 border-b-2 border-ink-900 bg-ink-800 px-4 py-2">
+            <div className="flex items-center gap-2">
+              {CONSOLE_FILTERS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={consoleFilter === value}
+                  onClick={() => setConsoleFilter(value)}
+                  className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-2 text-[10px] transition-colors ${
+                    consoleFilter === value
+                      ? 'bg-accent text-ink-950'
+                      : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
+                  }`}
+                >
+                  {value === 'all' ? t('games.filterAll') : CONSOLE_LABEL[value]}
+                </button>
+              ))}
+            </div>
 
-          {state === 'ready' && games.length > 0 && (
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3">
-              {games.map((game) => {
-                const busy = loadingId === game.id;
-                const meta = [game.year, game.developer].filter(Boolean).join(' · ');
-                return (
-                  <li key={game.id}>
-                    <button
-                      type="button"
-                      disabled={loadingId !== null}
-                      onClick={() => onPick(game)}
-                      title={game.title}
-                      className={`pixel-edge pxw-2 pxc-700 block w-full bg-ink-850 text-left transition-colors enabled:hover:bg-ink-700 disabled:cursor-not-allowed ${
-                        // 正在下的那张不置灰：进度条要看得清。其余卡片才跟着变暗
-                        busy ? '' : 'disabled:opacity-50'
-                      }`}
-                    >
-                      <div className="relative aspect-[3/4] w-full overflow-hidden bg-ink-900">
-                        {/* R2 公网域名，不走 next/image（那需要在 next.config 里登记 remotePatterns） */}
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={game.imageUrl}
-                          alt=""
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                        />
-                        <span className="absolute left-0 top-0 bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
-                          {CONSOLE_LABEL[game.consoleType]}
-                        </span>
-                        {/*
-                          下载进度**叠在封面里**（底部一条），不占独立的行 ——
-                          放在文字下面会把卡片撑高，网格里其余卡片跟着重排、跳动。
-                          progress 为 null（拿不到 Content-Length）时退回来回滑的不确定条。
-                        */}
-                        {busy && (
-                          <div className="absolute inset-x-0 bottom-0 h-[6px] overflow-hidden bg-ink-950/80">
-                            {progress === null ? (
-                              <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
-                            ) : (
-                              <span
-                                className="absolute inset-y-0 left-0 bg-accent"
-                                style={{ width: `${Math.round(progress * 100)}%` }}
-                              />
+            {/* 搜索框与按钮同属一个 form，回车等同点击「搜索」 */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                applySearch();
+              }}
+              className="ml-auto flex min-w-0 max-w-[230px] flex-1 items-center gap-2"
+            >
+              <input
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                placeholder={t('games.searchPlaceholder')}
+                className="pixel-edge pxw-2 pxc-500 h-[24px] min-w-0 flex-1 bg-ink-900 px-2 text-[11px] text-ink-100 placeholder:text-ink-600 focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="pixel-edge pxw-2 pxc-500 flex h-[24px] shrink-0 items-center bg-ink-700 px-2.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              >
+                {t('games.search')}
+              </button>
+            </form>
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {tab === 'library' ? (
+            <>
+              {state === 'loading' && (
+                <p className="text-[12px] text-ink-400">{t('games.loading')}</p>
+              )}
+              {state === 'error' && <p className="text-[12px] text-danger">{t('games.failed')}</p>}
+              {state === 'ready' && games.length === 0 && (
+                <p className="text-[12px] text-ink-400">{t('games.empty')}</p>
+              )}
+              {/* 库里有东西、只是被筛掉了 —— 和「库是空的」分开说，否则会以为库坏了 */}
+              {state === 'ready' && games.length > 0 && matchedGames.length === 0 && (
+                <p className="text-[12px] text-ink-400">{t('games.noMatch')}</p>
+              )}
+
+              {state === 'ready' && matchedGames.length > 0 && (
+                <ul className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3">
+                  {matchedGames.map((game) => {
+                    const busy = loadingId === game.id;
+                    const meta = [game.year, game.developer].filter(Boolean).join(' · ');
+                    return (
+                      <li key={game.id}>
+                        <button
+                          type="button"
+                          disabled={loadingId !== null}
+                          onClick={() => onPick(game)}
+                          title={game.title}
+                          className={`pixel-edge pxw-2 pxc-700 block w-full bg-ink-850 text-left transition-colors enabled:hover:bg-ink-700 disabled:cursor-not-allowed ${
+                            // 正在下的那张不置灰：进度条要看得清。其余卡片才跟着变暗
+                            busy ? '' : 'disabled:opacity-50'
+                          }`}
+                        >
+                          <div className="relative aspect-[3/4] w-full overflow-hidden bg-ink-900">
+                            {/* R2 公网域名，不走 next/image（那需要在 next.config 里登记 remotePatterns） */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={game.imageUrl}
+                              alt=""
+                              loading="lazy"
+                              className="h-full w-full object-cover"
+                            />
+                            <span className="absolute left-0 top-0 bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
+                              {CONSOLE_LABEL[game.consoleType]}
+                            </span>
+                            {/*
+                              下载进度**叠在封面里**（底部一条），不占独立的行 ——
+                              放在文字下面会把卡片撑高，网格里其余卡片跟着重排、跳动。
+                              progress 为 null（拿不到 Content-Length）时退回来回滑的不确定条。
+                            */}
+                            {busy && (
+                              <div className="absolute inset-x-0 bottom-0 h-[6px] overflow-hidden bg-ink-950/80">
+                                {progress === null ? (
+                                  <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
+                                ) : (
+                                  <span
+                                    className="absolute inset-y-0 left-0 bg-accent"
+                                    style={{ width: `${Math.round(progress * 100)}%` }}
+                                  />
+                                )}
+                              </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
-                        <span className="truncate text-[11px] text-ink-100">{game.title}</span>
-                        {/* 元数据行**始终显示 meta**：不能用「正在载入…」把它换掉 ——
-                            文字换来换去会让卡片高度/内容跳动，进度全部交给封面里那条进度条 */}
-                        <span className="truncate text-[10px] text-ink-500">{meta}</span>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
+                          <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
+                            <span className="truncate text-[11px] text-ink-100">{game.title}</span>
+                            {/* 元数据行**始终显示 meta**：不能用「正在载入…」把它换掉 ——
+                                文字换来换去会让卡片高度/内容跳动，进度全部交给封面里那条进度条 */}
+                            <span className="truncate text-[10px] text-ink-500">{meta}</span>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
+          ) : cartridges.length === 0 ? (
+            <p className="text-[12px] text-ink-400">{t('games.historyEmpty')}</p>
+          ) : (
+            /*
+              历史用**行**而不是卡片：本机卡带没有封面（封面是在线上传时才有的），
+              硬凑成网格会是一排空框。行也正好和存档列表同一套读法 ——
+              左边是谁、右边是时间，点哪条载入哪条。
+            */
+            <ul className="flex flex-col">
+              {cartridges.map((cartridge) => (
+                /* 分隔线挂在 <li> 上：挂在按钮上的话，每个按钮都是自己 li 的独子，
+                   `last:` 会全部命中，整列的分隔线就都没了。 */
+                <li
+                  key={cartridge.id}
+                  className="flex items-center gap-2 border-b-2 border-ink-900 pr-2 last:border-b-0"
+                >
+                  <button
+                    type="button"
+                    disabled={loadingId !== null}
+                    aria-current={cartridge.id === activeId}
+                    onClick={() => onPickCartridge(cartridge.id)}
+                    title={t('games.historyLoad', { name: cartridge.name })}
+                    className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2.5 text-left text-[12px] text-ink-200 transition-colors enabled:hover:bg-ink-700 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    {/* 机种标签全是 ASCII（NES / SFC / ARC），走 font-pixel 不掉字形 */}
+                    <span className="shrink-0 font-pixel text-[8px] text-ink-500">
+                      {CONSOLE_LABEL[cartridge.console]}
+                    </span>
+                    {/* 文件名可能很长（含中文），系统字体 + truncate */}
+                    <span
+                      className={`min-w-0 flex-1 truncate ${
+                        cartridge.id === activeId ? 'text-accent' : ''
+                      }`}
+                    >
+                      {cartridge.name}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-ink-500">
+                      {formatTime(cartridge.lastPlayedAt, locale)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t('library.removeLabel', { name: cartridge.name })}
+                    onClick={() => onRemoveCartridge(cartridge.id)}
+                    className="pixel-edge pxw-2 pxc-500 flex h-[16px] w-[18px] shrink-0 items-center justify-center bg-ink-800 text-[9px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
         </div>

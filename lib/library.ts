@@ -3,7 +3,7 @@
 import { openDb, run as runOn, STORE_CARTRIDGES } from './db';
 import type { ConsoleType } from './emulator';
 
-/** 卡带架里的一盘卡带。 */
+/** 载入过的一盘卡带 —— 游戏库弹窗「历史」里的一行。 */
 export interface Cartridge {
   id: string;
   name: string;
@@ -29,7 +29,7 @@ export const MAX_CARTRIDGES = 10;
  * 而一个数据库只有一个版本号：两处各自 open 的话，版本对不上的那次会直接抛
  * VersionError。这里只把 store 名绑进来，下面所有调用点都不用改。
  *
- * 拿不到 IndexedDB（隐私模式等）时全程降级为「没有卡带架」，不影响玩游戏。
+ * 拿不到 IndexedDB（隐私模式等）时全程降级为「没有历史」，不影响玩游戏。
  */
 const run = <T,>(
   db: IDBDatabase,

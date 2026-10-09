@@ -26,7 +26,7 @@
   --color-wood-800: #2e261b;
   --color-wood-700: #413526;
 
-  --color-floor: #15151b;
+  --color-floor: #211b16;
 
   --color-accent: #e8b339;
   --color-ok: #4ade80;
@@ -68,6 +68,17 @@
   color-scheme: dark;
   --shadow-ground: rgba(0, 0, 0, 0.55);
   --vignette: rgba(0, 0, 0, 0.65);
+
+  /*
+   * 墙面（.wall）。深色下比房间底色（ink-950）略亮一点点 —— 整面死黑会像个洞，
+   * 但也不能亮过地板（--color-floor），不然墙和地会糊成一片。
+   */
+  --wall-top: #13131a;
+  --wall-bottom: #0a0a0e;
+  --wall-seam: rgba(255, 255, 255, 0.04);
+
+  /* 地板。暖一点、比墙底亮一档 —— 原来是块冷灰，跟木桌子放一起像块水泥 */
+  --floor-seam: rgba(0, 0, 0, 0.32);
 }
 
 :root[data-theme='light'] {
@@ -90,7 +101,7 @@
   --color-wood-800: #ece1cb;
   --color-wood-700: #bda98a;
 
-  --color-floor: #e3e3ea;
+  --color-floor: #ddd5c6;
 
   --color-accent: #a9761a;
   --color-ok: #1f9d55;
@@ -98,6 +109,13 @@
 
   --shadow-ground: rgba(0, 0, 0, 0.16);
   --vignette: rgba(120, 110, 90, 0.22);
+
+  /* 浅色下墙比地板（#e3e3ea）偏暖、略亮，两者才分得开 */
+  --wall-top: #f7f6f4;
+  --wall-bottom: #e9e6e1;
+  --wall-seam: rgba(0, 0, 0, 0.05);
+
+  --floor-seam: rgba(120, 100, 80, 0.22);
 }
 
 html,
@@ -174,6 +192,129 @@ body {
 
 .vignette {
   background: radial-gradient(120% 95% at 50% 42%, transparent 42%, var(--vignette) 100%);
+}
+
+/*
+ * 墙面（见 components/RoomBackdrop.tsx 的 RoomWall）。
+ * 两层：一层很淡的竖向「板缝」（104px 一条、2px 宽），压在一层上亮下暗的
+ * 纵向渐变上 —— 光是从窗户那边下来的。之前那版是 22px 一条的高对比竖条纹，
+ * 密得像栅栏，撤了。
+ * 必须渲染在 .vignette 之前，否则四角那圈压暗会被墙盖掉。
+ */
+.wall {
+  background-color: var(--wall-bottom);
+  background-image:
+    repeating-linear-gradient(to right, var(--wall-seam) 0 2px, transparent 2px 104px),
+    linear-gradient(to bottom, var(--wall-top), var(--wall-bottom));
+}
+
+/*
+ * 地板。底色还是 bg-floor（--color-floor），这里只叠一层横向的板缝 ——
+ * 平着看过去，木地板就是一条条横线。缝从地板层的顶边（墙地交界）往下每 32px 一条，
+ * 所以地板层挪到哪，缝就跟到哪。
+ */
+.floor {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 30px,
+    var(--floor-seam) 30px 32px
+  );
+}
+
+/*
+ * 窗外景色分昼夜两套，跟着主题切：**夜间模式 → 窗外是晚上（有月亮）**，
+ * 白天模式 → 太阳。
+ *
+ * 主题只写在 <html data-theme> 上、React 刻意不持有它（见 ConsoleScene 的 applyTheme），
+ * 所以这里必须用纯 CSS 切 —— 要是换成 useState，切主题时窗外的景色不会跟着变。
+ * 默认（data-theme 缺失或 =dark）走夜景，和 layout 内联脚本的兜底值保持一致。
+ */
+.scene-night {
+  display: block;
+}
+.scene-day {
+  display: none;
+}
+:root[data-theme='light'] .scene-night {
+  display: none;
+}
+:root[data-theme='light'] .scene-day {
+  display: block;
+}
+
+/* ------------------------------------------------------------------ *
+ * 吊灯（见 components/RoomBackdrop.tsx 的 RoomLamp）
+ *
+ * 开 / 关状态挂在 <html data-lamp> 上（首屏由 layout 的内联脚本写入），
+ * 所以这里全部用属性选择器切 —— 和主题同一套路，React 不持有这份状态。
+ *
+ * **灯跟着主题走**：切白天自动关、切夜晚自动开（写属性的是 ConsoleScene 的 applyTheme）。
+ * 所以下面那几条 `:root[data-theme='light'][data-lamp='on']` 只在一种情况下命中 ——
+ * 白天里**手动把灯打开**：那时压一层，光晕几乎看不见、灯泡也不发光，屋里本来就亮。
+ * ------------------------------------------------------------------ */
+
+/*
+ * 灯线长度跟着窗口高度缩。
+ *
+ * 房间是竖向居中的：机身顶边到天花板 ≈ (100vh - 789px) / 2 + 16px
+ * （789 = 机身 ~757 + main 的 py-4；16 是 main 的上内边距）。
+ * 灯罩 26 + 灯泡 13 + 吸盘 8 + 一点留白 4 = 51px 是灯线之外必须占掉的高度，
+ * 所以灯线 ≤ (100vh - 789px) / 2 + 16px - 51px = 50vh - 429.5px。
+ * 上限 34px（窗口够高就不再变长），下限 0（再矮就贴顶，剩下的交给机身遮住）。
+ *
+ * **改电视机尺寸必须同步这个数** —— 它和 RetroTv 顶部那段尺寸注释、
+ * globals.css 底部的 900px 断点是同一条链上的。
+ */
+.lamp-cord {
+  height: clamp(0px, calc(50vh - 429.5px), 34px);
+}
+
+.lamp-glow {
+  width: 720px;
+  height: 720px;
+  border-radius: 50%;
+  /* 微黄光。中心一档暖黄，往外迅速收掉，免得整面墙泛黄 */
+  background: radial-gradient(
+    closest-side,
+    rgba(255, 214, 138, 0.3),
+    rgba(255, 196, 102, 0.13) 46%,
+    transparent 76%
+  );
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+:root[data-lamp='on'] .lamp-glow {
+  opacity: 1;
+}
+:root[data-theme='light'][data-lamp='on'] .lamp-glow {
+  opacity: 0.14;
+}
+
+.lamp-bulb {
+  background: #3c3c46;
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+:root[data-lamp='on'] .lamp-bulb {
+  background: #ffe9a8;
+  box-shadow: 0 0 10px 3px rgba(255, 214, 138, 0.6);
+}
+:root[data-theme='light'][data-lamp='on'] .lamp-bulb {
+  background: #f5d98a;
+  /* 白天不需要灯泡自己发光 */
+  box-shadow: none;
+}
+
+.lamp-rim {
+  background: #8a6228;
+  transition: background-color 0.2s ease;
+}
+:root[data-lamp='on'] .lamp-rim {
+  background: #ffd98a;
+}
+:root[data-theme='light'][data-lamp='on'] .lamp-rim {
+  background: #e8c579;
 }
 
 /* 画面放大时保持硬边，不做双线性插值 */
@@ -305,6 +446,8 @@ body {
 .theme-seg,
 .locale-seg {
   display: flex;
+  /* 右侧那排开关是竖排的，两个分段控件也跟着竖过来 —— 横着放会让这一列宽出一倍 */
+  flex-direction: column;
 }
 .theme-seg > button,
 .locale-seg > button {
@@ -338,13 +481,16 @@ body {
 }
 
 /*
- * 场景是「电视机(766) + 右侧卡带架(220)」并排 + main 的 px-6，约 1050px。
- * 断点落在 1100px，就是被这个宽度撑出来的：再窄右边的架子就会被
- * main 的 overflow 裁掉。机身 2026-10-08 从 612 放大到 766（屏幕 576×432 → 720×540），
- * 所以断点从 1024 提到 1100 —— 改机身尺寸必须同步这里、
- * components/RetroTv.tsx 顶部那段尺寸注释，以及 i18n.ts 的 notice.desktopOnly（中英各一处）。
+ * 场景原先 = 电视机(766) + 间隙 + 右侧卡带架(220) + main 的 px-6，约 1050px，
+ * 断点 1100px 就是被这个宽度撑出来的。机身 2026-10-08 从 612 放大到 766
+ * （屏幕 576×432 → 720×540），断点当时从 1024 提到 1100。
+ *
+ * 卡带架 2026-10-09 撤掉之后场景只剩电视机：766 + main 的 px-6 = **814px**，
+ * 所以断点跟着降到 **900px**（留一点余量，滚动条也要占宽）。
+ * 改机身尺寸必须同步这里、components/RetroTv.tsx 顶部那段尺寸注释，
+ * 以及 i18n.ts 的 notice.desktopOnly（中英各一处，里面写死了这个数字）和 README。
  */
-@media (max-width: 1099px) {
+@media (max-width: 899px) {
   .stage {
     display: none;
   }

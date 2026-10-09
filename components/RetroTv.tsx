@@ -1,22 +1,25 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type DragEvent, type RefObject } from 'react';
 import packageJson from '@/package.json';
 import { VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
-import CartridgeSprite from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
 /*
- * 机身尺寸（2026-10-08 整体放大到 1.25 倍）。
+ * 机身尺寸（2026-10-08 整体放大到 1.25 倍；2026-10-09 去掉插卡舱，高度减 70px）。
  *
  * 屏幕是 720×540（NES 画面的 4:3），机身宽度 = 720 + 屏幕外边距 15×2 +
- * 内圈外边距 8×2 = **766px**。顶沿、前面板、插卡舱、底座都是跟着屏幕走的固定值，
+ * 内圈外边距 8×2 = **766px**。顶沿、前面板、底座都是跟着屏幕走的固定值，
  * 只改屏幕会让比例散掉 —— 下面这些是**一套**，要动就一起动：
  *
  *   屏幕 720×540 · 屏幕外边距 15 · 内圈外边距 8 · 内圈描边 pxw-4 · 机身描边 pxw-6
- *   顶沿 30 · 插卡舱 68 · 卡槽 375 · 舱内卡带 375-8×2 = 359 · 底座 450×18
+ *   顶沿 30 · 前面板（py-3 撑出来）· 底座 450×18
  *
- * 场景宽度 = 766 + 间距 16 + 卡带架 220 = 1002，加 main 的 px-6 是 1050px，
- * 所以 globals.css 的桌面端断点落在 **1100px**。改这里就要同步那个断点、
- * globals.css 上方那段注释，以及 i18n.ts 的 notice.desktopOnly（中英各一处）。
+ * 底部那个 68px 的**插卡舱已经撤掉**（2026-10-09，用户要求）：拖拽落点本来就是整机，
+ * 卡槽只是个多余的入口，留着还白占 70px 高度。现在「怎么开始玩」由屏幕里的提示负责。
+ *
+ * 场景原先 = 766 + 间距 16 + 卡带架 220 = 1002，加 main 的 px-6 是 1050px，断点 1100px。
+ * 卡带架 2026-10-09 撤掉后只剩 766 + px-6 = **814px**，断点跟着降到 **900px**。
+ * 改这里要同步 globals.css 的断点与上方那段注释，
+ * 以及 i18n.ts 的 notice.desktopOnly（中英各一处）。
  */
 
 /**
@@ -37,11 +40,13 @@ interface RetroTvProps {
   /** 房主推过来的画面。联机时加入者靠它出画面（本机不跑模拟器） */
   remoteStream: MediaStream | null;
   /**
-   * 房主插着的那盘卡带。加入者拿它在机身上显示「现在玩的是哪盘」。
-   * 刻意不要求 size —— 加入者只需要名字和机种（卡带 sprite 就吃这两个），
-   * 没必要为了凑成 LoadedRom 在线上多传一个数字。
+   * 房主那边正在玩（= `netplayState.remotePlaying`）。
+   *
+   * 加入者收到画面之前有一段「房主说在玩、流还在路上」的空窗，那时屏幕还是一片雪花。
+   * 靠它把这段时间和「什么都没在玩」区分开：前者不该提示「拖 ROM 进来」——
+   * 本机插卡带是没意义的，画面是房主推来的。
    */
-  remoteRom: { name: string; console: LoadedRom['console'] } | null;
+  remotePlaying: boolean;
   paused: boolean;
   busy: boolean;
   /**
@@ -58,9 +63,6 @@ interface RetroTvProps {
   volume: number;
   /** 系统文件正悬停在电视机上方 */
   fileOver: boolean;
-  /** 拎着的卡带正悬停在底部插卡口上 */
-  slotHot: boolean;
-  slotRef: RefObject<HTMLButtonElement | null>;
   onPickFile: () => void;
   onDragOver: () => void;
   onDragLeave: () => void;
@@ -68,41 +70,42 @@ interface RetroTvProps {
   onTogglePause: () => void;
   onSave: () => void;
   onLoad: () => void;
-  onImport: () => void;
-  onExport: () => void;
   onEject: () => void;
   onVolume: (level: number) => void;
   onExitFullscreen: () => void;
 }
 
 /**
- * 电视机（游戏机已并进来：插卡口就在机身下沿，顶沿有一条散热缝）。
- * 卡带推进去以后只露出侧面那一条，名字沿长边走 —— 和卡带架里的一盘露的是同一个面。
+ * 电视机（游戏机已并进来：顶沿有一条散热缝）。机身下沿原来有个插卡舱，2026-10-09 撤了。
  * canvas 必须始终留在 DOM 里（未插卡带时也一样），否则 Nostalgist 找不到渲染目标。
  *
- * 屏幕内部不放任何文案：没插卡带就是一片雪花，插上就直接出画面。
- * 状态一律由机身上的东西表达 —— 电源灯的颜色、面板按钮的可用状态、插卡舱那句提示。
+ * **没插卡带时屏幕里放的是「怎么开始玩」的提示**（拖进来 / 点屏幕选文件 / 点游戏库），
+ * 叠在那片雪花之上 —— 插卡舱撤掉之后没有别的地方能说清这件事，
+ * 新用户对着一片雪花只会以为坏了。
+ *
+ * 屏幕里**只放状态提示**：这一句、`RELEASE TO LOAD`、`WAITING FOR HOST`、载入进度条。
+ * 要读的说明（存档列表 / 联机 / 键位 / 按键说明）一律走浮在房间上的弹窗。
+ * 提示文字走 font-pixel，那套字模**没有汉字**，所以只能是英文（和 PWR / VOL /
+ * EXIT FULLSCREEN 同一套做法，也因此不进 i18n 文案表）。
  * 屏幕内部的配色一律用 crt-* 令牌而不是 ink-*：屏幕底永远是黑的，
  * 而 ink-* 会随主题翻转，浅色主题下就成了黑底黑字。
  *
  * 联机时加入者这边**没有模拟器**：屏幕上放的是一条 `<video>`（房主推来的画面），
- * 插卡舱里躺着的是**房主**插的那盘卡带，六个面板按钮因为没有本地卡带而全部变灰。
- * 这些都由 remoteStream / remoteRom 两个 prop 表达。
+ * 四个面板按钮因为没有本地卡带而全部变灰。
+ * 这些都由 remoteStream / remotePlaying 两个 prop 表达。
  */
 export default function RetroTv({
   canvasRef,
   screenRef,
   rom,
   remoteStream,
-  remoteRom,
+  remotePlaying,
   paused,
   busy,
   loading,
   canLoad,
   volume,
   fileOver,
-  slotHot,
-  slotRef,
   onPickFile,
   onDragOver,
   onDragLeave,
@@ -110,15 +113,13 @@ export default function RetroTv({
   onTogglePause,
   onSave,
   onLoad,
-  onImport,
-  onExport,
   onEject,
   onVolume,
   onExitFullscreen,
 }: RetroTvProps) {
   const { t } = useI18n();
-  const hot = fileOver || slotHot;
-  /** 载入进度（整数百分比）。null = 拿不到字节数，插卡舱画不确定进度条 */
+  const hot = fileOver;
+  /** 载入进度（整数百分比）。null = 拿不到字节数，屏幕上画一条不确定进度条 */
   const loadPct = loading && loading.ratio !== null ? Math.round(loading.ratio * 100) : null;
 
   /*
@@ -126,34 +127,8 @@ export default function RetroTv({
    * 加入者一收到画面就会把自己本地的卡带弹掉（见 ConsoleScene）。
    */
   const hasPicture = Boolean(rom) || Boolean(remoteStream);
-  /** 机身上显示的那盘：本机插的优先，其次才是房主插的 */
-  const shownRom = rom ?? remoteRom;
-  /** 只看着房主的画面（本机没插卡带）—— 这时插卡口不该还能点出文件选择框 */
-  const remoteOnly = !rom && Boolean(remoteRom);
-
-  /**
-   * 插卡口。必须始终挂在 DOM 上 —— 拎着卡带拖过来时靠它的矩形做命中判定，
-   * 插着卡带的时候若把它摘掉，slotRef.current 就成了 null，想换卡带就拖不动了。
-   * 所以这里是「按钮常驻、提示文案随状态增减」，而不是整块条件渲染。
-   *
-   * `block` 不能省：button 默认是 inline-block，一旦被放进普通 div（插卡态的包裹层），
-   * 行内格式化上下文的 strut 会把这个 div 撑高几个像素、按钮被顶到顶部，
-   * 于是相对它居中的卡带就偏了。改成块级就没有行框了。
-   */
-  const slotButton = (
-    <button
-      type="button"
-      ref={slotRef}
-      onClick={onPickFile}
-      disabled={loading !== null}
-      title={t('slot.pick')}
-      className={`block relative h-[16px] w-[375px] pixel-edge pxw-2 transition-colors ${
-        hot ? 'bg-accent/30 pxc-accent' : 'bg-ink-950 pxc-700'
-      }`}
-    >
-      <span className="sr-only">{t('slot.srLabel')}</span>
-    </button>
-  );
+  /** 房主在玩、画面还没到 —— 这时该说「等一下」，不该招呼用户拖 ROM 进来 */
+  const waitingForHost = !rom && remotePlaying && !remoteStream;
 
   return (
     <div
@@ -174,7 +149,7 @@ export default function RetroTv({
         {/*
           机身顶沿：一条凹进去的散热缝。
           原本顶沿是一条光边，机身读起来「只有屏幕没有壳」，加这一条才立得住。
-          缝用 ink-950 并配一道顶沿亮边 —— 和下面插卡舱的凹影同一个方向。
+          缝用 ink-950 并配一道顶沿亮边 —— 和机身下沿那条面板分界线同一个方向。
           右端原来有一块 NESLOAD 铭牌（去掉过），现在换成**版本号铭牌** ——
           用 ml-auto 推到右端，和左边的散热缝各占一头。
         */}
@@ -188,7 +163,7 @@ export default function RetroTv({
           {/*
             版本号铭牌（机身右上角）。版本取自 package.json，不手写 —— 免得两处各存一份、
             改了一处忘了另一处。
-            走 font-pixel：机身上所有铭牌（PWR / VOL / LOADING / INSERT CARTRIDGE）都是这套字，
+            走 font-pixel：机身上所有铭牌（PWR / VOL / BETA）都是这套字，
             且内容只有 ASCII，没有掉字形的问题，所以不进 i18n 文案表。
             pointer-events-none：纯装饰，别让它成为拖拽的落点 / relatedTarget。
           */}
@@ -242,14 +217,68 @@ export default function RetroTv({
             {!hasPicture && <div className="noise absolute inset-0 opacity-[0.72]" />}
 
             {/*
-              载入进度。**从插卡舱挪到屏幕里**的 —— 用户要求进度条出现在电视上，
-              机身下沿那一格不再画它。屏幕里没画面时本来是一片雪花，进度条叠在雪花之上，
-              让「正在读卡带」这件事看得见。
+              没有画面时的提示 —— 屏幕里**没插卡带时**那一处状态提示（见组件头注释）。
+              三种「空屏」分开说：
+
+                · 房主在玩、画面还没到 → WAITING FOR HOST，等一下就行；
+                · 文件正悬停在机身上 → RELEASE TO LOAD（拖拽落点本来就是整机，
+                  机身描边这时也变成了 accent 色）；
+                · 其余 → 怎么开始玩的三行。
+
+              整块屏幕就是按钮，点它 = 选 ROM 文件；拖拽由根元素的 onDrop 接，
+              事件从这一层冒泡上去，这里不用管。载入中不显示 —— 那时屏幕里是进度条，
+              两样东西叠在一起会打架。
+
+              配色走 crt-*（屏幕底永远是黑的，ink-* 会随主题翻转）。
+              那层 drop-shadow 是为了压住雪花：像素字直接叠在噪点上会糊掉。
+            */}
+            {!hasPicture &&
+              !loading &&
+              (waitingForHost ? (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <span className="font-pixel text-[9px] text-crt-ink-400 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+                    WAITING FOR HOST
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onPickFile}
+                  title={t('screen.pick')}
+                  aria-label={t('screen.srLabel')}
+                  className="absolute inset-0 flex items-center justify-center"
+                >
+                  <span className="flex flex-col items-center gap-[14px] drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+                    {hot ? (
+                      <span className="font-pixel text-[13px] text-crt-accent">
+                        RELEASE TO LOAD
+                      </span>
+                    ) : (
+                      <>
+                        <span className="font-pixel text-[11px] text-crt-ink-200">
+                          DRAG &amp; DROP A ROM
+                        </span>
+                        <span className="font-pixel text-[9px] text-crt-ink-400">
+                          OR CLICK TO CHOOSE A FILE
+                        </span>
+                        <span className="font-pixel text-[9px] text-crt-ink-400">
+                          OR LAUNCH FROM LIBRARY
+                        </span>
+                      </>
+                    )}
+                  </span>
+                </button>
+              ))}
+
+            {/*
+              载入进度。**从机身下沿挪到屏幕里**的 —— 用户要求进度条出现在电视上，
+              而插卡舱 2026-10-09 整个撤掉了。屏幕里没画面时本来是一片雪花，
+              进度条叠在雪花之上，让「正在读卡带」这件事看得见。
 
               刻意**不写 z-index**：要盖住雪花，又必须落在 .crt 的扫描线（z-5）/ 暗角（z-6）
               之下，否则会把显像管质感糊掉。配色走 crt-* 而不是 ink-*（屏幕底永远是黑的，
               ink-* 会随主题翻转，浅色主题下就成了黑底黑字）。
-              百分数是**读数**、不是文案 —— 和 EXIT FULLSCREEN 同性质，是屏幕里唯一的例外。
+              百分数是**读数**、不是文案。
             */}
             {loading && (
               <div className="absolute inset-x-0 bottom-[52px] flex items-center justify-center gap-3">
@@ -271,8 +300,9 @@ export default function RetroTv({
             )}
 
             {/*
-              全屏时唯一的退出口。它是功能件不是文案 —— 平时（非全屏）不显示，
-              屏幕里就真的什么都没有。
+              全屏时唯一的退出口。它是功能件不是文案 —— 平时（非全屏）不显示。
+              z-40 压在屏幕里那层提示之上：全屏 + 没插卡带时两样会同时出现，
+              提示是铺满整屏的按钮，不抬起来就点不到这个退出口。
             */}
             <button
               type="button"
@@ -288,9 +318,15 @@ export default function RetroTv({
           前面板。纵向留白刻意压到 py-3 —— 一排小按钮 + 20px 的音量键，
           面板高度就由它们撑出来，多余的空只会让机身显得虚胖。
 
-          六个按钮一律看 `rom`（本机有没有插卡带），不看有没有画面：
+          四个按钮一律看 `rom`（本机有没有插卡带），不看有没有画面：
           加入者屏幕上是房主的画面，但这些按钮管的是本机的模拟器，本机没有模拟器，
           所以它们该是灰的。PWR 灯则相反 —— 有画面就亮。
+
+          按钮宽度**写死 64px**、整排用 `ml-auto` 贴右边：之前是 `flex-1` 撑满，
+          4 个格子分掉整条面板，每个按钮宽到 110px，太大也太散。
+          不用 `px-*` 让文字自己撑宽度是因为中英文字数不一样（`Pause` vs `暂停`），
+          那样 4 个按钮会宽窄不齐。面板是定宽机身（屏幕 720 + 边距）里的一行，
+          不存在窄屏挤压，所以写死尺寸是安全的。
         */}
         <div className="flex items-center gap-5 border-t-2 border-ink-800 bg-ink-700 px-5 py-3">
           <div className="flex shrink-0 items-center gap-2">
@@ -349,7 +385,7 @@ export default function RetroTv({
             </div>
           </div>
 
-          <div className="grid flex-1 grid-cols-6 gap-1.5">
+          <div className="ml-auto grid grid-cols-[repeat(4,64px)] gap-1.5">
             <PanelBtn onClick={onTogglePause} disabled={!rom || busy}>
               {paused ? t('panel.resume') : t('panel.pause')}
             </PanelBtn>
@@ -359,67 +395,10 @@ export default function RetroTv({
             <PanelBtn onClick={onLoad} disabled={!rom || busy || !canLoad}>
               {t('panel.load')}
             </PanelBtn>
-            <PanelBtn onClick={onImport} disabled={!rom || busy}>
-              {t('panel.import')}
-            </PanelBtn>
-            <PanelBtn onClick={onExport} disabled={!rom || busy}>
-              {t('panel.export')}
-            </PanelBtn>
             <PanelBtn onClick={onEject} disabled={!rom || busy} danger>
               {t('panel.eject')}
             </PanelBtn>
           </div>
-        </div>
-
-        {/*
-          底部插卡舱：卡带从机身下沿推进去，露在外面的只有侧面那一条。
-          这是唯一的入口，所以空着的时候必须把「插卡」这件事说清楚。
-          INSERT CARTRIDGE / RELEASE TO LOAD 刻意留英文：它们是 font-pixel（Press Start 2P）
-          渲染的，那套字模没有汉字，混排会掉到等宽字体上、和机身上其他铭牌不一致。
-
-          联机时加入者这边躺的是**房主**那盘（remoteRom）：插卡口整块
-          pointer-events-none —— 本机没插卡带，点它只会弹出文件选择框，
-          而这时候载入本地卡带是没意义的（画面是房主推来的）。
-        */}
-        <div className="relative flex h-[68px] flex-col items-center justify-center gap-[8px] border-t-2 border-ink-800 bg-ink-850">
-          {/* 舱口的暗影，让它读起来是凹进去的一格而不是又一块面板 */}
-          <span className="pointer-events-none absolute inset-x-0 top-0 h-[4px] bg-ink-950/55" />
-
-          {loading ? (
-            /*
-              正在插卡带。**进度条不在这里** —— 用户要求它挪进屏幕（见上面 `.screen` 里那段），
-              机身下沿这一格只留状态标签和槽本身。
-              槽按钮必须留着：拎着卡带拖过来时靠它的矩形做命中判定，摘掉就没法换卡带了。
-            */
-            <>
-              <span className="font-pixel text-[9px] text-accent">LOADING</span>
-              {slotButton}
-            </>
-          ) : shownRom ? (
-            /*
-              卡带就插在卡槽的位置上，和槽重叠 —— 不是排在槽下面。
-              槽 375 宽、卡带 359 宽，所以槽在左右各露出 8px；卡带 30px 比槽 16px 高，
-              垂直居中于槽之后上下各探出 7px，读起来才像「插进去了」。
-              卡带必须 pointer-events-none：它压在槽按钮上，否则点槽换卡带就点不到。
-              宽度必须在这里定死：sprite 是 w-full，而插卡舱是 flex-col + items-center，
-              不会把子项横向拉伸，w-full 会一路算到机身宽度上。
-            */
-            <div className={`relative w-[375px] ${remoteOnly ? 'pointer-events-none' : ''}`}>
-              {slotButton}
-              <div className="pointer-events-none absolute inset-x-[8px] top-1/2 -translate-y-1/2">
-                <CartridgeSprite name={shownRom.name} consoleType={shownRom.console} active />
-              </div>
-            </div>
-          ) : (
-            <>
-              <span className={`font-pixel text-[9px] ${hot ? 'text-accent' : 'text-ink-400'}`}>
-                {hot ? 'RELEASE TO LOAD' : 'INSERT CARTRIDGE'}
-              </span>
-              {slotButton}
-              {/* 箭头朝上：卡带是从下往上推进这个槽里的 */}
-              <span className="blink font-pixel text-[10px] text-ink-500">▲</span>
-            </>
-          )}
         </div>
       </div>
 

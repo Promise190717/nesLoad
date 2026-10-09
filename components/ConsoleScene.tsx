@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type DragEvent,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { getAudioTrack } from '@/lib/audio-tap';
 import { getBios, getBiosInfo, isNeoGeoBios, putBios, type BiosInfo } from '@/lib/bios';
@@ -18,7 +17,7 @@ import {
   type ConsoleType,
   type LoadedRom,
 } from '@/lib/emulator';
-import type { Locale } from '@/lib/i18n';
+import { formatTime, type Locale } from '@/lib/i18n';
 import {
   IDLE_NETPLAY_STATE,
   NetplayController,
@@ -42,28 +41,35 @@ import {
   type Cartridge,
 } from '@/lib/library';
 import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
-import CartridgeRack, { CART_WIDTH } from './CartridgeRack';
-import CartridgeSprite from './CartridgeSprite';
 import GameLibraryPanel, { type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
 import RetroTv from './RetroTv';
-import { ExpandIcon, KeyboardIcon, LibraryIcon, LinkIcon, MoonIcon, SunIcon } from './icons';
+import {
+  DESK_HEIGHT,
+  RoomDesk,
+  RoomFloorItems,
+  RoomLamp,
+  RoomWall,
+  RoomWindow,
+} from './RoomBackdrop';
+import {
+  ExpandIcon,
+  HelpIcon,
+  KeyboardIcon,
+  LibraryIcon,
+  LinkIcon,
+  MoonIcon,
+  SunIcon,
+} from './icons';
 
-interface DragGhost {
-  x: number;
-  y: number;
-  name: string;
-  consoleType: ConsoleType;
-}
-
-/** 拎起卡带后，指针离卡槽这么近就算命中 */
-const SLOT_HIT_PAD_X = 56;
-const SLOT_HIT_PAD_Y = 64;
-/** 位移小于这个值算「点击」而不是「拖拽」 */
-const CLICK_SLOP = 6;
 const THEME_KEY = 'nesload:theme';
+/**
+ * 吊灯开关。值只有 'on' / 'off'，首屏由 layout 的内联脚本读进 <html data-lamp>。
+ * 它**跟着主题走**（白天关、夜晚开，见下面的 applyTheme），手动点灯只是临时覆盖。
+ */
+const LAMP_KEY = 'nesload:lamp';
 
 /**
  * 抓流时请求的帧率。NES 是 60fps，给足就不会丢帧；
@@ -80,21 +86,6 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: 'zh', label: '中' },
   { value: 'en', label: 'EN' },
 ];
-
-/**
- * 存档时间的显示格式，如 `2026/10/08 16:21`。
- * 带上年份是为了跨年之后还能分清 —— 槽位只有 5 个，最旧的那份可能放很久。
- */
-function formatTime(timestamp: number, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(timestamp));
-}
 
 /**
  * 抓一条「画面 + 声音」的流，给联机时的加入者看。
@@ -161,17 +152,12 @@ export default function ConsoleScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const screenRef = useRef<HTMLDivElement>(null);
   const romInputRef = useRef<HTMLInputElement>(null);
-  const stateInputRef = useRef<HTMLInputElement>(null);
-  const slotRef = useRef<HTMLButtonElement>(null);
-
-  const dragCartridgeRef = useRef<Cartridge | null>(null);
-  const dragOriginRef = useRef({ x: 0, y: 0 });
   /**
    * 「正在载入」的同步标记。
    *
    * `loading` 是异步 state，挡不住「载入还没完又拖一盘进来」—— 那会再走一遍 loadRom
    * （内部先 exit 再 launch），白等一次还容易把两边的状态搅在一起。
-   * 用 ref 而不是把 `loading` 放进 useCallback 依赖：那样拖拽那套 effect 会跟着重订阅。
+   * 用 ref 而不是把 `loading` 放进 useCallback 依赖：那样载入回调会每次换一次身份。
    */
   const loadingRef = useRef(false);
 
@@ -187,8 +173,8 @@ export default function ConsoleScene() {
    * 核心已经躺在 CacheStorage 里、或者响应没有 Content-Length 时就是 null，
    * 界面据此退回一条来回滑动的「不确定」进度条。
    *
-   * 单独一个 state 而不是复用 busy：busy 是面板六个按钮共用的禁用开关，
-   * 存档 / 读档也会把它置起来，而那些操作不该在插卡舱上冒出进度条。
+   * 单独一个 state 而不是复用 busy：busy 是面板四个按钮共用的禁用开关，
+   * 存档 / 读档也会把它置起来，而那些操作不该在屏幕上冒出进度条。
    */
   const [loading, setLoading] = useState<{ ratio: number | null } | null>(null);
   // 当前这盘卡带的存档槽，新的在前。「有没有存档可读」就是 saves.length > 0，
@@ -205,34 +191,30 @@ export default function ConsoleScene() {
   /**
    * 已装上的街机 BIOS（Neo Geo 的 neogeo.zip），null 表示没装。
    *
-   * 只用来画页脚那一行状态 —— 真正递给模拟器的那份由 loadFile 现取（`getBios()`），
+   * **只当一个布尔用**（装过没有），决定 loadFile 要不要去翻一次 IndexedDB；
+   * 真正递给模拟器的那份由 loadFile 现取（`getBios()`），
    * 免得把一个几 MB 的 File 长期挂在 React state 上。
    */
   const [bios, setBios] = useState<BiosInfo | null>(null);
 
   /**
-   * 「刚失败的那次是街机」。
-   *
-   * 失败的卡带不会进卡带架（`putCartridge` 在载入成功之后才跑），所以光看架子和当前
-   * 卡带都判断不出用户刚才拖的是街机 —— 而没有这个，页脚那行 BIOS 提示就永远不会出现，
-   * 用户也就永远不知道 Neo Geo 游戏要 neogeo.zip。只置位、不清零。
-   */
-  const [biosHint, setBiosHint] = useState(false);
-
-  /**
    * 刚拖进来的文件是 `.7z` / `.rar` 这类 FBNeo 吃不下的压缩格式。
    *
-   * 这一条必须单独记：机种认不出时 `consoleType` 是 null，上面那行 BIOS 提示
-   * **不会**亮（它只认街机），于是整条失败在界面上是完全静默的 —— 用户看到的就是
-   * 「拖进去毫无反应」。存 null 表示没这回事。
+   * 载入失败在屏幕上是完全静默的（刻意的），所以这一条是**唯一**还能告诉用户
+   * 「为什么拖进去没反应」的通道 —— 它挂在「按键说明」那个弹窗里。存 null 表示没这回事。
    */
   const [archiveHint, setArchiveHint] = useState<'7z' | 'rar' | null>(null);
 
   const [fileOver, setFileOver] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [ghost, setGhost] = useState<DragGhost | null>(null);
-  const [slotHot, setSlotHot] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  /**
+   * 吊灯开着没有。
+   *
+   * 真身其实在 `<html data-lamp>` 上（首屏由 layout 的内联脚本写入），CSS 按那个属性
+   * 决定亮不亮 —— 和主题同一套路。这里这份 state **只为了 aria-pressed 和按钮文案**，
+   * 挂载后再从属性同步（见下面那个 effect），所以不会影响首帧的观感。
+   */
+  const [lampOn, setLampOn] = useState(true);
 
   /* ---------------- 联机 ---------------- */
 
@@ -269,6 +251,8 @@ export default function ConsoleScene() {
 
   const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
   const [keybindOpen, setKeybindOpen] = useState(false);
+  /** 「按键说明」弹窗。内容原先是常驻在右上角的一块文字，现在收进按钮里 */
+  const [legendOpen, setLegendOpen] = useState(false);
 
   /* ---------------- 在线游戏库 ---------------- */
 
@@ -339,14 +323,12 @@ export default function ConsoleScene() {
        * 拖进来的可能不是游戏，而是街机 BIOS（Neo Geo 的 neogeo.zip）。
        *
        * 它和 romset 一样是个 zip、文件头一模一样，只能靠文件名分（见 lib/bios.ts）。
-       * 认出来就存成系统文件 —— 不进卡带架、不启动模拟器。
+       * 认出来就存成系统文件 —— 不进历史、不启动模拟器。
        * 这条路刻意做得和拖卡带一样：用户不需要知道「BIOS」这个概念，拖进来就算装上了。
        */
       if (isNeoGeoBios(file)) {
         const info = await putBios(file);
         setBios(info);
-        // 那条「需要 BIOS」的提示到此为止 —— 它的全部使命就是让用户去装 BIOS
-        setBiosHint(false);
         console.info(
           `[nesload] 街机 BIOS 已装上：${file.name}。` +
             'Neo Geo 游戏（合金弹头、拳皇、侍魂…）现在能跑了 —— 重新拖一次那盘卡带即可。'
@@ -417,13 +399,8 @@ export default function ConsoleScene() {
          */
         console.error('[nesload] 载入失败：', file.name, e);
         /*
-         * 街机失败时把页脚那行 BIOS 提示叫出来 —— 这是唯一能告诉用户
-         * 「Neo Geo 游戏需要 neogeo.zip」的通道。
-         */
-        if (!bios && consoleType === 'arcade') setBiosHint(true);
-        /*
-         * 机种认不出（`consoleType` 是 null）时上面那条不会亮，得单独给一句准话。
-         * 最常见的原因就是压缩格式：街机 romset 大量以 7z / rar 流通，而 FBNeo 只吃 zip。
+         * 机种认不出（`consoleType` 是 null）时给不出任何准话，只能单独认一次压缩格式 ——
+         * 那是最常见的原因：街机 romset 大量以 7z / rar 流通，而 FBNeo 只吃 zip。
          */
         if (consoleType === null) setArchiveHint(await unsupportedArchive(file));
         setRom(null);
@@ -480,7 +457,7 @@ export default function ConsoleScene() {
   /**
    * 从在线游戏库载入：按 id 走本站代理把 ROM 拉回来，再当成一个文件插进卡带槽。
    *
-   * 走的是和本地拖拽同一条 `loadFile`，所以 BIOS 装置、卡带架、存档槽这些既有
+   * 走的是和本地拖入同一条 `loadFile`，所以 BIOS 装置、卡带历史、存档槽这些既有
    * 逻辑全都自动带上；文件名必须用后库存的 `romName` —— 街机 FBNeo 拿 zip 文件名认驱动。
    *
    * 下载这段**面板一直开着**并显示进度条：ROM 整包拉下来之前关掉弹窗，用户就只看到
@@ -509,7 +486,7 @@ export default function ConsoleScene() {
     [libraryLoadingId, loadFile]
   );
 
-  /* ---------------- 卡带架 ---------------- */
+  /* ---------------- 卡带列表 ---------------- */
 
   useEffect(() => {
     // 首屏把上次留下的卡带捞出来。异步读，所以不会触发 set-state-in-effect。
@@ -527,68 +504,6 @@ export default function ConsoleScene() {
     setLibrary(await listCartridges());
     setActiveId((current) => (current === id ? null : current));
   }, []);
-
-  /* ---------------- 拎起卡带 ---------------- */
-
-  const isOverSlot = useCallback((x: number, y: number) => {
-    const rect = slotRef.current?.getBoundingClientRect();
-    if (!rect) return false;
-    return (
-      x >= rect.left - SLOT_HIT_PAD_X &&
-      x <= rect.right + SLOT_HIT_PAD_X &&
-      y >= rect.top - SLOT_HIT_PAD_Y &&
-      y <= rect.bottom + SLOT_HIT_PAD_Y
-    );
-  }, []);
-
-  const pickUp = useCallback((cartridge: Cartridge, e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    // 阻止原生文本选中 / 图片拖拽，卡带完全由指针事件接管
-    e.preventDefault();
-    dragCartridgeRef.current = cartridge;
-    dragOriginRef.current = { x: e.clientX, y: e.clientY };
-    setGhost({ x: e.clientX, y: e.clientY, name: cartridge.name, consoleType: cartridge.console });
-    setDragging(true);
-  }, []);
-
-  useEffect(() => {
-    if (!dragging) return;
-
-    const onMove = (e: PointerEvent) => {
-      setGhost((current) => (current ? { ...current, x: e.clientX, y: e.clientY } : current));
-      setSlotHot(isOverSlot(e.clientX, e.clientY));
-    };
-
-    const onRelease = (e: PointerEvent) => {
-      const cartridge = dragCartridgeRef.current;
-      const moved = Math.hypot(
-        e.clientX - dragOriginRef.current.x,
-        e.clientY - dragOriginRef.current.y
-      );
-      const hot = isOverSlot(e.clientX, e.clientY);
-
-      dragCartridgeRef.current = null;
-      setDragging(false);
-      setGhost(null);
-      setSlotHot(false);
-
-      if (!cartridge) return;
-      // 拖到卡槽 = 载入；几乎没动 = 当作点击，也载入
-      if (hot || moved < CLICK_SLOP) void loadFromLibrary(cartridge.id);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onRelease);
-    window.addEventListener('pointercancel', onRelease);
-    document.body.style.cursor = 'grabbing';
-
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onRelease);
-      window.removeEventListener('pointercancel', onRelease);
-      document.body.style.cursor = '';
-    };
-  }, [dragging, isOverSlot, loadFromLibrary]);
 
   /* ---------------- 控制 ---------------- */
 
@@ -614,8 +529,8 @@ export default function ConsoleScene() {
   }, [controller]);
 
   /*
-   * 存档 / 读档 / 导入都必须把 setBusy(false) 放进 finally。
-   * busy 是面板六个按钮共用的禁用开关 —— 只要有一条路径漏了复位，
+   * 存档 / 读档都必须把 setBusy(false) 放进 finally。
+   * busy 是面板四个按钮共用的禁用开关 —— 只要有一条路径漏了复位，
    * 整排按钮（包括「弹出」）就会永久变灰，表现就是「点了弹出没反应，游戏还在跑」。
    */
 
@@ -667,26 +582,6 @@ export default function ConsoleScene() {
     },
     [controller]
   );
-
-  const importState = useCallback(
-    async (file: File) => {
-      if (!controller.isRunning) return;
-      setBusy(true);
-      try {
-        await controller.loadStateFrom(file);
-      } catch (e) {
-        console.warn('导入存档失败', e);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [controller]
-  );
-
-  const exportState = useCallback(async () => {
-    if (!controller.isRunning) return;
-    await controller.downloadState();
-  }, [controller]);
 
   /** 档位由 controller 夹紧后返回，界面上显示的永远是真正生效的那一档 */
   const changeVolume = useCallback(
@@ -804,16 +699,51 @@ export default function ConsoleScene() {
   /* ---------------- 主题 / 全屏 ---------------- */
 
   /**
-   * 主题状态刻意不放进 React：首屏由 layout 的内联脚本写到 <html data-theme>，
-   * 图标的高亮交给 CSS 按属性切换。这样既没有水合不一致，也不用在 effect 里 setState。
+   * 写吊灯的开关。**DOM 属性是唯一真相**：先写 <html data-lamp>，再同步 React 那份
+   * （只为 aria）。反过来的话，连续点两下可能因为 state 批处理丢掉一次翻转。
    */
-  const applyTheme = useCallback((next: Theme) => {
-    document.documentElement.dataset.theme = next;
+  const applyLamp = useCallback((next: boolean) => {
+    document.documentElement.dataset.lamp = next ? 'on' : 'off';
+    setLampOn(next);
     try {
-      localStorage.setItem(THEME_KEY, next);
+      localStorage.setItem(LAMP_KEY, next ? 'on' : 'off');
     } catch {
       // 隐私模式下写不进去，忽略即可
     }
+  }, []);
+
+  /**
+   * 主题状态刻意不放进 React：首屏由 layout 的内联脚本写到 <html data-theme>，
+   * 图标的高亮交给 CSS 按属性切换。这样既没有水合不一致，也不用在 effect 里 setState。
+   *
+   * **吊灯跟着主题走**：切白天自动关灯、切夜晚自动开灯（用户要求）。
+   * 手动点灯只是**临时覆盖** —— 下次切主题、或者刷新页面（首屏脚本按主题决定）
+   * 就又回到主题说了算。
+   */
+  const applyTheme = useCallback(
+    (next: Theme) => {
+      document.documentElement.dataset.theme = next;
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch {
+        // 隐私模式下写不进去，忽略即可
+      }
+      applyLamp(next === 'dark');
+    },
+    [applyLamp]
+  );
+
+  /** 点灯：把当前状态翻过来（读的是 DOM 属性，和上面同一份真相） */
+  const toggleLamp = useCallback(() => {
+    applyLamp(document.documentElement.dataset.lamp !== 'on');
+  }, [applyLamp]);
+
+  /**
+   * 挂载后把 React 那份对齐到属性上（首屏是内联脚本写的，React 无从得知）。
+   * 和键位一样是「挂载后再读」—— 服务端没有 localStorage，惰性初始化会两边不一致。
+   */
+  useEffect(() => {
+    setLampOn(document.documentElement.dataset.lamp === 'on');
   }, []);
 
   useEffect(() => {
@@ -844,12 +774,13 @@ export default function ConsoleScene() {
 
       // 有面板开着的时候只认 Esc。否则在面板上按 P / R / F5 会顺手把游戏
       // 暂停、重置、或者又存一份 —— 全是意外。
-      if (saveOpen || netplayOpen || keybindOpen || libraryOpen) {
+      if (saveOpen || netplayOpen || keybindOpen || libraryOpen || legendOpen) {
         if (e.key === 'Escape') {
           setSaveOpen(false);
           setNetplayOpen(false);
           setKeybindOpen(false);
           setLibraryOpen(false);
+          setLegendOpen(false);
         }
         return;
       }
@@ -871,7 +802,17 @@ export default function ConsoleScene() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePause, reset, saveState, openLoad, saveOpen, netplayOpen, keybindOpen, libraryOpen]);
+  }, [
+    togglePause,
+    reset,
+    saveState,
+    openLoad,
+    saveOpen,
+    netplayOpen,
+    keybindOpen,
+    libraryOpen,
+    legendOpen,
+  ]);
 
   /**
    * 把本地按键转发给对方。**只有加入者转发。**
@@ -889,7 +830,7 @@ export default function ConsoleScene() {
    */
   useEffect(() => {
     if (netplayState.role !== 'guest') return;
-    if (saveOpen || netplayOpen || keybindOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen || legendOpen) return;
 
     /*
      * 「物理键 → 钮」由**加入者自己的 2P 键位**反查得到。
@@ -940,7 +881,7 @@ export default function ConsoleScene() {
       for (const button of held) netplay.sendButton(button, false);
       held.clear();
     };
-  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen]);
+  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen]);
 
   /**
    * 面板关掉之后，把焦点从按钮上摘掉。
@@ -955,10 +896,10 @@ export default function ConsoleScene() {
    * 摘掉焦点后事件目标落回 body，核心才会重新读键盘。
    */
   useEffect(() => {
-    if (saveOpen || netplayOpen || keybindOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen || legendOpen) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) active.blur();
-  }, [saveOpen, netplayOpen, keybindOpen]);
+  }, [saveOpen, netplayOpen, keybindOpen, legendOpen]);
 
   /**
    * 点完按钮就把焦点摘掉。
@@ -988,6 +929,11 @@ export default function ConsoleScene() {
 
   return (
     <main className="room relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden px-6 py-4">
+      {/*
+        墙纸。**必须在 .vignette 之前** —— 两者都是 z-auto 的定位元素，谁先渲染谁在下，
+        墙纸要是排在暗角后面，四角那圈压暗就被它盖掉了（见 RoomBackdrop 顶部注释）。
+      */}
+      <RoomWall />
       <div className="vignette pointer-events-none absolute inset-0" />
 
       <div className="pc-notice relative max-w-md flex-col items-center gap-3 text-center">
@@ -995,8 +941,14 @@ export default function ConsoleScene() {
         <p className="text-[12px] leading-relaxed text-ink-400">{t('notice.desktopOnly')}</p>
       </div>
 
-      {/* 房间角落的开关：主题 / 语言 / 全屏 / 联机 */}
-      <div className="stage absolute right-6 top-6 z-40 flex items-center gap-2">
+      {/*
+        右侧竖排开关：**上下居中贴右边**。
+
+        原先是横着摆在右上角，整排压住了机身右上角（说明那块更是直接盖在电视机上）。
+        竖过来之后宽度只有原来的一半不到，场景横向又空出来，不再和电视机抢地方。
+        两个分段控件也跟着竖排 —— 见 globals.css 的 `.theme-seg / .locale-seg`。
+      */}
+      <div className="stage absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2">
         <div className="theme-seg pixel-edge pxw-2 bg-ink-800">
           <button
             type="button"
@@ -1082,48 +1034,21 @@ export default function ConsoleScene() {
         >
           <KeyboardIcon size={13} />
         </button>
-      </div>
 
-      {/*
-        键位说明。原先挂在电视机**下方**（页脚），现在挪到右上角那排按钮底下。
-
-        内容仍是**从当前键位现算**（`playerLegend`），不是写死的文案 —— 写死过一次，
-        结果是说明描述默认值、面板显示 localStorage 里存的那份，两边说的不是一回事
-        （老用户看到「说明说 W/A/S/D、面板里却是方向键」）。
-
-        `pointer-events-none` 不能省：这块现在压在电视机右上角上方，若吃指针事件，
-        点屏幕就点不到了。宽度写死是为了让长句在这里换行、整体右对齐。
-        `top-[60px]` = 按钮那排的 top-6（24）+ 行高（约 25）+ 一点间距。
-      */}
-      <div className="stage pointer-events-none absolute right-6 top-[60px] z-40 flex w-[340px] flex-col items-end gap-1 text-right text-[11px] leading-snug text-ink-500">
-        <p>{playerLegend(bindings.p1, 1, t)}</p>
-        <p>{playerLegend(bindings.p2, 2, t)}</p>
-        <p>{t('legend.shortcut')}</p>
         {/*
-          BIOS 状态行。只在**跟街机有关**的时候出现：已经装了 BIOS、刚有街机载入失败、
-          架子上有街机卡带、或者正在玩街机。玩 NES / SFC 的人不需要被这一行打扰。
-
-          这是唯一能告诉用户「Neo Geo 缺 neogeo.zip」的通道 —— 屏幕里不放文案，
-          核心失败又是静默的（见 RetroTv）。「装了还失败」那档指向 romset 版本，
-          免得用户一直以为是 BIOS 没装好。
+          按键说明。内容从**当前**键位现算（`playerLegend`），收进弹窗也永远是准的 ——
+          写死过一次，结果是说明描述默认值、面板显示 localStorage 里存的那份，
+          两边说的不是一回事（老用户看到「说明说 W/A/S/D、面板里却是方向键」）。
         */}
-        {(bios ||
-          biosHint ||
-          rom?.console === 'arcade' ||
-          library.some((c) => c.console === 'arcade')) && (
-          <p>
-            {bios
-              ? biosHint
-                ? t('legend.biosReadyFailed')
-                : t('legend.biosReady')
-              : t('legend.biosMissing')}
-          </p>
-        )}
-        {/*
-          压缩格式提示。只有 `.7z` / `.rar` 会走到这儿 —— 那种情况下机种根本认不出，
-          上面那行 BIOS 提示不会亮，所以这一条必须独立存在。
-        */}
-        {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
+        <button
+          type="button"
+          onClick={() => setLegendOpen(true)}
+          title={t('legend.open')}
+          aria-label={t('legend.open')}
+          className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+        >
+          <HelpIcon size={13} />
+        </button>
       </div>
 
       <div
@@ -1135,16 +1060,51 @@ export default function ConsoleScene() {
           if (file) void loadFile(file);
         }}
       >
-        {/* 电视机 + 右侧卡带架并排；items-end 让架子站在和电视机同一条地平线上 */}
+        {/*
+          吊灯。**排在电视机之前** —— 整盏灯（灯具 + 光晕）都在机身背后：
+          光晕糊在屏幕画面上就毁了；而窗口一矮天花板会贴到机身顶边，灯顶上去时
+          也必须让**机身压住灯**，不能反过来挡着电视机（灯线会跟着窗口高度缩，
+          见 globals.css 的 .lamp-cord）。
+        */}
+        <RoomLamp
+          on={lampOn}
+          onToggle={toggleLamp}
+          label={t(lampOn ? 'lamp.turnOff' : 'lamp.turnOn')}
+        />
+
+        {/* 电视机。右侧那个卡带架 2026-10-09 撤掉了（历史挪进游戏库弹窗） */}
         <div className="relative flex items-end gap-4">
+          {/*
+            墙上的窗户。挂在这一层（= 电视机的盒子）上，窗户就永远贴着机身左上角。
+            排在 RetroTv 之前 → 被机身挡住，只从左侧和上方露出两条。
+          */}
+          <RoomWindow />
+
           {/*
             地板铺在场景内部而不是视口上：这样地板线永远贴着物件的落地线，
             不会随窗口高度切到家具身上。
             向下铺 200vh 并让 main 的 overflow 裁掉，避免物件下方又露出墙面。
+
+            墙地交界线按 **DESK_HEIGHT 再往下让**一段（原来是 `-150px`）：
+            电视机摆在桌子上，桌子站在地板上 —— 交界线要落在**桌腿底端**，
+            桌子才不是陷在地里。桌子是 absolute、不占布局，所以这里只能手算这个偏移。
           */}
-          <div className="pointer-events-none absolute -inset-x-[600px] top-[calc(100%-150px)] h-[200vh] bg-floor">
+          <div
+            className="floor pointer-events-none absolute -inset-x-[600px] h-[200vh] bg-floor"
+            style={{ top: `calc(100% + ${DESK_HEIGHT}px)` }}
+          >
             <div className="absolute inset-x-0 top-0 h-[2px] bg-ink-800" />
           </div>
+
+          {/* 桌子。`top-full` 挂在电视机下沿，腿向下伸到地板上 */}
+          <RoomDesk />
+
+          {/*
+            地板上那摊杂物（红白机 / 手柄 / 黄卡带）。**必须排在桌子之后** ——
+            它在桌子前面，压在桌腿上；排前面就会被桌子挡住，像嵌进桌子里。
+            它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），不占布局、也不影响机身。
+          */}
+          <RoomFloorItems />
 
           <RetroTv
             canvasRef={canvasRef}
@@ -1155,15 +1115,13 @@ export default function ConsoleScene() {
               说了算 —— 光看流有没有到会有一小段「已经弹卡了但还显示旧画面」。
             */
             remoteStream={netplayState.remotePlaying ? remoteStream : null}
-            remoteRom={netplayState.remoteGame}
+            remotePlaying={netplayState.remotePlaying}
             paused={paused}
             busy={busy}
             loading={loading}
             canLoad={saves.length > 0}
             volume={volume}
             fileOver={fileOver}
-            slotHot={slotHot}
-            slotRef={slotRef}
             onPickFile={() => romInputRef.current?.click()}
             onDragOver={() => setFileOver(true)}
             onDragLeave={() => setFileOver(false)}
@@ -1171,27 +1129,18 @@ export default function ConsoleScene() {
             onTogglePause={() => void togglePause()}
             onSave={() => void saveState()}
             onLoad={() => void openLoad()}
-            onImport={() => stateInputRef.current?.click()}
-            onExport={() => void exportState()}
             onEject={() => void eject()}
             onVolume={changeVolume}
             onExitFullscreen={exitFullscreen}
           />
-
-          <CartridgeRack
-            cartridges={library}
-            activeId={activeId}
-            onPickUp={pickUp}
-            onLaunch={(id) => void loadFromLibrary(id)}
-            onRemove={(id) => void removeFromLibrary(id)}
-          />
         </div>
-
       </div>
 
       {/*
-        存档列表。刻意浮在房间上、**不进屏幕** —— 「屏幕里不放任何文案」是这个项目的
-        硬规矩（见 RetroTv），而这张表必须写字，所以只能在外面。
+        存档列表。刻意浮在房间上、**不进屏幕** —— 屏幕里跑的是游戏画面，
+        盖一张列表上去就把画面挡了；而且它是要点选的面板，不该占着显像管。
+        屏幕里只放**状态提示**（怎么开始玩 / RELEASE TO LOAD / 载入进度），
+        要读的说明一律走这种弹窗。
 
         它自己不是物件，没必要做成拟物：一块带像素描边的面板 + 点背板或 Esc 关掉。
         行按时间从新到旧排，点哪一条载入哪一条。
@@ -1212,7 +1161,7 @@ export default function ConsoleScene() {
           >
             <div className="flex items-center gap-3 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
               <span className="text-[12px] text-ink-200">{t('saves.title')}</span>
-              {/* 计数走 font-pixel：全是数字，没有掉字形的问题，和架子上的 nn/10 同一套 */}
+              {/* 计数走 font-pixel：全是数字，没有掉字形的问题 */}
               <span className="ml-auto font-pixel text-[8px] text-ink-400">
                 {String(saves.length).padStart(2, '0')}/{String(MAX_SAVES).padStart(2, '0')}
               </span>
@@ -1246,7 +1195,7 @@ export default function ConsoleScene() {
 
       {/*
         联机面板。和存档列表一样浮在房间上、**不进屏幕** ——
-        「屏幕里不放任何文案」是硬规矩，而这张面板必须写字。
+        屏幕里跑的是游戏画面，这张面板要写字、还要输入房间码。
       */}
       <NetplayPanel
         open={netplayOpen}
@@ -1276,34 +1225,75 @@ export default function ConsoleScene() {
 
       {/*
         在线游戏库。和上面三块一样浮在房间上、不进屏幕。
-        选中的游戏由父级记 loadingId，弹窗据此把卡片置灰、并显示「正在载入」。
+        弹窗里两个 tab：「游戏库」是在线列表（选中的那盘由父级记 loadingId，
+        弹窗据此把卡片置灰、并显示下载进度），「历史」是本机载入过的卡带 ——
+        数据直接用父级的 `library`（和卡带历史同一份），面板自己不再去翻一遍 IndexedDB。
       */}
       {libraryOpen && (
         <GameLibraryPanel
           loadingId={libraryLoadingId}
           progress={libraryProgress}
+          cartridges={library}
+          activeId={activeId}
           onPick={(game) => void loadRemoteGame(game)}
+          /*
+            从「历史」里挑一盘本机卡带：**先关面板再载入** —— ROM 就在 IndexedDB 里，
+            没有下载那一段要给用户看进度（远程那盘正好相反，得留着面板显示进度条）。
+          */
+          onPickCartridge={(id) => {
+            setLibraryOpen(false);
+            void loadFromLibrary(id);
+          }}
+          onRemoveCartridge={(id) => void removeFromLibrary(id)}
           onClose={() => setLibraryOpen(false)}
         />
       )}
 
       {/*
-        被拎在手上的那盘卡带。
-        fixed 定位下宽度是收缩到内容的，sprite 的 w-full 会算成 0，必须在这里显式给宽度。
-        宽度取架子里那盘的宽度（不是机身卡槽的 288）：按下指针的一瞬间卡带宽度不能跳，
-        而架子里那一盘就是这么宽 —— 插进卡槽后变宽，正好是「推进去」这件事本身。
+        按键说明。原先是一块常驻在电视机右上角上方（`pointer-events-none`）的文字，
+        现在收进右侧那排开关里的问号按钮 —— 它本来就只是给人读的，占着一块地方还压机身。
+
+        和上面几块面板一样浮在房间上、**不进屏幕**。压缩格式那条提示也挂在这儿：
+        载入失败在屏幕上是静默的，这是唯一还能说出「为什么没反应」的地方。
       */}
-      {ghost && (
+      {legendOpen && (
         <div
-          className="pointer-events-none fixed z-50"
-          style={{
-            width: CART_WIDTH,
-            left: ghost.x,
-            top: ghost.y,
-            transform: 'translate(-50%, -50%)',
-          }}
+          className="fixed inset-0 z-50 flex items-center justify-center px-6"
+          onClick={() => setLegendOpen(false)}
         >
-          <CartridgeSprite name={ghost.name} consoleType={ghost.consoleType} floating />
+          <div className="absolute inset-0 bg-ink-950/70" />
+
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('legend.title')}
+            className="relative w-[420px] max-w-full bg-ink-800 pixel-edge pxw-4 pxc-600"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
+              <span className="text-[12px] text-ink-200">{t('legend.title')}</span>
+              <button
+                type="button"
+                aria-label={t('legend.close')}
+                onClick={() => setLegendOpen(false)}
+                className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+              >
+                ×
+              </button>
+            </div>
+
+            {/*
+              系统字体 11px，**不用 font-pixel**：里面有 ↑↓←→ 和小键盘名，
+              而 Press Start 2P 没有箭头字形，那几个会掉回系统字体、和旁边的
+              `J`、`Enter` 混排出两种字形。
+            */}
+            <div className="flex flex-col gap-2 p-4 text-[11px] leading-relaxed text-ink-300">
+              <p>{playerLegend(bindings.p1, 1, t)}</p>
+              <p>{playerLegend(bindings.p2, 2, t)}</p>
+              <p>{t('legend.shortcut')}</p>
+              {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1315,17 +1305,6 @@ export default function ConsoleScene() {
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) void loadFile(file);
-          e.target.value = '';
-        }}
-      />
-      <input
-        ref={stateInputRef}
-        type="file"
-        accept=".state,.sav,.bin"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void importState(file);
           e.target.value = '';
         }}
       />

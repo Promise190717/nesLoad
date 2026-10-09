@@ -1,6 +1,7 @@
 'use client';
 
 import { Nostalgist } from 'nostalgist';
+import { resolveArcadeCore } from './arcade-core';
 import { installAudioTap } from './audio-tap';
 import { NEOGEO_BIOS_NAME } from './bios';
 import {
@@ -42,11 +43,15 @@ export class UnsupportedRomError extends Error {
  * 机种 → libretro 核心名。核心由 Nostalgist 从它自己的 CDN 拉
  * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2`），拉过一次之后进 CacheStorage。
  *
- * 街机刻意只挂 **fbneo** 一个：它一套 romset 覆盖 CPS1 / CPS2 / Neo Geo / 大量 8-16 位基板，
- * 是「一个核心管一大片」的那个。MAME 系（`mame2003_plus` 等）在同一个 CDN 上也有，
- * 但各自的 romset 版本互相不认，多挂一个只会多一类「拖进来没反应」。
+ * 街机实际用哪个核心**不在这里定** —— `loadRom` 会先跑 `resolveArcadeCore()`
+ * （见 `lib/arcade-core.ts`），在 `fbneo` 和 `fbalpha2012_cps1` 之间按 romset 内容挑。
+ * 这里的 `'fbneo'` 只是**兜底默认值**。
  *
- * ⚠️ FBNeo 的 romset 是**版本锁死**的：zip 里的文件必须和核心期望的版本对得上，
+ * 为什么是这两个：fbneo 一套 romset 覆盖 CPS1 / CPS2 / Neo Geo / 大量 8-16 位基板；
+ * 但它的 CPS1 romset 比老 FBA 改过名，还砍掉了一批 hack 驱动 —— 那些只有
+ * `fbalpha2012_cps1`（FBA 0.2.97.42）认。两个核心都放在 `public/cores/`。
+ *
+ * ⚠️ 两个核心的 romset 都是**版本锁死**的：zip 里的文件必须和核心期望的版本对得上，
  * 对不上就直接不加载（表现和「格式不支持」一样是静默的）。这不是这个项目能绕开的。
  */
 const CORE_MAP: Record<ConsoleType, string> = {
@@ -59,16 +64,16 @@ const CORE_MAP: Record<ConsoleType, string> = {
  * 街机核心的**本站路径**（`public/cores/`）。
  *
  * NES / SFC 的核心仍由 Nostalgist 从 jsdelivr 拉（一直正常，不动它）；只有街机改走本地。
- * 这两个文件是从 Nostalgist 用的**同一个构建**里取出来的
- * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2`，和它 CDN 上那个 zip 同源），
- * 所以核心本身没换，换掉的只是「运行时去哪儿拿这 46 MB」。
+ * `fbneo` / `fbalpha2012_cps1` 两个核心都是从 Nostalgist 用的**同一个构建**里取出来的
+ * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2` 的 `retroarch/<core>_libretro.zip`），
+ * 所以核心本身没换，换掉的只是「运行时去哪儿拿这几十 MB」。
  *
  * 走本地的理由：核心包是整个项目里**唯一在运行时才去下载**的东西
- * （fbneo 是 10 MB 的 zip / 解出来 36 MB 的 wasm），而 jsdelivr 在国内经常连不上或被限速 ——
- * 拉不动就是「拖进去毫无反应」。放进 `public/` 之后这一段就再没有网络变量了。
+ * （fbneo 解出来 36 MB 的 wasm、fbalpha2012_cps1 是 3.4 MB），而 jsdelivr 在国内经常
+ * 连不上或被限速 —— 拉不动就是「拖进去毫无反应」。放进 `public/` 之后这一段就再没有网络变量了。
  *
  * 文件名必须和核心名严格对上：`<core>_libretro.js` / `<core>_libretro.wasm`。
- * 以后换核心（比如换成 FB Alpha 2012 系）要同时把对应文件放进 `public/cores/`。
+ * 以后再加核心，同样从上面那个仓库的 `retroarch/<core>_libretro.zip` 里解出来放这儿。
  */
 const LOCAL_CORE_DIR = '/cores';
 
@@ -404,7 +409,52 @@ export class EmulatorController {
       );
     }
 
-    const core = CORE_MAP[consoleType];
+    /*
+     * 街机要多做一步：**决定用哪个核心、romset 叫什么名字、喂哪份字节**。
+     *
+     * 三件事都可能变：
+     *   - 核心：FBA 0.2.97.42（`fbalpha2012_cps1`）多出 9 个 FBNeo 没有的 hack 驱动；
+     *   - 名字：FBNeo / FBA 拿 zip 的文件名当驱动名，网上流通的 romset 经常被改过名；
+     *   - 内容：如果 zip 里 rom 的**名字**和驱动期望的对不上（内容是对的），
+     *     `resolveArcadeCore` 会把 zip 重打包一遍补上名字 —— 核心自己不校验 CRC，
+     *     只认名字，所以这是唯一能救「内容对、名字错」那类的办法。
+     *
+     * 判定依据、两张表的来历、重打包的细节都在 `lib/arcade-core.ts` / `lib/zip.ts` 里。
+     * NES / SFC 不掺和，照旧走 `CORE_MAP`。
+     */
+    let core = CORE_MAP[consoleType];
+    let romFileName = file.name;
+    let romContent: Blob = file;
+    if (consoleType === 'arcade') {
+      const resolved = await resolveArcadeCore(file);
+      core = resolved.core;
+      romFileName = resolved.fileName;
+      romContent = resolved.content;
+      /*
+       * 街机失败是**完全静默**的（屏幕照常出雪花、核心也不抛异常，FBNeo 只把错误画在画面里），
+       * 所以这次到底选了哪个核心、romset 被叫成什么、有没有动过字节，必须留一行日志
+       * —— 这是唯一的排查入口。
+       */
+      const why =
+        resolved.reason === 'name'
+          ? '文件名即驱动名，内容已核对'
+          : resolved.reason === 'content'
+            ? '文件名不是驱动名，按内容认出来的'
+            : resolved.reason === 'rewritten'
+              ? '按内容认出来的，并重写了 zip 里的 rom 名'
+              : '没认出来，按原名交给核心';
+      const from = resolved.container ? `，取自整合包内层「${resolved.container}」` : '';
+      console.info(
+        `[nesload] 街机核心：${core}（本站 ${LOCAL_CORE_DIR}/），` +
+          `romset 名「${romFileName}」（${why}）${from}`
+      );
+      if (/[^\x20-\x7e]/.test(romFileName.replace(/\.[^.]+$/, ''))) {
+        console.warn(
+          `[nesload] romset 名「${romFileName}」里含非 ASCII 字符。FBNeo / FBA 都用文件名认驱动，` +
+            '改名后大概率找不到 —— 把 zip 恢复成原始 romset 名（kof98.zip、dino.zip 这种）再试。'
+        );
+      }
+    }
 
     /*
      * 街机核心走本站静态文件（`public/cores/`）；NES / SFC 不传这两个 resolve，
@@ -413,7 +463,7 @@ export class EmulatorController {
      * 参数类型写 `unknown` 是刻意的：Nostalgist 把这两个回调的参数声明成
      * `NostalgistCoreDict | string`（那个类型没导出，我们引不到），而它实际传进来的
      * **永远是核心名字符串** —— `updateCore()` 里是 `resolver(core, options)`，
-     * `core` 就是我们传的 `'fbneo'`。手写成 `string` 会踩逆变检查
+     * `core` 就是我们传的 `'fbneo'` / `'fbalpha2012_cps1'`。手写成 `string` 会踩逆变检查
      * （`NostalgistCoreDict` 不能赋给 `string`）编译不过；改成让上下文推断，
      * 模板串里又会出现对象类型、同样报错。`unknown` 两头都绕开。
      */
@@ -425,25 +475,6 @@ export class EmulatorController {
               `${LOCAL_CORE_DIR}/${String(name)}_libretro.wasm`,
           }
         : {};
-
-    if (consoleType === 'arcade') {
-      /*
-       * FBNeo 是拿 **zip 的文件名**（去掉扩展名）去认驱动名的 —— 名字对不上就直接不加载，
-       * 而且完全静默（屏幕照常出雪花、核心也不抛异常）。从网上拿到的 romset 被改名的情况
-       * 太常见了（中文名、下载站加的 `(1)` 后缀），所以先把名字和核心路径打出来：
-       * 真出问题，一眼能判断是不是名字的锅。
-       */
-      const base = file.name.replace(/\.[^.]+$/, '');
-      console.info(
-        `[nesload] 街机核心：${core}（本站 ${LOCAL_CORE_DIR}/），romset 名「${base}」`
-      );
-      if (/[^\x20-\x7e]/.test(base)) {
-        console.warn(
-          `[nesload] romset 名「${base}」里含非 ASCII 字符。FBNeo 用文件名认驱动，` +
-            '改名后大概率找不到 —— 把 zip 恢复成原始 romset 名（kof98.zip、dino.zip 这种）再试。'
-        );
-      }
-    }
 
     /*
      * 只在下核心包那段时间挂上观测，launch 一结束就摘掉 ——
@@ -463,12 +494,17 @@ export class EmulatorController {
          * 直接传 File 会走 ResolvableFile 的 `isBlob` 分支，而那条路**不读 File.name**，
          * 最终落到 `generateValidFileName()` 生成一个随机名（`data<随机>.zip`）写进 content 目录。
          *
-         * 对 NES / SFC 无所谓（核心按内容识别），但 **FBNeo 是拿 zip 的文件名（去扩展名）
-         * 当 romset 名去查驱动表的** —— 名字变成 `data<随机>` 就查不到任何游戏，
-         * 屏幕上是核心自己画的「FBNeo Error: Romset is unknown.」，
-         * 跟 romset 版本、内容对不对全都无关。名字必须钉死成用户拖进来的那个。
+         * 对 NES / SFC 无所谓（核心按内容识别），但 **FBNeo / FBA 都是拿 zip 的文件名
+         * （去扩展名）当 romset 名去查驱动表的** —— 名字变成 `data<随机>` 就查不到任何游戏，
+         * 屏幕上是核心自己画的「Romset is unknown.」，跟 romset 版本、内容对不对全都无关。
+         *
+         * 名字用 `romFileName` 而不是 `file.name`：街机的那个名字可能是
+         * `resolveArcadeCore()` 按内容认出来纠正过的（见 `lib/arcade-core.ts`）。
+         *
+         * 内容同理用 `romContent`：街机那盘可能是**重打包过**的（补了 zip 里的 rom 名），
+         * 也可能取自整合包的内层 zip。NES / SFC 下它恒等于 `file`，没有额外开销。
          */
-        rom: { fileName: file.name, fileContent: file },
+        rom: { fileName: romFileName, fileContent: romContent },
         ...coreSource,
         /*
          * BIOS 只能以 `{ fileName, fileContent }` 的形式给。
@@ -543,7 +579,11 @@ export class EmulatorController {
     return state;
   }
 
-  /** 载入一份快照。从槽位里取出来的是 Blob，导入的文件是 File —— File 也是 Blob。 */
+  /**
+   * 载入一份快照。存档槽里存的就是 Blob（`lib/saves.ts` 不做 base64 膨胀）。
+   * 入参留着 `ArrayBuffer` 是因为 Nostalgist 的 `loadState` 两种都收，
+   * 现在实际只会走 Blob 这一条（面板上的「导入 .state」2026-10-09 已撤）。
+   */
   async loadStateFrom(data: Blob | ArrayBuffer): Promise<boolean> {
     if (!this.instance) return false;
     try {
@@ -555,7 +595,12 @@ export class EmulatorController {
     }
   }
 
-  /** 导出存档。传入已有的快照可避免重复抓取。 */
+  /**
+   * 把快照下载成 `.state` 文件。传入已有的快照可避免重复抓取。
+   *
+   * 面板上那个「导出」按钮 2026-10-09 撤了，现在只剩一个调用点：
+   * 存档时 IndexedDB 不可用（隐私模式等）的**兜底** —— 存不进去就退化成下载。
+   */
   async downloadState(blob?: Blob): Promise<void> {
     if (!this.instance || !this.currentRom) return;
     const state = blob ?? (await this.instance.saveState()).state;

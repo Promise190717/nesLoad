@@ -32,24 +32,29 @@ const en = {
     'An NES / SFC cartridge loader that runs in your browser. Drop a ROM onto the console and play.',
 
   'notice.desktopOnly':
-    'This room is desktop-only. Widen your browser window to at least 1100px.',
+    'This room is desktop-only. Widen your browser window to at least 900px.',
 
   'theme.toDark': 'Switch to night mode',
   'theme.toLight': 'Switch to day mode',
+  /* 吊灯的点击目标 —— 描述的是「点下去会发生什么」，和全屏那两条同一写法 */
+  'lamp.turnOn': 'Turn on the lamp',
+  'lamp.turnOff': 'Turn off the lamp',
   'locale.toZh': '切换到中文',
   'locale.toEn': 'Switch to English',
   'fullscreen.enter': 'Fullscreen the game screen',
   'fullscreen.exit': 'Exit fullscreen',
 
-  'slot.pick': 'Click to choose a ROM file, or drop one here',
-  'slot.srLabel': 'Insert cartridge (choose a ROM file)',
+  /*
+   * 屏幕里那条提示的**无障碍名字**。屏幕上显示的是英文像素字（font-pixel 没有汉字，
+   * 见 RetroTv），但读屏软件念出来的应该是用户当前的语言，所以这两条留在文案表里。
+   */
+  'screen.pick': 'Click to choose a ROM file, or drop one here',
+  'screen.srLabel': 'Choose a ROM file to run',
 
   'panel.resume': 'Resume',
   'panel.pause': 'Pause',
   'panel.save': 'Save',
   'panel.load': 'Load',
-  'panel.import': 'Import',
-  'panel.export': 'Export',
   'panel.eject': 'Eject',
 
   'volume.down': 'Volume down one step',
@@ -57,15 +62,13 @@ const en = {
   'volume.set': 'Set volume to {level} of {max}',
 
   /*
-   * 存档槽。列表浮在房间上，不在屏幕里 —— 「屏幕内不放任何文案」是硬规矩。
+   * 存档槽。列表浮在房间上，不在屏幕里 —— 屏幕里跑的是游戏画面。
    */
   'saves.title': 'Load state',
   'saves.load': 'Load',
   'saves.close': 'Close',
 
-  'library.empty': 'No cartridges yet — games you load will line up here',
-  'library.recent': 'Recently loaded',
-  'library.launchTitle': '{name}\nClick to load, or drag it into the TV slot',
+  /* 卡带架 2026-10-09 撤掉，历史改在游戏库弹窗里（见 games.tabHistory）。 */
   'library.removeLabel': 'Remove {name}',
 
   /*
@@ -79,17 +82,14 @@ const en = {
    */
   'legend.moves': 'moves',
   'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load — bindings are customizable (top right)',
+  /* 「按键说明」弹窗本身。内容由 playerLegend() 现算，这里只有壳的文案。 */
+  'legend.open': 'Controls',
+  'legend.title': 'Controls',
+  'legend.close': 'Close',
   /*
-   * 页脚的状态行。这两组都只在**跟街机有关**时才出现 ——
-   * 玩 NES / SFC 的人不需要被它们打扰。
-   *
-   * BIOS 那行有三档：没装 / 装了 / 装了但还是失败（后者要把矛头指向 romset 版本，
-   * 否则用户会一直以为是 BIOS 没装好，白折腾）。
+   * 载入失败时**唯一**的提示通道（屏幕里只有状态提示，载入失败本身是静默的）。
+   * FBNeo 只吃 .zip，而街机 romset 大量以 7z / rar 流通 —— 认出来就把这句亮出来。
    */
-  'legend.biosReady': 'BIOS  neogeo.zip installed — Neo Geo arcade games can run',
-  'legend.biosMissing': 'BIOS  Neo Geo arcade games need neogeo.zip — drop the file here to install it',
-  'legend.biosReadyFailed':
-    'BIOS  neogeo.zip is installed, yet that arcade game still did not start — the romset version probably does not match this core',
   'legend.needZip':
     'Format  FBNeo only reads .zip — this one looks like {ext}. Repack it, or grab a .zip build',
 
@@ -159,8 +159,8 @@ const en = {
     'You are the guest, and a cartridge of your own is running here too. Player 1 drives that local cartridge — reload it after changing. Player 2 is what gets sent to the host and applies right away.',
 
   /*
-   * 在线游戏库（服务端上传的那批游戏）。和前台的卡带架 `library.*` 是两回事：
-   * 卡带架是本地载入过的，这里是 R2 + D1 里的公共库。
+   * 在线游戏库（服务端上传的那批游戏）。和本机历史是两回事：
+   * 历史是这台机器上载入过的（`library.*`），这里是 R2 + D1 里的公共库。
    */
   'games.open': 'Game library',
   'games.title': 'Game library',
@@ -168,6 +168,24 @@ const en = {
   'games.empty': 'The library is empty — nothing has been uploaded yet',
   'games.loading': 'Loading…',
   'games.failed': 'Could not load the game library',
+  /*
+   * 弹窗里的两个 tab：「游戏库」是在线库，「历史」是本机载入过的卡带 ——
+   * 就是这台机器上载入过的那批（上限 10 盘）。两者刻意分开：在线库是公共的，
+   * 历史只属于这台机器，混在一起会分不清哪盘是自己拖进来的。
+   */
+  'games.tabLibrary': 'Game library',
+  'games.tabHistory': 'History',
+  'games.historyEmpty': 'Nothing loaded yet — cartridges you load will show up here',
+  'games.historyLoad': '{name}\nClick to load',
+  /*
+   * 在线库列表上那排筛选：机种 + 搜索。两者都只在**已经拉回来的那份列表**上过滤
+   * （客户端过滤，不再打接口）。「全部」那一档和 NES / SFC / ARC 并排，
+   * 机种名是丝印（CONSOLE_LABEL），不走这张表。
+   */
+  'games.filterAll': 'All',
+  'games.searchPlaceholder': 'Search title / developer / series',
+  'games.search': 'Search',
+  'games.noMatch': 'No matching games.',
 
   /* 后台（登录 + 录入），独立于房间界面。 */
   'admin.title': 'Admin',
@@ -220,24 +238,24 @@ export type MessageKey = keyof typeof en;
 const zh: Record<MessageKey, string> = {
   'meta.description': '在浏览器里运行的 NES / SFC 卡带加载器，把卡带拖到游戏机上即可开始。',
 
-  'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 1100px 以上。',
+  'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 900px 以上。',
 
   'theme.toDark': '切换到夜晚模式',
   'theme.toLight': '切换到白天模式',
+  'lamp.turnOn': '开灯',
+  'lamp.turnOff': '关灯',
   'locale.toZh': '切换到中文',
   'locale.toEn': '切换到英文',
   'fullscreen.enter': '游戏画面全屏',
   'fullscreen.exit': '退出全屏',
 
-  'slot.pick': '点击选择 ROM 文件，或把文件拖到这里',
-  'slot.srLabel': '插入卡带（选择 ROM 文件）',
+  'screen.pick': '点击选择 ROM 文件，或把文件拖到这里',
+  'screen.srLabel': '选择要运行的 ROM 文件',
 
   'panel.resume': '继续',
   'panel.pause': '暂停',
   'panel.save': '存档',
   'panel.load': '读档',
-  'panel.import': '导入',
-  'panel.export': '导出',
   'panel.eject': '弹出',
 
   'volume.down': '音量减一档',
@@ -248,17 +266,13 @@ const zh: Record<MessageKey, string> = {
   'saves.load': '加载',
   'saves.close': '关闭',
 
-  'library.empty': '还没有卡带，载入过的游戏会摆在这里',
-  'library.recent': '最近载入',
-  'library.launchTitle': '{name}\n点击载入，或拖到电视机卡槽里',
   'library.removeLabel': '移除 {name}',
 
   'legend.moves': '移动',
   'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档 —— 键位可在右上角自定义',
-  'legend.biosReady': 'BIOS  neogeo.zip 已装上 —— 街机的 Neo Geo 游戏可以跑了',
-  'legend.biosMissing': 'BIOS  街机的 Neo Geo 游戏需要 neogeo.zip —— 把这个文件拖进页面即可装上',
-  'legend.biosReadyFailed':
-    'BIOS  neogeo.zip 已装上，但这盘街机还是没起来 —— 多半是 romset 版本和核心对不上',
+  'legend.open': '按键说明',
+  'legend.title': '按键说明',
+  'legend.close': '关闭',
   'legend.needZip': '格式  FBNeo 只吃 .zip —— 这个是 {ext}，重新打包一下（或换一个 .zip 版）',
 
   'netplay.title': '联机',
@@ -319,6 +333,14 @@ const zh: Record<MessageKey, string> = {
   'games.empty': '游戏库还是空的 —— 还没有上传过游戏',
   'games.loading': '载入中…',
   'games.failed': '游戏库读取失败',
+  'games.tabLibrary': '游戏库',
+  'games.tabHistory': '历史',
+  'games.historyEmpty': '还没有载入过卡带 —— 载入过的会出现在这里',
+  'games.historyLoad': '{name}\n点击载入',
+  'games.filterAll': '全部',
+  'games.searchPlaceholder': '搜索标题 / 开发者 / 系列',
+  'games.search': '搜索',
+  'games.noMatch': '没有匹配的游戏。',
 
   'admin.title': '后台',
   'admin.login.title': '后台登录',
@@ -398,6 +420,24 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
     .split(',')
     .map((part) => part.split(';')[0].trim())
     .filter(Boolean);
+}
+
+/**
+ * 存档列表 / 游戏库历史里那种「2026/10/08 16:21」的时间戳。
+ *
+ * 带上年份是为了跨年之后还能分清 —— 存档只有 5 份、历史最多 10 盘，最旧的那份可能放很久。
+ * 放在这里是因为它**跟着语言走**（zh-CN 与 en-US 的日期写法不同），而存档面板和游戏库
+ * 历史都要用；两处各写一份迟早会漂成两种格式。
+ */
+export function formatTime(timestamp: number, locale: Locale): string {
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(timestamp));
 }
 
 export function translate(
