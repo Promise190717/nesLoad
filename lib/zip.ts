@@ -154,7 +154,16 @@ export async function rebuildZip(
 
   const encoder = new TextEncoder();
   const parts: BlobPart[] = [];
-  const central: Uint8Array[] = [];
+  /*
+   * 这里必须写 `Uint8Array<ArrayBuffer>` 而不能只写 `Uint8Array`。
+   *
+   * TS 5.7 起 `Uint8Array` 多了个 buffer 类型参数，省略时默认 `ArrayBufferLike` ——
+   * 那可能是 `SharedArrayBuffer`，而 `BlobPart` 只收 `ArrayBufferView<ArrayBuffer>`。
+   * 于是 `new Blob([...central])` 会报 TS2322「Type 'Uint8Array<ArrayBufferLike>'
+   * is not assignable to type 'BlobPart'」。`new Uint8Array(n)` 本身返回的就是
+   * `Uint8Array<ArrayBuffer>`，所以只要把数组声明写死就能对上。
+   */
+  const central: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;
 
   for (let i = 0; i < entries.length; i += 1) {
