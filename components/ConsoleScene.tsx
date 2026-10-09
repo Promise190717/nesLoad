@@ -44,11 +44,12 @@ import {
 import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
 import CartridgeRack, { CART_WIDTH } from './CartridgeRack';
 import CartridgeSprite from './CartridgeSprite';
+import GameLibraryPanel, { type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
 import RetroTv from './RetroTv';
-import { ExpandIcon, KeyboardIcon, LinkIcon, MoonIcon, SunIcon } from './icons';
+import { ExpandIcon, KeyboardIcon, LibraryIcon, LinkIcon, MoonIcon, SunIcon } from './icons';
 
 interface DragGhost {
   x: number;
@@ -107,6 +108,51 @@ function createCaptureStream(canvas: HTMLCanvasElement | null): MediaStream | nu
   const audio = getAudioTrack();
   if (audio) stream.addTrack(audio);
   return stream;
+}
+
+/**
+ * 流式读一个响应体，边读边报下载进度。
+ *
+ * 从游戏库载入时 ROM 是整包拉下来的，几 MB 的街机 romset 不给进度就像卡死了 ——
+ * `res.blob()` 要等全部下完才 resolve，中途什么都看不到，所以这里手动读流。
+ *
+ * 拿不到 Content-Length（响应被压缩 / 分块传输）时进度一律报 null，
+ * 界面据此退回一条来回滑的「不确定」进度条 —— 总比原地不动强。
+ * 和核心包那段一样按 1% 节流，避免几百个 chunk 把场景重渲染几百次。
+ */
+async function readBodyWithProgress(
+  res: Response,
+  onProgress: (ratio: number | null) => void
+): Promise<Blob> {
+  const total = Number(res.headers.get('content-length')) || 0;
+  const body = res.body;
+  if (!body) return res.blob();
+
+  const reader = body.getReader();
+  const chunks: BlobPart[] = [];
+  let loaded = 0;
+  let lastPct = -1;
+
+  // 先给一帧「开始下载」：总字节数未知时是 null（不确定进度条），已知时从 0 起步
+  onProgress(total > 0 ? 0 : null);
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    // 拷一份再进 chunk 数组：读出来的 Uint8Array 底层是 ArrayBufferLike，直接塞给
+    // Blob 过不了类型（BlobPart 要求 ArrayBuffer 支撑），复制一次最省事。
+    chunks.push(new Uint8Array(value));
+    loaded += value.byteLength;
+
+    if (total <= 0) continue;
+    const pct = Math.floor((loaded / total) * 100);
+    if (pct === lastPct) continue;
+    lastPct = pct;
+    onProgress(Math.min(loaded / total, 1));
+  }
+
+  return new Blob(chunks, { type: 'application/octet-stream' });
 }
 
 export default function ConsoleScene() {
@@ -223,6 +269,14 @@ export default function ConsoleScene() {
 
   const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
   const [keybindOpen, setKeybindOpen] = useState(false);
+
+  /* ---------------- 在线游戏库 ---------------- */
+
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  /** 正在从游戏库载入的那盘游戏 id；非 null 时弹窗里的卡片全部置灰 */
+  const [libraryLoadingId, setLibraryLoadingId] = useState<string | null>(null);
+  /** ROM 下载进度（0..1）；null = 拿不到总字节数，弹窗里画不确定进度条 */
+  const [libraryProgress, setLibraryProgress] = useState<number | null>(null);
 
   // 刷新页面后，已经装过的 BIOS 还得在页脚那行状态里体现出来
   useEffect(() => {
@@ -422,6 +476,38 @@ export default function ConsoleScene() {
       setBusy(false);
     }
   }, [controller, activeId, loadFile]);
+
+  /**
+   * 从在线游戏库载入：按 id 走本站代理把 ROM 拉回来，再当成一个文件插进卡带槽。
+   *
+   * 走的是和本地拖拽同一条 `loadFile`，所以 BIOS 装置、卡带架、存档槽这些既有
+   * 逻辑全都自动带上；文件名必须用后库存的 `romName` —— 街机 FBNeo 拿 zip 文件名认驱动。
+   *
+   * 下载这段**面板一直开着**并显示进度条：ROM 整包拉下来之前关掉弹窗，用户就只看到
+   * 一片空荡荡的房间，不知道是在下载还是卡住了。拉完再关窗、交给 `loadFile`——
+   * 后面核心包的下载进度由电视机屏幕里的进度条接着显示。
+   */
+  const loadRemoteGame = useCallback(
+    async (game: LibraryGame) => {
+      if (libraryLoadingId !== null) return;
+      setLibraryLoadingId(game.id);
+      setLibraryProgress(null);
+      try {
+        const res = await fetch(`/api/games/${game.id}/rom`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await readBodyWithProgress(res, setLibraryProgress);
+        const file = new File([blob], game.romName, { type: 'application/octet-stream' });
+        setLibraryOpen(false);
+        await loadFile(file);
+      } catch (e) {
+        console.error('[nesload] 从游戏库载入失败：', game.title, e);
+      } finally {
+        setLibraryLoadingId(null);
+        setLibraryProgress(null);
+      }
+    },
+    [libraryLoadingId, loadFile]
+  );
 
   /* ---------------- 卡带架 ---------------- */
 
@@ -758,11 +844,12 @@ export default function ConsoleScene() {
 
       // 有面板开着的时候只认 Esc。否则在面板上按 P / R / F5 会顺手把游戏
       // 暂停、重置、或者又存一份 —— 全是意外。
-      if (saveOpen || netplayOpen || keybindOpen) {
+      if (saveOpen || netplayOpen || keybindOpen || libraryOpen) {
         if (e.key === 'Escape') {
           setSaveOpen(false);
           setNetplayOpen(false);
           setKeybindOpen(false);
+          setLibraryOpen(false);
         }
         return;
       }
@@ -784,7 +871,7 @@ export default function ConsoleScene() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePause, reset, saveState, openLoad, saveOpen, netplayOpen, keybindOpen]);
+  }, [togglePause, reset, saveState, openLoad, saveOpen, netplayOpen, keybindOpen, libraryOpen]);
 
   /**
    * 把本地按键转发给对方。**只有加入者转发。**
@@ -946,6 +1033,17 @@ export default function ConsoleScene() {
             </button>
           ))}
         </div>
+
+        {/* 在线游戏库。点开是个全屏弹窗，选一盘直接载入 */}
+        <button
+          type="button"
+          onClick={() => setLibraryOpen(true)}
+          title={t('games.open')}
+          aria-label={t('games.open')}
+          className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+        >
+          <LibraryIcon size={13} />
+        </button>
 
         <button
           type="button"
@@ -1175,6 +1273,19 @@ export default function ConsoleScene() {
         onReload={reloadRom}
         onClose={() => setKeybindOpen(false)}
       />
+
+      {/*
+        在线游戏库。和上面三块一样浮在房间上、不进屏幕。
+        选中的游戏由父级记 loadingId，弹窗据此把卡片置灰、并显示「正在载入」。
+      */}
+      {libraryOpen && (
+        <GameLibraryPanel
+          loadingId={libraryLoadingId}
+          progress={libraryProgress}
+          onPick={(game) => void loadRemoteGame(game)}
+          onClose={() => setLibraryOpen(false)}
+        />
+      )}
 
       {/*
         被拎在手上的那盘卡带。

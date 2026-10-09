@@ -1,6 +1,6 @@
 import type { ConsoleType } from '@/lib/emulator';
 
-const CONSOLE_LABEL: Record<ConsoleType, string> = {
+export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   nes: 'NES',
   snes: 'SFC',
   arcade: 'ARC',

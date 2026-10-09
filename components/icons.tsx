@@ -121,3 +121,22 @@ export function KeyboardIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/** 一排立在架子上的卡带，表示「游戏库」 */
+export function LibraryIcon({ size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      <rect x="1" y="13" width="14" height="1" />
+      <rect x="2" y="4" width="3" height="9" />
+      <rect x="6" y="2" width="3" height="11" />
+      <rect x="10" y="5" width="3" height="8" />
+    </svg>
+  );
+}
