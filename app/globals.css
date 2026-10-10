@@ -550,6 +550,90 @@ body {
   background: var(--color-accent);
 }
 
+/* ------------------------------------------------------------------ *
+ * 昼夜切换：从左上角推开的「天光」
+ *
+ * 用 **View Transitions API**：浏览器把旧的一帧冻成快照，再让新的一帧从左上角
+ * 用一个圆推出去 —— 看上去就是「光从左上角漫过来，把原来的样子盖掉」。
+ *
+ * 比自己叠一层纯色覆盖层好在**不用在动画中途改主题**：那种做法要么在覆盖满之前
+ * 露出一整屏纯色，要么得掐着毫秒数对齐，两头都难受。
+ *
+ * 0.6s 刻意比一般的过渡长：这是整页级别的变化，快了像闪一下，慢一点才有
+ * 「天亮了」的感觉。
+ * ------------------------------------------------------------------ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  /*
+   * 默认是 `plus-lighter`，新旧两帧叠在一起会发白、颜色发飘。
+   * 我们要的是「新的一帧盖住旧的一帧」，所以关掉。
+   */
+  mix-blend-mode: normal;
+}
+/* 新的一帧压在上面，圆从它身上开出来 */
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2;
+  animation: theme-daybreak 0.6s ease-out;
+}
+/*
+ * 圆心钉死在左上角，半径给到 150% —— 视口对角线约 141%，150% 保证四个角都被
+ * 盖满，不会留下没推到的边。
+ */
+@keyframes theme-daybreak {
+  from {
+    clip-path: circle(0% at 0% 0%);
+  }
+  to {
+    clip-path: circle(150% at 0% 0%);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * 兜底：不支持 View Transitions 的浏览器（老 Firefox 等）走这套
+ *
+ * 只在切换的那一瞬间挂上 `theme-fading`（ConsoleScene 的 applyTheme 加 / 摘），
+ * **不做成常驻** —— 常驻的话所有 hover 都会跟着慢半拍，像素 UI 要的是即时反馈。
+ *
+ * 只列这几个属性就够：主题翻的全是 CSS 变量里的**颜色**，位置和尺寸一个都不动，
+ * 所以整段过渡**不触发重排**。
+ *
+ * `opacity` 必须一起列 —— 过渡简写是整条属性覆盖，漏掉它会把吊灯 `.lamp-glow`
+ * 自己那条 `transition: opacity` 吃掉，灯就不淡入了。
+ * 同理，`!important` 是必须的：`.lamp-bulb`、`.theme-seg > button` 这些自己带
+ * transition 的元素，不加的话它们的声明会赢过这里。
+ * ------------------------------------------------------------------ */
+:root.theme-fading,
+:root.theme-fading *,
+:root.theme-fading *::before,
+:root.theme-fading *::after {
+  transition:
+    background-color 0.36s ease,
+    border-color 0.36s ease,
+    color 0.36s ease,
+    box-shadow 0.36s ease,
+    fill 0.36s ease,
+    stroke 0.36s ease,
+    opacity 0.36s ease !important;
+}
+
+/* 系统开了「减少动态效果」就直接切，两套都不玩 */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+  :root.theme-fading,
+  :root.theme-fading *,
+  :root.theme-fading *::before,
+  :root.theme-fading *::after {
+    transition: none !important;
+  }
+}
+
 /* 只支持 PC：窄屏直接换成提示 */
 .pc-notice {
   display: none;

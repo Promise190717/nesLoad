@@ -71,6 +71,14 @@ import {
 } from './icons';
 
 const THEME_KEY = 'nesload:theme';
+
+/**
+ * 主题切换时挂 `theme-fading` 的时长，**必须 ≥ globals.css 里那几条 transition 的时长**。
+ *
+ * 挂多久就过渡多久：早了会在颜色还没走完时把过渡属性摘掉，后半程直接跳；
+ * 晚了则白白让所有 hover 都慢半拍。见下面 applyTheme。
+ */
+const THEME_FADE_MS = 400;
 /**
  * 吊灯开关。值只有 'on' / 'off'，首屏由 layout 的内联脚本读进 <html data-lamp>。
  * 它**跟着主题走**（白天关、夜晚开，见下面的 applyTheme），手动点灯只是临时覆盖。
@@ -788,22 +796,73 @@ export default function ConsoleScene() {
   }, []);
 
   /**
+   * 主题过渡类的摘除定时器。
+   *
+   * 用 ref 不用 state —— 它一变就要重渲染，而这个值跟渲染没有任何关系。
+   */
+  const themeFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
    * 主题状态刻意不放进 React：首屏由 layout 的内联脚本写到 <html data-theme>，
    * 图标的高亮交给 CSS 按属性切换。这样既没有水合不一致，也不用在 effect 里 setState。
    *
    * **吊灯跟着主题走**：切白天自动关灯、切夜晚自动开灯（用户要求）。
    * 手动点灯只是**临时覆盖** —— 下次切主题、或者刷新页面（首屏脚本按主题决定）
    * 就又回到主题说了算。
+   *
+   * **切换时有一层「天光」动画**（2026-10-10 加）：新的一帧从左上角用一个圆推开。
+   * 走 View Transitions API，不支持才退回整屏颜色淡入 —— 见下面那两分支。
    */
   const applyTheme = useCallback(
     (next: Theme) => {
-      document.documentElement.dataset.theme = next;
+      const root = document.documentElement;
+
+      /** 真正落主题。两条路径都走它 —— View Transition 那条要把它塞进回调里。 */
+      const commit = () => {
+        root.dataset.theme = next;
+        applyLamp(next === 'dark');
+      };
+
+      /*
+       * 首选 View Transitions：浏览器把旧的一帧冻成快照，新的一帧从左上角用一个圆
+       * 推出去（`::view-transition-*` 那几条在 globals.css），观感就是「光从左上角
+       * 漫过来」。这样**不用在动画中途改主题**，也不会出现一整屏纯色。
+       *
+       * 回调里**只改 DOM 属性、不碰 setState**：快照是在回调（及其返回的 promise）
+       * 结束后立刻拍的，而 `applyLamp` 里那次 setState 只影响 aria，重渲染跑在
+       * 快照之后也无所谓，画面一模一样。
+       */
+      if (typeof document.startViewTransition === 'function') {
+        document.startViewTransition(commit);
+      } else {
+        /*
+         * 兜底（老 Firefox 等）：整屏颜色交叉淡入。
+         *
+         * 顺序是「加类 → 强制算一次样式 → 再改属性」：中间那步不能省。
+         * 少了它，浏览器会把「加类」和「改 data-theme」并进同一次样式计算，
+         * 于是过渡属性在**前一份**样式里根本不存在 —— 直接跳过去，看不到过渡。
+         * 读一下 offsetHeight 就够，代价是一次同步布局，而这是点击触发的，无所谓。
+         */
+        root.classList.add('theme-fading');
+        void root.offsetHeight;
+        commit();
+
+        /*
+         * 连点（白天→夜晚→白天）时**重置**定时器而不是叠加：
+         * 否则第一下那个定时器会在第二下过渡还没走完时把类摘掉，后半程直接跳。
+         */
+        if (themeFadeTimer.current !== null) clearTimeout(themeFadeTimer.current);
+        themeFadeTimer.current = setTimeout(() => {
+          root.classList.remove('theme-fading');
+          themeFadeTimer.current = null;
+        }, THEME_FADE_MS);
+      }
+
       try {
         localStorage.setItem(THEME_KEY, next);
       } catch {
         // 隐私模式下写不进去，忽略即可
       }
-      applyLamp(next === 'dark');
     },
     [applyLamp]
   );
@@ -1090,16 +1149,13 @@ export default function ConsoleScene() {
         data-tour="rail"
         className="stage absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2"
       >
+        {/*
+          白天在上、夜晚在下（用户要求，2026-10-10 换过）。
+          分段控件是 `flex-direction: column`（见 globals.css 的 `.theme-seg`），
+          所以 DOM 顺序就是上下顺序 —— 高亮由 `.seg-light / .seg-dark` 类决定，
+          和先后无关，换位置不会影响选中态。
+        */}
         <div className="theme-seg pixel-edge pxw-2 bg-ink-800">
-          <button
-            type="button"
-            className="seg-dark"
-            onClick={() => applyTheme('dark')}
-            title={t('theme.toDark')}
-            aria-label={t('theme.toDark')}
-          >
-            <MoonIcon size={13} />
-          </button>
           <button
             type="button"
             className="seg-light"
@@ -1108,6 +1164,15 @@ export default function ConsoleScene() {
             aria-label={t('theme.toLight')}
           >
             <SunIcon size={13} />
+          </button>
+          <button
+            type="button"
+            className="seg-dark"
+            onClick={() => applyTheme('dark')}
+            title={t('theme.toDark')}
+            aria-label={t('theme.toDark')}
+          >
+            <MoonIcon size={13} />
           </button>
         </div>
 
