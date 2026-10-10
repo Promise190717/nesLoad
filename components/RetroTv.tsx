@@ -1,4 +1,10 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type DragEvent, type RefObject } from 'react';
+import {
+  useEffect,
+  useRef,
+  type ButtonHTMLAttributes,
+  type DragEvent,
+  type RefObject
+} from 'react';
 import packageJson from '@/package.json';
 import { VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
 import { useI18n } from './I18nProvider';
@@ -115,12 +121,13 @@ export default function RetroTv({
   onLoad,
   onEject,
   onVolume,
-  onExitFullscreen,
+  onExitFullscreen
 }: RetroTvProps) {
   const { t } = useI18n();
   const hot = fileOver;
   /** 载入进度（整数百分比）。null = 拿不到字节数，屏幕上画一条不确定进度条 */
-  const loadPct = loading && loading.ratio !== null ? Math.round(loading.ratio * 100) : null;
+  const loadPct =
+    loading && loading.ratio !== null ? Math.round(loading.ratio * 100) : null;
 
   /*
    * 有画面 = 本机插着卡带，或者房主推了画面过来。两者只会有一个成立：
@@ -145,7 +152,9 @@ export default function RetroTv({
       }}
       onDrop={onDropFile}
     >
-      <div className={`relative bg-ink-700 pixel-edge pxw-6 ${hot ? 'pxc-accent' : 'pxc-500'}`}>
+      <div
+        className={`relative bg-ink-700 pixel-edge pxw-6 ${hot ? 'pxc-accent' : 'pxc-500'}`}
+      >
         {/*
           机身顶沿：一条凹进去的散热缝。
           原本顶沿是一条光边，机身读起来「只有屏幕没有壳」，加这一条才立得住。
@@ -173,7 +182,7 @@ export default function RetroTv({
         </div>
 
         {/* 机身内圈 + 屏幕 */}
-        <div className="relative m-[8px] bg-ink-900 pixel-edge pxw-4 pxc-700">
+        <div className="relative m-[8px] mx-2.5 bg-ink-900 pixel-edge pxw-4 pxc-700">
           {/*
             屏幕尺寸由容器定死，canvas 只负责填满。
             Nostalgist 启动时会往 canvas 上写 width/height: 100% 的内联样式，
@@ -182,7 +191,7 @@ export default function RetroTv({
           <div
             ref={screenRef}
             data-tour="screen"
-            className="screen crt relative m-[15px] h-[540px] w-[720px] overflow-hidden bg-black"
+            className="screen crt relative overflow-hidden bg-black"
           >
             {/*
               canvas 必须始终留在 DOM 里，但没画面时要把它藏起来：
@@ -215,7 +224,9 @@ export default function RetroTv({
               和暗角一起糊掉，显像管的质感就没了。
               亮度只由 opacity 控制，CSS 里那份噪点本身保持原样。
             */}
-            {!hasPicture && <div className="noise absolute inset-0 opacity-[0.72]" />}
+            {!hasPicture && (
+              <div className="noise absolute inset-0 opacity-[0.72]" />
+            )}
 
             {/*
               没有画面时的提示 —— 屏幕里**没插卡带时**那一处状态提示（见组件头注释）。
@@ -333,7 +344,13 @@ export default function RetroTv({
           <div className="flex shrink-0 items-center gap-2">
             <span
               className={`h-3 w-3 ${
-                rom ? (paused ? 'bg-accent' : 'bg-ok') : hasPicture ? 'bg-ok' : 'bg-ink-600'
+                rom
+                  ? paused
+                    ? 'bg-accent'
+                    : 'bg-ok'
+                  : hasPicture
+                    ? 'bg-ok'
+                    : 'bg-ink-600'
               }`}
             />
             <span className="font-pixel text-[9px] text-ink-500">PWR</span>
@@ -363,18 +380,20 @@ export default function RetroTv({
                 onClick={() => onVolume(volume - 1)}
               />
               <span className="flex gap-[5px]">
-                {Array.from({ length: VOLUME_MAX }, (_, i) => i + 1).map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => onVolume(level)}
-                    title={t('volume.set', { level, max: VOLUME_MAX })}
-                    aria-label={t('volume.set', { level, max: VOLUME_MAX })}
-                    className={`h-[14px] w-[11px] transition-colors ${
-                      level <= volume ? 'bg-accent' : 'bg-ink-900'
-                    }`}
-                  />
-                ))}
+                {Array.from({ length: VOLUME_MAX }, (_, i) => i + 1).map(
+                  (level) => (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => onVolume(level)}
+                      title={t('volume.set', { level, max: VOLUME_MAX })}
+                      aria-label={t('volume.set', { level, max: VOLUME_MAX })}
+                      className={`h-[14px] w-[11px] transition-colors ${
+                        level <= volume ? 'bg-accent' : 'bg-ink-900'
+                      }`}
+                    />
+                  )
+                )}
               </span>
               <VolBtn
                 label="+"

@@ -1,6 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent
+} from 'react';
 import { formatTime } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
@@ -64,7 +70,9 @@ const FIELD_CLASS =
   'pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[11px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none';
 
 async function fetchPage(cursor: string | null): Promise<FeedbackPage> {
-  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}&limit=${PAGE_SIZE}` : `?limit=${PAGE_SIZE}`;
+  const query = cursor
+    ? `?cursor=${encodeURIComponent(cursor)}&limit=${PAGE_SIZE}`
+    : `?limit=${PAGE_SIZE}`;
   const res = await fetch(`/api/feedback${query}`);
   if (!res.ok) throw new Error(String(res.status));
   return (await res.json()) as FeedbackPage;
@@ -256,7 +264,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
       const res = await fetch('/api/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content })
       });
       if (!res.ok) throw new Error(await readError(res, t('feedback.failed')));
 
@@ -286,7 +294,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('feedback.failed'),
+        text: error instanceof Error ? error.message : t('feedback.failed')
       });
     } finally {
       setSubmitting(false);
@@ -298,7 +306,10 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
   const canNext = state === 'ready' && Boolean(page?.nextCursor);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-6" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-6"
+      onClick={onClose}
+    >
       <div className="absolute inset-0 bg-ink-950/80" />
 
       <div
@@ -309,7 +320,9 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
-          <span className="text-[12px] text-ink-200">{t('feedback.title')}</span>
+          <span className="text-[12px] text-ink-200">
+            {t('feedback.title')}
+          </span>
           <button
             type="button"
             aria-label={t('feedback.close')}
@@ -321,38 +334,35 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/*
-          列表区 = **一页作业本纸**。和「一张纸」弹窗同一套道具：
-          `.note-rules`（一行 30px、线在行内 23px）+ 纸色 `#e8dcbd` + 描边 `pxc-paper`。
+          列表区 = **一页米黄的纸**（2026-10-10：去掉作业本横线、纸色调淡）。
+          道具只剩纸色 `#f2ecdc` + 描边 `pxc-paper`。
 
-          **正文必须 `leading-[30px]`**，这样 12px 的字正好坐在线上（基线约 18.6px，
-          线在 23px，中间留 ~4px）。改字号或行高要连着 `.note-rules` 里的 23 一起改。
-
-          **整页要对齐行网格**，三处留白都取 30 的整数倍，错一处整页的线就全部错位半行：
-            - 纸的上内边距 `pt-[30px]`（空一行再开始写）；
-            - 每条之间 `pb-[30px]`（空一行 —— 本子上连着写两段会读成一段）；
-            - 时间戳和「已解决」标记套一层 `h-[30px] flex items-center`，
-              只影响自身高度，不会把正文的行高带偏。
+          **正文仍然 `leading-[30px]`**：纸面虽不再画线，但整页按 30px 的行网格排 ——
+          纸的上内边距 `pt-[30px]`、每条之间 `pb-[30px]`（空一行，读起来才不连成一段）、
+          时间戳和「已解决」标记套 `h-[30px] flex items-center` 对齐到同一格。
+          改字号或行高要连着这几处 30 一起改，否则各行的格线会对不齐。
 
           **每条收起时只占一行**（`truncate` + `…`），点那一条就地展开成多行 ——
-          展开占 N 行 = N×30，网格一样不断。一行 = 一个格子，读起来就是「写在格子里」。
+          展开占 N 行 = N×30，网格一样不断。
 
           描边（`pixel-edge pxw-2 pxc-paper`）就画在纸上、跟着纸一起滚 —— 那本来就是
           **这张纸自己的边**，往下翻时纸的上沿滚出视野是对的。
           外面那层 `p-3` 的暗色底是「壳」：纸是「页」，壳不动、页在滚。
-          颜色全写死：纸是物件，不跟主题翻（同「一张纸」）。
-
-          唯一不完美的地方：`min-h-full` 让纸至少撑满可视区，高度不一定是 30 的倍数，
-          所以**最底下那行线可能被切掉一半**。页底本来就是裁切处，没为它单独做处理。
+          颜色全写死：纸是物件，不跟主题翻。
         */}
         <div className="min-h-0 flex-1 overflow-y-auto bg-ink-900 p-3">
-          <div className="note-rules min-h-full bg-[#e8dcbd] pixel-edge pxw-2 pxc-paper px-6 pb-[30px] pt-[30px]">
+          <div className="min-h-full bg-[#f2ecdc] pixel-edge pxw-2 pxc-paper py-4 px-3">
             {state === 'loading' && (
-              <p className="text-[12px] leading-[30px] text-[#8a7a5c]">{t('feedback.loading')}</p>
+              <p className="text-[12px] leading-[30px] text-[#8a7a5c]">
+                {t('feedback.loading')}
+              </p>
             )}
 
             {state === 'error' && (
               <div className="flex h-[30px] items-center gap-3">
-                <p className="text-[12px] leading-[30px] text-[#a3302a]">{t('feedback.failed')}</p>
+                <p className="text-[12px] leading-[30px] text-[#a3302a]">
+                  {t('feedback.failed')}
+                </p>
                 {/*
                   重试 = 原地再跳一次当前页。失败的那页没进缓存，所以 goto 会真的重发；
                   已经拿到过的页不会走到这里（它们不会进 error 分支）。
@@ -368,7 +378,9 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
             )}
 
             {state === 'ready' && page && page.items.length === 0 && (
-              <p className="text-[12px] leading-[30px] text-[#8a7a5c]">{t('feedback.empty')}</p>
+              <p className="text-[12px] leading-[30px] text-[#8a7a5c]">
+                {t('feedback.empty')}
+              </p>
             )}
 
             {page && page.items.length > 0 && (
@@ -377,7 +389,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
                   const expanded = openId === item.id;
                   return (
                     <li key={item.id} className="pb-[30px] last:pb-0">
-                      {/* 悬停给一道**半透明**的墨色 —— 实色会盖掉那行格子线 */}
+                      {/* 悬停给一道**半透明**的墨色 —— 只是提示可点，别喧宾夺主 */}
                       <button
                         type="button"
                         onClick={() => setOpenId(expanded ? null : item.id)}
@@ -395,7 +407,9 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
                         */}
                         <span
                           className={`min-w-0 flex-1 text-[12px] leading-[30px] text-[#3b3327] ${
-                            expanded ? 'whitespace-pre-wrap break-words' : 'truncate'
+                            expanded
+                              ? 'whitespace-pre-wrap break-words'
+                              : 'truncate'
                           }`}
                         >
                           {item.content}
@@ -404,10 +418,16 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
                         <span className="flex h-[30px] shrink-0 items-center">
                           <span
                             className={`pixel-edge pxw-2 pxc-paper px-1.5 py-0.5 text-[10px] ${
-                              item.resolved ? 'bg-[#cbdcc0] text-[#2f5a2b]' : 'bg-[#e2d3ae] text-[#6b5a3a]'
+                              item.resolved
+                                ? 'bg-[#cbdcc0] text-[#2f5a2b]'
+                                : 'bg-[#e2d3ae] text-[#6b5a3a]'
                             }`}
                           >
-                            {t(item.resolved ? 'feedback.resolved' : 'feedback.unresolved')}
+                            {t(
+                              item.resolved
+                                ? 'feedback.resolved'
+                                : 'feedback.unresolved'
+                            )}
                           </span>
                         </span>
                         <span className="flex h-[30px] w-[92px] shrink-0 items-center justify-end text-[10px] text-[#8a7a5c]">
@@ -427,7 +447,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
           二来列表区高度不会因为状态切换而抖一下。
           `nextCursor` 为 null 就是到底了，所以「下一页」禁用即可，不需要总页数。
         */}
-        <div className="flex items-center gap-3 border-t-2 border-ink-900 bg-ink-850 px-4 py-2">
+        <div className="flex items-center justify-end gap-3 border-t-2 border-ink-900 bg-ink-850 px-4 py-2">
           <button
             type="button"
             onClick={goPrev}
@@ -472,7 +492,9 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
               {draft.length}/{MAX_LENGTH}
             </span>
             {notice && (
-              <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+              <span
+                className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}
+              >
                 {notice.text}
               </span>
             )}
