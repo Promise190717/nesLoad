@@ -507,7 +507,7 @@ const zh: Record<MessageKey, string> = {
   'netplay.qualityBalanced': '均衡',
   'netplay.qualitySharp': '清晰',
   'netplay.qualityHint':
-    '模拟器和推流都压在房主那台机器上，它跟不上时整局都会变慢（慢动作）。卡就往下调一档 —— 这一项只在房主那边生效。',
+    '出画质量会影响流畅度,建议使用均衡档。',
   'netplay.copy': '复制',
   'netplay.copied': '已复制',
   'netplay.connected': '已连接',
