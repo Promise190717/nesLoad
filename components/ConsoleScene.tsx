@@ -34,8 +34,10 @@ import {
   loadBindings,
   playerLegend,
   saveBindings,
+  type ButtonName,
   type KeyBindings,
 } from '@/lib/keybindings';
+import { readGamepads } from '@/lib/gamepad';
 import {
   listCartridges,
   pruneCartridges,
@@ -1080,11 +1082,16 @@ export default function ConsoleScene() {
   ]);
 
   /**
-   * 把本地按键转发给对方。**只有加入者转发。**
+   * 把本地输入转发给对方。**只有加入者转发。**
    *
-   * 房主那边不用转发：他的按键由 RetroArch 自己读（P1），加入者是从房主推来的
-   * 画面里看到这一下动作的 —— 再转发一遍反而会让加入者去注入一个不存在的模拟器。
-   * 加入者这边反过来：本机没有模拟器，所有按键都得送给房主，由房主注入成 2P。
+   * 房主那边不用转发：他的输入由 RetroArch 自己读（键盘读 P1 键位，手柄由核心的
+   * `rwebpad` 驱动读），加入者是从房主推来的画面里看到这一下动作的 —— 再转发一遍
+   * 反而会让加入者去注入一个不存在的模拟器。加入者这边反过来：本机没有模拟器，
+   * 键盘和手柄都得送过去，由房主注入成 2P。
+   *
+   * 两个来源都汇进这条链路：键盘是 `物理键 code → 钮名`（按他自己的 1P 键位反查），
+   * 手柄是 `按钮下标 → 钮名`（标准布局，见 `lib/gamepad.ts`）。**wire 上只有钮名** ——
+   * 房主分不出、也不需要分出这一下是键盘还是手柄按的。
    *
    * 刻意**不**阻止默认行为、也不接管输入：本地那一半（房主读 P1）完全不用我们插手。
    *
@@ -1111,8 +1118,37 @@ export default function ConsoleScene() {
      * 他没有模拟器，不需要重插卡带（房主那边才需要）。
      */
     const keys = codeToButton(bindings.p1);
-    /** 本地正按着的按钮 —— 切走窗口时靠它把欠下的 keyup 补上 */
-    const held = new Set<string>();
+
+    /*
+     * 两个输入来源（键盘 / 手柄），最后合成一条「对面该看到的状态」。
+     *
+     * 必须**各自记账再取并集**，不能让它们各发各的：同一个钮被两边同时按着时
+     * （左手键盘推着方向、右手顺手也推了摇杆），任何一边松手都不该让对面收到 keyup ——
+     * 那会让角色在房主手里突然停住。所以只有并集变化了才发包。
+     *
+     * 类型是 `ButtonName` 而不是 string：手柄那边直接产出钮名（`lib/gamepad.ts`），
+     * 让它和键盘那条路对得上同一个集合类型，写错名字时 tsc 会拦。
+     */
+    const fromKeyboard = new Set<ButtonName>();
+    let fromPad = new Set<ButtonName>();
+    /** 已经发出去的「按下」状态 —— 拿它和并集做差分 */
+    const sent = new Set<ButtonName>();
+
+    const sync = () => {
+      const want = new Set<ButtonName>(fromKeyboard);
+      for (const button of fromPad) want.add(button);
+
+      for (const button of want) {
+        if (sent.has(button)) continue;
+        sent.add(button);
+        netplay.sendButton(button, true);
+      }
+      for (const button of [...sent]) {
+        if (want.has(button)) continue;
+        sent.delete(button);
+        netplay.sendButton(button, false);
+      }
+    };
 
     const forward = (e: KeyboardEvent, down: boolean) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -1120,37 +1156,62 @@ export default function ConsoleScene() {
       if (!button) return;
       // 按住不放会连发 keydown，重复转发没有意义
       if (down && e.repeat) return;
-      if (down) held.add(button);
-      else held.delete(button);
-      netplay.sendButton(button, down);
+      if (down) fromKeyboard.add(button);
+      else fromKeyboard.delete(button);
+      sync();
     };
 
     const onDown = (e: KeyboardEvent) => forward(e, true);
     const onUp = (e: KeyboardEvent) => forward(e, false);
 
     /*
-     * 切走窗口（alt+tab、点别的应用）时浏览器**不会补发 keyup**，
-     * 不主动松的话对面会一直以为你按着那个方向键 —— 角色自己往边上走。
+     * 手柄每帧读一次。
+     *
+     * 用 rAF 而不是 `gamepadconnected` 事件：那个事件只在**插上**时来一次，之后按钮状态
+     * 全靠轮询（浏览器不会为「按下 A」派发任何事件）—— 引擎自己也是每帧轮询的。
+     * 开销可以忽略（60Hz 下就是读十几个布尔值），而且这段只在「加入者 + 房间内」才挂。
      */
-    const onBlur = () => {
-      for (const button of held) netplay.sendButton(button, false);
-      held.clear();
+    let raf = 0;
+    const pollPad = () => {
+      fromPad = readGamepads();
+      sync();
+      raf = requestAnimationFrame(pollPad);
+    };
+    raf = requestAnimationFrame(pollPad);
+
+    /*
+     * 切走窗口 / 切走标签页时，把手里的钮一次性松开。
+     *
+     * 键盘那条是因为浏览器**不补发 keyup**；手柄那条是因为 rAF 会停 —— 两种情况都不主动
+     * 松的话，房主会一直以为你按着那个方向，角色自己往边上走。
+     */
+    const releaseAll = () => {
+      for (const button of sent) netplay.sendButton(button, false);
+      sent.clear();
+      fromKeyboard.clear();
+      fromPad = new Set();
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) releaseAll();
     };
 
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
-    window.addEventListener('blur', onBlur);
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
-      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('blur', releaseAll);
+      document.removeEventListener('visibilitychange', onVisibility);
+      cancelAnimationFrame(raf);
       /*
        * 摘监听时把欠着的 keyup 补上。不只为了关页面：开面板 / 改键位都会让这段
        * effect 重跑（依赖里有 bindings 和面板开关），正按着方向键的那一刻打开面板，
        * 后面那个 keyup 就再也没人转发了 —— 房主那边会一直以为你按着。
        */
-      for (const button of held) netplay.sendButton(button, false);
-      held.clear();
+      releaseAll();
     };
   }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, tourOpen]);
 
@@ -1697,6 +1758,8 @@ export default function ConsoleScene() {
             <div className="flex flex-col gap-2 p-4 text-[11px] leading-relaxed text-ink-300">
               <p>{playerLegend(bindings.p1, 1, t)}</p>
               <p>{playerLegend(bindings.p2, 2, t)}</p>
+              {/* 手柄不列键位 —— 它是固定的标准布局，改不了，见 lib/gamepad.ts */}
+              <p>{t('legend.gamepad')}</p>
               {/*
                 这里原来还有一行 `legend.shortcut`（P 暂停 / R 重置 / F5 存档 / F8 读档）。
                 快捷键 2026-10-10 全撤了，那行文案跟着删掉 —— 留着就是教用户去做一件

@@ -183,6 +183,12 @@ const en = {
    */
   'legend.needZip':
     'Format  FBNeo only reads .zip — this one looks like {ext}. Repack it, or grab a .zip build',
+  /*
+   * 手柄。单机是引擎白送的（RetroArch 的 `rwebpad` 驱动，我们一行代码没写），
+   * 但界面上不说就等于没有 —— 用户不会去猜插上的东西有没有生效。
+   * 房间里那句照样成立：加入者那侧的手柄是我们自己实现的（见 lib/gamepad.ts）。
+   */
+  'legend.gamepad': 'Gamepad  Plug one in and it works — on both sides when you are in a room.',
 
   /*
    * 联机面板。同样浮在房间上、不进屏幕。
@@ -229,7 +235,7 @@ const en = {
   'netplay.youAreHost':
     'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. You play with your own key set — see Controls for the current bindings.',
   'netplay.youAreGuest':
-    'You are player 2. No cartridge needed — the host streams the picture, and your keys are sent to the host. You play with your own key set (the Player 1 group) — see Controls.',
+    'You are player 2. No cartridge needed — the host streams the picture, and your input is sent to the host. Play with your own key set (the Player 1 group) or a gamepad — see Controls.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
   'netplay.errInsecure':
@@ -477,6 +483,8 @@ const zh: Record<MessageKey, string> = {
   'legend.title': '按键说明',
   'legend.close': '关闭',
   'legend.needZip': '格式  FBNeo 只吃 .zip —— 这个是 {ext}，重新打包一下（或换一个 .zip 版）',
+  /* 手柄，见上面英文那份的注释。 */
+  'legend.gamepad': '手柄  插上就能用；联机时房主和加入者各插一个也可以。',
 
   'netplay.title': '联机',
   'netplay.open': '联机对战',
@@ -512,7 +520,7 @@ const zh: Record<MessageKey, string> = {
   'netplay.youAreHost':
     '你是 1P。插上卡带后画面会自动推给对方。键位就是你自己的那套，当前值见「按键说明」。',
   'netplay.youAreGuest':
-    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。你按的是自己那套键（玩家 1 组），当前值见「按键说明」。',
+    '你是 2P。不需要卡带，房主会把画面推过来；你的键盘和手柄都会发给房主。键盘按的是自己那套键（玩家 1 组），手柄插上直接能用 —— 当前值见「按键说明」。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
   'netplay.errInsecure':

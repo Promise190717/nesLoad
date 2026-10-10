@@ -81,13 +81,35 @@ launch 又把 canvas 的 CSS 复位成 100% —— 结果**每换一盘游戏机
   游戏画面会响应，所以「支持手柄」是核心白送的，不是我们做的。
 - **本站没有任何手柄相关代码**（`lib/` `components/` 里 `gamepad` 0 处）：键位面板只配键盘、
   没有连接提示、不能改手柄键、页脚按键说明只有键盘。手柄能用**纯粹靠核心默认映射**。
-- **联机时加入者的手柄完全无效**：转发链只认 DOM 键盘事件
-  （`物理键盘 code --codeToButton(bindings.p1)--> 钮名`），加入者本机没有模拟器、
-  没有东西读他的手柄。房主自己的手柄能用（就是他本机 1P）。
-  —— 以后要做「加入者用手柄」，改动点在 `ConsoleScene` 的转发 effect：得先把手柄状态
-  轮询出来再翻成钮名，不能只挂在 keydown 上。
+- **联机时加入者的手柄也能用了**（2026-10-10 实现并验证）。原先转发链只认 DOM 键盘事件，
+  加入者本机不跑模拟器、没有东西读他的手柄。现在转发 effect 里多了一条 rAF 轮询。
+  - 映射表在 **`lib/gamepad.ts`**，**必须和引擎一致**（同一个手柄在两人手里手感要一样）。
+    引擎那份是 RetroArch 内置的 SDL 标准手柄 autoconfig，**直接从核心 wasm 里读出来的**：
+    `input_b_btn=0 input_a_btn=1 … input_right_btn=15`。**0/1 是反的**：手柄下键→RetroPad B、
+    右键→RetroPad A（实测确认过）。站内没有 l2/r2/l3/r3，那几项映射成 `null` 丢掉。
+  - **两个来源各自记账、再取并集**（`fromKeyboard` / `fromPad` → `sent` 差分后发包）。
+    不能让键盘和手柄各发各的 —— 同一个钮被两边同时按着时，任何一边松手都会把 keyup 发出去、
+    让角色在房主手里突然停住。
+  - 摇杆也接（死区 0.5）是**超出引擎默认**的放宽：引擎默认不开 `input_analog_dpad_mode`。
+  - 轮询走 rAF ⇒ **加入者把标签页切到后台时手柄会失效**（键盘不会，它走事件）。
+    用 `visibilitychange` 把欠下的 up 补上，避免切回来时角色自己走。
+  - 复现验证手法：`Page.addScriptToEvaluateOnNewDocument` 里覆写 `navigator.getGamepads()`，
+    暴露一个 `__setPad()`，再在转发 effect 里挂临时探针把发包序列记到一个数组里。
+    **记得先把 `localStorage['nesload:tour-done']` 置上** —— 操作指引开着时整段转发 effect 不挂
+    （`tourOpen` 是 effect 的拦截条件之一），不关掉会看到「探针在、就是一条包都不发」。
 - 未实测：两个手柄能否自动分到 1P/2P。
-
+- **两个手柄会自动分到 1P / 2P**（2026-10-10 实测，靠详细日志法，见下）：`[Autoconf] Xbox
+  Wireless Controller … configured in port 1` + `[Autoconf] Generic USB Joystick …
+  configured in port 2` —— 按浏览器枚举顺序（`getGamepads()` 的 index **0 / 1**）依次占端口，
+  不用任何配置。
+- **坑：单手柄永远落 1P**（端口就是按顺序占的，没有「把它挪到 2P」的入口，应用层更没做）。
+  所以 **「键盘 1P + 手柄 2P」这种组合在本站做不到** —— 两人要各用一个手柄才行；
+  或者干脆让 1P 位空着。跟用户解释双人方案时要主动说这条，否则他会以为插一个手柄就能当 2P。
+- 复现手法（下次直接用）：`Page.addScriptToEvaluateOnNewDocument` 里篡改
+  `navigator.getGamepads()` 返回 N 个伪造设备（不同 id、index 0/1、`mapping` 一个
+  `'standard'` 一个 `''`），用 `new Event('gamepadconnected')` + `Object.defineProperty(ev,
+  'gamepad', …)` 派发（**不能用 `GamepadEvent` 构造器，那个会校验真对象**），然后读
+  `log_verbosity: 'true'` 下的 `[Autoconf] … configured in port N` 行。
 ### 观测这类问题的坑（下次直接用）
 
 - **无头 Chrome 看不到输入效果**：rAF 基本不跑（`Page.startScreencast` 也不行），

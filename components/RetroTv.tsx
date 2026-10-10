@@ -283,7 +283,7 @@ export default function RetroTv({
               但必须落在 .crt 的两层伪元素（扫描线 z-5 / 边角暗角 z-6）之下，
               写成 z-10 会把显像管的质感一起糊掉。
             */}
-            {remoteStream && <RemoteScreen stream={remoteStream} />}
+            {remoteStream && <RemoteScreen stream={remoteStream} volume={volume} />}
 
             {/*
               没画面 = 没有信号，整块屏幕就是一片雪花。
@@ -558,8 +558,17 @@ export default function RetroTv({
  * `autoPlay` 不能省 —— 不播的话就是一张静止的黑图；`playsInline` 是给 iOS 的，
  * 不加会强行全屏。刻意不加 `muted`：房主那边的声音也一起推过来了，
  * 静音等于白抓一路音频。
+ *
+ * `volume` 是**本机**的音量档位（机身那颗 VOL）。加入者没有模拟器，房主推来的
+ * 声音只在这条 `<video>` 上 —— 见下面那个 effect 的注释。
  */
-function RemoteScreen({ stream }: { stream: MediaStream }) {
+function RemoteScreen({
+  stream,
+  volume,
+}: {
+  stream: MediaStream;
+  volume: number;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -580,6 +589,27 @@ function RemoteScreen({ stream }: { stream: MediaStream }) {
       if (video.srcObject === stream) video.srcObject = null;
     };
   }, [stream]);
+
+  /*
+   * 音量：第 n 档 = n / VOLUME_MAX，0 档静音。
+   *
+   * 为什么非接不可：机身那颗 VOL 原先只喂给 `controller.setVolume()`（模拟器音量），
+   * 而加入者本机没有模拟器实例 —— 那个调用只是把档位记下来就返回了，一点声音都改不动。
+   * 加入者听见的声音全来自这条 <video>，所以档位必须落到 `video.volume` 上，
+   * 否则他拖音量条只有格子会动（也压不到 0）。
+   *
+   * 0 档另外写一次 `muted`：单把 volume 归零也能静音，但「自动播放被拦」那条兜底
+   * 走的就是 muted（见上），两边语义统一之后，用户把档位从 0 往上推时能确定地放出声音。
+   * 挂载瞬间这两个 effect 的先后不会打架：`play()` 是异步的，它失败时的 `muted = true`
+   * 发生在音量写入之后，那时即便档位大于 0 也只是暂时静音，用户一动音量就恢复 ——
+   * 极端情况，不值得为它加一层状态同步。
+   */
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    video.volume = volume / VOLUME_MAX;
+    video.muted = volume === 0;
+  }, [volume]);
 
   return (
     <video
