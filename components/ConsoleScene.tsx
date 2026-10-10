@@ -19,11 +19,14 @@ import {
 } from '@/lib/emulator';
 import { formatTime, type Locale } from '@/lib/i18n';
 import {
+  captureFpsFor,
+  DEFAULT_STREAM_QUALITY,
   IDLE_NETPLAY_STATE,
   NetplayController,
   remotePlayer,
   type NetplayMode,
   type NetplayState,
+  type StreamQuality,
 } from '@/lib/netplay';
 import {
   codeToButton,
@@ -98,12 +101,20 @@ const SIMPLE_KEY = 'nesload:simple';
  * 所以以后想重置只要删掉这个键即可 —— 见下面那个 effect。
  */
 const TOUR_KEY = 'nesload:tour-done';
+/**
+ * 联机出画档位。**要记住**（和主题 / 吊灯同类）—— 它是按机器性能选的，
+ * 每开一局都要重选一遍太烦。值的类型是 `StreamQuality`，存在 `lib/netplay.ts`。
+ */
+const QUALITY_KEY = 'nesload:netplay-quality';
 
 /**
- * 抓流时请求的帧率。NES 是 60fps，给足就不会丢帧；
- * 浏览器会按实际编码能力降，不会硬撑。
+ * 注意：抓流请求的帧率**不再是这里的常量**，由出画档位给出（`captureFpsFor`）。
+ *
+ * 为什么帧率必须在建流那一刻定死：`captureStream(fps)` 的帧率是建流参数，事后改不了
+ * （`applyConstraints` 对画布来的轨并不可靠），所以「换档」等于「重建整条流」。
+ * 档位为什么能换到帧数、以及「房主掉帧 = 整局变慢」的完整因果，
+ * 写在 lib/netplay.ts 的 `StreamQuality` 那一段。
  */
-const CAPTURE_FPS = 60;
 /** 等音频轨的最长尝试次数（每次 500ms，共 5 秒）—— 见下面的「声音迟到」注释 */
 const AUDIO_RETRY_LIMIT = 10;
 
@@ -120,10 +131,16 @@ const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
  *
  * 画面来自 canvas.captureStream；声音是从 WebAudio 上旁路出来的（见 lib/audio-tap.ts），
  * 核心还没建 AudioContext 时拿不到 —— 那就先推画面，声音由调用方重试补上。
+ *
+ * `contentHint = 'motion'`：告诉编码器这是一路**动的东西**（游戏画面），
+ * 让它按「保住动作连贯」的口径去分配码率，而不是按「保住静态细节」——
+ * 后者会把码率堆在单帧画质上，既费编码算力又对游戏没意义。
  */
-function createCaptureStream(canvas: HTMLCanvasElement | null): MediaStream | null {
+function createCaptureStream(canvas: HTMLCanvasElement | null, fps: number): MediaStream | null {
   if (!canvas || typeof canvas.captureStream !== 'function') return null;
-  const stream = canvas.captureStream(CAPTURE_FPS);
+  const stream = canvas.captureStream(fps);
+  const [video] = stream.getVideoTracks();
+  if (video) video.contentHint = 'motion';
   const audio = getAudioTrack();
   if (audio) stream.addTrack(audio);
   return stream;
@@ -261,6 +278,11 @@ export default function ConsoleScene() {
    * 不持久化：每次开面板都从局域网开始，省得用户上次选了公网、这次忘了切回去。
    */
   const [netplayMode, setNetplayMode] = useState<NetplayMode>('lan');
+  /**
+   * 出画档位（房主选）。默认值先给 `DEFAULT_STREAM_QUALITY`，真正存的份在挂载后读
+   * （和键位同一套路：服务端没有 localStorage，惰性初始化会两边不一致）。
+   */
+  const [streamQuality, setStreamQuality] = useState<StreamQuality>(DEFAULT_STREAM_QUALITY);
   /** 房主推过来的画面流。只有加入者会拿到，房主那边永远是 null */
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
@@ -341,6 +363,34 @@ export default function ConsoleScene() {
     setBindings(stored);
     controller.setBindings(stored);
   }, [controller]);
+
+  /**
+   * 出画档位也是挂载后读（同上：服务端没有 localStorage）。
+   * 读到的值不是合法档位（手改过、或旧版本留下的）就当没存过、退回默认 ——
+   * 免得一个脏值被当成档位传下去。
+   */
+  useEffect(() => {
+    const stored = localStorage.getItem(QUALITY_KEY);
+    if (stored === 'smooth' || stored === 'balanced' || stored === 'sharp') {
+      setStreamQuality(stored);
+    }
+  }, []);
+
+  /**
+   * 换档：状态 + 记住。写入失败（隐私模式）不影响本次生效，只是下次要重选。
+   *
+   * 这里**不碰流** —— 下面那个「房主推画面」的 effect 依赖里有 `streamQuality`，
+   * 值一变它会自动收掉旧流、按新帧率重建一条。帧率是建流参数、事后改不了，
+   * 所以「换档 = 重建整条流」这件事只有那一个地方该做。
+   */
+  const changeStreamQuality = useCallback((next: StreamQuality) => {
+    setStreamQuality(next);
+    try {
+      localStorage.setItem(QUALITY_KEY, next);
+    } catch {
+      // 隐私模式下 localStorage 会抛，静默即可
+    }
+  }, []);
 
   /*
    * 初次访问自动弹操作指引。和上面键位同一套路：挂载后读，不在惰性初始化里读。
@@ -722,14 +772,18 @@ export default function ConsoleScene() {
    *
    * 依赖里带 `role` 是为了覆盖「先插卡带、后开房」——开房那一刻 role 才变成 host，
    * 这个 effect 会重跑一遍、把流建起来。反过来退房（role 变 null）时走清理。
+   *
+   * 依赖里带 `streamQuality` 是为了**换档**：帧率是 `captureStream(fps)` 的建流参数，
+   * 事后改不了，所以换档必须重建整条流 —— 也就是「先按老样子收掉、再按新帧率建一条」。
+   * 正常情况下换不了：档位选择器只在没进房间时显示（见 NetplayPanel）。
    */
   useEffect(() => {
     if (netplayState.role !== 'host' || !rom) return;
 
-    const stream = createCaptureStream(canvasRef.current);
+    const stream = createCaptureStream(canvasRef.current, captureFpsFor(streamQuality));
     if (!stream) return;
 
-    netplay.publishStream(stream);
+    netplay.publishStream(stream, streamQuality);
     netplay.announceGame({ name: rom.name, console: rom.console });
 
     /*
@@ -755,7 +809,7 @@ export default function ConsoleScene() {
       netplay.announceGame(null);
       netplay.unpublishStream();
     };
-  }, [rom, netplayState.role, netplay]);
+  }, [rom, netplayState.role, netplay, streamQuality]);
 
   /**
    * 加入者：房主一出画面，就把本机那盘卡带弹掉。
@@ -944,62 +998,49 @@ export default function ConsoleScene() {
     if (document.fullscreenElement) void document.exitFullscreen();
   }, []);
 
+  /**
+   * Esc 关面板。
+   *
+   * **键盘快捷键（P / R / F5 / F8）2026-10-10 全部取消了**（用户要求）。
+   * 它们都是「看不见的操作」，而按错的代价不小：P 一按游戏就停住（画面冻在最后一帧，
+   * 看着就是卡死），F5 会直接把存档槽覆盖掉。这四件事在机身前面板上一人一颗钮 ——
+   * 看得见、点得到，键盘这条路没有存在的必要。
+   *
+   * 所以这个 effect 现在只剩一件事：面板开着时按 Esc 关掉它。
+   *
+   * 输入框里按 Esc 不算关面板（房间码打了一半、留言本写了一行，都不该被撤掉）——
+   * 留言本尤其如此：它的输入框是 `<textarea>`，不在下面那道 `HTMLInputElement`
+   * 过滤里，只能靠早退那一行挡住。
+   */
   useEffect(() => {
+    const anyPanelOpen =
+      saveOpen ||
+      netplayOpen ||
+      keybindOpen ||
+      libraryOpen ||
+      legendOpen ||
+      noteOpen ||
+      feedbackOpen ||
+      tourOpen;
+
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
+      if (!anyPanelOpen || e.key !== 'Escape') return;
 
-      // 有面板开着的时候只认 Esc。否则在面板上按 P / R / F5 会顺手把游戏
-      // 暂停、重置、或者又存一份 —— 全是意外。操作指引算面板的一种。
-      //
-      // 留言本尤其需要这一条：它的输入框是 `<textarea>`，不在上面那道
-      // `HTMLInputElement` 过滤里，所以「在留言本里打字」只能靠这里挡住。
-      if (
-        saveOpen ||
-        netplayOpen ||
-        keybindOpen ||
-        libraryOpen ||
-        legendOpen ||
-        noteOpen ||
-        feedbackOpen ||
-        tourOpen
-      ) {
-        if (e.key === 'Escape') {
-          setSaveOpen(false);
-          setNetplayOpen(false);
-          setKeybindOpen(false);
-          setLibraryOpen(false);
-          setLegendOpen(false);
-          setNoteOpen(false);
-          setFeedbackOpen(false);
-          // 指引自己也挂了一个 Esc（见 OnboardingTour），这里再兜一次。
-          // 两条路都通到 closeTour，重复调用只是多写一次标记，无副作用。
-          if (tourOpen) closeTour();
-        }
-        return;
-      }
-
-      const k = e.key.toLowerCase();
-      if (k === 'p') {
-        e.preventDefault();
-        void togglePause();
-      } else if (k === 'r') {
-        e.preventDefault();
-        void reset();
-      } else if (e.key === 'F5') {
-        e.preventDefault();
-        void saveState();
-      } else if (e.key === 'F8') {
-        e.preventDefault();
-        void openLoad();
-      }
+      setSaveOpen(false);
+      setNetplayOpen(false);
+      setKeybindOpen(false);
+      setLibraryOpen(false);
+      setLegendOpen(false);
+      setNoteOpen(false);
+      setFeedbackOpen(false);
+      // 指引自己也挂了一个 Esc（见 OnboardingTour），这里再兜一次。
+      // 两条路都通到 closeTour，重复调用只是多写一次标记，无副作用。
+      if (tourOpen) closeTour();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    togglePause,
-    reset,
-    saveState,
-    openLoad,
     saveOpen,
     netplayOpen,
     keybindOpen,
@@ -1427,8 +1468,9 @@ export default function ConsoleScene() {
       {/*
         存档列表。刻意浮在房间上、**不进屏幕** —— 屏幕里跑的是游戏画面，
         盖一张列表上去就把画面挡了；而且它是要点选的面板，不该占着显像管。
-        屏幕里只放**状态提示**（怎么开始玩 / RELEASE TO LOAD / 载入进度），
-        要读的说明一律走这种弹窗。
+        屏幕里只放**状态提示**（怎么开始玩 / RELEASE TO LOAD / 载入进度 / PAUSED），
+        要读的说明一律走这种弹窗。存档列表尤其如此 —— 它是要点选的东西，
+        而且从 2026-10-10 起它也是读档**唯一**的入口（F8 那个快捷键撤了）。
 
         它自己不是物件，没必要做成拟物：一块带像素描边的面板 + 点背板或 Esc 关掉。
         行按时间从新到旧排，点哪一条载入哪一条。
@@ -1491,6 +1533,8 @@ export default function ConsoleScene() {
         busy={netplayBusy}
         mode={netplayMode}
         onModeChange={setNetplayMode}
+        quality={streamQuality}
+        onQualityChange={changeStreamQuality}
         onClose={() => setNetplayOpen(false)}
         onCreate={() => void createRoom()}
         onJoin={(code) => void joinRoom(code)}
@@ -1583,7 +1627,12 @@ export default function ConsoleScene() {
             <div className="flex flex-col gap-2 p-4 text-[11px] leading-relaxed text-ink-300">
               <p>{playerLegend(bindings.p1, 1, t)}</p>
               <p>{playerLegend(bindings.p2, 2, t)}</p>
-              <p>{t('legend.shortcut')}</p>
+              {/*
+                这里原来还有一行 `legend.shortcut`（P 暂停 / R 重置 / F5 存档 / F8 读档）。
+                快捷键 2026-10-10 全撤了，那行文案跟着删掉 —— 留着就是教用户去做一件
+                现在不会有任何反应的事。暂停 / 重置 / 存档 / 读档都在机身前面板上，
+                按钮上写的字和这里原来那句一模一样，不需要再说明一遍。
+              */}
               {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
 
               {/*

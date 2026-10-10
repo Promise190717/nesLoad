@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { TURN_CONFIGURED } from '@/lib/netplay';
-import type { NetplayError, NetplayMode, NetplayState } from '@/lib/netplay';
+import type { NetplayError, NetplayMode, NetplayState, StreamQuality } from '@/lib/netplay';
 import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
@@ -13,6 +13,9 @@ interface NetplayPanelProps {
   /** 当前选的链路。`lan` = 只 STUN；`wan` = 额外带 TURN 兜底（仍是直连优先） */
   mode: NetplayMode;
   onModeChange: (mode: NetplayMode) => void;
+  /** 当前出画档位。房主用得上；加入者不推流，选了也不生效 */
+  quality: StreamQuality;
+  onQualityChange: (quality: StreamQuality) => void;
   onClose: () => void;
   onCreate: () => void;
   onJoin: (code: string) => void;
@@ -36,6 +39,19 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
 };
 
 /**
+ * 档位 → 文案。和上面同样是穷尽性检查，加档位时漏一条编译不过。
+ * 刻意只用两个字 / 一个词：三个按钮要并排塞进 420px 的面板。
+ */
+const QUALITY_MESSAGE: Record<StreamQuality, MessageKey> = {
+  smooth: 'netplay.qualitySmooth',
+  balanced: 'netplay.qualityBalanced',
+  sharp: 'netplay.qualitySharp',
+};
+
+/** 三档的顺序：由省到费。数组顺序 = 界面顺序，别改成对象遍历（顺序不可靠）。 */
+const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
+
+/**
  * 联机面板。和存档列表一样浮在房间上、**不进屏幕** ——
  * 屏幕里跑的是游戏画面，这张面板要写字、还要输入房间码。
  *
@@ -43,6 +59,11 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
  *   idle      → 创建 / 输入码加入（`error` 有值时在底部补一句原因）
  *   waiting   → 亮出房间码 + 「等待对方」
  *   connected → 亮出房间码 + 延迟
+ *
+ * idle 那一屏上有两个选择器，都只在**没进房间**时出现：
+ *   - 链路（`lan` / `wan`）—— 连上了再换档没有意义；
+ *   - 出画档位（流畅 / 均衡 / 清晰）—— 换档要重建整条流，玩到一半换会闪一下。
+ * 档位那个是给房主用的（编码压在他机器上），理见 lib/netplay.ts 的 `StreamQuality`。
  *
  * 「等待对方」只对**房主**成立 —— 加入者那边房主一走，房间就被销毁、
  * 直接落回 idle 并报 `host-left`（见 lib/netplay.ts 的 onPeerLeave）。
@@ -57,6 +78,8 @@ export default function NetplayPanel({
   busy,
   mode,
   onModeChange,
+  quality,
+  onQualityChange,
   onClose,
   onCreate,
   onJoin,
@@ -153,6 +176,44 @@ export default function NetplayPanel({
           {/* 公网档还没配 TURN —— 只说明，不放创建/加入的入口 */}
           {!inRoom && wanLocked && (
             <p className="text-[12px] text-ink-200">{t('netplay.wanDev')}</p>
+          )}
+
+          {/*
+            出画档位。
+
+            为什么放在「没进房间」这一段（和链路选择器同规矩）：换档要连**帧率**一起换，
+            而帧率是 `captureStream(fps)` 的建流参数、事后改不了 —— 换档等于重建整条流，
+            玩到一半换会闪一下还要重新协商。退房再选是几秒钟的事。
+
+            为什么加入者也看得到：进房间之前谁都还不知道自己是房主还是加入者
+            （角色是开了/进了房间才定的）。这一项确实只对房主生效，所以文案里讲明白，
+            而不是藏起来 —— 藏起来的话，卡的那个人会以为这事儿跟他无关。
+          */}
+          {!inRoom && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[10px] text-ink-500">{t('netplay.quality')}</span>
+              <div className="flex gap-1">
+                {QUALITY_ORDER.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={busy}
+                    aria-pressed={quality === value}
+                    onClick={() => onQualityChange(value)}
+                    className={`pixel-edge pxw-2 pxc-500 block flex-1 py-1.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                      quality === value
+                        ? 'bg-accent text-ink-950'
+                        : 'bg-ink-700 text-ink-200 enabled:hover:bg-ink-600 enabled:hover:text-accent'
+                    }`}
+                  >
+                    {t(QUALITY_MESSAGE[value])}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] leading-relaxed text-ink-500">
+                {t('netplay.qualityHint')}
+              </p>
+            </div>
           )}
 
           {!inRoom && !wanLocked && (

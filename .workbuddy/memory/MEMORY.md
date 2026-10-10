@@ -24,6 +24,22 @@
 （font-pixel 无汉字）。主题 / 灯 / 季节 / 简洁模式四个属性由 `<html>` 上的 data-* 控制，
 首屏靠 app/layout.tsx 里的内联脚本 BOOT_INIT 落地。
 
+### 屏幕尺寸必须写死在 `.screen` 的 class 上（2026-10-10 踩过大坑）
+
+`components/RetroTv.tsx` 里那个屏幕 div 的 `h-[540px] w-[720px]` **不能删、不能改成让
+canvas 撑出尺寸**。canvas 是 .screen 里唯一在流里的孩子，一旦屏幕尺寸变成「由 canvas 决定」，
+模拟器核心就会把它越撑越大：核心启动时先 `canvas.width=64` 探尺寸（发现 CSS 没锁死就把
+clientWidth 写死回内联样式）、随后按 devicePixelRatio 把后备存储设成 720×dpr、Nostalgist 每次
+launch 又把 canvas 的 CSS 复位成 100% —— 结果**每换一盘游戏机身就乘一次 dpr**（720→900→1125…），
+100% 缩放的机器上看不出来，125%/150% 上必现「点第二款游戏整个游戏区域变大」。
+
+同理：`lib/emulator.ts` 的 launch `size` 用 `SCREEN_WIDTH/SCREEN_HEIGHT`（720×540）常量，
+**不要读 `canvas.width/height`** —— 那对属性会被核心改成 720×dpr，读回来等于把脏值烤进下一次。
+
+尺寸链的实际值：屏幕 720×540（4:3）→ 内圈左右外边距 10（`mx-2.5`）→ **机身 740**。
+文档（globals.css / i18n 的 `notice.desktopOnly` / README）里的 766 是屏幕还带 15px 外边距时的
+旧数，2026-10-10 起实际是 740；900px 断点仍有余量，不用动。
+
 ## SEO 层（2026-10-10 建，别随手改回去）
 
 | 位置 | 管什么 |
@@ -56,6 +72,36 @@
   写「玩家 1」加入者会读成「那是房主的键」。2P 那组只服务单机双人共用一块键盘。
 - 房主 P1/P2 不许撞键那条校验**必须留着**：注入合成的是真键盘事件，同一个 code 会同时驱动两个玩家。
 - 文案里**不要列键位**（写死的默认值迟早说假话），键位一律由 `playerLegend()` 现算。
+
+## 操作入口：只有机身按钮，没有键盘快捷键（2026-10-10 定）
+
+用户要求取消 `P` 暂停 / `R` 重置 / `F5` 存档 / `F8` 读档 四个全局快捷键 ——
+**现在全站唯一的键盘操作是 `Esc`（关面板）**，暂停 / 存档 / 读档 / 重载一律走机身前面板
+那排按钮。**别再往 ConsoleScene 的 keydown effect 里加操作类快捷键**：它们是看不见的操作，
+按错的代价大（P 冻画面像卡死、F5 覆盖存档）。
+
+- i18n 的 `legend.shortcut` 已删，原位置留了「别再补回来」的注释。
+- 暂停提示在屏幕里（`RetroTv` 的 `paused` 层）：`PAUSED` + `PRESS RESUME ON THE PANEL`，
+  文案跟着按钮的 `panel.resume` 走 —— 撤快捷键后**不能**再写「按 P」。
+
+### 房主掉帧 = 整局变慢（2026-10-10）
+
+**RetroArch 的 emscripten 主循环是 rAF 驱动、不跳帧的**（核心里 `_emscripten_set_main_loop_timing(1,1)`）：
+一帧超过 16.7 ms 它不丢帧，而是整体跑慢 —— 表现是**平滑的「慢动作」**，而且**两端都会慢**
+（加入者放的本来就是房主那串慢帧）。所以房主端任何额外开销都直接换成掉帧。
+
+由此定下「出画质量」三档，**唯一出口是 `lib/netplay.ts` 的 `StreamQuality` + `QUALITY_SPEC`**：
+`captureFpsFor()` 给 `createCaptureStream`（帧率是建流参数，**换档 = 重建整条流**）；
+编码侧参数（`scaleResolutionDownBy` / `maxBitrate` / `degradationPreference`）由私有
+`tuneStream()` 在 **addStream 之后 / onPeerJoin / refreshStream** 三处压上去。
+
+- **`room.getPeers()` 能拿到 `RTCPeerConnection`**（`Record<string, RTCPeerConnection>`），
+  从 `getSenders()` 按 track 反查就能 `setParameters` —— 这是改编码参数的**唯一口子**。
+  `room.addStream()` 在 0.26 里返回 `Promise<void>[]`，**不给 sender**，别去那儿找。
+- 默认档 `balanced` 会按 720 这条线压编码高度：画布后备存储是 **720×dpr**（125% = 900×675），
+  而客人那块 `.screen` 只有 720×540 —— 多出来的像素他显示不出来，编了白编。
+  **不做这件事才是 bug**，不是画质妥协。
+- 三个档里**只有帧率**能减轻主线程负担；分辨率 / 码率减的是编码器线程。改不动时先降帧率。
 
 ## 部署相关
 

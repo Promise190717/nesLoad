@@ -6,37 +6,42 @@ import {
   type RefObject
 } from 'react';
 import packageJson from '@/package.json';
-import { VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
+import { SCREEN_HEIGHT, SCREEN_WIDTH, VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
 import { useI18n } from './I18nProvider';
 
 /*
  * 机身尺寸（2026-10-08 整体放大到 1.25 倍；2026-10-09 去掉插卡舱，高度减 70px）。
  *
- * 屏幕是 720×540（NES 画面的 4:3），机身宽度 = 720 + 屏幕外边距 15×2 +
- * 内圈外边距 8×2 = **766px**。顶沿、前面板、底座都是跟着屏幕走的固定值，
+ * 屏幕是 720×540（NES 画面的 4:3），**尺寸写在屏幕那个 div 的 class 上**（h-[540px]
+ * w-[720px]，见下面那段注释 —— 别删、别改成让 canvas 撑）。机身宽度 =
+ * 720 + 内圈左右外边距 10×2 = **740px**。顶沿、前面板、底座都是跟着屏幕走的固定值，
  * 只改屏幕会让比例散掉 —— 下面这些是**一套**，要动就一起动：
  *
- *   屏幕 720×540 · 屏幕外边距 15 · 内圈外边距 8 · 内圈描边 pxw-4 · 机身描边 pxw-6
- *   顶沿 30 · 前面板（py-3 撑出来）· 底座 450×18
+ *   屏幕 720×540（class 上）· 内圈外边距 m-[8px] mx-2.5 · 内圈描边 pxw-4 · 机身描边 pxw-6
+ *   顶沿 30 · 前面板（py-2.5 撑出来）· 底座 450×18
  *
  * 底部那个 68px 的**插卡舱已经撤掉**（2026-10-09，用户要求）：拖拽落点本来就是整机，
  * 卡槽只是个多余的入口，留着还白占 70px 高度。现在「怎么开始玩」由屏幕里的提示负责。
  *
- * 场景原先 = 766 + 间距 16 + 卡带架 220 = 1002，加 main 的 px-6 是 1050px，断点 1100px。
- * 卡带架 2026-10-09 撤掉后只剩 766 + px-6 = **814px**，断点跟着降到 **900px**。
+ * 场景原先 = 屏幕 766 那版 + 间距 16 + 卡带架 220 ≈ 1002，加 main 的 px-6 是 1050px，
+ * 断点 1100px。卡带架 2026-10-09 撤掉、屏幕外边距同期从 15 收到 10 之后只剩
+ * 740 + px-6 = **788px**，断点仍是 **900px**（当初按 814 定的，余量还在，不用动）。
  * 改这里要同步 globals.css 的断点与上方那段注释，
  * 以及 i18n.ts 的 notice.desktopOnly（中英各一处）。
+ *
+ * ⚠️ globals.css / i18n.ts / README 里写的「机身 766 / 屏幕外边距 15」是屏幕还自己带
+ * 15px 外边距时的数字，2026-10-10 起实际是 **740 / 10** —— 那几处文案没跟着改。
  */
 
 /**
- * 机身宽度 = 屏幕 720 + 屏幕外边距 15×2 + 内圈外边距 8×2 = 766。
+ * 机身宽度 = 屏幕 720 + 内圈左右外边距 10×2 = 740。
  *
  * 组件里**没有**写死 width（宽度是上面那套尺寸自己撑出来的），这里只是把它导出去。
  * 早先 ConsoleScene 的键位表要按**机身**对中（而不是按「机身 + 卡带架」整排对中）时
  * 用过它；键位表 2026-10-09 挪到右上角之后已无人引用，保留是为了让机身宽度有个
  * 唯一出处 —— 改屏幕尺寸或那两道外边距时，对着这个值核一遍。
  */
-export const TV_WIDTH = 766;
+export const TV_WIDTH = 740;
 
 interface RetroTvProps {
   canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -53,6 +58,14 @@ interface RetroTvProps {
    * 本机插卡带是没意义的，画面是房主推来的。
    */
   remotePlaying: boolean;
+  /**
+   * 本机模拟器暂停着。
+   *
+   * 两个用处：机身那颗 PWR 灯多出第三个颜色（accent），以及屏幕里那句
+   * `PAUSED / PRESS RESUME ON THE PANEL`。后者不能省 —— 暂停之后画面就是**冻住的
+   * 最后一帧**，和「卡死了」长得完全一样，而解除暂停的那个钮在机身上，
+   * 屏幕里不指一下就只能靠猜（见下面那层提示的注释）。
+   */
   paused: boolean;
   busy: boolean;
   /**
@@ -91,7 +104,8 @@ interface RetroTvProps {
  * 叠在那片雪花之上 —— 插卡舱撤掉之后没有别的地方能说清这件事，
  * 新用户对着一片雪花只会以为坏了。
  *
- * 屏幕里**只放状态提示**：这一句、`RELEASE TO LOAD`、`WAITING FOR HOST`、载入进度条。
+ * 屏幕里**只放状态提示**：这一句、`RELEASE TO LOAD`、`WAITING FOR HOST`、载入进度条、
+ * 以及暂停时的 `PAUSED`（暂停后画面冻住，不提示就看着像卡死）。
  * 要读的说明（存档列表 / 联机 / 键位 / 按键说明）一律走浮在房间上的弹窗。
  * 提示文字走 font-pixel，那套字模**没有汉字**，所以只能是英文（和 PWR / VOL /
  * EXIT FULLSCREEN 同一套做法，也因此不进 i18n 文案表）。
@@ -187,14 +201,32 @@ export default function RetroTv({
         {/* 机身内圈 + 屏幕 */}
         <div className="relative m-[8px] mx-2.5 bg-ink-900 pixel-edge pxw-4 pxc-700">
           {/*
-            屏幕尺寸由容器定死，canvas 只负责填满。
-            Nostalgist 启动时会往 canvas 上写 width/height: 100% 的内联样式，
-            内联样式压过 class —— 若让 canvas 去撑容器就会塌成 0。
+            屏幕尺寸**必须写在这行 class 上**（h-[540px] w-[720px]）。
+
+            不能省、也不能改成「让 canvas 撑出尺寸」—— 那正是 2026-10-10 用户报的
+            「点第二款游戏后整个游戏区域变大」：尺寸类被删过一次，屏幕就变成由 canvas
+            的**固有尺寸**决定（canvas 是屏幕里唯一在流里的孩子），而 canvas 的尺寸会
+            被三方轮番改：
+
+              · 核心启动时先把 canvas 设成 64×64 探一下，发现「CSS 没锁死尺寸」就把
+                探之前的 clientWidth 写死回内联样式（核心自己的日志：
+                「Canvas size should be set using CSS properties!」）；
+              · 核心随后按 devicePixelRatio 把后备存储设成 720×dpr（125% 缩放 = 900）；
+              · Nostalgist 每次 launch 又往 canvas 写一次 width/height: 100%。
+
+            于是设备缩放比被一次一次乘进机身：100% 缩放的机器上看不出来，
+            125% / 150% 上每换一盘游戏整台机器就大一圈（720 → 900 → 1125…）。
+            写死尺寸之后，canvas 怎么改都只动它自己（它仍是 class 上的 h-full w-full，
+            照样填满屏幕），机身纹丝不动。
+
+            另外：全屏规则 `.screen:fullscreen { width:100vw; height:100vh }` 写在
+            globals.css 里，是**未分层**的样式，优先级高于 Tailwind 的 utilities 层，
+            所以这两个尺寸类不会顶掉全屏尺寸 —— 别改成内联 style，内联会顶掉全屏。
           */}
           <div
             ref={screenRef}
             data-tour="screen"
-            className="screen crt relative overflow-hidden bg-black"
+            className="screen crt relative h-[540px] w-[720px] overflow-hidden bg-black"
           >
             {/*
               canvas 必须始终留在 DOM 里，但没画面时要把它藏起来：
@@ -205,8 +237,8 @@ export default function RetroTv({
             */}
             <canvas
               ref={canvasRef}
-              width={720}
-              height={540}
+              width={SCREEN_WIDTH}
+              height={SCREEN_HEIGHT}
               className={`pixelated block h-full w-full ${
                 rom && !remoteStream ? '' : 'invisible'
               }`}
@@ -286,6 +318,43 @@ export default function RetroTv({
               ))}
 
             {/*
+              暂停提示。**必须在屏幕里**，光靠机身那颗 PWR 灯不够。
+
+              最要紧的一点：暂停之后画面是**冻住的最后一帧**，和「卡死了」长得一模一样。
+              不写这一句，用户看到的就是一台「坏了」的电视。
+
+              起因（2026-10-10，用户提的）：P 是全局快捷键，全屏、手搁在键盘上时很容易误触，
+              按完画面就不动了。**现在 P 已经撤掉**（键盘快捷键全取消），暂停只剩机身面板那颗
+              钮这一个入口，所以下面那句提示必须指到**面板上**，不能再写「按 P」——
+              那会教用户去按一个已经不存在的键。
+
+              和别的状态提示互斥：暂停意味着本机跑着卡带（`paused` 只在
+              `controller.isRunning` 时才可能为 true），所以那句「怎么开始玩」不会同时出现，
+              载入进度也不会（载入会先把 paused 复位）。
+
+              那层半透明底是拿来压住冻结画面的：什么都不垫的话，亮场景里这行字会糊掉。
+              配色走 crt-*（屏幕底永远是黑的，ink-* 会随主题翻转）。
+              文字走 font-pixel，那套字模没有汉字 —— 屏幕上所有提示都只能是英文，
+              因此和 PWR / VOL 一样不进 i18n 文案表。
+
+              刻意**不写 z-index**：要盖住 canvas，又必须落在 .crt 的扫描线（z-5）/
+              暗角（z-6）之下，否则显像管质感会被一起糊掉（和上面几层同一个理由）。
+              pointer-events-none：它只是一句话，不该变成点击 / 拖拽的落点 ——
+              全屏退出口是 z-40，压在它上面，不受影响。
+            */}
+            {paused && (
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-[12px] bg-crt-950/60">
+                <span className="blink font-pixel text-[20px] text-crt-accent drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+                  PAUSED
+                </span>
+                {/* 用的就是那颗钮自己的词（i18n 的 panel.resume = Resume），照着找得到 */}
+                <span className="font-pixel text-[9px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+                  PRESS RESUME ON THE PANEL
+                </span>
+              </div>
+            )}
+
+            {/*
               载入进度。**从机身下沿挪到屏幕里**的 —— 用户要求进度条出现在电视上，
               而插卡舱 2026-10-09 整个撤掉了。屏幕里没画面时本来是一片雪花，
               进度条叠在雪花之上，让「正在读卡带」这件事看得见。
@@ -347,8 +416,12 @@ export default function RetroTv({
           不存在窄屏挤压，所以写死尺寸是安全的。
 
           顺序把「重载」放在「弹出」前面：重载是留在卡带上的操作，弹出是把它撤下来，
-          撤下来那个永远排最后。重载＝重启核心（游戏从头开始），和键盘上的 R 是同一件事 ——
-          以前只有快捷键没有钮，屏幕里的提示也从不提它，等于藏起来了。
+          撤下来那个永远排最后。重载＝重启核心（游戏从头开始），原先只有快捷键（R）、
+          没有钮，屏幕里的提示也从不提它，等于藏起来了。
+
+          2026-10-10 起这五颗钮是暂停 / 存档 / 读档 / 重载**唯一**的入口 ——
+          键盘快捷键全撤了（为什么撤见 ConsoleScene 里那个 Esc effect 的注释）。
+          所以它们不能变灰之后没有出路：`disabled` 只在没卡带 / 载入中时成立。
         */}
         <div className="flex items-center gap-5 border-t-2 border-ink-800 bg-ink-700 px-5 py-2.5">
           <div className="flex shrink-0 items-center gap-2">

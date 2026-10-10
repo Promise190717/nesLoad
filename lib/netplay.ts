@@ -103,6 +103,108 @@ export type NetplayRole = 'host' | 'guest';
 export type NetplayMode = 'lan' | 'wan';
 
 /**
+ * 出画面的**编码档位**。房主选 —— 因为「模拟器 + 抓帧 + 编码」三件事都压在他一台机器上。
+ *
+ * 这个开关不是画质偏好，是**帧数开关**。
+ *
+ * 原因：RetroArch 的 emscripten 主循环是 rAF 驱动、**不跳帧**的
+ * （核心里那句 `_emscripten_set_main_loop_timing(1,1)`），一帧超过 16.7 ms 它不会丢帧，
+ * 而是整体跑慢 —— 表现就是平滑的「慢动作」，而且**两端都会慢**（加入者放的本来就是
+ * 房主那串已经变慢的帧，他只是没跟着一起变糊）。所以房主这边每省下一点编码开销，
+ * 换来的是实打实的帧数。
+ *
+ * 三档之间只差三件事：抓帧帧率、编码分辨率上限、码率上限。见 `QUALITY_SPEC`。
+ */
+export type StreamQuality = 'smooth' | 'balanced' | 'sharp';
+
+/** 默认档。压分辨率但不砍帧率 —— 对客人来说是**无损**的（理由见 `QUALITY_SPEC`）。 */
+export const DEFAULT_STREAM_QUALITY: StreamQuality = 'balanced';
+
+/**
+ * 档位 → 编码参数。
+ *
+ * `captureFps` 是**抓帧频率**（`canvas.captureStream(fps)`）。它是这套参数里唯一能减轻
+ * **主线程**负担的旋钮：帧率直接决定「把画布帧交给编码器」这件事每秒钟发生几次，
+ * 所以真正撑不住的机器要救就得砍它。默认档不砍（60fps 的机器砍到 30 会看得出来）。
+ *
+ * `maxHeight` 是**编码画面高度上限**，按客人那边真能显示的尺寸给。
+ * `.screen` 是 720×540（见 RetroTv），而画布的后备存储会被核心按 devicePixelRatio
+ * 抬到 720×dpr —— 125% 缩放就是 900×675。**多出来那 36% 的像素客人根本显示不出来**
+ * （`<video>` 撑满那块 720×540 的屏幕），却要原样编一遍、传一遍。
+ * 所以默认档按 720 这条线等比往下压，画质对客人无损、编码量少三成以上。
+ * 选「清晰」时不压（`maxHeight: 0`）—— 留给客人把屏幕全屏铺到 1080p 显示器上的情况
+ * （全屏时 `<video>` 是铺满视口的，那时候 720 就真的不够了）。
+ *
+ * `maxBitrate` 是**上限不是目标**：真实码率仍由带宽估计决定，这里只防止局域网里
+ * 一头冲到没人需要的量级上 —— 码率越高编码器就越忙。
+ */
+const QUALITY_SPEC: Record<
+  StreamQuality,
+  { captureFps: number; maxHeight: number; maxBitrate: number }
+> = {
+  smooth: { captureFps: 30, maxHeight: 540, maxBitrate: 1_200_000 },
+  balanced: { captureFps: 60, maxHeight: 540, maxBitrate: 2_500_000 },
+  sharp: { captureFps: 60, maxHeight: 0, maxBitrate: 6_000_000 },
+};
+
+/** 档位 → 抓帧帧率。给 `createCaptureStream` 用（帧率必须在建流那一刻定死）。 */
+export function captureFpsFor(quality: StreamQuality): number {
+  return QUALITY_SPEC[quality].captureFps;
+}
+
+/**
+ * 把档位的编码参数压到一条视频 sender 上。
+ *
+ * 为什么绕到 `getPeers()` 去找 sender：Trystero 0.26 的 `addStream` 返回的是
+ * `Promise<void>[]`，**拿不到 `RTCRtpSender`**；而 `room.getPeers()` 会给出底层的
+ * `RTCPeerConnection`，从它的 `getSenders()` 里按 track 反查就能摸到同一个 sender。
+ * 这是改编码参数的唯一口子。
+ *
+ * 原始尺寸取 `track.getSettings()` 而**不是 `canvas.width`**：后者会被核心按 dpr 改掉
+ * （那段尺寸说明见 lib/emulator.ts），语义上也不对 —— 我们要的是「这条轨真正在采多大」，
+ * `getSettings()` 报的正好就是它。
+ *
+ * 全程吞异常只 warn：`setParameters` 会拒掉某些需要重新协商的组合，最坏情况是
+ * 「参数没改上、按默认继续」，绝不能因为它把联机弄断。
+ */
+function tuneVideoSender(
+  sender: RTCRtpSender,
+  stream: MediaStream,
+  quality: StreamQuality
+): void {
+  const track = sender.track;
+  if (!track || track.kind !== 'video') return;
+  // 只调我们自己这条流上的轨 —— 房间底层可能还有别的 sender
+  if (!stream.getVideoTracks().includes(track)) return;
+
+  const spec = QUALITY_SPEC[quality];
+  const { height: srcHeight = 0 } = track.getSettings();
+  /*
+   * 压到 maxHeight 就够，比它矮的来源不动（`scaleResolutionDownBy` 必须 ≥ 1）。
+   * 用高度而不是宽度算比例：16:9 和 4:3 的来源都要保持长宽比，差一个轴没意义。
+   */
+  const downscale =
+    spec.maxHeight > 0 && srcHeight > spec.maxHeight ? srcHeight / spec.maxHeight : 1;
+
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+    params.encodings[0].scaleResolutionDownBy = Math.max(1, downscale);
+    params.encodings[0].maxBitrate = spec.maxBitrate;
+    /*
+     * 游戏宁可掉清晰度也不能掉帧率：WebRTC 默认是 `balanced`，带宽一吃紧就两边一起砍，
+     * 而这里的「帧率」不是流畅度问题 —— 房主端掉帧就是模拟器变慢。
+     */
+    params.degradationPreference = 'maintain-framerate';
+    void sender.setParameters(params).catch((e) => {
+      console.warn('[netplay] 编码参数没改上，按默认继续：', e);
+    });
+  } catch (e) {
+    console.warn('[netplay] 读取编码参数失败，按默认继续：', e);
+  }
+}
+
+/**
  * idle     —— 不在房间里
  * waiting  —— 房间已开/已加入，但对方还没连上
  * connected—— 双方 DataChannel 已通
@@ -299,6 +401,11 @@ export class NetplayController {
   private localStream: MediaStream | null = null;
   /** 本机插着的那盘卡带（房主才有），连上新人时要把这条状态补发过去 */
   private localGame: RemoteGame | null = null;
+  /**
+   * 当前出画档位。由 `publishStream` 带进来（帧率已经在那里建流时用掉了），
+   * 留着是为了「对方连上 / 补发音频」这些**重新 addStream 的时刻**能再压一遍参数。
+   */
+  private quality: StreamQuality = DEFAULT_STREAM_QUALITY;
   private readonly callbacks: NetplayCallbacks;
 
   constructor(callbacks: NetplayCallbacks) {
@@ -370,18 +477,26 @@ export class NetplayController {
   /**
    * 开始把画面推给对方（房主）。重复调用会先把上一条收掉。
    * 对方还没连上也没关系 —— `onPeerJoin` 会补发。
+   *
+   * `quality` 就是当前档位：帧率在**建流那一刻**已经定死了（`captureStream(fps)`），
+   * 这里能改的是编码侧那几项（分辨率上限 / 码率上限）。换档要连帧率一起换，
+   * 所以调用方换档时会重建整条流、再调一次这里。
    */
-  publishStream(stream: MediaStream): void {
+  publishStream(stream: MediaStream, quality: StreamQuality): void {
     const previous = this.localStream;
     if (previous === stream) return;
     this.localStream = stream;
+    this.quality = quality;
     if (previous) {
       const room = this.room;
       if (room) room.removeStream(previous);
       for (const track of previous.getTracks()) track.stop();
     }
     const room = this.room;
-    if (room) void Promise.all(room.addStream(stream)).catch(() => undefined);
+    if (room)
+      void Promise.all(room.addStream(stream))
+        .then(() => this.tuneStream())
+        .catch(() => undefined);
   }
 
   /** 收掉画面流（房主弹卡 / 退房）。会顺手 stop 掉轨道，否则 canvas 一直被采集。 */
@@ -405,7 +520,27 @@ export class NetplayController {
     const stream = this.localStream;
     const room = this.room;
     if (!stream || !room) return;
-    void Promise.all(room.addStream(stream)).catch(() => undefined);
+    void Promise.all(room.addStream(stream))
+      .then(() => this.tuneStream())
+      .catch(() => undefined);
+  }
+
+  /**
+   * 按当前档位把所有视频 sender 压一遍。
+   *
+   * 几个必须重压的时刻：**对方新连上**（那时才出现 sender）、重新 addStream 之后，
+   * 以及每次重建流。参数丢失只会让编码变回默认（费一点），不会断流 ——
+   * 所以这里不需要记账，随手重压即可。
+   */
+  private tuneStream(): void {
+    const room = this.room;
+    const stream = this.localStream;
+    if (!room || !stream) return;
+    for (const connection of Object.values(room.getPeers())) {
+      for (const sender of connection.getSenders()) {
+        tuneVideoSender(sender, stream, this.quality);
+      }
+    }
   }
 
   /**
@@ -506,9 +641,16 @@ export class NetplayController {
       this.state = { ...this.state, status: 'connected', peerId, error: null };
       this.callbacks.onState(this.state);
       this.startPing(peerId);
-      // 补发：流和会话状态都是在对方连上之前就准备好的，Trystero 不会自动补给后来者
+      /*
+       * 补发：流和会话状态都是在对方连上之前就准备好的，Trystero 不会自动补给后来者。
+       * `.then(tuneStream)` 不能省 —— sender 是**这一刻**才出现的，开房时那次
+       * `publishStream` 里根本还没有 peer 可以调参数。
+       */
       const stream = this.localStream;
-      if (stream) void Promise.all(room.addStream(stream)).catch(() => undefined);
+      if (stream)
+        void Promise.all(room.addStream(stream))
+          .then(() => this.tuneStream())
+          .catch(() => undefined);
       this.sendSession();
     };
 

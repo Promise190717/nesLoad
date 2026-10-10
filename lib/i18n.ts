@@ -167,7 +167,12 @@ const en = {
    * （W/A/S/D、A B C X Y Z）都是丝印，中英一样。
    */
   'legend.moves': 'moves',
-  'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load',
+  /*
+   * 这里原来有一条 `legend.shortcut`（P 暂停 / R 重置 / F5 存档 / F8 读档）。
+   * 2026-10-10 用户要求把键盘快捷键全部取消，那条说明连同它的键一起删了
+   * （为什么撤、以及 Esc 为什么留着，见 ConsoleScene 里那个 effect 的注释）。
+   * **别再补回来** —— 键都没了，说明行只会教人按了没反应。
+   */
   /* 「按键说明」弹窗本身。内容由 playerLegend() 现算，这里只有壳的文案。 */
   'legend.open': 'Controls',
   'legend.title': 'Controls',
@@ -198,6 +203,16 @@ const en = {
   'netplay.modeLan': 'LAN',
   'netplay.modeWan': 'Public internet',
   'netplay.wanDev': 'Public-internet netplay is under development.',
+  /*
+   * 出画档位。三档的差别是抓帧帧率 / 编码分辨率 / 码率上限，完整理由见
+   * lib/netplay.ts 的 `StreamQuality`。标签保持一两个词 —— 三个按钮要并排塞下。
+   */
+  'netplay.quality': 'Stream quality',
+  'netplay.qualitySmooth': 'Smooth',
+  'netplay.qualityBalanced': 'Balanced',
+  'netplay.qualitySharp': 'Sharp',
+  'netplay.qualityHint':
+    'The host runs the emulator and the stream on one machine. If it cannot keep up, the whole game slows down (slow motion). Drop a level if that happens — this only applies on the host.',
   'netplay.copy': 'Copy',
   'netplay.copied': 'Copied',
   'netplay.connected': 'Connected',
@@ -455,7 +470,7 @@ const zh: Record<MessageKey, string> = {
   'library.removeLabel': '移除 {name}',
 
   'legend.moves': '移动',
-  'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档',
+  // 原来这里有一条 `legend.shortcut`（P / R / F5 / F8）—— 快捷键已全部取消，见英文版注释
   'legend.open': '按键说明',
   'legend.title': '按键说明',
   'legend.close': '关闭',
@@ -476,6 +491,13 @@ const zh: Record<MessageKey, string> = {
   'netplay.modeLan': '局域网',
   'netplay.modeWan': '公网',
   'netplay.wanDev': '公网联机正在开发中。',
+  /* 出画档位。理由同英文版那段：差别是帧率 / 分辨率 / 码率，来龙去脉见 lib/netplay.ts */
+  'netplay.quality': '出画质量',
+  'netplay.qualitySmooth': '流畅',
+  'netplay.qualityBalanced': '均衡',
+  'netplay.qualitySharp': '清晰',
+  'netplay.qualityHint':
+    '模拟器和推流都压在房主那台机器上，它跟不上时整局都会变慢（慢动作）。卡就往下调一档 —— 这一项只在房主那边生效。',
   'netplay.copy': '复制',
   'netplay.copied': '已复制',
   'netplay.connected': '已连接',

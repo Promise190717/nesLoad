@@ -61,6 +61,20 @@ const CORE_MAP: Record<ConsoleType, string> = {
 };
 
 /**
+ * 屏幕尺寸 = canvas 后备存储的**基准**尺寸，720×540（NES 画面的 4:3）。
+ *
+ * 三处用同一组数字：Nostalgist 的 launch `size`（见 `loadRom`）、canvas 的
+ * width/height 属性（RetroTv 用这两个常量）、以及 RetroTv 里那个屏幕 div 的
+ * `h-[540px] w-[720px]`（Tailwind 类吃不到 TS 常量，只能各写一份，改这里要跟着改）。
+ *
+ * 注意它只是**基准**：核心起来之后会按 `devicePixelRatio` 把后备存储改成
+ * 720×dpr（125% 缩放 = 900×675）来保证清晰度，那是核心的事，屏幕的显示尺寸由
+ * RetroTv 写死的 CSS 决定，两者不互相牵制。
+ */
+export const SCREEN_WIDTH = 720;
+export const SCREEN_HEIGHT = 540;
+
+/**
  * 街机核心的**本站路径**（`public/cores/`）。
  *
  * NES / SFC 的核心仍由 Nostalgist 从 jsdelivr 拉（一直正常，不动它）；只有街机改走本地。
@@ -528,7 +542,18 @@ export class EmulatorController {
           audio_mute_enable: this.volumeLevel === 0,
           input_overlay_enable: false,
         },
-        size: { width: canvas.width, height: canvas.height },
+        /*
+         * 初始尺寸**写死屏幕尺寸，不要读 `canvas.width/height`**。
+         *
+         * 那两个属性会被改掉：核心启动后会按 devicePixelRatio 把后备存储设成
+         * 720×dpr（125% 缩放就是 900×675），Nostalgist 退出时也不还原。读回来等于
+         * 把上一次运行留下的脏值烤进这一次 —— 曾经的写法就是读回来的，于是设备缩放比
+         * 一局一局乘上去（720 → 900 → 1125…），表现是「换第二盘游戏时整个机身变大」。
+         * 屏幕那段的完整因果写在 RetroTv 的屏幕 div 上。
+         *
+         * 传固定的 720×540 也不影响清晰度：核心拿到 CSS 尺寸后会自己按 dpr 再设一次。
+         */
+        size: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
         style: {
           width: '100%',
           height: '100%',

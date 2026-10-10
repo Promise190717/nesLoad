@@ -124,10 +124,10 @@ export default function KeyBindingsPanel({
    *
    * 用 window 的**捕获阶段** + `stopPropagation()`：Nostalgist 的键盘监听挂在
    * `document` 的冒泡阶段（见 `nostalgist.js` 的 `updateKeyboardEventHandlers`），
-   * 事件在 window 捕获阶段就被截住，根本走不到 document —— 模拟器读不到、
-   * 我们自己的快捷键（P / R / F5 / F8）不触发、联机也不转发。
+   * 事件在 window 捕获阶段就被截住，根本走不到 document —— 模拟器读不到、联机也不转发。
    * （`stopPropagation()` 会连同 window 上冒泡阶段的监听一起挡掉，所以 ConsoleScene
-   * 那几条不用再加 `keybindOpen` 判断也能拦住；Escape 因此只能在这里处理。）
+   * 那几条不用再加 `keybindOpen` 判断也能拦住；Escape 因此只能在这里处理。
+   * 这里原本还挡着 P / R / F5 / F8 那几条快捷键 —— 2026-10-10 它们全撤了。）
    *
    * 两个层次：
    *   - 面板开着：吞掉按键，但**不**吞 keyup。开面板前就按着的键要能正常松开，
