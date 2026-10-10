@@ -175,6 +175,13 @@ body {
 .pxc-accent {
   --px-c: var(--color-accent);
 }
+/*
+ * 「一张纸」的描边。纸是**物件**、固定色，所以不走 ink 令牌 ——
+ * ink 的灰阶会随主题翻，浅色主题下那道冷灰压在米黄纸上很脏。
+ */
+.pxc-paper {
+  --px-c: #a8916a;
+}
 
 /* 落地阴影：白天模式下必须变淡，否则地板上会出现一条死黑的横杠 */
 .ground-shadow {
@@ -222,24 +229,48 @@ body {
 }
 
 /*
- * 窗外景色分昼夜两套，跟着主题切：**夜间模式 → 窗外是晚上（有月亮）**，
- * 白天模式 → 太阳。
+ * 窗外景色：**春夏秋冬四套**，跟着 `<html data-season>` 切。
  *
- * 主题只写在 <html data-theme> 上、React 刻意不持有它（见 ConsoleScene 的 applyTheme），
- * 所以这里必须用纯 CSS 切 —— 要是换成 useState，切主题时窗外的景色不会跟着变。
- * 默认（data-theme 缺失或 =dark）走夜景，和 layout 内联脚本的兜底值保持一致。
+ * 2026-10-10 之前是「昼夜两套 + 跟 data-theme 走」，改成四季 + 手动切换：
+ * 默认值按农历算（见 lib/season.ts），**点窗户循环到下一季**。
+ *
+ * 四套 `<svg>` 都留在 DOM 里靠 CSS 切，**不能**改成 useState 条件渲染：
+ * 季节状态不在 React 里（首屏由 layout.tsx 的内联脚本 BOOT_INIT 写）。
+ * 默认（属性缺失或值不认识）走冬天，和那段脚本的兜底值保持一致。
  */
-.scene-night {
-  display: block;
-}
-.scene-day {
+.scene-spring,
+.scene-summer,
+.scene-autumn,
+.scene-winter {
   display: none;
 }
-:root[data-theme='light'] .scene-night {
+:root[data-season='spring'] .scene-spring,
+:root[data-season='summer'] .scene-summer,
+:root[data-season='autumn'] .scene-autumn,
+:root[data-season='winter'] .scene-winter,
+:root:not([data-season]) .scene-winter {
+  display: block;
+}
+
+/*
+ * 每季的景色里再分**昼夜两套**（同一个 `<svg>` 里的 `.sky-*` / `.land-*` 两组 <g>）。
+ * 季节那层管「哪一季」，这一层管「白天还是晚上」，两个维度互不干扰。
+ *
+ * **昼夜跟 `data-theme` 走**（和改造前一样）：深色主题 = 夜晚（默认），浅色主题 = 白天。
+ * 注意这里的 `display` 是写在 <g> 上的 —— SVG 1.1 的 display 本来就允许 block，
+ * 任何非 none 的值都会照常绘制。
+ */
+.sky-day,
+.land-day {
   display: none;
 }
-:root[data-theme='light'] .scene-day {
+:root[data-theme='light'] .sky-day,
+:root[data-theme='light'] .land-day {
   display: block;
+}
+:root[data-theme='light'] .sky-night,
+:root[data-theme='light'] .land-night {
+  display: none;
 }
 
 /* ------------------------------------------------------------------ *
@@ -256,17 +287,21 @@ body {
 /*
  * 灯线长度跟着窗口高度缩。
  *
- * 房间是竖向居中的：机身顶边到天花板 ≈ (100vh - 789px) / 2 + 16px
- * （789 = 机身 ~757 + main 的 py-4；16 是 main 的上内边距）。
+ * 房间是竖向居中的：机身顶边到天花板 ≈ (100vh - 719px) / 2 + 16px
+ * （719 = 机身 ~687 + main 的 py-4；16 是 main 的上内边距）。
  * 灯罩 26 + 灯泡 13 + 吸盘 8 + 一点留白 4 = 51px 是灯线之外必须占掉的高度，
- * 所以灯线 ≤ (100vh - 789px) / 2 + 16px - 51px = 50vh - 429.5px。
+ * 所以灯线 ≤ (100vh - 719px) / 2 + 16px - 51px = 50vh - 394.5px。
  * 上限 34px（窗口够高就不再变长），下限 0（再矮就贴顶，剩下的交给机身遮住）。
  *
  * **改电视机尺寸必须同步这个数** —— 它和 RetroTv 顶部那段尺寸注释、
  * globals.css 底部的 900px 断点是同一条链上的。
+ *
+ * 2026-10-09 撤掉底部插卡舱、机身矮了 70px，这里跟着从 429.5 收到 394.5：
+ * 机身矮 70 → 居中之后它的顶边反而**往下**走了 35 → 天花板到机身顶边多了 35
+ * → 灯线可以长 35。忘了改的后果是灯吊得比设计高一截，和机身顶边之间空一道。
  */
 .lamp-cord {
-  height: clamp(0px, calc(50vh - 429.5px), 34px);
+  height: clamp(0px, calc(50vh - 394.5px), 34px);
 }
 
 .lamp-glow {
@@ -315,6 +350,26 @@ body {
 }
 :root[data-theme='light'][data-lamp='on'] .lamp-rim {
   background: #e8c579;
+}
+
+/* ------------------------------------------------------------------ *
+ * 「一张纸」弹窗里的作业本横线（见 components/ConsoleScene.tsx 末尾那个弹窗）
+ *
+ * 一行 30px，线画在每行的 **23..24px** 处 —— 于是**文字正好坐在线上**：
+ * 正文是 12px / `leading-[30px]`，基线落在行内约 18.6px 的地方，线在 23px，
+ * 中间留 ~4px。改字号或行高要连着这个 23 一起改，否则字会浮起来或者压住线。
+ *
+ * 书写区高度取 **30 的整数倍**（弹窗里用的 240 = 8 行）——
+ * 顶、底都正好收在整行边界上，不会出现「上下被切掉半条」的线。
+ * 颜色写死：纸是物件，不跟主题翻。
+ * ------------------------------------------------------------------ */
+.note-rules {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 23px,
+    #bfae87 23px 24px,
+    transparent 24px 30px
+  );
 }
 
 /* 画面放大时保持硬边，不做双线性插值 */
@@ -496,6 +551,14 @@ body {
   }
   .pc-notice {
     display: flex;
+  }
+  /*
+   * 操作指引跟着场景一起藏掉（见 components/OnboardingTour.tsx）：机身不在，
+   * 圈出来只会是个空框，还会盖住那句「请用桌面端」。**这里只是不显示**，
+   * 组件那边不会写「看过了」的标记，之后在宽窗口打开还会补上这一遍。
+   */
+  .tour {
+    display: none;
   }
 }
 

@@ -520,3 +520,18 @@ export function cloneDefaultBindings(): KeyBindings {
     p2: { ...DEFAULT_BINDINGS.p2 },
   };
 }
+
+/**
+ * 只把**某一组**恢复成默认值，另一组原样留着。
+ *
+ * 联机时用：面板上只给你自己那组（房主 = 1P、加入者 = 2P），「恢复默认」要是把两组
+ * 一起推回默认，就等于改了对面那组 —— 那是这个面板在联机下唯一不该碰的东西。
+ *
+ * 刻意写成两个分支而不是 `{ ...bindings, [which]: ... }`：计算属性名会让 TS
+ * 把结果推成带索引签名的类型，对不上 `KeyBindings`。
+ */
+export function resetPlayerBindings(bindings: KeyBindings, which: 'p1' | 'p2'): KeyBindings {
+  return which === 'p1'
+    ? { ...bindings, p1: { ...DEFAULT_BINDINGS.p1 } }
+    : { ...bindings, p2: { ...DEFAULT_BINDINGS.p2 } };
+}

@@ -22,3 +22,19 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash  TEXT NOT NULL,          -- 格式：salt:hash（scrypt）
   created_at     INTEGER NOT NULL
 );
+
+-- 留言本（房间地板上那本，任何人可写、可看）
+--
+-- 前台是**匿名提交**：没有账号体系，所以不留作者、只留内容。要挡刷屏只能靠
+-- 长度上限 + 后台人工处理（见 app/api/feedback/route.ts）。
+-- resolved 用 0 / 1 而不是布尔：D1 底下是 SQLite，本来就没有 BOOLEAN 类型，
+-- 存 0/1 才和 INTEGER 列对得上（映射在 lib/server/feedback.ts 里转成 boolean）。
+CREATE TABLE IF NOT EXISTS feedback (
+  id          TEXT PRIMARY KEY,
+  content     TEXT NOT NULL,             -- 留言正文（必填）
+  resolved    INTEGER NOT NULL DEFAULT 0,-- 0 = 未解决，1 = 已解决
+  created_at  INTEGER NOT NULL
+);
+
+-- 列表一律「新的在前」，游标翻页也走这个序
+CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback (created_at DESC, id DESC);

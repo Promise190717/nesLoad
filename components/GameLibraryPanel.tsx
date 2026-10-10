@@ -114,6 +114,11 @@ export default function GameLibraryPanel({
   onClose,
 }: GameLibraryPanelProps) {
   const { t, locale } = useI18n();
+  /*
+   * 在线库的加载速度提示。**只有中文版有内容**，英文那份是空串 ——
+   * 下面按「空串就不渲染」处理。见 i18n 里 games.remoteSlow 的说明。
+   */
+  const slowHint = t('games.remoteSlow');
   const [tab, setTab] = useState<Tab>('library');
   // 有缓存时**首帧就是 ready** —— 惰性初始化直接吃缓存，连一次「载入中」都不闪。
   const [games, setGames] = useState<LibraryGame[]>(() => gamesCache ?? []);
@@ -263,6 +268,15 @@ export default function GameLibraryPanel({
                 {t('games.search')}
               </button>
             </form>
+
+            {/*
+              加载速度提示，**只有中文下才有内容**（英文那份是空串，这里就不渲染）。
+              `w-full` 把这条挤到筛选条的第二行 —— 外层是 flex-wrap，宽度撑满就自然换行，
+              不用为它单起一块容器。
+            */}
+            {slowHint && (
+              <p className="w-full text-[11px] leading-relaxed text-ink-400">{slowHint}</p>
+            )}
           </div>
         )}
 

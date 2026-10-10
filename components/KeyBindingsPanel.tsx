@@ -10,6 +10,7 @@ import {
   codeToRetroArch,
   conflictInOtherPlayer,
   conflictInPlayer,
+  resetPlayerBindings,
   type ButtonName,
   type KeyBindings,
 } from '@/lib/keybindings';
@@ -39,7 +40,9 @@ interface Notice {
 interface KeyBindingsPanelProps {
   open: boolean;
   bindings: KeyBindings;
-  /** 当前联机角色。加入者只用 2P 键位，提示文案也不一样。 */
+  /**
+   * 当前联机角色。加入者只用 2P 键位，提示文案不一样，**页签也锁在你自己那组**。
+   */
   role: NetplayRole | null;
   /**
    * 本机是否跑着一盘自己的卡带。
@@ -67,7 +70,10 @@ interface KeyBindingsPanelProps {
  * —— 屏幕里跑的是游戏画面，这张表要写字、还得一格一格点着改键。
  *
  * 1P / 2P 分两组标签页，不是一次铺 24 行：单机双人时两组都要配，但一次只看一组
- * 才看得清「哪个钮 = 哪个键」。加入者进来默认落在 2P（他用的就是那组）。
+ * 才看得清「哪个钮 = 哪个键」。
+ *
+ * **联机时只给你自己那组**（房主 = 1P、加入者 = 2P），页签收成一个标签 ——
+ * 理由见下面 `lockedPlayer` 那段注释。
  */
 export default function KeyBindingsPanel({
   open,
@@ -79,17 +85,31 @@ export default function KeyBindingsPanel({
   onClose,
 }: KeyBindingsPanelProps) {
   const { t } = useI18n();
-  const [player, setPlayer] = useState<'p1' | 'p2'>('p1');
+  /** 页签。**只在单机时有效** —— 联机时下面那个 `player` 按角色直接定死，不看它。 */
+  const [tab, setTab] = useState<'p1' | 'p2'>('p1');
   /** 正在等新键的那个钮。null 表示不在捕获态。 */
   const [capturing, setCapturing] = useState<ButtonName | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   /** 正在重载卡带。重新 launch 要几秒，这期间别让按钮再被按一次。 */
   const [reloading, setReloading] = useState(false);
 
+  /**
+   * 联机时**只能改自己那组**：房主 = 1P、加入者 = 2P；单机（`role` 为 null）两组都能改。
+   *
+   * 加入者那侧最明确 —— 他本机不跑模拟器（除非自己先插了一盘），P1 那一栏对他是死的。
+   * 房主那侧，P2 是加入者按键落地的位置，房主自己去改只会让两边说的不是一回事。
+   * 要动对面那组，先离开房间。
+   *
+   * 用「派生」而不是在 effect 里改 state：角色在面板开着的时候也会变（建房 / 进房 /
+   * 离房），派生出来的一定跟着变，不会留下一个改不动的旧页签。
+   */
+  const lockedPlayer = role === 'guest' ? 'p2' : role === 'host' ? 'p1' : null;
+  const player = lockedPlayer ?? tab;
+
   // 每次打开都重置：默认落在「你自己那组」，捕获态和上一条提示都清掉
   useEffect(() => {
     if (!open) return;
-    setPlayer(role === 'guest' ? 'p2' : 'p1');
+    setTab(role === 'guest' ? 'p2' : 'p1');
     setCapturing(null);
     setNotice(null);
     setReloading(false);
@@ -240,26 +260,37 @@ export default function KeyBindingsPanel({
         </div>
 
         <div className="flex flex-col gap-3 p-4">
+          {/*
+            联机时只留「你自己那组」一个标签，不再是可切换的页签 —— 能改的只有它，
+            摆两个按钮出来、其中一个永远点不动，只会让人以为坏了。
+            单机（不在房间里）才给两个可切换的页签。
+          */}
           <div className="flex gap-2">
-            {(['p1', 'p2'] as const).map((which) => (
-              <button
-                key={which}
-                type="button"
-                aria-pressed={player === which}
-                onClick={() => {
-                  setPlayer(which);
-                  setCapturing(null);
-                  setNotice(null);
-                }}
-                className={`pixel-edge pxw-2 pxc-500 flex-1 py-1.5 text-[11px] transition-colors ${
-                  player === which
-                    ? 'bg-accent text-ink-950'
-                    : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
-                }`}
-              >
-                {t(which === 'p1' ? 'keybind.p1' : 'keybind.p2')}
-              </button>
-            ))}
+            {lockedPlayer ? (
+              <span className="pixel-edge pxw-2 pxc-500 flex-1 bg-accent py-1.5 text-center text-[11px] text-ink-950">
+                {t(lockedPlayer === 'p1' ? 'keybind.p1' : 'keybind.p2')}
+              </span>
+            ) : (
+              (['p1', 'p2'] as const).map((which) => (
+                <button
+                  key={which}
+                  type="button"
+                  aria-pressed={player === which}
+                  onClick={() => {
+                    setTab(which);
+                    setCapturing(null);
+                    setNotice(null);
+                  }}
+                  className={`pixel-edge pxw-2 pxc-500 flex-1 py-1.5 text-[11px] transition-colors ${
+                    player === which
+                      ? 'bg-accent text-ink-950'
+                      : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
+                  }`}
+                >
+                  {t(which === 'p1' ? 'keybind.p1' : 'keybind.p2')}
+                </button>
+              ))
+            )}
           </div>
 
           {/*
@@ -316,8 +347,9 @@ export default function KeyBindingsPanel({
             没有本地卡带时（加入者、或还没插卡）没什么可重载的，所以禁用而不是藏起来
             —— 按钮在、灰着，配上上面那句提示，能说清「为什么现在用不了」。
 
-            恢复默认是**两组一起**回到默认，不是只复位当前这一栏 —— 标签没写「本组」，
-            而且「把键位弄回一个已知状态」本来就是这个按钮的用途。
+            恢复默认：单机是**两组一起**回到默认（标签没写「本组」，「把键位弄回一个已知
+            状态」就是这个按钮的用途）；联机时只复位**你自己那组** —— 面板本来就只给你
+            这一组，连对面一起推回默认就超出「只能改自己的键位」了。
           */}
           <div className="flex gap-2">
             <button
@@ -331,7 +363,9 @@ export default function KeyBindingsPanel({
             <button
               type="button"
               onClick={() => {
-                onChange(cloneDefaultBindings());
+                onChange(
+                  lockedPlayer ? resetPlayerBindings(bindings, lockedPlayer) : cloneDefaultBindings()
+                );
                 setCapturing(null);
                 setNotice(null);
               }}

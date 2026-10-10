@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
+import AdminFeedback from './AdminFeedback';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
@@ -454,6 +455,12 @@ export default function AdminConsole({ username }: { username: string }) {
             </div>
           )}
         </section>
+
+        {/*
+          留言本。放在游戏列表**之后** —— 后台的主线是录游戏，
+          处理留言是顺手的活儿，不该一进来就顶在最上面。
+        */}
+        <AdminFeedback />
       </div>
 
       {modalOpen && (

@@ -41,13 +41,17 @@ import {
   type Cartridge,
 } from '@/lib/library';
 import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
+import { isSeason, nextSeason } from '@/lib/season';
+import FeedbackPanel from './FeedbackPanel';
 import GameLibraryPanel, { type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
+import OnboardingTour from './OnboardingTour';
 import RetroTv from './RetroTv';
 import {
   DESK_HEIGHT,
+  RoomCalendar,
   RoomDesk,
   RoomFloorItems,
   RoomLamp,
@@ -70,6 +74,14 @@ const THEME_KEY = 'nesload:theme';
  * 它**跟着主题走**（白天关、夜晚开，见下面的 applyTheme），手动点灯只是临时覆盖。
  */
 const LAMP_KEY = 'nesload:lamp';
+
+/**
+ * 操作指引「看过了没有」的标记。
+ *
+ * **只有两种状态**：写过（看过）和没写过（没看过）。判断一律用 `!== null`，
+ * 所以以后想重置只要删掉这个键即可 —— 见下面那个 effect。
+ */
+const TOUR_KEY = 'nesload:tour-done';
 
 /**
  * 抓流时请求的帧率。NES 是 60fps，给足就不会丢帧；
@@ -253,6 +265,28 @@ export default function ConsoleScene() {
   const [keybindOpen, setKeybindOpen] = useState(false);
   /** 「按键说明」弹窗。内容原先是常驻在右上角的一块文字，现在收进按钮里 */
   const [legendOpen, setLegendOpen] = useState(false);
+  /**
+   * 「一张纸」。点地板右下角那张纸片弹出来 —— 不是面板，是一句祝福，
+   * 所以它不做工具栏那套，只做「窗口糊掉 + 浮起一张纸」。
+   */
+  const [noteOpen, setNoteOpen] = useState(false);
+
+  /**
+   * 留言本。点地上那本（亮青封面 + 斜搁着的笔）弹出来 —— 内容来自 `/api/feedback`，是**公开**的，
+   * 面板自己也负责提交（见 FeedbackPanel）。列表数据不放在这里：
+   * 面板每次打开都是一次全新挂载，翻页 / 提交的状态没必要留在父级。
+   */
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+
+  /**
+   * 操作指引开着没有。**初次访问自动打开**（下面那个 effect），之后靠「重看操作指引」
+   * 再打开（在按键说明弹窗里）。
+   *
+   * 默认 false、由 effect 打开而不是惰性初始化：客户端组件在服务端也会渲染一遍，
+   * 那时没有 localStorage，惰性初始化会在两遍之间给出不同结果 → hydration 不一致。
+   * 和键位那份用同一个理由（见下面 loadBindings 那段）。
+   */
+  const [tourOpen, setTourOpen] = useState(false);
 
   /* ---------------- 在线游戏库 ---------------- */
 
@@ -279,6 +313,27 @@ export default function ConsoleScene() {
     setBindings(stored);
     controller.setBindings(stored);
   }, [controller]);
+
+  /*
+   * 初次访问自动弹操作指引。和上面键位同一套路：挂载后读，不在惰性初始化里读。
+   *
+   * 窄屏（< 900px）时指引整块是 display:none，用户根本看不到；**这里照样把它置开**，
+   * 因为「标记」只在 onClose 里写（见 closeTour）—— 他看不到就没机会关，标记也就写不进去，
+   * 之后换到宽窗口还会补上这一遍。这正是我们要的。
+   */
+  useEffect(() => {
+    if (localStorage.getItem(TOUR_KEY) === null) setTourOpen(true);
+  }, []);
+
+  /** 关掉指引（走完 / 跳过都走这里），顺手记下「看过了」。 */
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    try {
+      localStorage.setItem(TOUR_KEY, '1');
+    } catch {
+      // 隐私模式下写不进去也无所谓：下次还会再弹一遍，不影响功能
+    }
+  }, []);
 
   /**
    * 改键位的唯一出口：写回引擎（**下次插卡带**才生效）、存盘、更新界面。
@@ -739,6 +794,25 @@ export default function ConsoleScene() {
   }, [applyLamp]);
 
   /**
+   * 换窗外的季节：切到下一季（春→夏→秋→冬→春）。
+   *
+   * 和 `toggleLamp` 一样**读 DOM 属性取当前值** —— `<html data-season>` 是唯一真相，
+   * React 不持有季节（首屏由 layout.tsx 的内联脚本按农历写，见 lib/season.ts）。
+   * 所以这里连 state 都不需要：按钮的文案是固定的，界面别处也不显示季节。
+   *
+   * **只改当次会话，不落盘** —— 手动选的季节是临时看看，刷新要回到按农历算的那一季。
+   * 所以这里**不写 localStorage**（和主题 / 吊灯不同，那两个是要记住的偏好）。
+   *
+   * 和主题**无关**：季节只看农历 + 手动，切主题不会把它重置掉
+   * （雪夜、晴冬都能有，屋里开不开灯是另一回事）。
+   */
+  const cycleSeason = useCallback(() => {
+    const current = document.documentElement.dataset.season;
+    const next = nextSeason(isSeason(current) ? current : 'winter');
+    document.documentElement.dataset.season = next;
+  }, []);
+
+  /**
    * 挂载后把 React 那份对齐到属性上（首屏是内联脚本写的，React 无从得知）。
    * 和键位一样是「挂载后再读」—— 服务端没有 localStorage，惰性初始化会两边不一致。
    */
@@ -773,14 +847,31 @@ export default function ConsoleScene() {
       if (e.target instanceof HTMLInputElement) return;
 
       // 有面板开着的时候只认 Esc。否则在面板上按 P / R / F5 会顺手把游戏
-      // 暂停、重置、或者又存一份 —— 全是意外。
-      if (saveOpen || netplayOpen || keybindOpen || libraryOpen || legendOpen) {
+      // 暂停、重置、或者又存一份 —— 全是意外。操作指引算面板的一种。
+      //
+      // 留言本尤其需要这一条：它的输入框是 `<textarea>`，不在上面那道
+      // `HTMLInputElement` 过滤里，所以「在留言本里打字」只能靠这里挡住。
+      if (
+        saveOpen ||
+        netplayOpen ||
+        keybindOpen ||
+        libraryOpen ||
+        legendOpen ||
+        noteOpen ||
+        feedbackOpen ||
+        tourOpen
+      ) {
         if (e.key === 'Escape') {
           setSaveOpen(false);
           setNetplayOpen(false);
           setKeybindOpen(false);
           setLibraryOpen(false);
           setLegendOpen(false);
+          setNoteOpen(false);
+          setFeedbackOpen(false);
+          // 指引自己也挂了一个 Esc（见 OnboardingTour），这里再兜一次。
+          // 两条路都通到 closeTour，重复调用只是多写一次标记，无副作用。
+          if (tourOpen) closeTour();
         }
         return;
       }
@@ -812,6 +903,10 @@ export default function ConsoleScene() {
     keybindOpen,
     libraryOpen,
     legendOpen,
+    noteOpen,
+    feedbackOpen,
+    tourOpen,
+    closeTour,
   ]);
 
   /**
@@ -830,7 +925,7 @@ export default function ConsoleScene() {
    */
   useEffect(() => {
     if (netplayState.role !== 'guest') return;
-    if (saveOpen || netplayOpen || keybindOpen || legendOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || tourOpen) return;
 
     /*
      * 「物理键 → 钮」由**加入者自己的 2P 键位**反查得到。
@@ -881,7 +976,7 @@ export default function ConsoleScene() {
       for (const button of held) netplay.sendButton(button, false);
       held.clear();
     };
-  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen]);
+  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, tourOpen]);
 
   /**
    * 面板关掉之后，把焦点从按钮上摘掉。
@@ -896,10 +991,10 @@ export default function ConsoleScene() {
    * 摘掉焦点后事件目标落回 body，核心才会重新读键盘。
    */
   useEffect(() => {
-    if (saveOpen || netplayOpen || keybindOpen || legendOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || tourOpen) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) active.blur();
-  }, [saveOpen, netplayOpen, keybindOpen, legendOpen]);
+  }, [saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, tourOpen]);
 
   /**
    * 点完按钮就把焦点摘掉。
@@ -948,7 +1043,10 @@ export default function ConsoleScene() {
         竖过来之后宽度只有原来的一半不到，场景横向又空出来，不再和电视机抢地方。
         两个分段控件也跟着竖排 —— 见 globals.css 的 `.theme-seg / .locale-seg`。
       */}
-      <div className="stage absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2">
+      <div
+        data-tour="rail"
+        className="stage absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2"
+      >
         <div className="theme-seg pixel-edge pxw-2 bg-ink-800">
           <button
             type="button"
@@ -1077,8 +1175,17 @@ export default function ConsoleScene() {
           {/*
             墙上的窗户。挂在这一层（= 电视机的盒子）上，窗户就永远贴着机身左上角。
             排在 RetroTv 之前 → 被机身挡住，只从左侧和上方露出两条。
+
+            窗外是**四季**（靠 `<html data-season>` 切），**点玻璃换下一季** ——
+            `cycleSeason` 只写属性和 localStorage，不经过 React（和吊灯同一套路）。
           */}
-          <RoomWindow />
+          <RoomWindow onCycleSeason={cycleSeason} label={t('window.cycle')} />
+
+          {/*
+            墙上的日历。和窗户同一层、同样排在 RetroTv 之前 —— 挂在机身右侧那片空墙上
+            （窗户占了左边）。**纯装饰**，不能点：留言本已经挪到地板上那摊杂物里了。
+          */}
+          <RoomCalendar />
 
           {/*
             地板铺在场景内部而不是视口上：这样地板线永远贴着物件的落地线，
@@ -1100,11 +1207,20 @@ export default function ConsoleScene() {
           <RoomDesk />
 
           {/*
-            地板上那摊杂物（红白机 / 手柄 / 黄卡带）。**必须排在桌子之后** ——
-            它在桌子前面，压在桌腿上；排前面就会被桌子挡住，像嵌进桌子里。
-            它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），不占布局、也不影响机身。
+            地板上那摊杂物（红白机 / 手柄 / 黄卡带 / 一本留言本 / 右下角那张纸片）。
+            **必须排在桌子之后** —— 它在桌子前面，压在桌腿上；排前面就会被桌子挡住，
+            像嵌进桌子里。它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），
+            不占布局、也不影响机身。
+
+            这摊里能点的有两处：**留言本**（点开留言面板）和右下角那张**纸片**
+            （点开「一张纸」，见文件末尾那个弹窗）。
           */}
-          <RoomFloorItems />
+          <RoomFloorItems
+            onOpenNote={() => setNoteOpen(true)}
+            noteLabel={t('note.open')}
+            onOpenFeedback={() => setFeedbackOpen(true)}
+            feedbackLabel={t('feedback.open')}
+          />
 
           <RetroTv
             canvasRef={canvasRef}
@@ -1212,6 +1328,9 @@ export default function ConsoleScene() {
         role + localPlaying 决定底部那句提示：加入者用的是 2P 键位、改完立刻生效；
         但他要是自己在房主出画面之前插了一盘，那盘按 P1 读键盘，一样要重载卡带。
         `rom !== null` 就是「本机跑着一盘自己的卡带」，同时也是重载按钮的可用条件。
+
+        `role` 还决定**页签锁在哪一组**：联机时只能改自己那组（房主 1P / 加入者 2P），
+        所以面板在房间里只画一个标签、不给切换。见 KeyBindingsPanel 的 lockedPlayer。
       */}
       <KeyBindingsPanel
         open={keybindOpen}
@@ -1292,10 +1411,103 @@ export default function ConsoleScene() {
               <p>{playerLegend(bindings.p2, 2, t)}</p>
               <p>{t('legend.shortcut')}</p>
               {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
+
+              {/*
+                重看操作指引。**先关自己再开指引** —— 两个弹窗的层级不一样
+                （这里 z-50，指引 z-[60]），虽然指引会盖在上面，但留着这个面板
+                会让底下那颗「按键说明」按钮一直保持按下态，收尾时不好看。
+              */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLegendOpen(false);
+                  setTourOpen(true);
+                }}
+                className="pixel-edge pxw-2 pxc-500 mt-1 self-start bg-ink-700 px-3 py-1.5 text-[11px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
+              >
+                {t('tour.replay')}
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/*
+        「一张纸」。点地板右下角那张纸片弹出来的。
+
+        它和别的面板不是一路货：那些是工具，这张纸只是一句祝福。所以刻意做成
+        **游戏里过场提示**的样子 —— 整个窗口糊掉（backdrop-blur），中间浮起一张纸。
+        点背板或 Esc 关掉。
+
+        **背板用固定暗色，不走 ink 令牌**（别的面板都是 `bg-ink-950/70`）：
+        ink-950 会随主题翻，浅色主题下它是近白（#f1f1f4），45% 叠上去整屏变成一片白雾
+        —— 用户报「纸片打开时不能纯白」就是指这个。过场提示本来就该把世界压暗。
+
+        纸是**物件**，颜色全写死（和地板杂物、吊灯一个规矩），不跟主题翻 ——
+        白天夜里它都是这张米黄的纸。**刻意用 `#e8dcbd` 而不是更浅的纸色**：
+        用户明确要「不能纯白」，所以给足黄味。
+
+        **纸上铺的是作业本那种横线**（`.note-rules`，globals.css）：
+        一行 30px、线在行内 23px 处，正文 `leading-[30px]` 正好**坐在线上**。
+        书写区高 240 = 30 × 8 行，顶底都收在整行边界上，不会切出半条线。
+
+        正文走 `font-pixel`：英文是真像素字；**中文没有像素字模**，
+        会掉回系统等宽字体（和屏幕里那句提示同一个取舍，见 RoomBackdrop 顶部那段）。
+      */}
+      {noteOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-6"
+          onClick={() => setNoteOpen(false)}
+        >
+          {/* 背板：模糊 + 压暗。固定暗色 —— 理由见上面那段 */}
+          <div className="absolute inset-0 bg-[#0b0b10]/55 backdrop-blur-[3px]" />
+
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('note.title')}
+            className="relative w-[400px] max-w-full bg-[#e8dcbd] pixel-edge pxw-4 pxc-paper"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 折角：右上角折下去的那一块（外暗内亮，读起来是纸被翻起来一个角） */}
+            <span aria-hidden className="absolute right-0 top-0 h-[18px] w-[18px] bg-[#cdbb92]" />
+            <span aria-hidden className="absolute right-[5px] top-[5px] h-[8px] w-[8px] bg-[#f0e7cf]" />
+
+            {/* 书写区：作业本横线 + 写在线上的字 */}
+            <div className="note-rules mx-10 my-8 h-[240px]">
+              <p className="font-pixel text-[12px] leading-[30px] text-[#3b3327]">
+                {t('note.text')}
+              </p>
+            </div>
+
+            {/* 关掉。压在纸的右下角，用纸色系做底、深棕做字 */}
+            <button
+              type="button"
+              aria-label={t('note.close')}
+              onClick={() => setNoteOpen(false)}
+              className="absolute bottom-[12px] right-[12px] flex h-[24px] w-[24px] items-center justify-center bg-[#d6c69e] text-[13px] leading-none text-[#6b5c3c] transition-colors hover:bg-[#3b3327] hover:text-[#e8dcbd]"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/*
+        留言本。点地上那本弹出来 —— 和存档 / 联机 / 按键几块面板同一套视觉，
+        但内容是从 `/api/feedback` 拉的（公开），并且自带提交框。
+        列表状态全在面板内部：每次打开都是全新挂载；翻页进度和已拉过的页靠
+        `FeedbackPanel` 文件里那份**模块级页缓存**跨挂载保留，父级一概不碰
+        （缓存必须挂在模块上 —— 挂组件里的话「关掉再打开」就白费了，而 D1 请求有限额）。
+      */}
+      {feedbackOpen && <FeedbackPanel onClose={() => setFeedbackOpen(false)} />}
+
+      {/*
+        操作指引。挂在所有弹窗**之后**、层级也最高（z-[60]，其余是 z-50）——
+        它要能圈住右侧那排开关（z-40）和整台机身，还要把底下的点击全吃掉。
+        初次访问由上面那个 effect 自动打开，之后从「按键说明」里的按钮重看。
+      */}
+      <OnboardingTour open={tourOpen} onClose={closeTour} />
 
       <input
         ref={romInputRef}

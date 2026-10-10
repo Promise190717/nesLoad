@@ -181,6 +181,7 @@ export default function RetroTv({
           */}
           <div
             ref={screenRef}
+            data-tour="screen"
             className="screen crt relative m-[15px] h-[540px] w-[720px] overflow-hidden bg-black"
           >
             {/*

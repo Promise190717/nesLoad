@@ -81,7 +81,7 @@ const en = {
    * （W/A/S/D、A B C X Y Z）都是丝印，中英一样。
    */
   'legend.moves': 'moves',
-  'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load — bindings are customizable (top right)',
+  'legend.shortcut': 'Keys  P Pause · R Reset · F5 Save · F8 Load',
   /* 「按键说明」弹窗本身。内容由 playerLegend() 现算，这里只有壳的文案。 */
   'legend.open': 'Controls',
   'legend.title': 'Controls',
@@ -115,9 +115,9 @@ const en = {
   'netplay.waitingGame': 'Connected — waiting for the host to load a cartridge',
   'netplay.hostPlaying': 'Host is playing',
   'netplay.youAreHost':
-    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: W/A/S/D, J, K, L, U, I, O, B, Enter — customizable at the top right.',
+    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: W/A/S/D, J, K, L, U, I, O, B, Enter.',
   'netplay.youAreGuest':
-    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: arrows, Num 1 2 4 5 7 8, Del, Num 0 — customizable at the top right.',
+    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: arrows, Num 1 2 4 5 7 8, Del, Num 0.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
   'netplay.errInsecure':
@@ -152,7 +152,7 @@ const en = {
   'keybind.hint':
     'The keyboard map is read once, when a cartridge loads — reload it for changes to apply. The two players cannot share a key.',
   'keybind.hostHint':
-    'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. They cannot share a key, or the injected input would also drive your Player 1. Reload a cartridge after changing either.',
+    'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. They cannot share a key, or the injected input would also drive your Player 1. Reload a cartridge after changing.',
   'keybind.guestHint':
     'You are the guest and play with the Player 2 keys. Changes take effect right away — no need to reload the cartridge.',
   'keybind.guestLocalHint':
@@ -186,6 +186,66 @@ const en = {
   'games.searchPlaceholder': 'Search title / developer / series',
   'games.search': 'Search',
   'games.noMatch': 'No matching games.',
+  /*
+   * 在线库的加载速度提示。**刻意只有中文版**（英文是空串，组件那边按「空串不渲染」处理）：
+   * 那句话是说给国内用户听的 —— 文件存在境外，慢是常态。英文界面下读者多半就在境外，
+   * 这条既没用又显得莫名其妙。
+   */
+  'games.remoteSlow': '',
+
+  /*
+   * 地板上那张纸片，点开弹出来的那句话。
+   * 中文原文由用户给定（他打成「童年是的开心」，这里按语义还原成「童年时的开心」）。
+   * 纸上的字走系统字体 —— Press Start 2P 没有中日韩字形，这一点和别的文案一样。
+   */
+  'note.text': 'May we all find again the joy we had as kids..',
+  'note.open': 'Read the note on the floor',
+  'note.title': 'A note',
+  'note.close': 'Close',
+  'window.cycle': 'Change the season outside',
+
+  /*
+   * 地上那本留言本（点开是留言列表 + 提交框）。
+   * 列表里的正文是用户写的、可能含中文，一律走系统字体 —— 和存档列表、按键说明同一套做法。
+   */
+  'feedback.open': 'Read the guestbook on the floor',
+  'feedback.title': 'Guestbook',
+  'feedback.close': 'Close',
+  'feedback.placeholder': 'Say something — a suggestion, or a game you would like to see here…',
+  'feedback.submit': 'Post',
+  'feedback.submitting': 'Posting…',
+  'feedback.ok': 'Posted — thanks!',
+  'feedback.required': 'Write something first.',
+  'feedback.failed': 'Could not post — try again.',
+  'feedback.loading': 'Loading…',
+  'feedback.empty': 'No messages yet — be the first to write one.',
+  'feedback.retry': 'Try again',
+  /* 翻页条。没有总页数（游标分页拿不到总数），所以只有「第几页」 */
+  'feedback.prev': 'Previous',
+  'feedback.next': 'Next',
+  'feedback.page': 'Page {n}',
+  'feedback.resolved': 'Resolved',
+  'feedback.unresolved': 'Open',
+
+  /*
+   * 初次打开的操作指引（两步）。指向屏幕和右侧那排开关 —— 靠 `data-tour` 属性找元素，
+   * 见 components/OnboardingTour.tsx。是给人读的说明，所以走系统字体、中英两版。
+   *
+   * 刻意只说「怎么把游戏弄进去」和「右边那列按钮是干嘛的」：机身上的按钮一眼就懂，
+   * 吊灯和那张纸片是彩蛋，**不在指引里剧透**。
+   */
+  'tour.title': 'Quick tour',
+  'tour.skip': 'Skip',
+  'tour.back': 'Back',
+  'tour.next': 'Next',
+  'tour.done': 'Start playing',
+  'tour.replay': 'Show the tour again',
+  'tour.screen.title': 'Start with a game',
+  'tour.screen.body':
+    'Drag a .nes / .sfc / arcade .zip file onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
+  'tour.rail.title': 'The switch rail',
+  'tour.rail.body':
+    'Top to bottom: theme (night / day), language (中 / EN), Library (online games and this machine’s history), Fullscreen (it is the screen itself that goes fullscreen), Netplay, Key bindings, and Controls help.',
 
   /* 后台（登录 + 录入），独立于房间界面。 */
   'admin.title': 'Admin',
@@ -231,6 +291,16 @@ const en = {
   'admin.search': 'Search',
   'admin.prev': 'Prev',
   'admin.next': 'Next',
+
+  /* 留言本（房间地板上那本）。后台只管「解决没有」——正文不给改，理由见那条接口的注释。 */
+  'admin.feedback.title': 'Guestbook',
+  'admin.feedback.empty': 'No messages yet.',
+  'admin.feedback.loadMore': 'Load more',
+  'admin.feedback.resolved': 'Resolved',
+  'admin.feedback.unresolved': 'Open',
+  'admin.feedback.markResolved': 'Mark resolved',
+  'admin.feedback.markUnresolved': 'Mark open',
+  'admin.feedback.failed': 'Request failed.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -269,7 +339,7 @@ const zh: Record<MessageKey, string> = {
   'library.removeLabel': '移除 {name}',
 
   'legend.moves': '移动',
-  'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档 —— 键位可在右上角自定义',
+  'legend.shortcut': '快捷键  P 暂停 · R 重置 · F5 存档 · F8 读档',
   'legend.open': '按键说明',
   'legend.title': '按键说明',
   'legend.close': '关闭',
@@ -293,9 +363,9 @@ const zh: Record<MessageKey, string> = {
   'netplay.waitingGame': '已连接，等房主插上卡带',
   'netplay.hostPlaying': '房主正在玩',
   'netplay.youAreHost':
-    '你是 1P。插上卡带后画面会自动推给对方。默认键位：W/A/S/D、J、K、L、U、I、O、B、Enter —— 可在右上角自定义。',
+    '你是 1P。插上卡带后画面会自动推给对方。默认键位：W/A/S/D、J、K、L、U、I、O、B、Enter。',
   'netplay.youAreGuest':
-    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：方向键、小键盘 1 2 4 5 7 8、Del、小键盘 0 —— 可在右上角自定义。',
+    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：方向键、小键盘 1 2 4 5 7 8、Del、小键盘 0。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
   'netplay.errInsecure':
@@ -341,6 +411,46 @@ const zh: Record<MessageKey, string> = {
   'games.searchPlaceholder': '搜索标题 / 开发者 / 系列',
   'games.search': '搜索',
   'games.noMatch': '没有匹配的游戏。',
+  /* 只有中文版，英文那份是空串 —— 见英文表里同一条上面的说明 */
+  'games.remoteSlow':
+    '提示：在线游戏库的文件存放在境外服务器，载入可能偏慢。想快一点就拖一个本机文件进来。',
+
+  'note.text': '愿我们都能找回童年时的开心..',
+  'note.open': '读一读地上那张纸',
+  'note.title': '一张纸',
+  'note.close': '关闭',
+  'window.cycle': '换一换窗外的季节',
+
+  'feedback.open': '翻一翻地上那本留言本',
+  'feedback.title': '留言本',
+  'feedback.close': '关闭',
+  'feedback.placeholder': '写句留言 —— 建议、想加的游戏，都行…',
+  'feedback.submit': '发布',
+  'feedback.submitting': '提交中…',
+  'feedback.ok': '已发布，谢谢！',
+  'feedback.required': '先写点什么吧。',
+  'feedback.failed': '提交失败，再试一次。',
+  'feedback.loading': '载入中…',
+  'feedback.empty': '还没有留言 —— 第一个写点什么吧。',
+  'feedback.retry': '重试',
+  'feedback.prev': '上一页',
+  'feedback.next': '下一页',
+  'feedback.page': '第 {n} 页',
+  'feedback.resolved': '已解决',
+  'feedback.unresolved': '未解决',
+
+  'tour.title': '操作指引',
+  'tour.skip': '跳过',
+  'tour.back': '上一步',
+  'tour.next': '下一步',
+  'tour.done': '开始玩',
+  'tour.replay': '重看操作指引',
+  'tour.screen.title': '先来一盘游戏',
+  'tour.screen.body':
+    '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。仓库里不带 ROM，得你自己准备一个。',
+  'tour.rail.title': '右边这一列开关',
+  'tour.rail.body':
+    '从上到下：主题（夜晚 / 白天）、语言（中 / EN）、游戏库（在线库 + 本机历史）、全屏（全屏的是屏幕本身）、联机、自定义按键、按键说明。',
 
   'admin.title': '后台',
   'admin.login.title': '后台登录',
@@ -385,6 +495,15 @@ const zh: Record<MessageKey, string> = {
   'admin.search': '搜索',
   'admin.prev': '上一页',
   'admin.next': '下一页',
+
+  'admin.feedback.title': '留言本',
+  'admin.feedback.empty': '还没有留言。',
+  'admin.feedback.loadMore': '加载更多',
+  'admin.feedback.resolved': '已解决',
+  'admin.feedback.unresolved': '未解决',
+  'admin.feedback.markResolved': '标记已解决',
+  'admin.feedback.markUnresolved': '标记未解决',
+  'admin.feedback.failed': '请求失败。',
 };
 
 const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };
