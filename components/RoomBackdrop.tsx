@@ -31,6 +31,12 @@
  * **只有窗外那扇窗是特例**：它分春夏秋冬（跟 `data-season`）、每季又分昼夜
  * （跟 `data-theme`）—— 见 `RoomWindow`。但昼夜跟的是**主题**，不是吊灯：
  * 屋里白天手动开灯，窗外也不会变成晚上。
+ *
+ * 2026-10-10 起，四个「可选的」部件根节点各挂了一个稳定类名 ——
+ * `room-lamp` / `room-window` / `room-calendar` / `room-floor-items` ——
+ * 给**简洁模式**用：`<html data-simple="on">` 时这几块整体 `display: none`
+ * （见 globals.css）。剩下的是背景墙 / 电视机 / 桌子 / 地面。
+ * 类名只做钩子，样式一条都不写在这里 —— 别把它们挪进 Tailwind 的类串里。
  */
 
 /**
@@ -82,7 +88,7 @@ export function RoomWindow({
   label: string;
 }) {
   return (
-    <div className="pointer-events-none absolute left-[-160px] top-[-100px] h-[342px] w-[342px] bg-wood-700 pixel-edge pxw-4 pxc-500">
+    <div className="room-window pointer-events-none absolute left-[-160px] top-[-100px] h-[342px] w-[342px] bg-wood-700 pixel-edge pxw-4 pxc-500">
       {/*
         玻璃：整块可点。四套景色**都留在 DOM 里**，由 CSS 按 <html data-season> 显隐 ——
         不能改成条件渲染，季节状态不在 React 里。
@@ -557,7 +563,7 @@ export function RoomCalendar() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute right-[-150px] top-[10px] w-[98px] bg-[#f4f1e8] pixel-edge pxw-2 pxc-500"
+      className="room-calendar pointer-events-none absolute right-[-150px] top-[10px] w-[98px] bg-[#f4f1e8] pixel-edge pxw-2 pxc-500"
     >
       {/* 线圈装订：纸上方一排小环 */}
       <span className="absolute inset-x-[12px] top-[-5px] flex justify-between">
@@ -708,7 +714,7 @@ export function RoomFloorItems({
 }) {
   return (
     <div
-      className="pointer-events-none absolute left-1/2 h-[120px] w-[1020px] -translate-x-1/2"
+      className="room-floor-items pointer-events-none absolute left-1/2 h-[120px] w-[1020px] -translate-x-1/2"
       style={{ top: `calc(100% + ${DESK_HEIGHT}px)` }}
     >
       {/* 纯装饰件整组。`inset-0` 和容器同盒，子元素那些 left / top 坐标一个都不用改 */}
@@ -957,7 +963,7 @@ export function RoomLamp({
       否则灯罩左右那点余量会变成一块隐形挡板，压住机身的拖拽落点。
       点击只落在里面那个 <button> 上。
     */
-    <div className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2">
+    <div className="room-lamp pointer-events-none absolute left-1/2 top-0 -translate-x-1/2">
       {/*
         光晕。以灯泡为中心 —— 灯泡中心在灯具底边往上 6px 处（灯泡 13 的一半）。
         它和灯具一起落在机身背后，所以只会照亮墙，不会糊到屏幕上。

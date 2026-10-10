@@ -39,6 +39,12 @@ const en = {
   /* 吊灯的点击目标 —— 描述的是「点下去会发生什么」，和全屏那两条同一写法 */
   'lamp.turnOn': 'Turn on the lamp',
   'lamp.turnOff': 'Turn off the lamp',
+  /*
+   * 简洁模式。同样是「描述点下去会发生什么」：
+   * 开着的时候点 = 退出，关着的时候点 = 只留背景墙 / 电视机 / 桌子 / 地面。
+   */
+  'simple.enter': 'Simple mode: keep only the wall, TV, desk and floor',
+  'simple.exit': 'Exit simple mode',
   'locale.toZh': '切换到中文',
   'locale.toEn': 'Switch to English',
   'fullscreen.enter': 'Fullscreen the game screen',
@@ -245,7 +251,7 @@ const en = {
     'Drag a .nes / .sfc / arcade .zip file onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
   'tour.rail.title': 'The switch rail',
   'tour.rail.body':
-    'Top to bottom: theme (night / day), language (中 / EN), Library (online games and this machine’s history), Fullscreen (it is the screen itself that goes fullscreen), Netplay, Key bindings, and Controls help.',
+    'Top to bottom: theme (night / day), language (中 / EN), Library (online games and this machine’s history), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), Netplay, Key bindings, and Controls help.',
 
   /* 后台（登录 + 录入），独立于房间界面。 */
   'admin.title': 'Admin',
@@ -314,6 +320,8 @@ const zh: Record<MessageKey, string> = {
   'theme.toLight': '切换到白天模式',
   'lamp.turnOn': '开灯',
   'lamp.turnOff': '关灯',
+  'simple.enter': '简洁模式：只保留背景墙、电视机、桌子和地面',
+  'simple.exit': '退出简洁模式',
   'locale.toZh': '切换到中文',
   'locale.toEn': '切换到英文',
   'fullscreen.enter': '游戏画面全屏',
@@ -450,7 +458,7 @@ const zh: Record<MessageKey, string> = {
     '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
   'tour.rail.body':
-    '从上到下：主题（夜晚 / 白天）、语言（中 / EN）、游戏库（在线库 + 本机历史）、全屏（全屏的是屏幕本身）、联机、自定义按键、按键说明。',
+    '从上到下：主题（夜晚 / 白天）、语言（中 / EN）、游戏库（在线库 + 本机历史）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、联机、自定义按键、按键说明。',
 
   'admin.title': '后台',
   'admin.login.title': '后台登录',

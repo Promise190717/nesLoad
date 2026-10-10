@@ -229,6 +229,26 @@ body {
 }
 
 /*
+ * 简洁模式：整间屋子只留**背景墙 / 电视机 / 桌子 / 地面**，
+ * 藏掉**吊灯、窗户、日历、地板杂物**这四块。
+ *
+ * 开关挂在 `<html data-simple>`（首屏由 layout.tsx 的内联脚本 BOOT_INIT 写入，
+ * 和主题 / 吊灯 / 季节同一套路：DOM 属性是唯一真相，React 那份 state 只为了 aria）。
+ * 挂点上的 `room-*` 类由 components/RoomBackdrop.tsx 各自提供。
+ *
+ * 用 `display: none` 而不是 visibility / opacity：藏起来的那四块里有**四个可点元素**
+ * （吊灯、窗户玻璃、地上的留言本、右下角那张纸片），只有 display:none 能把它们
+ * 同时移出布局、Tab 顺序和无障碍树 —— 否则会留下一片点得到却看不见的热区，
+ * 而且挡住机身的拖拽落点。
+ */
+:root[data-simple='on'] .room-lamp,
+:root[data-simple='on'] .room-window,
+:root[data-simple='on'] .room-calendar,
+:root[data-simple='on'] .room-floor-items {
+  display: none;
+}
+
+/*
  * 窗外景色：**春夏秋冬四套**，跟着 `<html data-season>` 切。
  *
  * 2026-10-10 之前是「昼夜两套 + 跟 data-theme 走」，改成四季 + 手动切换：

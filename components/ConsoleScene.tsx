@@ -64,6 +64,7 @@ import {
   KeyboardIcon,
   LibraryIcon,
   LinkIcon,
+  MinimalIcon,
   MoonIcon,
   SunIcon,
 } from './icons';
@@ -227,6 +228,12 @@ export default function ConsoleScene() {
    * 挂载后再从属性同步（见下面那个 effect），所以不会影响首帧的观感。
    */
   const [lampOn, setLampOn] = useState(true);
+
+  /**
+   * 简洁模式开着没有。真身在 `<html data-simple>` 上（首屏由 layout 的内联脚本写入），
+   * 这份 state **只为了 aria-pressed 和按钮文案**，挂载后再从属性同步 —— 和上面那盏灯一样。
+   */
+  const [simple, setSimple] = useState(false);
 
   /* ---------------- 联机 ---------------- */
 
@@ -794,6 +801,28 @@ export default function ConsoleScene() {
   }, [applyLamp]);
 
   /**
+   * 写简洁模式。和 `applyLamp` 一模一样的顺序：**先写 DOM 属性再同步 React**
+   * （反过来的话，连点两下可能因为 state 批处理丢掉一次翻转）。
+   *
+   * 真正藏东西的是 CSS（`globals.css` 里 `:root[data-simple='on']` 那几条），
+   * 这里一个组件都不卸载 —— 和季节四套 `<svg>` 留在 DOM 里同一个理由：
+   * 状态在属性上，React 不持有「藏了谁」。
+   */
+  const applySimple = useCallback((next: boolean) => {
+    document.documentElement.dataset.simple = next ? 'on' : 'off';
+    setSimple(next);
+    try {
+      localStorage.setItem(SIMPLE_KEY, next ? 'on' : 'off');
+    } catch {
+      // 隐私模式下写不进去，忽略即可
+    }
+  }, []);
+
+  const toggleSimple = useCallback(() => {
+    applySimple(document.documentElement.dataset.simple !== 'on');
+  }, [applySimple]);
+
+  /**
    * 换窗外的季节：切到下一季（春→夏→秋→冬→春）。
    *
    * 和 `toggleLamp` 一样**读 DOM 属性取当前值** —— `<html data-season>` 是唯一真相，
@@ -818,6 +847,7 @@ export default function ConsoleScene() {
    */
   useEffect(() => {
     setLampOn(document.documentElement.dataset.lamp === 'on');
+    setSimple(document.documentElement.dataset.simple === 'on');
   }, []);
 
   useEffect(() => {
@@ -1105,6 +1135,24 @@ export default function ConsoleScene() {
           }`}
         >
           <ExpandIcon size={13} />
+        </button>
+
+        {/*
+          简洁模式：只留背景墙 / 电视机 / 桌子 / 地面。
+          和全屏那颗一样是**有开关状态的按钮**，所以亮着的样式跟它同一套（accent 底）。
+          真正藏东西的是 CSS，这里只负责翻 <html data-simple>。
+        */}
+        <button
+          type="button"
+          onClick={toggleSimple}
+          title={t(simple ? 'simple.exit' : 'simple.enter')}
+          aria-label={t(simple ? 'simple.exit' : 'simple.enter')}
+          aria-pressed={simple}
+          className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+            simple ? 'pxc-accent bg-accent/20 text-accent' : 'bg-ink-800 text-ink-300 hover:text-accent'
+          }`}
+        >
+          <MinimalIcon size={13} />
         </button>
 
         {/* 在房间里（等待或已连上）就一直亮着，免得关掉面板后忘了自己还在房 */}

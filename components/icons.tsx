@@ -122,6 +122,36 @@ export function KeyboardIcon({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * 一台孤零零的电视机（外壳 + 屏幕 + 底座），表示「简洁模式」——
+ * 点下去整间屋子只剩背景墙、电视机、桌子和地面，所以图标就是**那个剩下来的主体**。
+ *
+ * 和 ExpandIcon（四角外扩）刻意画得不一样：那个是空心四角，这个是实心一台机器。
+ */
+export function MinimalIcon({ size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      {/* 外壳：四条边拼一个空心框，实心块会糊成一坨 */}
+      <rect x="1" y="3" width="14" height="1" />
+      <rect x="1" y="11" width="14" height="1" />
+      <rect x="1" y="3" width="1" height="9" />
+      <rect x="14" y="3" width="1" height="9" />
+      {/* 屏幕 */}
+      <rect x="3" y="5" width="10" height="5" />
+      {/* 底座：一根细颈 + 一块底板 */}
+      <rect x="7" y="12" width="2" height="2" />
+      <rect x="4" y="14" width="8" height="1" />
+    </svg>
+  );
+}
+
 /** 一排立在架子上的卡带，表示「游戏库」 */
 export function LibraryIcon({ size = 14 }: IconProps) {
   return (
