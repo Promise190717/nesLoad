@@ -27,6 +27,7 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
   'no-direct-connection': 'netplay.errNoDirect',
   'room-password': 'netplay.errPassword',
   handshake: 'netplay.errHandshake',
+  'host-left': 'netplay.errHostLeft',
   'join-failed': 'netplay.errUnknown',
 };
 
@@ -35,9 +36,12 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
  * 屏幕里跑的是游戏画面，这张面板要写字、还要输入房间码。
  *
  * 三个状态各自成屏：
- *   idle      → 创建 / 输入码加入
+ *   idle      → 创建 / 输入码加入（`error` 有值时在底部补一句原因）
  *   waiting   → 亮出房间码 + 「等待对方」
  *   connected → 亮出房间码 + 延迟
+ *
+ * 「等待对方」只对**房主**成立 —— 加入者那边房主一走，房间就被销毁、
+ * 直接落回 idle 并报 `host-left`（见 lib/netplay.ts 的 onPeerLeave）。
  *
  * 加入者这边还多两条只有它才看得到的信息：房主在玩哪盘、以及「连上了但房主还没插卡」。
  * 后者必须有 —— 加入者本机没有卡带，房主不出画面时他的屏幕就是一片雪花，

@@ -74,8 +74,18 @@ export function ExpandIcon({ size = 14 }: IconProps) {
   );
 }
 
-/** 两个方块中间一条横杠，表示两台机器连起来 */
-export function LinkIcon({ size = 14 }: IconProps) {
+/**
+ * 两个并肩站着的半身玩家 + 头顶一道信号，表示「联机对战」。
+ *
+ * 为什么是这两块拼一起：光画两个人只会读成「好友 / 群组」（试过，看不出是联机），
+ * 光画两个方块加根线又读成「设备/网络」（也试过，没有人的感觉）。所以一块负责「多人」
+ * ——两个小人（头 / 肩 / 上身，肩比身宽一档才有肩膀）、一块负责「在线」——头顶三道
+ * 由宽到窄的横杠加一个点，是各路像素 UI 里通用的信号写法。
+ *
+ * 信号三条**隔行画**（留 1px 空档），不然会糊成一个实心三角。两人各 5 格宽、中间空
+ * 5 格，头顶的信号正好落在空档上方，谁也不压谁。
+ */
+export function PlayersIcon({ size = 14 }: IconProps) {
   return (
     <svg
       width={size}
@@ -85,9 +95,19 @@ export function LinkIcon({ size = 14 }: IconProps) {
       shapeRendering="crispEdges"
       aria-hidden="true"
     >
-      <rect x="1" y="5" width="5" height="6" />
-      <rect x="10" y="5" width="5" height="6" />
-      <rect x="6" y="7" width="4" height="2" />
+      {/* 头顶信号：由宽到窄的三道弧 + 一个信号点 */}
+      <rect x="4" y="0" width="8" height="1" />
+      <rect x="5" y="2" width="6" height="1" />
+      <rect x="6" y="4" width="4" height="1" />
+      <rect x="7" y="6" width="2" height="1" />
+      {/* 左玩家 */}
+      <rect x="1" y="8" width="3" height="3" />
+      <rect x="0" y="12" width="5" height="1" />
+      <rect x="1" y="13" width="3" height="3" />
+      {/* 右玩家 */}
+      <rect x="12" y="8" width="3" height="3" />
+      <rect x="11" y="12" width="5" height="1" />
+      <rect x="12" y="13" width="3" height="3" />
     </svg>
   );
 }

@@ -11,7 +11,6 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
-import AdminFeedback from './AdminFeedback';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
@@ -78,10 +77,14 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 /**
- * 后台管理台：游戏列表（默认视图，分页 + 搜索）+ 添加 / 编辑弹窗 + 删除 + 登出。
+ * 后台 · 游戏列表 tab：列表（分页 + 搜索）+ 添加 / 编辑弹窗 + 删除。
  * 鉴权由各接口自查（见 lib/server/admin-guard.ts），这里只负责界面与调接口。
+ *
+ * 顶栏、退出登录、左侧 tab 栏都在 `AdminShell` 里（由服务端 layout 包着），
+ * 这个组件只画**这一页的内容** —— 原先它俩（列表 + 留言本）挤在一个页面里，
+ * 2026-10-10 拆成了两个 tab，各自一个路由。
  */
-export default function AdminConsole({ username }: { username: string }) {
+export default function AdminGames() {
   const { t } = useI18n();
   const router = useRouter();
 
@@ -319,149 +322,123 @@ export default function AdminConsole({ username }: { username: string }) {
     }
   };
 
-  const logout = async () => {
-    await fetch('/api/admin/login', { method: 'DELETE' }).catch(() => undefined);
-    router.replace('/admin/login');
-    router.refresh();
-  };
-
   return (
-    <div className="min-h-screen bg-ink-950 px-6 py-8 text-ink-100">
-      <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
-        <header className="flex items-center gap-3">
-          <h1 className="text-[14px] text-ink-200">{t('admin.title')}</h1>
-          <span className="text-[11px] text-ink-500">{username}</span>
+    <div className="flex flex-col gap-6">
+      <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
+        <div className="mb-3 flex items-center gap-3">
+          <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.list.title')}</h2>
+          {/* 搜索框与按钮同属一个 form，回车等同点击「搜索」 */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              applySearch();
+            }}
+            className="ml-auto flex min-w-0 max-w-[380px] flex-1 items-center gap-2"
+          >
+            <input
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              placeholder={t('admin.searchPlaceholder')}
+              className={`${FIELD_CLASS} min-w-0 flex-1`}
+            />
+            <button
+              type="submit"
+              className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[11px] text-ink-200 transition-colors hover:text-accent"
+            >
+              {t('admin.search')}
+            </button>
+          </form>
           <button
             type="button"
-            onClick={() => void logout()}
-            className="pixel-edge pxw-2 pxc-500 ml-auto bg-ink-800 px-3 py-1.5 text-[11px] text-ink-300 transition-colors hover:text-danger"
+            onClick={openAdd}
+            className="pixel-edge pxw-3 pxc-600 shrink-0 bg-accent px-4 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
           >
-            {t('admin.logout')}
+            {t('admin.add')}
           </button>
-        </header>
+        </div>
 
-        <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
-          <div className="mb-3 flex items-center gap-3">
-            <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.list.title')}</h2>
-            {/* 搜索框与按钮同属一个 form，回车等同点击「搜索」 */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                applySearch();
-              }}
-              className="ml-auto flex min-w-0 max-w-[380px] flex-1 items-center gap-2"
-            >
-              <input
-                value={searchDraft}
-                onChange={(e) => setSearchDraft(e.target.value)}
-                placeholder={t('admin.searchPlaceholder')}
-                className={`${FIELD_CLASS} min-w-0 flex-1`}
-              />
-              <button
-                type="submit"
-                className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[11px] text-ink-200 transition-colors hover:text-accent"
-              >
-                {t('admin.search')}
-              </button>
-            </form>
+        {pageNotice && (
+          <p
+            className={`mb-2 text-[11px] ${
+              pageNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
+            }`}
+          >
+            {pageNotice.text}
+          </p>
+        )}
+
+        {listLoaded && games.length === 0 && (
+          <p className="text-[11px] text-ink-500">{t('admin.list.empty')}</p>
+        )}
+
+        {games.length > 0 && matchedGames.length === 0 && (
+          <p className="text-[11px] text-ink-500">{t('admin.noMatch')}</p>
+        )}
+
+        {pagedGames.length > 0 && (
+          <ul className="flex flex-col divide-y-2 divide-ink-900">
+            {pagedGames.map((game) => (
+              <li key={game.id} className="flex items-center gap-3 py-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={game.imageUrl}
+                  alt=""
+                  className="pixel-edge pxw-2 pxc-700 h-[46px] w-[34px] shrink-0 bg-ink-900 object-cover"
+                />
+                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
+                  {game.title}
+                </span>
+                <span className="shrink-0 font-pixel text-[9px] text-accent">
+                  {CONSOLE_LABEL[game.consoleType]}
+                </span>
+                <span className="w-[150px] shrink-0 truncate text-right text-[10px] text-ink-500">
+                  {[game.year, game.developer, languageLabel(game.language), game.series]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openEdit(game)}
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-accent"
+                >
+                  {t('admin.edit')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void remove(game)}
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-danger"
+                >
+                  {t('admin.delete')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {pageCount > 1 && (
+          <div className="mt-3 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={openAdd}
-              className="pixel-edge pxw-3 pxc-600 shrink-0 bg-accent px-4 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
+              disabled={safePage <= 1}
+              onClick={() => setPage(safePage - 1)}
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {t('admin.add')}
+              {t('admin.prev')}
+            </button>
+            <span className="text-[10px] text-ink-500">
+              {safePage} / {pageCount}
+            </span>
+            <button
+              type="button"
+              disabled={safePage >= pageCount}
+              onClick={() => setPage(safePage + 1)}
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t('admin.next')}
             </button>
           </div>
-
-          {pageNotice && (
-            <p
-              className={`mb-2 text-[11px] ${
-                pageNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
-              }`}
-            >
-              {pageNotice.text}
-            </p>
-          )}
-
-          {listLoaded && games.length === 0 && (
-            <p className="text-[11px] text-ink-500">{t('admin.list.empty')}</p>
-          )}
-
-          {games.length > 0 && matchedGames.length === 0 && (
-            <p className="text-[11px] text-ink-500">{t('admin.noMatch')}</p>
-          )}
-
-          {pagedGames.length > 0 && (
-            <ul className="flex flex-col divide-y-2 divide-ink-900">
-              {pagedGames.map((game) => (
-                <li key={game.id} className="flex items-center gap-3 py-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={game.imageUrl}
-                    alt=""
-                    className="pixel-edge pxw-2 pxc-700 h-[46px] w-[34px] shrink-0 bg-ink-900 object-cover"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
-                    {game.title}
-                  </span>
-                  <span className="shrink-0 font-pixel text-[9px] text-accent">
-                    {CONSOLE_LABEL[game.consoleType]}
-                  </span>
-                  <span className="w-[150px] shrink-0 truncate text-right text-[10px] text-ink-500">
-                    {[game.year, game.developer, languageLabel(game.language), game.series]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => openEdit(game)}
-                    className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-accent"
-                  >
-                    {t('admin.edit')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void remove(game)}
-                    className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-danger"
-                  >
-                    {t('admin.delete')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {pageCount > 1 && (
-            <div className="mt-3 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                disabled={safePage <= 1}
-                onClick={() => setPage(safePage - 1)}
-                className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {t('admin.prev')}
-              </button>
-              <span className="text-[10px] text-ink-500">
-                {safePage} / {pageCount}
-              </span>
-              <button
-                type="button"
-                disabled={safePage >= pageCount}
-                onClick={() => setPage(safePage + 1)}
-                className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {t('admin.next')}
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/*
-          留言本。放在游戏列表**之后** —— 后台的主线是录游戏，
-          处理留言是顺手的活儿，不该一进来就顶在最上面。
-        */}
-        <AdminFeedback />
-      </div>
+        )}
+      </section>
 
       {modalOpen && (
         <div

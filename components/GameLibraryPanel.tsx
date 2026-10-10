@@ -27,6 +27,22 @@ export interface LibraryGame {
 type LoadState = 'loading' | 'ready' | 'error';
 
 /**
+ * 封面右上角那个**语言角标**。
+ *
+ * 库里 `language` 存的是短码（`zh` / `en`，见后台 AdminGames 的 `LANGUAGE_OPTIONS`），
+ * 但 DB 那列没有约束，老数据可能是自由文本 —— 所以这里**不做映射**，直接把值转大写当标识：
+ * `ZH` / `EN`。全大写 ASCII 正好能走 `font-pixel`，和左上的机种角标同一套字模。
+ *
+ * `pixel` 是给非 ASCII 老数据留的后路：`font-pixel`（Press Start 2P）没有 CJK 字形，
+ * 直接上会糊成方框，那一条就退回系统字体 —— 只影响这一张卡片，不连累别的。
+ */
+function languageTag(value: string | null): { text: string; pixel: boolean } | null {
+  const text = value?.trim().toUpperCase();
+  if (!text) return null;
+  return { text, pixel: /^[\x20-\x7e]+$/.test(text) };
+}
+
+/**
  * 两个 tab：在线库（R2 + D1 上传的那批）和本机历史（载入过的卡带）。
  * 默认落在「游戏库」——弹窗的主要用途还是去挑一盘没玩过的。
  */
@@ -300,6 +316,7 @@ export default function GameLibraryPanel({
                   {matchedGames.map((game) => {
                     const busy = loadingId === game.id;
                     const meta = [game.year, game.developer].filter(Boolean).join(' · ');
+                    const tag = languageTag(game.language);
                     return (
                       <li key={game.id}>
                         <button
@@ -324,6 +341,19 @@ export default function GameLibraryPanel({
                             <span className="absolute left-0 top-0 bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
                               {CONSOLE_LABEL[game.consoleType]}
                             </span>
+                            {/*
+                              语言角标贴在**右上角**，和左上的机种角标一左一右。
+                              没有语言数据就整块不渲染 —— 不留一个空框。
+                            */}
+                            {tag && (
+                              <span
+                                className={`absolute right-0 top-0 bg-ink-950/85 px-1 py-0.5 text-accent ${
+                                  tag.pixel ? 'font-pixel text-[8px]' : 'text-[9px]'
+                                }`}
+                              >
+                                {tag.text}
+                              </span>
+                            )}
                             {/*
                               下载进度**叠在封面里**（底部一条），不占独立的行 ——
                               放在文字下面会把卡片撑高，网格里其余卡片跟着重排、跳动。

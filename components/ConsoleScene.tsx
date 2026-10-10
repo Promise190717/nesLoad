@@ -63,9 +63,9 @@ import {
   HelpIcon,
   KeyboardIcon,
   LibraryIcon,
-  LinkIcon,
   MinimalIcon,
   MoonIcon,
+  PlayersIcon,
   SunIcon,
 } from './icons';
 
@@ -75,6 +75,12 @@ const THEME_KEY = 'nesload:theme';
  * 它**跟着主题走**（白天关、夜晚开，见下面的 applyTheme），手动点灯只是临时覆盖。
  */
 const LAMP_KEY = 'nesload:lamp';
+
+/**
+ * 简洁模式开关。值只有 'on' / 'off'（'on' 才是开），首屏由 layout 的内联脚本读进
+ * <html data-simple>。真正藏东西的是 CSS，见 globals.css 里 `:root[data-simple='on']`。
+ */
+const SIMPLE_KEY = 'nesload:simple';
 
 /**
  * 操作指引「看过了没有」的标记。
@@ -1155,20 +1161,39 @@ export default function ConsoleScene() {
           <MinimalIcon size={13} />
         </button>
 
-        {/* 在房间里（等待或已连上）就一直亮着，免得关掉面板后忘了自己还在房 */}
-        <button
-          type="button"
-          onClick={() => setNetplayOpen(true)}
-          title={t('netplay.open')}
-          aria-label={t('netplay.open')}
-          className={`pixel-edge pxw-2 p-1.5 transition-colors ${
-            netplayState.status !== 'idle'
-              ? 'pxc-accent bg-accent/20 text-accent'
-              : 'bg-ink-800 text-ink-300 hover:text-accent'
-          }`}
-        >
-          <LinkIcon size={13} />
-        </button>
+        {/*
+          联机。在房间里（等待或已连上）就一直亮着，免得关掉面板后忘了自己还在房。
+
+          外面这层 `relative` 只是为了**挂延迟读数**：竖排这一列每个按钮才 28px 宽，
+          里面塞不下字，所以把读数绝对定位到按钮**左边**（`right-full` + 一点外边距）。
+          读数本身在 <html data-*> 之外、跟着 React state 走 —— 它两秒一刷，
+          走 DOM 属性反而要自己管生命周期。
+        */}
+        <div className="relative">
+          {/*
+            延迟。只在**真的连上**且**测出值**时出现：`rtt` 是 ping 的往返时间，
+            连上到第一次 ping 回来之间有一小段空窗，那时不显示比显示个「--」干净。
+            用 font-pixel 的英文/数字（`123ms`），和面板里那一处读数同一套。
+          */}
+          {netplayState.status === 'connected' && netplayState.rtt !== null && (
+            <span className="absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[9px] text-accent">
+              {Math.round(netplayState.rtt)}ms
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setNetplayOpen(true)}
+            title={t('netplay.open')}
+            aria-label={t('netplay.open')}
+            className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+              netplayState.status !== 'idle'
+                ? 'pxc-accent bg-accent/20 text-accent'
+                : 'bg-ink-800 text-ink-300 hover:text-accent'
+            }`}
+          >
+            <PlayersIcon size={13} />
+          </button>
+        </div>
 
         {/* 自定义按键。单机双人也用得上，所以不跟着联机状态走 */}
         <button

@@ -41,7 +41,7 @@ interface CartridgeSpriteProps {
  *
  * **2026-10-09 起默认导出已经没人引用了**：插卡舱撤掉之后，机身上不再有卡带可见物
  * （现在「插着哪盘」由屏幕里的画面表达）。还在被用的是上面的 `CONSOLE_LABEL`
- * （`AdminConsole` / `GameLibraryPanel` 拿它当机种标签），所以文件留着。
+ * （`AdminGames` / `GameLibraryPanel` 拿它当机种标签），所以文件留着。
  * 要彻底清掉的话，把默认导出和 `CONSOLE_TINT` / `LABEL_*` / props 一起删。
  */
 export default function CartridgeSprite({

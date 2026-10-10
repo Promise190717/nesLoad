@@ -132,6 +132,8 @@ const en = {
     'Both sides reached the relay, but no direct connection could be opened — usually NAT or a firewall. Same LAN works best.',
   'netplay.errPassword': 'Room code mismatch.',
   'netplay.errHandshake': 'Handshake timed out — the other player may have left.',
+  /* 加入者专用：房主退出了，房间已经被我们主动销毁 */
+  'netplay.errHostLeft': 'The host left the room — it has been closed.',
   'netplay.errUnknown':
     'Could not connect to the other player. The browser console has the exact reason.',
 
@@ -263,6 +265,9 @@ const en = {
   'admin.login.error': 'Wrong username or password',
   'admin.login.failed': 'Sign-in failed — try again',
   'admin.logout': 'Sign out',
+  /* 后台左侧那两个 tab —— 游戏列表和留言本 2026-10-10 起分成两页，靠它俩切换 */
+  'admin.nav.games': 'Games',
+  'admin.nav.feedback': 'Guestbook',
   'admin.upload.title': 'Add a game',
   'admin.field.title': 'Title',
   'admin.field.image': 'Cover image',
@@ -382,6 +387,7 @@ const zh: Record<MessageKey, string> = {
     '双方都连上了中继，但建不起直连 —— 通常是 NAT 或防火墙。同一个局域网成功率最高。',
   'netplay.errPassword': '房间码对不上。',
   'netplay.errHandshake': '握手超时，对方可能已经离开了。',
+  'netplay.errHostLeft': '房主已离开房间，房间已关闭。',
   'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
 
   'keybind.title': '自定义按键',
@@ -469,6 +475,8 @@ const zh: Record<MessageKey, string> = {
   'admin.login.error': '用户名或口令不对',
   'admin.login.failed': '登录失败，请重试',
   'admin.logout': '退出登录',
+  'admin.nav.games': '游戏列表',
+  'admin.nav.feedback': '留言本',
   'admin.upload.title': '添加游戏',
   'admin.field.title': '游戏名',
   'admin.field.image': '封面图片',

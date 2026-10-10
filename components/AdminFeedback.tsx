@@ -28,7 +28,7 @@ async function fetchPage(cursor: string | null): Promise<FeedbackPage> {
   return (await res.json()) as FeedbackPage;
 }
 
-/** 和 AdminConsole 里那份同一套：把服务端给的 detail 挖出来，比一句「请求失败」有用。 */
+/** 和 AdminGames 里那份同一套：把服务端给的 detail 挖出来，比一句「请求失败」有用。 */
 async function readError(res: Response, fallback: string): Promise<string> {
   try {
     const data = (await res.json()) as { detail?: string };
@@ -39,10 +39,12 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 /**
- * 后台的「留言本」区块。
+ * 后台 · 留言本 tab。
  *
- * 刻意做成 AdminConsole 里的**一个 section**而不是又一个弹窗：后台的用法是
- * 「一边看游戏一边顺手处理留言」，弹窗会把游戏列表盖掉。
+ * 2026-10-10 之前它和游戏列表挤在同一个页面里（当时刻意做成一个 section 而不是弹窗，
+ * 理由是「一边看游戏一边顺手处理留言」）。用户改主意了：现在两个 tab 各占一页，
+ * 左侧切换。**顺带的好处是配额** —— 进后台默认只拉游戏列表，这张表点了才请求，
+ * 不再一进来就把两份都拉一遍（留言走 D1 REST，一次列表 = 一次 API 调用）。
  *
  * 唯一的动作是切「已解决」—— 正文不给改（理由见 app/api/admin/feedback/[id]/route.ts）。
  * 翻页是**按钮触发**而不是滚动加载：后台列表短、操作是「一条条处理」，

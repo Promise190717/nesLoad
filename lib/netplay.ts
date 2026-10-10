@@ -108,6 +108,8 @@ export type NetplayError =
   | 'room-password'
   /** 握手超时或失败，通常是对端刚离开 */
   | 'handshake'
+  /** 加入者专用：房主退出了房间（房间已被本机主动销毁，不是「暂时掉线」） */
+  | 'host-left'
   /** 其他，原文见 console */
   | 'join-failed';
 
@@ -301,7 +303,13 @@ export class NetplayController {
     await this.open(code, 'guest');
   }
 
-  /** 退出房间。房主离开后对方的 onPeerLeave 会触发，对方界面会退回「等待中」。 */
+  /**
+   * 退出房间（销毁房间）。
+   *
+   * 房主离开后对方的 `onPeerLeave` 会触发：加入者那边**自己也会调这个** ——
+   * 房主一走，加入者手里的房间就没有意义了（见 onPeerLeave）。
+   * 房主那边对方走了则退回「等待」，房间继续开着，不用重新开房。
+   */
   async leave(): Promise<void> {
     this.stopPing();
     // 必须在重置 state 之前松 —— releaseHeld 要靠 state.role 才知道该注到哪个玩家位
@@ -485,7 +493,28 @@ export class NetplayController {
       this.stopPing();
       // 对方可能是直接关的页面 —— 他欠的那些 keyup 永远不会到，得我们替他松开
       this.releaseHeld();
-      // 对方走了但房间还开着 —— 退回等待，房主不用重新开房
+
+      /*
+       * 加入者：房主走了。
+       *
+       * 退回 'waiting' 对加入者是错的 —— 它会对着「等待对方加入」干等，可这个房间里
+       * 根本不会再有人来（只有房主手里的码能招人，而房主已经走了）。
+       * 所以直接把房间**销毁**掉、回到初始态，并把原因摆出来（'host-left'）。
+       *
+       * `leave()` 是异步的，但它先把 state 同步重置再 await，所以这里 `.then` 接的
+       * `fail()` 一定跑在重置之后 —— 顺序是「先清空、再挂上原因」，不会被覆盖掉。
+       *
+       * ⚠️ **摘流交给 `leave()` 去做，这里不能提前摘**：先摘流再重置 state 的话，
+       * 会有一帧 `remotePlaying` 还是 true 而 `remoteStream` 已经没了 ——
+       * 屏幕那句提示的判定是 `!rom && remotePlaying && !remoteStream`，
+       * 于是会闪一下 `WAITING FOR HOST`。
+       */
+      if (this.state.role === 'guest') {
+        void this.leave().then(() => this.fail('host-left'));
+        return;
+      }
+
+      // 房主：对方走了但房间还开着 —— 退回等待，房主不用重新开房
       this.state = {
         ...this.state,
         status: 'waiting',
@@ -495,6 +524,7 @@ export class NetplayController {
         remoteGame: null,
       };
       this.callbacks.onState(this.state);
+      // 对方推来的画面作废（房主其实收不到流，这行是防御性的，和改造前保持一致）
       this.callbacks.onRemoteStream(null);
     };
   }
