@@ -73,6 +73,34 @@ launch 又把 canvas 的 CSS 复位成 100% —— 结果**每换一盘游戏机
 - 房主 P1/P2 不许撞键那条校验**必须留着**：注入合成的是真键盘事件，同一个 code 会同时驱动两个玩家。
 - 文案里**不要列键位**（写死的默认值迟早说假话），键位一律由 `playerLegend()` 现算。
 
+## 手柄（2026-10-10 查清）
+
+- **引擎层支持，应用层零支持**。RetroArch 的 web 构建带 `rwebpad` joypad 驱动
+  （日志 `[Input] Found joypad driver: "rwebpad"`），插着的浏览器手柄会被 autoconfig 到
+  **1P**（`[Autoconf] … configured in port 1.`），和键盘的 1P 并存 —— 实测按下手柄键
+  游戏画面会响应，所以「支持手柄」是核心白送的，不是我们做的。
+- **本站没有任何手柄相关代码**（`lib/` `components/` 里 `gamepad` 0 处）：键位面板只配键盘、
+  没有连接提示、不能改手柄键、页脚按键说明只有键盘。手柄能用**纯粹靠核心默认映射**。
+- **联机时加入者的手柄完全无效**：转发链只认 DOM 键盘事件
+  （`物理键盘 code --codeToButton(bindings.p1)--> 钮名`），加入者本机没有模拟器、
+  没有东西读他的手柄。房主自己的手柄能用（就是他本机 1P）。
+  —— 以后要做「加入者用手柄」，改动点在 `ConsoleScene` 的转发 effect：得先把手柄状态
+  轮询出来再翻成钮名，不能只挂在 keydown 上。
+- 未实测：两个手柄能否自动分到 1P/2P。
+
+### 观测这类问题的坑（下次直接用）
+
+- **无头 Chrome 看不到输入效果**：rAF 基本不跑（`Page.startScreencast` 也不行），
+  模拟器实际停摆 → 「按键没反应」是假象。必须用**离屏真窗口**（`--window-position=-3000,-3000`
+  + `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding
+  --disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling` + `Page.bringToFront`）。
+- **多开 Chrome 互相抢渲染**，只有前台那个满帧；测前先把自己起的实例杀干净（按
+  `remote-debugging-port=92` / 独立 `--user-data-dir` 过滤，**别动用户自己的 Chrome**）。
+- 判据别用颜色：`.crt` 叠加层 + 核心调色板映射都不符合直觉。让 ROM 自己「无输入时变色、
+  有输入时恒定」，比连拍哈希；**采样间隔要不等距**，否则和变色周期锁相会出现假冻结。
+- 想看引擎侧证据就临时开 `retroarchConfig.log_verbosity: 'true'`（**会让 `tsc` 报错，验完必删**）。
+
+
 ## 操作入口：只有机身按钮，没有键盘快捷键（2026-10-10 定）
 
 用户要求取消 `P` 暂停 / `R` 重置 / `F5` 存档 / `F8` 读档 四个全局快捷键 ——
@@ -83,6 +111,23 @@ launch 又把 canvas 的 CSS 复位成 100% —— 结果**每换一盘游戏机
 - i18n 的 `legend.shortcut` 已删，原位置留了「别再补回来」的注释。
 - 暂停提示在屏幕里（`RetroTv` 的 `paused` 层）：`PAUSED` + `PRESS RESUME ON THE PANEL`，
   文案跟着按钮的 `panel.resume` 走 —— 撤快捷键后**不能**再写「按 P」。
+
+### 房主的暂停要说给加入者（2026-10-10）
+
+加入者屏幕上是房主推来的 `<video>`，房主一暂停它就**冻在最后一帧**（和卡死 / 掉线一样），
+而他本机没有模拟器、那颗暂停钮也是灰的 —— **必须由房主明说**。
+
+- 走**已有的会话消息**，不新开通道：`lib/netplay.ts` 的 `SessionMessage` 带 `z?: 0 | 1`
+  （`z` = 睡着了；`?` 是为了跟老版本客户端错配不炸）。解析只信 `playing && z === 1`。
+- 状态存在控制器的 `localPaused` 里、`sendSession()` 整包发 —— 所以**晚连上的人**在
+  `onPeerJoin` 的补发里也能拿到当前值。`announceGame()` 会把 `localPaused` 归零
+  （换卡带 = 换一张盘），载入 / 弹卡两条路径都覆盖，调用方不必额外调 `announcePaused`。
+- `RetroTv` 的暂停层判据是 `paused || (remotePaused && Boolean(remoteStream))` ——
+  **必须用 `remoteStream` 而不是 `hasPicture`**：加入者切换的瞬间本机可能还插着自己的卡带，
+  那时 hasPicture 为真但屏幕上是**本机**的画面，会凭空盖一层 PAUSED。
+- 副标题两侧**分开写**：本机 `PRESS RESUME ON THE PANEL`（找得到那颗钮）、
+  房主 `WAITING FOR HOST TO RESUME`（他无处可点）。PWR 灯两种暂停都变 accent。
+- 暂停权**只在房主手里**：加入者不能反向发暂停（`sendSession` 只认房主），也没有暂停钮。
 
 ### 房主掉帧 = 整局变慢（2026-10-10）
 
@@ -102,6 +147,23 @@ launch 又把 canvas 的 CSS 复位成 100% —— 结果**每换一盘游戏机
   而客人那块 `.screen` 只有 720×540 —— 多出来的像素他显示不出来，编了白编。
   **不做这件事才是 bug**，不是画质妥协。
 - 三个档里**只有帧率**能减轻主线程负担；分辨率 / 码率减的是编码器线程。改不动时先降帧率。
+
+## 右侧开关栏：三组（2026-10-10 定）
+
+房间右边那一列按钮**按功能分三组**，从上到下（用户要求，组间要明显拉开）：
+
+1. **外观** —— 明暗、语言、全屏、简洁　（「全屏 / 简洁」归这组是问过用户的）
+2. **游戏** —— 游戏库、联机、自定义按键
+3. **帮助** —— 按键说明、留言本
+
+- 组内间距 = 容器 `gap-2`；组间插 `RailDivider`（ConsoleScene 里的本地小组件，
+  1px / `my-1.5` / `bg-ink-600`），叠起来 ~29px。改分组时记得**同步 `tour.rail.body`**（中英），
+  否则操作指引里念的顺序和看到的对不上。
+- **留言本有两个入口、同一个面板**（`FeedbackPanel`）：右侧开关栏那颗是正经入口
+  （`setFeedbackOpen(true)`，文案借 `feedback.title` = 留言本 / Guestbook）；
+  房间里地板上那本（`RoomFloorItems` 的 `onOpenFeedback`）**保留**，是彩蛋。
+  别用 `feedback.open` 当按钮文案 —— 那句写着「翻一翻**地上**那本」，会把人对到房间里去。
+- 新图标 `NoteIcon` 的辨识特征 = **左侧线圈**（和地板那本一致），别改成普通书本轮廓。
 
 ## 部署相关
 

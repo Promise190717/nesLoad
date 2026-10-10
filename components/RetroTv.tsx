@@ -59,14 +59,25 @@ interface RetroTvProps {
    */
   remotePlaying: boolean;
   /**
-   * 本机模拟器暂停着。
+   * **本机**模拟器暂停着（房主自己按的那颗钮）。
    *
    * 两个用处：机身那颗 PWR 灯多出第三个颜色（accent），以及屏幕里那句
    * `PAUSED / PRESS RESUME ON THE PANEL`。后者不能省 —— 暂停之后画面就是**冻住的
    * 最后一帧**，和「卡死了」长得完全一样，而解除暂停的那个钮在机身上，
    * 屏幕里不指一下就只能靠猜（见下面那层提示的注释）。
+   *
+   * 加入者永远拿到 false，他那边的暂停走 `remotePaused`。
    */
   paused: boolean;
+  /**
+   * 房主那边暂停着（= `netplayState.remotePaused`）。
+   *
+   * 加入者本机没有模拟器，`paused` 对他永远是 false —— 房主按下的那次暂停，
+   * 只能从这条 prop 进来。对他而言这**不是可选提示**：屏幕上放的是房主的
+   * `<video>`，房主一暂停它就冻在最后一帧，和「卡死 / 掉线」长得一模一样，
+   * 而他本机连一颗暂停钮都没有（面板那排因为没有卡带全是灰的）。
+   */
+  remotePaused: boolean;
   busy: boolean;
   /**
    * 正在插卡带。null = 没在载入。
@@ -105,7 +116,8 @@ interface RetroTvProps {
  * 新用户对着一片雪花只会以为坏了。
  *
  * 屏幕里**只放状态提示**：这一句、`RELEASE TO LOAD`、`WAITING FOR HOST`、载入进度条、
- * 以及暂停时的 `PAUSED`（暂停后画面冻住，不提示就看着像卡死）。
+ * 以及暂停时的 `PAUSED`（暂停后画面冻住，不提示就看着像卡死 —— 本机暂停和**房主暂停**
+ * 都会出这一层，只是副标题不同，见下面那层的注释）。
  * 要读的说明（存档列表 / 联机 / 键位 / 按键说明）一律走浮在房间上的弹窗。
  * 提示文字走 font-pixel，那套字模**没有汉字**，所以只能是英文（和 PWR / VOL /
  * EXIT FULLSCREEN 同一套做法，也因此不进 i18n 文案表）。
@@ -122,6 +134,7 @@ export default function RetroTv({
   rom,
   remoteStream,
   remotePlaying,
+  remotePaused,
   paused,
   busy,
   loading,
@@ -153,6 +166,26 @@ export default function RetroTv({
   const hasPicture = Boolean(rom) || Boolean(remoteStream);
   /** 房主在玩、画面还没到 —— 这时该说「等一下」，不该招呼用户拖 ROM 进来 */
   const waitingForHost = !rom && remotePlaying && !remoteStream;
+
+  /**
+   * 屏幕上要不要盖暂停层。
+   *
+   * 两个来源都算：本机暂停（房主自己按的），或**房主的画面**正被房主暂停着。
+   * 后者必须同时要求 `remoteStream` 到手 —— 只有画面真的在屏幕上、又停住了，
+   * 才有「为什么不动」这回事。流还没到的那段空当由 `WAITING FOR HOST` 顶着，
+   * 两层都画会在屏幕正中叠成一团（两层都是居中、pointer-events-none）。
+   *
+   * 注意判据用的是 `remoteStream` 而不是 `hasPicture`：加入者在切换的瞬间本机可能
+   * 还插着自己的卡带（房主一出画面他才把它弹掉），那时 hasPicture 为真但屏幕上的
+   * 画面是本机的、跟着本机跑 —— 拿它当判据会给本机画面凭空盖一层 PAUSED。
+   */
+  const showPaused = paused || (remotePaused && Boolean(remoteStream));
+  /**
+   * PWR 灯。有画面在跑是绿的，暂停了变 accent（本机暂停、房主暂停都算），
+   * 完全没画面就暗着。灯是机身上离屏幕最近的状态读数，两种暂停它都该跟着变 ——
+   * 加入者那台虽然没插卡带，屏幕上确实是房主停住的画面。
+   */
+  const pwrClass = !hasPicture ? 'bg-ink-600' : showPaused ? 'bg-accent' : 'bg-ok';
 
   return (
     <div
@@ -332,6 +365,12 @@ export default function RetroTv({
               `controller.isRunning` 时才可能为 true），所以那句「怎么开始玩」不会同时出现，
               载入进度也不会（载入会先把 paused 复位）。
 
+              **联机时这一层对加入者同样要出**，只是话不一样（见下面那句副标题）：
+              他屏幕上是房主推来的画面，房主一暂停那条 `<video>` 就冻在最后一帧，
+              而他本机没有模拟器、也没有那颗暂停钮（面板那排全是灰的）——
+              不告诉他，他只会以为游戏卡死或者掉线了。**两侧都需要这层提示，
+              但能做的事完全不同，所以文案必须分开**，不能共用「PRESS RESUME」那句。
+
               那层半透明底是拿来压住冻结画面的：什么都不垫的话，亮场景里这行字会糊掉。
               配色走 crt-*（屏幕底永远是黑的，ink-* 会随主题翻转）。
               文字走 font-pixel，那套字模没有汉字 —— 屏幕上所有提示都只能是英文，
@@ -342,14 +381,20 @@ export default function RetroTv({
               pointer-events-none：它只是一句话，不该变成点击 / 拖拽的落点 ——
               全屏退出口是 z-40，压在它上面，不受影响。
             */}
-            {paused && (
+            {showPaused && (
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-[12px] bg-crt-950/60">
                 <span className="blink font-pixel text-[20px] text-crt-accent drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
                   PAUSED
                 </span>
-                {/* 用的就是那颗钮自己的词（i18n 的 panel.resume = Resume），照着找得到 */}
+                {/*
+                  两句话分的是「谁按的」：
+                    · 本机暂停 → 用的就是那颗钮自己的词（i18n 的 panel.resume = Resume），
+                      照着去面板上找得到；
+                    · 房主暂停 → 加入者没有任何可操作的东西（连钮都是灰的），
+                      所以不写「按哪儿」，只说明白「在等谁」，顺带把「不是卡死」讲清楚。
+                */}
                 <span className="font-pixel text-[9px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
-                  PRESS RESUME ON THE PANEL
+                  {paused ? 'PRESS RESUME ON THE PANEL' : 'WAITING FOR HOST TO RESUME'}
                 </span>
               </div>
             )}
@@ -425,17 +470,7 @@ export default function RetroTv({
         */}
         <div className="flex items-center gap-5 border-t-2 border-ink-800 bg-ink-700 px-5 py-2.5">
           <div className="flex shrink-0 items-center gap-2">
-            <span
-              className={`h-3 w-3 ${
-                rom
-                  ? paused
-                    ? 'bg-accent'
-                    : 'bg-ok'
-                  : hasPicture
-                    ? 'bg-ok'
-                    : 'bg-ink-600'
-              }`}
-            />
+            <span className={`h-3 w-3 ${pwrClass}`} />
             <span className="font-pixel text-[9px] text-ink-500">PWR</span>
           </div>
 

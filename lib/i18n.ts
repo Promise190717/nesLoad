@@ -219,6 +219,8 @@ const en = {
   'netplay.waiting': 'Waiting for the other player',
   'netplay.waitingGame': 'Connected — waiting for the host to load a cartridge',
   'netplay.hostPlaying': 'Host is playing',
+  /** 房主按了暂停 —— 挂在游戏名后面的小标（屏幕里那层 PAUSED 说的是同一件事） */
+  'netplay.paused': 'Paused',
   /*
    * 这两句**刻意不列键位**。原先各写了一段「默认键位：…」，用户改过键位之后它就开始
    * 说假话（`playerLegend()` 那段注释记过同一个坑）。键位只由实时值生成，在「Controls」
@@ -362,7 +364,7 @@ const en = {
     'Drag a .nes / .sfc / arcade .zip file onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
   'tour.rail.title': 'The switch rail',
   'tour.rail.body':
-    'Top to bottom: theme (night / day), language (中 / EN), Library (online games and this machine’s history), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), Netplay, Key bindings, and Controls help.',
+    'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor). Games: Library (online games and this machine’s history), Netplay, Key bindings. Help: Controls help, and the Guestbook.',
 
   /* 后台（登录 + 录入），独立于房间界面。 */
   'admin.title': 'Admin',
@@ -504,6 +506,8 @@ const zh: Record<MessageKey, string> = {
   'netplay.waiting': '等待对方加入',
   'netplay.waitingGame': '已连接，等房主插上卡带',
   'netplay.hostPlaying': '房主正在玩',
+  /** 房主按了暂停 —— 挂在游戏名后面的小标（屏幕里那层 PAUSED 说的是同一件事） */
+  'netplay.paused': '已暂停',
   // 和英文版同一个理由：这里不列键位，改过键位之后那段清单就会说假话
   'netplay.youAreHost':
     '你是 1P。插上卡带后画面会自动推给对方。键位就是你自己的那套，当前值见「按键说明」。',
@@ -596,7 +600,7 @@ const zh: Record<MessageKey, string> = {
     '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
   'tour.rail.body':
-    '从上到下：主题（夜晚 / 白天）、语言（中 / EN）、游戏库（在线库 + 本机历史）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、联机、自定义按键、按键说明。',
+    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）。游戏：游戏库（在线库 + 本机历史）、联机、自定义按键。帮助：按键说明、留言本。',
 
   'admin.title': '后台',
   'admin.login.title': '后台登录',

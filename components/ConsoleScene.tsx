@@ -69,6 +69,7 @@ import {
   LibraryIcon,
   MinimalIcon,
   MoonIcon,
+  NoteIcon,
   PlayersIcon,
   SunIcon,
 } from './icons';
@@ -144,6 +145,18 @@ function createCaptureStream(canvas: HTMLCanvasElement | null, fps: number): Med
   const audio = getAudioTrack();
   if (audio) stream.addTrack(audio);
   return stream;
+}
+
+/**
+ * 右侧开关栏里「组与组之间」的那道分隔线。
+ *
+ * 用户 2026-10-10 要求把这一列按功能分组、组间拉开：
+ * 组内的间距是容器的 `gap-2`（8px），组间额外插一道 1px 短线，
+ * 再叠上它自己的上下外边距（`my-1.5`），合起来约 29px —— 和组内的 8px 一眼分得开。
+ * 纯装饰，`aria-hidden`（分组信息对读屏没有意义，逐个按钮本来就能读）。
+ */
+function RailDivider() {
+  return <span aria-hidden className="my-1.5 h-px w-7 bg-ink-600" />;
 }
 
 /**
@@ -322,9 +335,12 @@ export default function ConsoleScene() {
   const [noteOpen, setNoteOpen] = useState(false);
 
   /**
-   * 留言本。点地上那本（亮青封面 + 斜搁着的笔）弹出来 —— 内容来自 `/api/feedback`，是**公开**的，
-   * 面板自己也负责提交（见 FeedbackPanel）。列表数据不放在这里：
-   * 面板每次打开都是一次全新挂载，翻页 / 提交的状态没必要留在父级。
+   * 留言本。内容来自 `/api/feedback`，是**公开**的，面板自己也负责提交（见 FeedbackPanel）。
+   *
+   * 有**两个**入口，开的是同一个面板：
+   *   - 右侧开关栏那颗（正经入口，2026-10-10 加）
+   *   - 房间里地板上那本（亮青封面 + 斜搁着的笔）—— 从此退成**彩蛋**，点开照旧能用
+   * 列表数据不放在这里：面板每次打开都是一次全新挂载，翻页 / 提交的状态没必要留在父级。
    */
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
@@ -653,13 +669,24 @@ export default function ConsoleScene() {
     if (!controller.isRunning) return;
     await controller.togglePause();
     setPaused(controller.isPaused);
-  }, [controller]);
+    /*
+     * 把暂停说给对方。加入者手上的是一条 `<video>`，房主一暂停它就冻在最后一帧 ——
+     * 那个样子和「卡死 / 掉线」完全一样，而他本机没有模拟器、也没有那颗暂停钮
+     * （面板那排因为没卡带全是灰的），不告诉他就只能对着镜头猜。
+     *
+     * 加入者调到这里是空操作：没卡带时上面那句已经 return 了，就算调到了，
+     * 控制器也只在房主身份下广播（见 sendSession）。
+     */
+    netplay.announcePaused(controller.isPaused);
+  }, [controller, netplay]);
 
   const reset = useCallback(async () => {
     if (!controller.isRunning) return;
     await controller.reset();
     setPaused(false);
-  }, [controller]);
+    // 重载会把暂停一并解掉，对方屏幕上那层 PAUSED 也得跟着撤
+    netplay.announcePaused(false);
+  }, [controller, netplay]);
 
   /*
    * 存档 / 读档都必须把 setBusy(false) 放进 finally。
@@ -1206,7 +1233,17 @@ export default function ConsoleScene() {
       </div>
 
       {/*
-        右侧竖排开关：**上下居中贴右边**。
+        右侧竖排开关：**上下居中贴右边**，并且**按功能分成三组**
+        （用户 2026-10-10 要求：外观 / 游戏 / 帮助，组间拉开）。
+
+        从上到下：
+          ① 外观 —— 明暗、语言、全屏、简洁
+          ② 游戏 —— 游戏库、联机、自定义按键
+          ③ 帮助与留言 —— 按键说明、留言本
+        组内间距是容器的 `gap-2`，组间插一道 `RailDivider`（1px 短线 + 更大的外边距）。
+
+        留言本原先**只能**点房间里地板上那本，现在给了它一个正经入口；
+        地板上那本**留着**，成了彩蛋 —— 见 `RoomFloorItems` 的注释。
 
         原先是横着摆在右上角，整排压住了机身右上角（说明那块更是直接盖在电视机上）。
         竖过来之后宽度只有原来的一半不到，场景横向又空出来，不再和电视机抢地方。
@@ -1216,6 +1253,8 @@ export default function ConsoleScene() {
         data-tour="rail"
         className="stage absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2"
       >
+        {/* ==================== 组 ①：外观 ==================== */}
+
         {/*
           白天在上、夜晚在下（用户要求，2026-10-10 换过）。
           分段控件是 `flex-direction: column`（见 globals.css 的 `.theme-seg`），
@@ -1259,17 +1298,6 @@ export default function ConsoleScene() {
           ))}
         </div>
 
-        {/* 在线游戏库。点开是个全屏弹窗，选一盘直接载入 */}
-        <button
-          type="button"
-          onClick={() => setLibraryOpen(true)}
-          title={t('games.open')}
-          aria-label={t('games.open')}
-          className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
-        >
-          <LibraryIcon size={13} />
-        </button>
-
         <button
           type="button"
           onClick={toggleFullscreen}
@@ -1298,6 +1326,21 @@ export default function ConsoleScene() {
           }`}
         >
           <MinimalIcon size={13} />
+        </button>
+
+        <RailDivider />
+
+        {/* ==================== 组 ②：游戏 ==================== */}
+
+        {/* 在线游戏库。点开是个全屏弹窗，选一盘直接载入 */}
+        <button
+          type="button"
+          onClick={() => setLibraryOpen(true)}
+          title={t('games.open')}
+          aria-label={t('games.open')}
+          className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+        >
+          <LibraryIcon size={13} />
         </button>
 
         {/*
@@ -1345,6 +1388,10 @@ export default function ConsoleScene() {
           <KeyboardIcon size={13} />
         </button>
 
+        <RailDivider />
+
+        {/* ==================== 组 ③：帮助与留言 ==================== */}
+
         {/*
           按键说明。内容从**当前**键位现算（`playerLegend`），收进弹窗也永远是准的 ——
           写死过一次，结果是说明描述默认值、面板显示 localStorage 里存的那份，
@@ -1358,6 +1405,25 @@ export default function ConsoleScene() {
           className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
         >
           <HelpIcon size={13} />
+        </button>
+
+        {/*
+          留言本。和地板上那本打开的是**同一个面板**（`FeedbackPanel`），
+          只是这里才是正经入口 —— 地板上那本从此是彩蛋。
+
+          按钮文案直接借面板的标题（`feedback.title` = 留言本 / Guestbook）：
+          它就是这个按钮最准的两个字，没必要再起一个同义键。
+          `feedback.open` 那句「翻一翻地上那本留言本」是**地板那本专属**的措辞，
+          指路指向地板，用在这里会把人对到房间里去，所以不借。
+        */}
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          title={t('feedback.title')}
+          aria-label={t('feedback.title')}
+          className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+        >
+          <NoteIcon size={13} />
         </button>
       </div>
 
@@ -1424,8 +1490,11 @@ export default function ConsoleScene() {
             像嵌进桌子里。它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），
             不占布局、也不影响机身。
 
-            这摊里能点的有两处：**留言本**（点开留言面板）和右下角那张**纸片**
-            （点开「一张纸」，见文件末尾那个弹窗）。
+            这摊里能点的有两处：**留言本**和右下角那张**纸片**（点开「一张纸」，
+            见文件末尾那个弹窗）。
+
+            其中**留言本已经退成彩蛋**：留言本的正经入口挪到了右侧开关栏那颗（同一面板），
+            这里纯粹是「顺手在房间里点到了也会开」的隐藏彩蛋。纸片则是唯一的入口，照旧。
           */}
           <RoomFloorItems
             onOpenNote={() => setNoteOpen(true)}
@@ -1444,6 +1513,7 @@ export default function ConsoleScene() {
             */
             remoteStream={netplayState.remotePlaying ? remoteStream : null}
             remotePlaying={netplayState.remotePlaying}
+            remotePaused={netplayState.remotePaused}
             paused={paused}
             busy={busy}
             loading={loading}

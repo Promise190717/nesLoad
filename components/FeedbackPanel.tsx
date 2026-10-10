@@ -501,7 +501,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
             <button
               type="submit"
               disabled={submitting}
-              className="pixel-edge pxw-3 pxc-600 ml-auto bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-3 pxc-600 ml-auto bg-accent px-4 py-0.5 text-[12px] text-ink-950 transition-colors cursor-pointer enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {submitting ? t('feedback.submitting') : t('feedback.submit')}
             </button>

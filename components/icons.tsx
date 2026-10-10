@@ -210,3 +210,40 @@ export function HelpIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * 线圈本，表示「留言本」。
+ *
+ * 和地板上那本（`RoomFloorItems`：亮青封面 + 左侧线圈 + 白色标签）是同一个东西，
+ * 但图标是单色的、16px 里也铺不下封面配色，所以**抓的是它的形状特征**：
+ * 左侧三道探出封面的线圈 —— 「本子」和「书 / 列表」就靠这个分。
+ * 这也是当初把地板那本从「古书」改成「本子」时用的同一个特征（见 RoomBackdrop）。
+ *
+ * 封面是四条边拼的空心框（实心块在这个尺寸会糊成一坨，和 KeyboardIcon 同一个理由）。
+ */
+export function NoteIcon({ size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      {/* 封面：四条边拼空心框 */}
+      <rect x="4" y="2" width="10" height="1" />
+      <rect x="4" y="13" width="10" height="1" />
+      <rect x="4" y="2" width="1" height="12" />
+      <rect x="13" y="2" width="1" height="12" />
+      {/* 左侧线圈：三道，往封面外探出一格 */}
+      <rect x="2" y="4" width="2" height="1" />
+      <rect x="2" y="7" width="2" height="1" />
+      <rect x="2" y="10" width="2" height="1" />
+      {/* 里面三行字（写过的痕迹） */}
+      <rect x="6" y="5" width="5" height="1" />
+      <rect x="6" y="8" width="5" height="1" />
+      <rect x="6" y="11" width="3" height="1" />
+    </svg>
+  );
+}

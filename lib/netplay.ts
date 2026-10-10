@@ -266,6 +266,14 @@ export interface NetplayState {
   remotePlaying: boolean;
   /** 房主插着的那盘卡带，房主没插卡时为 null */
   remoteGame: RemoteGame | null;
+  /**
+   * 房主本机暂停着。加入者据此在屏幕上盖一层 PAUSED。
+   *
+   * 房主自己那条**永远是 false** —— 他不显示「对方暂停了」这种东西（只有房主会
+   * 广播会话状态，见 sendSession）。`remotePlaying` 为 false 时它必然也是 false：
+   * 没画面就无所谓暂停。
+   */
+  remotePaused: boolean;
 }
 
 export interface NetplayCallbacks {
@@ -296,11 +304,15 @@ type ButtonMessage = {
 };
 
 /**
- * 线上传的会话状态：房主当前在不在出画面、出的是哪盘。
+ * 线上传的会话状态：房主当前在不在出画面、出的是哪盘、**有没有暂停**。
  *
  * 为什么不能只靠媒体流判断「有没有画面」：Trystero 没有「远端流结束」的回调，
  * 房主弹卡之后加入者那边的 `<video>` 会冻在最后一帧上，看着像游戏卡住了。
  * 所以「有没有画面」由这条消息说了算，媒体流只负责像素。
+ *
+ * 暂停同理，而且是**更需要明说**的一种：暂停时画面不动是设计好的，可加入者手里
+ * 那条 `<video>` 冻住的样子和「卡死 / 掉线」一模一样，他本机又没有模拟器、没有那颗
+ * 暂停钮（面板那排全灰）—— 不说这一句，他只能对着镜头猜。
  *
  * 和 ButtonMessage 一样，必须是 `type` 而非 `interface`（隐式索引签名，见上）。
  */
@@ -308,6 +320,13 @@ type SessionMessage = {
   p: 0 | 1;
   n?: string;
   c?: ConsoleType;
+  /**
+   * 暂停。字母取 `z` —— 「睡着了」，和 p / n / c 不冲突，短。
+   *
+   * 用 `?:` 而不是必填是为了**版本错配**：老版本客户端发的包里没有这一位，
+   * 收到 undefined 就当「没暂停」（见 onMessage 里的解析），不会翻车。
+   */
+  z?: 0 | 1;
 };
 
 /** 空状态。界面拿它做初值，控制器也拿它做复位。 */
@@ -320,6 +339,7 @@ export const IDLE_NETPLAY_STATE: NetplayState = {
   error: null,
   remotePlaying: false,
   remoteGame: null,
+  remotePaused: false,
 };
 
 export function generateRoomCode(): string {
@@ -402,6 +422,13 @@ export class NetplayController {
   /** 本机插着的那盘卡带（房主才有），连上新人时要把这条状态补发过去 */
   private localGame: RemoteGame | null = null;
   /**
+   * 本机暂停着没有（房主才有意义）。
+   *
+   * 为什么不塞进 `localGame`：暂停不改变「在玩哪盘」，它是个独立的开关，
+   * 而广播是整包发的 —— 存在成员变量里，晚连上的人也能在补发时拿到当前值。
+   */
+  private localPaused = false;
+  /**
    * 当前出画档位。由 `publishStream` 带进来（帧率已经在那里建流时用掉了），
    * 留着是为了「对方连上 / 补发音频」这些**重新 addStream 的时刻**能再压一遍参数。
    */
@@ -450,6 +477,7 @@ export class NetplayController {
     this.buttonAction = null;
     this.sessionAction = null;
     this.localGame = null;
+    this.localPaused = false;
 
     // 流要显式收掉：光把 room 置空不会停掉 canvas 的采集，
     // 那张 canvas 会一直被 captureStream 攥着，弹卡之后还在编码。
@@ -551,6 +579,29 @@ export class NetplayController {
    */
   announceGame(game: RemoteGame | null): void {
     this.localGame = game;
+    /*
+     * 换卡带 = 换了一张盘，暂停状态跟着归零。
+     *
+     * 不在这里清会串味：房主「暂停 → 弹卡 → 插新卡」，新卡一上来就被标成暂停着
+     * （`setPaused(false)` 是 React 那边的事，控制器看不见）。清在这里就覆盖了
+     * 载入 / 弹卡两条路径，调用方不必再各叫一次 announcePaused。
+     */
+    this.localPaused = false;
+    this.sendSession();
+  }
+
+  /**
+   * 告诉对方「我这边暂停了 / 恢复了」。房主每次按下机身那颗暂停钮都要叫一次。
+   *
+   * 为什么不复用 `announceGame`：暂停不改变「在玩哪盘」，只是那盘停了。
+   * 加入者需要的是「画面为什么不动」这个解释 —— 见 SessionMessage.z 的注释。
+   *
+   * 非房主调用是空操作（`sendSession` 只认房主），所以加入者那边即使在载入本地卡带时
+   * 顺手调了也不会串味。
+   */
+  announcePaused(paused: boolean): void {
+    if (this.localPaused === paused) return;
+    this.localPaused = paused;
     this.sendSession();
   }
 
@@ -624,7 +675,16 @@ export class NetplayController {
           ? { name: data.n, console: data.c === 'snes' ? 'snes' : 'nes' }
           : null;
 
-      this.state = { ...this.state, remotePlaying: playing, remoteGame: game };
+      this.state = {
+        ...this.state,
+        remotePlaying: playing,
+        remoteGame: game,
+        /*
+         * 只信「在出画面」时的暂停位。老版本客户端不发 `z`（undefined）、或者发了脏数据，
+         * 这里一律落到 false —— 宁可少提示，也不能在别人的画面上凭空盖一层 PAUSED。
+         */
+        remotePaused: playing && data.z === 1,
+      };
       this.callbacks.onState(this.state);
 
       // 房主弹卡了 —— 把视频摘掉，别让它冻在最后一帧上
@@ -687,6 +747,7 @@ export class NetplayController {
         rtt: null,
         remotePlaying: false,
         remoteGame: null,
+        remotePaused: false,
       };
       this.callbacks.onState(this.state);
       // 对方推来的画面作废（房主其实收不到流，这行是防御性的，和改造前保持一致）
@@ -703,7 +764,13 @@ export class NetplayController {
 
     const game = this.localGame;
     void this.sessionAction
-      ?.send({ p: game ? 1 : 0, n: game?.name, c: game?.console })
+      ?.send({
+        p: game ? 1 : 0,
+        n: game?.name,
+        c: game?.console,
+        // 没在出画面时暂停位必然是 0 —— `announceGame` 已经把开关归零了
+        z: this.localPaused ? 1 : 0,
+      })
       .catch(() => undefined);
   }
 

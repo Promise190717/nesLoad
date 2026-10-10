@@ -305,6 +305,16 @@ export default function NetplayPanel({
                       <span className="min-w-0 flex-1 truncate text-ink-200">
                         {state.remoteGame.name}
                       </span>
+                      {/*
+                        房主暂停了就在这行尾巴上挂一枚小标。
+                        屏幕里已经有一层 PAUSED 了，但**面板浮起来时屏幕是被盖住的** ——
+                        用户打开面板想看「连上没有 / 在玩什么」的时候，也该看到这件事。
+                      */}
+                      {state.remotePaused && (
+                        <span className="shrink-0 border border-ink-500 px-1.5 py-[1px] text-[10px] text-accent">
+                          {t('netplay.paused')}
+                        </span>
+                      )}
                     </>
                   ) : (
                     <span className="text-ink-500">{t('netplay.waitingGame')}</span>
