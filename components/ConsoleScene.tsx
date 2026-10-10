@@ -22,6 +22,7 @@ import {
   IDLE_NETPLAY_STATE,
   NetplayController,
   remotePlayer,
+  type NetplayMode,
   type NetplayState,
 } from '@/lib/netplay';
 import {
@@ -246,6 +247,12 @@ export default function ConsoleScene() {
   const [netplayOpen, setNetplayOpen] = useState(false);
   const [netplayState, setNetplayState] = useState<NetplayState>(IDLE_NETPLAY_STATE);
   const [netplayBusy, setNetplayBusy] = useState(false);
+  /**
+   * 选的链路。默认 `lan`（只 STUN）—— 这是不依赖任何外部配置就能跑的那一档，
+   * `wan` 要构建期配了 TURN 才有意义（没配时面板会把它标成开发中）。
+   * 不持久化：每次开面板都从局域网开始，省得用户上次选了公网、这次忘了切回去。
+   */
+  const [netplayMode, setNetplayMode] = useState<NetplayMode>('lan');
   /** 房主推过来的画面流。只有加入者会拿到，房主那边永远是 null */
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
@@ -669,26 +676,26 @@ export default function ConsoleScene() {
   const createRoom = useCallback(async () => {
     setNetplayBusy(true);
     try {
-      await netplay.host();
+      await netplay.host(netplayMode);
     } catch (e) {
       console.warn('创建房间失败', e);
     } finally {
       setNetplayBusy(false);
     }
-  }, [netplay]);
+  }, [netplay, netplayMode]);
 
   const joinRoom = useCallback(
     async (code: string) => {
       setNetplayBusy(true);
       try {
-        await netplay.join(code);
+        await netplay.join(code, netplayMode);
       } catch (e) {
         console.warn('加入房间失败', e);
       } finally {
         setNetplayBusy(false);
       }
     },
-    [netplay]
+    [netplay, netplayMode]
   );
 
   const leaveRoom = useCallback(async () => {
@@ -1390,6 +1397,8 @@ export default function ConsoleScene() {
         open={netplayOpen}
         state={netplayState}
         busy={netplayBusy}
+        mode={netplayMode}
+        onModeChange={setNetplayMode}
         onClose={() => setNetplayOpen(false)}
         onCreate={() => void createRoom()}
         onJoin={(code) => void joinRoom(code)}

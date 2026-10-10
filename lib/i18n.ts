@@ -114,6 +114,10 @@ const en = {
   'netplay.hint':
     'Both sides only need to reach the public relay — same LAN works best. Read the 4-character code out to the other player. The host runs the emulator and streams the picture; the guest does not need the ROM.',
   'netplay.roomCode': 'Room code',
+  /* 链路选择器。「局域网」= 只 STUN；「公网」= 额外带 TURN 兜底（仍是直连优先） */
+  'netplay.modeLan': 'LAN',
+  'netplay.modeWan': 'Public internet',
+  'netplay.wanDev': 'Public-internet netplay is under development.',
   'netplay.copy': 'Copy',
   'netplay.copied': 'Copied',
   'netplay.connected': 'Connected',
@@ -367,8 +371,12 @@ const zh: Record<MessageKey, string> = {
   // 保持 ASCII：输入框走 font-pixel，该字模没有中日韩字形
   'netplay.codePlaceholder': 'CODE',
   'netplay.hint':
-    '双方都能访问公共中继即可，同一个局域网更佳。把 4 位房间码念给对方。房主负责跑游戏、把画面推过去，加入者不需要有卡带。',
+    '双方都能访问公共中继即可，请确保在同一个局域网。',
   'netplay.roomCode': '房间码',
+  /* 链路选择器。「局域网」= 只 STUN；「公网」= 额外带 TURN 兜底（仍是直连优先） */
+  'netplay.modeLan': '局域网',
+  'netplay.modeWan': '公网',
+  'netplay.wanDev': '公网联机正在开发中。',
   'netplay.copy': '复制',
   'netplay.copied': '已复制',
   'netplay.connected': '已连接',

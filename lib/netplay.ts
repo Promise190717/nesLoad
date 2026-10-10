@@ -46,22 +46,29 @@ const CONFUSABLE: Record<string, string> = { O: '0', I: '1', L: '1', U: 'V' };
 const APP_ID = 'nesload';
 
 /**
- * 可选的 TURN 服务器。
+ * 可选的 TURN 服务器。构建期是否配了 TURN —— 界面拿它决定「公网」这一档能不能选，
+ * 没配就只能标成「正在开发中」。
  *
  * Trystero 默认只带 STUN（`stun1-3.l.google.com` + `stun.cloudflare.com`），**没有 TURN**。
- * 两端只要不能直连 —— 对称 NAT、企业网络封 UDP、路由器开了客户端隔离 —— 就必然失败，
- * 报 `could not connect to peer … configure TURN servers`。这种情况唯一的解法是给一条
- * 中继链路，也就是 TURN。它需要一台自己的服务器（自建 coturn，或用付费服务），
- * 所以做成环境变量：**不配就完全走原来的 STUN-only 路径，行为一点不变**。
+ * 两端只要不能直连 —— 对称 NAT、企业网络封 UDP、路由器开了客户端隔离 —— 就必然失败。
+ * 这种情况唯一的解法是给一条中继链路，也就是 TURN。它需要一台自己的服务器
+ * （自建 coturn，或用付费服务），所以做成环境变量。
  *
  *   NEXT_PUBLIC_TURN_URL=turn:turn.example.com:3478
  *   NEXT_PUBLIC_TURN_USERNAME=user       （可选）
  *   NEXT_PUBLIC_TURN_CREDENTIAL=pass     （可选）
  *
  * 多个地址用逗号分隔。注意这几个变量**必须原样写成字面量** —— Next 只在构建期对
- * `process.env.NEXT_PUBLIC_*` 做静态替换，写成 `process.env[name]` 取不到值。
+ * `process.env.NEXT_PUBLIC_*` 做静态替换，写成 `process.env[name]` 取不到值；
+ * 也因此这是个**构建期常量**，改了环境变量必须重新构建，热更新不会变。
  */
-function turnConfig(): TurnServerConfig[] {
+export const TURN_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_TURN_URL);
+
+/** 按当前档位组出要追加进 `iceServers` 的 TURN 条目。`lan` 档返回空数组（= 只 STUN）。 */
+function turnConfig(enabled: boolean): TurnServerConfig[] {
+  // `lan` 档：不碰 TURN，和加这个开关之前的行为完全一致
+  if (!enabled) return [];
+
   const raw = process.env.NEXT_PUBLIC_TURN_URL;
   if (!raw) return [];
 
@@ -81,6 +88,19 @@ function turnConfig(): TurnServerConfig[] {
 }
 
 export type NetplayRole = 'host' | 'guest';
+
+/**
+ * 联机走的链路。
+ *
+ * `lan` —— 只带 STUN，不带 TURN。两端能直连就通，直连不了就失败。
+ * `wan` —— 额外带上 TURN 中继兜底。**仍然先试直连**：`iceServers` 里 STUN 在前、
+ *          TURN 在后，浏览器按候选优先级（host → srflx → relay）自己挑，直连能通
+ *          就不会用中继。所以「选了公网也优先走局域网直连」是白送的，不用写逻辑。
+ *
+ * 没配 `NEXT_PUBLIC_TURN_URL` 时 `wan` 和 `lan` **实际等价**（`turnConfig()` 返回空数组），
+ * 所以界面在 `TURN_CONFIGURED === false` 时直接把「公网」标成开发中。
+ */
+export type NetplayMode = 'lan' | 'wan';
 
 /**
  * idle     —— 不在房间里
@@ -287,20 +307,20 @@ export class NetplayController {
   }
 
   /** 创建房间，返回 4 位房间码。 */
-  async host(): Promise<string> {
+  async host(mode: NetplayMode): Promise<string> {
     const code = generateRoomCode();
-    await this.open(code, 'host');
+    await this.open(code, 'host', mode);
     return code;
   }
 
   /** 用对方给的码加入。码不合法时走 state.error（'bad-code'），不抛异常。 */
-  async join(rawCode: string): Promise<void> {
+  async join(rawCode: string, mode: NetplayMode): Promise<void> {
     const code = normalizeRoomCode(rawCode);
     if (!code) {
       this.fail('bad-code');
       return;
     }
-    await this.open(code, 'guest');
+    await this.open(code, 'guest', mode);
   }
 
   /**
@@ -396,7 +416,7 @@ export class NetplayController {
     this.sendSession();
   }
 
-  private async open(code: string, role: NetplayRole): Promise<void> {
+  private async open(code: string, role: NetplayRole, mode: NetplayMode): Promise<void> {
     // 换房间前先清干净，避免两个 room 同时活着互相抢事件
     await this.leave();
 
@@ -427,7 +447,7 @@ export class NetplayController {
 
     let room: Room;
     try {
-      room = joinRoom({ appId: APP_ID, turnConfig: turnConfig() }, code, {
+      room = joinRoom({ appId: APP_ID, turnConfig: turnConfig(mode === 'wan') }, code, {
         onJoinError: (details) => {
           // 原文只进 console —— 界面按稳定码选文案（见 classifyJoinError）
           console.warn('[netplay] join error:', details.error, details);

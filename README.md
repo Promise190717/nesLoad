@@ -165,6 +165,8 @@ Trystero 默认只带 STUN（`stun1-3.l.google.com` + `stun.cloudflare.com`）�
 
 **要跨过这一层只能配一台 TURN 服务器**（自建 coturn，或用付费服务），由它把流量中继过去。填三个环境变量即可，不填就还是原来的 STUN-only 路径、行为一点不变：
 
+> 联机面板顶上有个「**局域网 / 公网**」选择器。**局域网** = 只带 STUN（也就是原来的行为）；**公网** = 额外带上 TURN 兜底，但**仍然先试直连**，直连能通就不会走中继（ICE 的候选优先级是 host → srflx → relay，这是白送的，不用额外写逻辑）。构建期没配 `NEXT_PUBLIC_TURN_URL` 时「公网」这一档会显示「正在开发中」—— 把那三个变量配好、重新构建之后它会自动解锁。
+
 ```bash
 NEXT_PUBLIC_TURN_URL=turn:turn.example.com:3478   # 多个地址用逗号分隔
 NEXT_PUBLIC_TURN_USERNAME=user                    # 可选

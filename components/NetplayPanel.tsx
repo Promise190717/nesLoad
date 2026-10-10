@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { NetplayError, NetplayState } from '@/lib/netplay';
+import { TURN_CONFIGURED } from '@/lib/netplay';
+import type { NetplayError, NetplayMode, NetplayState } from '@/lib/netplay';
 import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
@@ -9,6 +10,9 @@ interface NetplayPanelProps {
   open: boolean;
   state: NetplayState;
   busy: boolean;
+  /** 当前选的链路。`lan` = 只 STUN；`wan` = 额外带 TURN 兜底（仍是直连优先） */
+  mode: NetplayMode;
+  onModeChange: (mode: NetplayMode) => void;
   onClose: () => void;
   onCreate: () => void;
   onJoin: (code: string) => void;
@@ -51,6 +55,8 @@ export default function NetplayPanel({
   open,
   state,
   busy,
+  mode,
+  onModeChange,
   onClose,
   onCreate,
   onJoin,
@@ -70,6 +76,14 @@ export default function NetplayPanel({
   if (!open) return null;
 
   const inRoom = state.status !== 'idle';
+  /**
+   * 「公网」这一档要靠 TURN 才跑得起来。构建期没配 `NEXT_PUBLIC_TURN_URL` 时
+   * `wan` 和 `lan` 实际等价（`turnConfig()` 返回空），那就不放进创建/加入流程，
+   * 只给一句说明 —— 否则用户会对着「等待对方加入」干等，还以为是对方没进来。
+   *
+   * 配好那三个环境变量重新构建之后，这里自动变成 false，「公网」就正常可用了。
+   */
+  const wanLocked = mode === 'wan' && !TURN_CONFIGURED;
   const errorText = state.error ? t(ERROR_MESSAGE[state.error]) : null;
 
   const copyCode = async () => {
@@ -114,7 +128,34 @@ export default function NetplayPanel({
         </div>
 
         <div className="flex flex-col gap-4 p-4">
-          {!inRoom ? (
+          {/* 链路选择器。只在没进房间时给 —— 连上了再换档没有意义 */}
+          {!inRoom && (
+            <div className="flex gap-1">
+              {(['lan', 'wan'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={mode === value}
+                  onClick={() => onModeChange(value)}
+                  className={`pixel-edge pxw-2 pxc-500 block flex-1 py-1.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                    mode === value
+                      ? 'bg-accent text-ink-950'
+                      : 'bg-ink-700 text-ink-200 enabled:hover:bg-ink-600 enabled:hover:text-accent'
+                  }`}
+                >
+                  {t(value === 'lan' ? 'netplay.modeLan' : 'netplay.modeWan')}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 公网档还没配 TURN —— 只说明，不放创建/加入的入口 */}
+          {!inRoom && wanLocked && (
+            <p className="text-[12px] text-ink-200">{t('netplay.wanDev')}</p>
+          )}
+
+          {!inRoom && !wanLocked && (
             <>
               <button
                 type="button"
@@ -155,7 +196,9 @@ export default function NetplayPanel({
 
               <p className="text-[11px] leading-relaxed text-ink-500">{t('netplay.hint')}</p>
             </>
-          ) : (
+          )}
+
+          {inRoom && (
             <>
               <div className="flex flex-col items-center gap-1 border-b-2 border-ink-900 pb-4">
                 <span className="text-[10px] text-ink-500">{t('netplay.roomCode')}</span>
