@@ -173,6 +173,49 @@ NEXT_PUBLIC_TURN_CREDENTIAL=pass                  # 可选
 
 这些值在**构建期**被内联进客户端代码（`NEXT_PUBLIC_` 前缀的固有行为），改了要重新构建。另外 TURN 是**中继**，走它会明显增加延迟——能用直连就别配。
 
+#### 自己搭一台 coturn
+
+用 Docker，`network_mode: host` 最省事（TURN 需要真实 IP 和一大段 UDP 端口）：
+
+```yaml
+services:
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --realm=turn.example.com
+      - --lt-cred-mech
+      - --user=nesload:<一串长随机密码>
+      - --fingerprint
+      - --no-cli
+      - --no-tlsv1
+      - --no-tlsv1_1
+      # 云主机在 NAT 后面时必写，格式是 <公网IP>/<内网IP>。
+      # 不写的话候选地址会填内网 IP，外面根本连不上。
+      - --external-ip=<公网IP>/<内网IP>
+```
+
+不想用 Docker 就 `apt install coturn`，同样这些参数写进 `/etc/turnserver.conf`，并在 `/etc/default/coturn` 里打开 `TURNSERVER_ENABLED=1`。
+
+**要放行的端口**（云厂商安全组和系统防火墙**两处都要开**）：
+
+| 端口 | 协议 | 用途 |
+|------|------|------|
+| `3478` | UDP + TCP | TURN 主端口 |
+| `49160-49200` | UDP | relay 端口段，必须和 `--min-port` / `--max-port` 一致 |
+
+**凭据用 `lt-cred-mech` + `--user=` 这种静态的。** 另一种 `use-auth-secret` 模式的用户名是「过期时间戳」、密码是 HMAC-SHA1 算出来的，会过期——写不进构建期就固定的环境变量，别用。
+
+验证：浏览器开 [Trickle ICE 测试页](https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/)，填上 `turn:你的IP:3478` 和用户名密码，看到 **`typ relay`** 的候选就说明服务器通了。
+
+> ⚠️ **`NEXT_PUBLIC_*` 会被打进客户端产物。** TURN 凭据打开 DevTools 就能看到，别人可以拿你的服务器当免费中继白嫖带宽。自用场景可以接受，但密码务必长随机，并给 coturn 限速（`--max-bps`、`--user-quota`、`--total-quota`）。
+
 ### 画面和声音是怎么过去的
 
 - **画面**：`canvas.captureStream(60)` 把模拟器画布直接抓成一条 `MediaStream`。
