@@ -1,7 +1,14 @@
 'use client';
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { LOCALE_COOKIE, translate, type Locale, type MessageKey, type Translate } from '@/lib/i18n';
+import {
+  LOCALE_COOKIE,
+  SITE_NAME,
+  translate,
+  type Locale,
+  type MessageKey,
+  type Translate,
+} from '@/lib/i18n';
 
 interface I18nValue {
   locale: Locale;
@@ -41,7 +48,15 @@ export function I18nProvider({
   const value = useMemo<I18nValue>(
     () => ({
       locale,
-      t: (key: MessageKey, vars) => translate(locale, key, vars),
+      /*
+       * 站名（文案里的 `{site}` 占位）在这里**统一注入**，不在每个调用点手写。
+       * 这样任何写了 `{site}` 的键，无论从服务端（layout 的 translate）还是客户端
+       * （这个 t）取，拿到的都是当前语言的站名。
+       *
+       * 顺序上 vars 在后：调用方传的变量优先级更高，需要时可以覆盖掉站名。
+       */
+      t: (key: MessageKey, vars) =>
+        translate(locale, key, { site: SITE_NAME[locale], ...vars }),
       setLocale,
     }),
     [locale, setLocale]

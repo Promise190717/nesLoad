@@ -26,10 +26,88 @@ export const DEFAULT_LOCALE: Locale = 'en';
  */
 export const LOCALE_COOKIE = 'nesload_locale';
 
+/**
+ * 站点名（品牌）。2026-10-10 用户定的：中文叫「复古游戏屋」。
+ *
+ * **为什么是「按语言的映射」而不是一个字符串**：站名会出现在 <title>、description、
+ * JSON-LD、分享图上，而这些全都跟着语言走（中文用户看到「复古游戏屋 — 在浏览器里…」，
+ * 英文用户该看到英文写法，不能是一串汉字）。
+ *
+ * **为什么不写成下面文案表里的一个键**（`meta.siteName`）：分享图那支
+ * （lib/og-image.tsx）是没有「当前语言」这个概念的 —— 它由 Satori 在服务端画，
+ * 图上也只能是英文（默认字体没有汉字，见那边的注释）。给它一个 `SITE_NAME.en`
+ * 比塞一个必须传 locale 才能取值的键直接得多。
+ *
+ * 唯一的源在这里：别在标题 / description 里手写站名，用 `{site}` 占位
+ * （见下面 meta.title / seo.intro，translate() 会把它替换掉）—— 改名才只改一处。
+ *
+ * ⚠️ 这是**对外的展示名**。仓库名 / npm 包名（package.json 的 `nesload`）、
+ * localStorage 与 IndexedDB 的键前缀（`nesload:*`、`nesload_locale`）、
+ * 联机的 APP_ID（lib/netplay.ts）都**不是**它，改这些会让老用户的数据和联机房间全部失联。
+ */
+export const SITE_NAME: Record<Locale, string> = {
+  zh: '复古游戏屋',
+  en: 'Retro Game House',
+};
+
 /** 英文是基准表，中文必须逐键对齐（漏键会在编译期报错）。 */
 const en = {
+  /*
+   * SEO 文案（<title> / description / og:* / JSON-LD）。
+   *
+   * 为什么单独列一组、而不是散在界面文案里：这几条**不进界面**，只给爬虫和社交
+   * 卡片看；但它们和界面文案一样**跟着语言走** —— 本站的语言由 cookie 决定，
+   * 没有 /en /zh 这种分语言 URL，所以 meta 只能按当前请求的语言渲染。
+   *
+   * 定位（用户 2026-10-10 明确）：主推「在线玩复古游戏」，NES / SFC / 街机都算，
+   * 有在线游戏库，也支持用自己的 ROM 文件。三条卖点按这个优先级排：
+   * 玩什么（复古游戏）> 怎么玩（在线游戏库 / 拖自己的 ROM）> 免安装。
+   */
+  /*
+   * <title>：站名在前（品牌词是搜索时最容易命中的），冒号后是「这站能干什么」。
+   * 整个标题压在 60 字符上下 —— 再长 Google 就截断了。
+   * `{site}` 由调用方替换成 SITE_NAME[locale]，别在这里手写站名。
+   */
+  'meta.title': '{site} — Play Retro Games in Your Browser: NES, SNES & Arcade',
+  /*
+   * description：长度按 **155 字符上下** 写（桌面端 Google 大约只显示这么多），
+   * 前半句必须能独立成立 —— 后半句被截掉也不能读不通。
+   */
   'meta.description':
-    'An NES / SFC cartridge loader that runs in your browser. Drop a ROM onto the console and play.',
+    'Play NES, SNES / SFC and arcade games right in your browser. Pick a title from the online library, or drop your own ROM file onto the pixel-art CRT.',
+  /*
+   * keywords：Google 早在 2009 年就不看了，这里留着是给 Bing / Yandex / 站内搜索
+   * 之类还有一点权重的地方 —— 属于「写了没坏处、别指望它」的一条。
+   */
+  'meta.keywords':
+    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
+  /*
+   * 这里**没有** og:image 的 alt —— 不是漏了。
+   * alt 由 app/opengraph-image.tsx 按文件约定导出，而那个导出必须是**静态值**，
+   * 拿不到当前请求的语言，所以只能是一句写死的英文（见 lib/og-image.tsx 的 OG_ALT）。
+   * 写一个 `{site}` 版本放在这里也没人会读，属于dead code，干脆不留。
+   */
+
+  /*
+   * 首屏那段**看不见的正文**（ConsoleScene 里用 sr-only 渲染）。
+   *
+   * 为什么需要它：这间屋子里所有东西都是 CSS 画的，游戏跑在 canvas 里，
+   * 整页除了按钮上那几个词之外**没有一个字**是可索引的文本 ——
+   * 一个没有正文的站在搜索结果里等于不存在，标题和 description 写得再好也没用，
+   * 因为没有任何东西支撑「这页讲了什么」。
+   *
+   * 用 sr-only 而不是渲染出来：这是刻意的极简视觉（屋里只该有电视机），
+   * 加一段文字说明就把设计毁了。而 sr-only 对读屏用户本来就是好事 ——
+   * 现在他们进来听到的第一句就是「这是什么、怎么开始玩」，而不是一片空白。
+   *
+   * 分寸：**简短、且与页面真实功能一致**。隐藏文本堆关键词会被判作弊，
+   * 这里只是把「这是什么、能干什么、怎么开始」如实说一遍，不塞任何没实现的卖点。
+   */
+  'seo.heading': 'Play retro games in your browser',
+  'seo.intro':
+    '{site} is an online retro game room. NES, SNES / SFC and arcade titles run right here in the browser — emulated on your own machine, with RetroArch compiled to WebAssembly.',
+  'seo.howTo':
+    'Pick a game from the online library, or drop your own ROM file onto the television. Nothing to install.',
 
   'notice.desktopOnly':
     'This room is desktop-only. Widen your browser window to at least 900px.',
@@ -61,6 +139,8 @@ const en = {
   'panel.pause': 'Pause',
   'panel.save': 'Save',
   'panel.load': 'Load',
+  /* 机身上的 RESET 钮：重启核心，游戏从头开始（对应键盘上的 R） */
+  'panel.reset': 'Reset',
   'panel.eject': 'Eject',
 
   'volume.down': 'Volume down one step',
@@ -124,10 +204,15 @@ const en = {
   'netplay.waiting': 'Waiting for the other player',
   'netplay.waitingGame': 'Connected — waiting for the host to load a cartridge',
   'netplay.hostPlaying': 'Host is playing',
+  /*
+   * 这两句**刻意不列键位**。原先各写了一段「默认键位：…」，用户改过键位之后它就开始
+   * 说假话（`playerLegend()` 那段注释记过同一个坑）。键位只由实时值生成，在「Controls」
+   * 弹窗里；这里只负责说清「你是谁、对方是谁」，值一律指过去看。
+   */
   'netplay.youAreHost':
-    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. Default keys: W/A/S/D, J, K, L, U, I, O, B, Enter.',
+    'You are player 1. Load a cartridge and the picture is pushed to the guest automatically. You play with your own key set — see Controls for the current bindings.',
   'netplay.youAreGuest':
-    'You are player 2. No cartridge needed — the host streams the picture. Your keys are sent to the host. Default keys: arrows, Num 1 2 4 5 7 8, Del, Num 0.',
+    'You are player 2. No cartridge needed — the host streams the picture, and your keys are sent to the host. You play with your own key set (the Player 1 group) — see Controls.',
   'netplay.leave': 'Leave room',
   'netplay.badCode': 'That code does not look right — it should be 4 characters.',
   'netplay.errInsecure':
@@ -151,6 +236,11 @@ const en = {
   'keybind.close': 'Close',
   'keybind.p1': 'Player 1',
   'keybind.p2': 'Player 2',
+  /*
+   * 联机时那个**唯一**的标签：锁的一定是 1P 那组，但对加入者不能写「Player 1」
+   * —— 他在游戏里是 2P，会读成「那是房主的键」。所以按「归属」命名，不按号位。
+   */
+  'keybind.mine': 'Your keys',
   'keybind.pressKey': 'PRESS…',
   'keybind.btnStart': 'START',
   'keybind.btnCoin': 'COIN',
@@ -166,9 +256,9 @@ const en = {
   'keybind.hostHint':
     'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. They cannot share a key, or the injected input would also drive your Player 1. Reload a cartridge after changing.',
   'keybind.guestHint':
-    'You are the guest and play with the Player 2 keys. Changes take effect right away — no need to reload the cartridge.',
+    'You are the guest and play with your own key set (the Player 1 group) — each side sits at its own keyboard, so nothing can clash. Changes take effect right away — no need to reload the cartridge.',
   'keybind.guestLocalHint':
-    'You are the guest, and a cartridge of your own is running here too. Player 1 drives that local cartridge — reload it after changing. Player 2 is what gets sent to the host and applies right away.',
+    'You are the guest, and a cartridge of your own is running here too. Your keys are the Player 1 group: they drive that local cartridge, so reload it after changing — and they are also what gets sent to the host, which applies right away.',
 
   /*
    * 在线游戏库（服务端上传的那批游戏）。和本机历史是两回事：
@@ -321,7 +411,15 @@ const en = {
 export type MessageKey = keyof typeof en;
 
 const zh: Record<MessageKey, string> = {
-  'meta.description': '在浏览器里运行的 NES / SFC 卡带加载器，把卡带拖到游戏机上即可开始。',
+  'meta.title': '{site} — 在浏览器里在线玩复古游戏：NES / SFC / 街机',
+  'meta.description':
+    '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）和街机都能跑。从在线游戏库挑一盘，或把自己的 ROM 文件拖到像素风电视机上，打开即玩、免安装。',
+  'meta.keywords':
+    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+  'seo.heading': '在浏览器里玩复古游戏',
+  'seo.intro':
+    '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）和街机游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
+  'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
 
   'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 900px 以上。',
 
@@ -343,6 +441,7 @@ const zh: Record<MessageKey, string> = {
   'panel.pause': '暂停',
   'panel.save': '存档',
   'panel.load': '读档',
+  'panel.reset': '重载',
   'panel.eject': '弹出',
 
   'volume.down': '音量减一档',
@@ -383,10 +482,11 @@ const zh: Record<MessageKey, string> = {
   'netplay.waiting': '等待对方加入',
   'netplay.waitingGame': '已连接，等房主插上卡带',
   'netplay.hostPlaying': '房主正在玩',
+  // 和英文版同一个理由：这里不列键位，改过键位之后那段清单就会说假话
   'netplay.youAreHost':
-    '你是 1P。插上卡带后画面会自动推给对方。默认键位：W/A/S/D、J、K、L、U、I、O、B、Enter。',
+    '你是 1P。插上卡带后画面会自动推给对方。键位就是你自己的那套，当前值见「按键说明」。',
   'netplay.youAreGuest':
-    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。默认键位：方向键、小键盘 1 2 4 5 7 8、Del、小键盘 0。',
+    '你是 2P。不需要卡带，房主会把画面推过来；你的按键会发给房主。你按的是自己那套键（玩家 1 组），当前值见「按键说明」。',
   'netplay.leave': '离开房间',
   'netplay.badCode': '房间码不对，应该是 4 位。',
   'netplay.errInsecure':
@@ -403,6 +503,7 @@ const zh: Record<MessageKey, string> = {
   'keybind.close': '关闭',
   'keybind.p1': '玩家 1',
   'keybind.p2': '玩家 2',
+  'keybind.mine': '你的键位',
   'keybind.pressKey': '按下新键…',
   'keybind.btnStart': '开始',
   'keybind.btnCoin': '投币',
@@ -415,9 +516,10 @@ const zh: Record<MessageKey, string> = {
   'keybind.hint': '键盘映射只在插卡带时读一次，改完要重载卡带才生效。两位玩家不能共用同一个键。',
   'keybind.hostHint':
     '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组不能共用一个键，否则注入会连带驱动你的玩家 1。改完要重载卡带。',
-  'keybind.guestHint': '你是加入者，用玩家 2 的键位。改完立刻生效，不用重载卡带。',
+  'keybind.guestHint':
+    '你是加入者，用你自己那套（玩家 1 组）—— 联机时两人各在自己的键盘前，不存在抢键。改完立刻生效，不用重载卡带。',
   'keybind.guestLocalHint':
-    '你是加入者，本机还跑着一盘自己的卡带。玩家 1 给本机那盘用，改完要重载卡带；玩家 2 是发给房主的，立刻生效。',
+    '你是加入者，本机还跑着一盘自己的卡带。你按的就是「玩家 1」那组：本机那盘按它读键盘，改完要重载卡带；发给房主的也是它，那部分立刻生效。',
 
   'games.open': '游戏库',
   'games.title': '游戏库',

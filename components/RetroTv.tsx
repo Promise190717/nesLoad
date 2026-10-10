@@ -76,6 +76,8 @@ interface RetroTvProps {
   onTogglePause: () => void;
   onSave: () => void;
   onLoad: () => void;
+  /** 重载：重启核心，游戏从头开始（机身面板上那颗 RESET 钮） */
+  onReload: () => void;
   onEject: () => void;
   onVolume: (level: number) => void;
   onExitFullscreen: () => void;
@@ -119,6 +121,7 @@ export default function RetroTv({
   onTogglePause,
   onSave,
   onLoad,
+  onReload,
   onEject,
   onVolume,
   onExitFullscreen
@@ -327,20 +330,27 @@ export default function RetroTv({
         </div>
 
         {/*
-          前面板。纵向留白刻意压到 py-3 —— 一排小按钮 + 20px 的音量键，
+          前面板。纵向留白压到 py-2.5 —— 一排小按钮 + 20px 的音量键，
           面板高度就由它们撑出来，多余的空只会让机身显得虚胖。
+          （2026-10-10 按钮整体收小之后，这里跟着从 py-3 收到 py-2.5，否则
+          按钮瘦了、面板没瘦，四周那圈空反而更显眼。）
 
-          四个按钮一律看 `rom`（本机有没有插卡带），不看有没有画面：
+          五个按钮一律看 `rom`（本机有没有插卡带），不看有没有画面：
           加入者屏幕上是房主的画面，但这些按钮管的是本机的模拟器，本机没有模拟器，
           所以它们该是灰的。PWR 灯则相反 —— 有画面就亮。
 
-          按钮宽度**写死 64px**、整排用 `ml-auto` 贴右边：之前是 `flex-1` 撑满，
-          4 个格子分掉整条面板，每个按钮宽到 110px，太大也太散。
+          按钮宽度**写死 52px**、整排用 `ml-auto` 贴右边：之前是 `flex-1` 撑满，
+          4 个格子分掉整条面板，每个按钮宽到 110px，太大也太散；中间试过 64px，
+          2026-10-10 添了「重载」凑成 5 个，整排一下又变宽，索性统一收到 52px。
           不用 `px-*` 让文字自己撑宽度是因为中英文字数不一样（`Pause` vs `暂停`），
-          那样 4 个按钮会宽窄不齐。面板是定宽机身（屏幕 720 + 边距）里的一行，
+          那样几个按钮会宽窄不齐。面板是定宽机身（屏幕 720 + 边距）里的一行，
           不存在窄屏挤压，所以写死尺寸是安全的。
+
+          顺序把「重载」放在「弹出」前面：重载是留在卡带上的操作，弹出是把它撤下来，
+          撤下来那个永远排最后。重载＝重启核心（游戏从头开始），和键盘上的 R 是同一件事 ——
+          以前只有快捷键没有钮，屏幕里的提示也从不提它，等于藏起来了。
         */}
-        <div className="flex items-center gap-5 border-t-2 border-ink-800 bg-ink-700 px-5 py-3">
+        <div className="flex items-center gap-5 border-t-2 border-ink-800 bg-ink-700 px-5 py-2.5">
           <div className="flex shrink-0 items-center gap-2">
             <span
               className={`h-3 w-3 ${
@@ -405,7 +415,7 @@ export default function RetroTv({
             </div>
           </div>
 
-          <div className="ml-auto grid grid-cols-[repeat(4,64px)] gap-1.5">
+          <div className="ml-auto grid grid-cols-[repeat(5,52px)] gap-1.5">
             <PanelBtn onClick={onTogglePause} disabled={!rom || busy}>
               {paused ? t('panel.resume') : t('panel.pause')}
             </PanelBtn>
@@ -414,6 +424,9 @@ export default function RetroTv({
             </PanelBtn>
             <PanelBtn onClick={onLoad} disabled={!rom || busy || !canLoad}>
               {t('panel.load')}
+            </PanelBtn>
+            <PanelBtn onClick={onReload} disabled={!rom || busy}>
+              {t('panel.reset')}
             </PanelBtn>
             <PanelBtn onClick={onEject} disabled={!rom || busy} danger>
               {t('panel.eject')}
@@ -487,6 +500,14 @@ function VolBtn({
   );
 }
 
+/**
+ * 前面板上那排功能钮（暂停 / 存档 / 读档 / 重载 / 弹出）。
+ *
+ * 尺寸走「窄 + 矮」：宽度由父级格子的写死列宽（52px）定，高度只由这里的
+ * `py-1 text-[10px]` 撑出来。2026-10-10 从 `py-1.5 text-[11px]` 收下来过 ——
+ * 用户要求这一排整体小一点，5 个钮一起占的宽度/高度都跟着降。
+ * 字号不能再往下了：10px 的中文「弹出 / 重载」已经贴着实心笔画，再小就糊。
+ */
 function PanelBtn({
   danger = false,
   className = '',
@@ -495,7 +516,7 @@ function PanelBtn({
   return (
     <button
       type="button"
-      className={`pixel-edge pxw-2 bg-ink-600 py-1.5 text-[11px] text-ink-100 transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+      className={`pixel-edge pxw-2 bg-ink-600 py-1 text-[10px] text-ink-100 transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         danger
           ? 'pxc-500 enabled:hover:bg-ink-500 enabled:hover:text-danger'
           : 'pxc-500 enabled:hover:bg-ink-500 enabled:hover:text-accent'

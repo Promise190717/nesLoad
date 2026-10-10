@@ -41,7 +41,8 @@ interface KeyBindingsPanelProps {
   open: boolean;
   bindings: KeyBindings;
   /**
-   * 当前联机角色。加入者只用 2P 键位，提示文案不一样，**页签也锁在你自己那组**。
+   * 当前联机角色。联机时提示文案不一样，**页签也锁在你自己的那套（1P 组）**，
+   * 不管是房主还是加入者 —— 理由见下面 `lockedPlayer`。
    */
   role: NetplayRole | null;
   /**
@@ -72,7 +73,7 @@ interface KeyBindingsPanelProps {
  * 1P / 2P 分两组标签页，不是一次铺 24 行：单机双人时两组都要配，但一次只看一组
  * 才看得清「哪个钮 = 哪个键」。
  *
- * **联机时只给你自己那组**（房主 = 1P、加入者 = 2P），页签收成一个标签 ——
+ * **联机时只给你自己那套**（两边都是 1P 那组），页签收成一个标签 ——
  * 理由见下面 `lockedPlayer` 那段注释。
  */
 export default function KeyBindingsPanel({
@@ -94,22 +95,25 @@ export default function KeyBindingsPanel({
   const [reloading, setReloading] = useState(false);
 
   /**
-   * 联机时**只能改自己那组**：房主 = 1P、加入者 = 2P；单机（`role` 为 null）两组都能改。
+   * 联机时**只能改你自己那套**（1P 组）；单机（`role` 为 null）两组都能改。
    *
-   * 加入者那侧最明确 —— 他本机不跑模拟器（除非自己先插了一盘），P1 那一栏对他是死的。
-   * 房主那侧，P2 是加入者按键落地的位置，房主自己去改只会让两边说的不是一回事。
-   * 要动对面那组，先离开房间。
+   * 两种角色锁的是**同一组**，但理由不一样：
+   *   - 加入者：他在游戏里是 2P，可联机时两人各在自己的键盘前，抢键这件事不成立，
+   *     所以他按的是自己配惯的那套（= 1P 组，见 ConsoleScene 的转发表）。2P 那组
+   *     对他只有单机双人时才有意义。
+   *   - 房主：P2 那组是**加入者输入落地的位置**（注入时按它合成键盘事件），房主
+   *     自己去改只会让两边说的不是一回事。要动它，先离开房间。
    *
    * 用「派生」而不是在 effect 里改 state：角色在面板开着的时候也会变（建房 / 进房 /
    * 离房），派生出来的一定跟着变，不会留下一个改不动的旧页签。
    */
-  const lockedPlayer = role === 'guest' ? 'p2' : role === 'host' ? 'p1' : null;
+  const lockedPlayer = role ? 'p1' : null;
   const player = lockedPlayer ?? tab;
 
-  // 每次打开都重置：默认落在「你自己那组」，捕获态和上一条提示都清掉
+  // 每次打开都重置：默认落在「你自己那组」（= 1P），捕获态和上一条提示都清掉
   useEffect(() => {
     if (!open) return;
-    setTab(role === 'guest' ? 'p2' : 'p1');
+    setTab('p1');
     setCapturing(null);
     setNotice(null);
     setReloading(false);
@@ -209,7 +213,7 @@ export default function KeyBindingsPanel({
   /*
    * 提示按「改完什么时候生效」分四种，不能只按角色分：
    * 加入者本机没模拟器时是立刻生效，可他要是自己在房主出画面之前插了一盘，
-   * 那盘走的是本机 RetroArch 读 P1 的老路 —— 一样要重载卡带。
+   * 那盘读的就是**同一组键**（他又转发又本地用）—— 一样要重载卡带。
    */
   let hint: MessageKey;
   if (role === 'guest') hint = localPlaying ? 'keybind.guestLocalHint' : 'keybind.guestHint';
@@ -261,14 +265,17 @@ export default function KeyBindingsPanel({
 
         <div className="flex flex-col gap-3 p-4">
           {/*
-            联机时只留「你自己那组」一个标签，不再是可切换的页签 —— 能改的只有它，
+            联机时只留一个标签，不再是可切换的页签 —— 能改的只有它，
             摆两个按钮出来、其中一个永远点不动，只会让人以为坏了。
             单机（不在房间里）才给两个可切换的页签。
+
+            标签写「你的键位」而不是「玩家 1」：加入者锁的也是这一组，可他游戏里是 2P，
+            写「玩家 1」他会读成「那是房主的键」—— 明明是他自己在按。
           */}
           <div className="flex gap-2">
             {lockedPlayer ? (
               <span className="pixel-edge pxw-2 pxc-500 flex-1 bg-accent py-1.5 text-center text-[11px] text-ink-950">
-                {t(lockedPlayer === 'p1' ? 'keybind.p1' : 'keybind.p2')}
+                {t('keybind.mine')}
               </span>
             ) : (
               (['p1', 'p2'] as const).map((which) => (
@@ -348,8 +355,8 @@ export default function KeyBindingsPanel({
             —— 按钮在、灰着，配上上面那句提示，能说清「为什么现在用不了」。
 
             恢复默认：单机是**两组一起**回到默认（标签没写「本组」，「把键位弄回一个已知
-            状态」就是这个按钮的用途）；联机时只复位**你自己那组** —— 面板本来就只给你
-            这一组，连对面一起推回默认就超出「只能改自己的键位」了。
+            状态」就是这个按钮的用途）；联机时只复位**你自己那组**（= 1P）—— 面板本来就
+            只给你这一组，连另一组一起推回默认就超出「只能改自己的键位」了。
           */}
           <div className="flex gap-2">
             <button

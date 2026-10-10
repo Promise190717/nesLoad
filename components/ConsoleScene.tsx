@@ -1020,7 +1020,8 @@ export default function ConsoleScene() {
    *
    * 刻意**不**阻止默认行为、也不接管输入：本地那一半（房主读 P1）完全不用我们插手。
    *
-   * 也正因如此，这个方案要求**双人游戏**：加入者按的是 2P 键位，而单人游戏只认 P1。
+   * 也正因如此，这个方案要求**双人游戏**：加入者的输入落在 2P 位上，而单人游戏只认 P1。
+   * 注意那是**游戏里的号位**，和他手上按哪几个键无关（见下面那张表）。
    *
    * 依赖 role：不在房间里就整段不生效，连监听都不挂。面板开着时也不挂 ——
    * 改键位的过程中按下的键不该被当成游戏输入送到对面去。
@@ -1030,13 +1031,18 @@ export default function ConsoleScene() {
     if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || tourOpen) return;
 
     /*
-     * 「物理键 → 钮」由**加入者自己的 2P 键位**反查得到。
+     * 「物理键 → 钮」由**加入者自己的 1P 键位**反查得到。
+     *
+     * 为什么是 1P 那组、不是看起来更「对位」的 2P：联机时两人各在自己的键盘前，
+     * **不存在抢键**，所以「游戏里的号位」和「手上按哪几个键」彻底解耦 —— 加入者
+     * 在游戏里是 2P，键位却该用他自己的 1P 布局（那才是他配惯的那套）。这样一来
+     * 1P 那组永远是「你自己的键」，2P 那组只服务单机双人共用一块键盘。
      *
      * 房主怎么配 P2 跟加入者无关：加入者只把钮名发过去，房主那边按自己的表
      * 合成一个按键事件喂给核心。所以加入者改完键位是**立刻生效**的 ——
      * 他没有模拟器，不需要重插卡带（房主那边才需要）。
      */
-    const keys = codeToButton(bindings.p2);
+    const keys = codeToButton(bindings.p1);
     /** 本地正按着的按钮 —— 切走窗口时靠它把欠下的 keyup 补上 */
     const held = new Set<string>();
 
@@ -1126,6 +1132,26 @@ export default function ConsoleScene() {
 
   return (
     <main className="room relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden px-6 py-4">
+      {/*
+        页面里唯一一段**真正的文字**，给搜索引擎和读屏软件看。
+        视觉上完全不可见（sr-only = 定位到 1px 再裁掉），不占位、不吃点击。
+
+        为什么非要有：屋子里的一切都是 CSS 画的，游戏跑在 canvas 里，
+        整页没有一个可索引的词 —— 爬虫进来只看到空壳。正文、层级（h1）都在这里补齐。
+        文案在 lib/i18n.ts 的 seo.* 里，跟着语言走。
+
+        位置放在 <main> 最前面：读屏用户 tab 进来的第一个焦点之前就能听到
+        「这是什么、怎么开始玩」，而不是直接从一片没有任何说明的按钮列表开始。
+
+        ⚠️ 别把 sr-only 改成可见，也别往里面堆关键词 —— 前者会毁掉这间屋子的极简感，
+        后者是会被判作弊的隐藏文本。这里只如实描述页面上真的有的功能。
+      */}
+      <div className="sr-only">
+        <h1>{t('seo.heading')}</h1>
+        <p>{t('seo.intro')}</p>
+        <p>{t('seo.howTo')}</p>
+      </div>
+
       {/*
         墙纸。**必须在 .vignette 之前** —— 两者都是 z-auto 的定位元素，谁先渲染谁在下，
         墙纸要是排在暗角后面，四角那圈压暗就被它盖掉了（见 RoomBackdrop 顶部注释）。
@@ -1390,6 +1416,7 @@ export default function ConsoleScene() {
             onTogglePause={() => void togglePause()}
             onSave={() => void saveState()}
             onLoad={() => void openLoad()}
+            onReload={() => void reset()}
             onEject={() => void eject()}
             onVolume={changeVolume}
             onExitFullscreen={exitFullscreen}
@@ -1472,11 +1499,11 @@ export default function ConsoleScene() {
 
       {/*
         自定义按键面板。和上面两块一样浮在房间上、不进屏幕。
-        role + localPlaying 决定底部那句提示：加入者用的是 2P 键位、改完立刻生效；
-        但他要是自己在房主出画面之前插了一盘，那盘按 P1 读键盘，一样要重载卡带。
+        role + localPlaying 决定底部那句提示：加入者用的是他自己那套（1P 组）、改完立刻生效；
+        但他要是自己在房主出画面之前插了一盘，那盘也按同一组读键盘，一样要重载卡带。
         `rom !== null` 就是「本机跑着一盘自己的卡带」，同时也是重载按钮的可用条件。
 
-        `role` 还决定**页签锁在哪一组**：联机时只能改自己那组（房主 1P / 加入者 2P），
+        `role` 还决定**页签锁在哪一组**：联机时只能改自己那组（两边都是 1P 那组），
         所以面板在房间里只画一个标签、不给切换。见 KeyBindingsPanel 的 lockedPlayer。
       */}
       <KeyBindingsPanel

@@ -402,8 +402,11 @@ export function bindingsToRetroArch(bindings: KeyBindings): Record<string, strin
  * 键位表 → `code → 钮名` 的反表。
  *
  * 加入者转发按键时用：加入者本机没有模拟器，它只把「哪个物理键」翻成「哪个钮」发给房主，
- * 由房主那边注入成 2P。所以这张反表用的是**加入者自己的 2P 键位** —— 房主怎么配 P2
+ * 由房主那边注入成 2P。所以这张反表用的是**加入者自己的 1P 键位** —— 房主怎么配 P2
  * 不影响加入者按什么键（房主那边只按钮名查表拿一个能用的键名去合成事件）。
+ *
+ * 用 1P 那组不是笔误：联机时两人各在自己的键盘前，抢键不成立，加入者该按自己配惯的那套
+ * —— 也就是 1P 那组。2P 那组只服务单机双人共用一块键盘。
  */
 export function codeToButton(table: PlayerBindings): Record<string, ButtonName> {
   const out: Record<string, ButtonName> = {};
@@ -524,7 +527,7 @@ export function cloneDefaultBindings(): KeyBindings {
 /**
  * 只把**某一组**恢复成默认值，另一组原样留着。
  *
- * 联机时用：面板上只给你自己那组（房主 = 1P、加入者 = 2P），「恢复默认」要是把两组
+ * 联机时用：面板上只给你自己那组（两边都是 1P），「恢复默认」要是把两组
  * 一起推回默认，就等于改了对面那组 —— 那是这个面板在联机下唯一不该碰的东西。
  *
  * 刻意写成两个分支而不是 `{ ...bindings, [which]: ... }`：计算属性名会让 TS
