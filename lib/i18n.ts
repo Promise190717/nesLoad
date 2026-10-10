@@ -413,9 +413,9 @@ const zh: Record<MessageKey, string> = {
   'games.noMatch': '没有匹配的游戏。',
   /* 只有中文版，英文那份是空串 —— 见英文表里同一条上面的说明 */
   'games.remoteSlow':
-    '提示：在线游戏库的文件存放在境外服务器，载入可能偏慢。想快一点就拖一个本机文件进来。',
+    '提示：在线游戏库的文件存放在境外服务器，载入可能偏慢。',
 
-  'note.text': '愿我们都能找回童年时的开心..',
+  'note.text': '愿我们都能找回童年时的开心.. \n 更多彩蛋等你发现哦!',
   'note.open': '读一读地上那张纸',
   'note.title': '一张纸',
   'note.close': '关闭',
@@ -447,7 +447,7 @@ const zh: Record<MessageKey, string> = {
   'tour.replay': '重看操作指引',
   'tour.screen.title': '先来一盘游戏',
   'tour.screen.body':
-    '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。仓库里不带 ROM，得你自己准备一个。',
+    '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
   'tour.rail.body':
     '从上到下：主题（夜晚 / 白天）、语言（中 / EN）、游戏库（在线库 + 本机历史）、全屏（全屏的是屏幕本身）、联机、自定义按键、按键说明。',
