@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SITE_NAME, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import BackLink from './BackLink';
 
 /**
  * 游戏列表 / 详情 / 下载三页共用的**外壳**（页头、返回链接、页脚）。
@@ -26,6 +27,7 @@ export default function GamesShell({
   title,
   intro,
   back,
+  backToAllHref = '/games',
   showAllGamesLink = true,
   children,
 }: {
@@ -38,8 +40,13 @@ export default function GamesShell({
   title: string;
   /** 标题下面那句说明。列表页放「共 N 款」，详情页放机种 / 年份那一行摘要 */
   intro?: string;
-  /** 左上角返回。列表页回房间，详情 / 下载页回列表 */
-  back: { href: string; label: MessageKey };
+  /** 左上角返回。列表页回房间，游戏详情 / 开发商详情页回上一页（history），下载页回详情页 */
+  back: { href: string; label: MessageKey; mode?: 'link' | 'history' };
+  /**
+   * 「全部游戏」那颗**页脚**链接的落点，默认 `/games` 本体。
+   * 只给页脚用 —— 左上角返回走的是 `back`，两者是两码事（见返回链接那段注释）。
+   */
+  backToAllHref?: string;
   /** 页脚那一行是否出现「全部游戏」。列表页自己就是，不必自指 */
   showAllGamesLink?: boolean;
   children: ReactNode;
@@ -54,14 +61,32 @@ export default function GamesShell({
           返回链接**不用 target="_blank"**：这里是内容页，点回去就是页面之间正常跳转，
           当前标签页往前走一步最自然（房间那侧才是新标签 —— 从房间点过来时，
           正在跑的游戏不该被顶掉，见 ConsoleScene 右上角那行链接的注释）。
+
+          两种「返回」由 `back.mode` 区分：
+          - `link`（默认）：真跳转到 `back.href`。列表页回房间、下载页回详情页都用它。
+          - `history`：走**浏览器回退**（`BackLink`）—— 游戏详情页左上那条「← 全部游戏」与
+            开发商详情页左上那颗「返回」用它，于是从 `/games?q=…&page=…` 或 `/developers`
+            点进来的人，返回的是**来时的那个地址**，而不是裸列表页
+            （2026-10-12 用户要求「简单的 back 就行」）。
+            `href` 在 history 模式里仍是兜底 / 爬虫 / 中键新标签的落点，通常就是对应列表页。
         */}
-        <Link
-          href={back.href}
-          className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
-        >
-          <span aria-hidden="true">←</span>
-          <span>{t(back.label)}</span>
-        </Link>
+        {back.mode === 'history' ? (
+          <BackLink
+            href={back.href}
+            className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+          >
+            <span aria-hidden="true">←</span>
+            <span>{t(back.label)}</span>
+          </BackLink>
+        ) : (
+          <Link
+            href={back.href}
+            className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+          >
+            <span aria-hidden="true">←</span>
+            <span>{t(back.label)}</span>
+          </Link>
+        )}
 
         <header className="mt-8 border-b border-ink-800 pb-6">
           <span className="font-pixel text-[10px] tracking-wider text-accent">{label}</span>
@@ -82,10 +107,18 @@ export default function GamesShell({
               {t('gamesPage.backHome')}
             </Link>
             {showAllGamesLink && (
-              <Link href="/games" className="text-ink-400 transition-colors hover:text-accent">
+              <Link href={backToAllHref} className="text-ink-400 transition-colors hover:text-accent">
                 {t('gamesPage.backToGames')}
               </Link>
             )}
+            {/*
+              「全部开发商」（2026-10-12 加）。放在这里而不是房间右上角那行 `.top-links`：
+              那边是「和移动端那颗盾牌钮互补、任意时刻恰好一个入口」的窄平衡，动它容易碰坏；
+              而内容页之间的互相发现本来就靠这个页脚（爬虫也是顺着它走的）。
+            */}
+            <Link href="/developers" className="text-ink-400 transition-colors hover:text-accent">
+              {t('developersPage.backToDevelopers')}
+            </Link>
             <Link href="/privacy" className="text-ink-400 transition-colors hover:text-accent">
               {t('legal.privacy')}
             </Link>

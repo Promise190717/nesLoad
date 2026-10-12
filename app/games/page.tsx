@@ -3,9 +3,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import GamesShell from '@/components/GamesShell';
-import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
-import { cardDelayMs } from '@/lib/card-stagger';
+import GameCardGrid from '@/components/GameCardGrid';
 import { SITE_NAME, translate, type MessageKey } from '@/lib/i18n';
+import { parsePageParam } from '@/lib/pager';
 import { listGamesPageCached } from '@/lib/server/games';
 import { readLocale } from '@/lib/server/locale';
 
@@ -124,26 +124,24 @@ function parseQuery(raw: SearchParams): {
   keyword: string;
   canonical: boolean;
 } {
-  // 页码：认不出的（0 / 负数 / 字母 / 空）当第 1 页
-  const pageGiven = raw.page !== undefined;
-  const rawPage = single(raw.page).trim();
-  const parsed = /^\d+$/.test(rawPage) ? Number.parseInt(rawPage, 10) : NaN;
-  const page = Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+  /*
+   * 页码那部分（认不出的当第 1 页、`?page=01` 判为非规范）交给了 `lib/pager.ts` ——
+   * 2026-10-12 加的开发商列表 / 详情页也要同一套规矩，两边各写一份迟早会漂。
+   */
+  const { page, canonical: pageCanonical } = parsePageParam(raw.page);
 
   const keywordGiven = raw.q !== undefined;
   const rawKeyword = single(raw.q);
   const keyword = clampKeyword(rawKeyword.trim());
 
   /*
-   * 规范形式：第 1 页不带参数（就是 /games）；没有关键词时 `q` **完全不出现**
-   * —— 是「没有这个参数」，不是 `?q=`。
-   * 于是 `?page=1`、`?page=01`、`?q=`、`?q=%20%20`（只有空白）、`?q=a&q=b`、
-   * 超长被截断的、以及前后带空格的，统统踢回规范地址。
+   * 关键词的规范形式：没有关键词时 `q` **完全不出现** —— 是「没有这个参数」，不是 `?q=`。
+   * 于是 `?q=`、`?q=%20%20`（只有空白）、`?q=a&q=b`、超长被截断的、以及前后带空格的，
+   * 统统踢回规范地址。
    *
    * 判据写成「参数在不在」而不是「参数等于空串」：`single()` 对**重复参数**
-   * （`?page=2&page=3` / `?q=a&q=b`）也返回空串，用「在不在」才把它们一起收敛掉。
+   * （`?q=a&q=b`）也返回空串，用「在不在」才把它们一起收敛掉。
    */
-  const pageCanonical = page > 1 ? rawPage === String(page) : !pageGiven;
   const keywordCanonical = keyword ? rawKeyword === keyword : !keywordGiven;
 
   return { page, keyword, canonical: pageCanonical && keywordCanonical };
@@ -311,74 +309,11 @@ export default async function GamesPage({
             : t('gamesPage.empty')}
         </p>
       ) : (
-        <ul className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {data.games.map((game, index) => {
-            /*
-             * 卡片下面那行：年份 · 开发者 · 机种。和房间那个弹窗里的写法不同 ——
-             * 这里把机种放在**文字里**而不是封面角标上：角标是给「已经知道自己在看什么」
-             * 的人认的，而这一页的读者很多是从搜索进来的，需要文字告诉他这是什么机种。
-             */
-            const meta = [
-              game.year,
-              game.developer,
-              CONSOLE_LABEL[game.consoleType]
-            ]
-              .filter(Boolean)
-              .join(' · ');
-
-            return (
-              /*
-               * 入场动效：`.card-in` 负责「一张卡片长什么样」（从下面 10px 浮上来 + 淡入），
-               * 错峰延迟按序号算好写进内联 `animation-delay`（参数在 lib/card-stagger.ts，
-               * 和房间那个游戏库弹窗共用同一套节奏）。
-               *
-               * 这一页是**服务端组件**，但动效一点不费事：延迟只是个内联 style，
-               * 服务端算好渲染进 HTML 就行，**不需要为它加客户端组件**。
-               *
-               * **不用给 <ul> 做「换一批就重播」的机关**：翻页 / 搜索之后装的是另一批 id，
-               * `key` 全变 ⇒ React 换掉整个 <li>，新元素上的 CSS 动画自然重播；
-               * 同一张卡片还在原位时就不该再动。
-               *
-               * ⚠️ 爬虫拿到的是**同样的 HTML**（动画纯 CSS，不影响正文与链接），
-               * 所以这一层可以放心加。
-               */
-              <li
-                key={game.id}
-                className="card-in"
-                style={{ animationDelay: `${cardDelayMs(index)}ms` }}
-              >
-                <Link
-                  href={`/games/${game.id}`}
-                  className="pixel-edge pxw-2 pxc-700 block h-full bg-ink-900 transition-colors hover:bg-ink-800"
-                >
-                  <span className="relative block aspect-[3/4] w-full overflow-hidden bg-ink-950">
-                    {/* R2 公网域名，不走 next/image（那需要在 next.config 里登记 remotePatterns） */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={game.imageUrl}
-                      /*
-                       * `alt=""` 是**刻意**的：这张图在同一个链接里，紧挨着下面那行标题文字，
-                       * 而链接名对读屏就是「标题」。再给图配一次标题 = 同一句话念两遍。
-                       * 详情页那张大封面不一样，那里它是页面的主图、不在链接里，配了 alt。
-                       */
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                    />
-                  </span>
-                  <span className="mt-2 block">
-                    <span className="block truncate text-[12px] text-ink-100">
-                      {game.title}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[10px] text-ink-500">
-                      {meta}
-                    </span>
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        /*
+         * 卡片网格（含入场动效）挪进了 `GameCardGrid` —— 开发商详情页里那段
+         * 「他名下的游戏」用的是同一个组件，两处版式与节奏由它统一。
+         */
+        <GameCardGrid games={data.games} />
       )}
 
       {pageCount > 1 && (

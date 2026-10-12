@@ -8,6 +8,7 @@
 import { unstable_cache } from 'next/cache';
 import type { ConsoleType } from '@/lib/emulator';
 import { query } from './d1';
+import { getDeveloperRow } from './developers';
 
 /** DB 行（snake_case）。 */
 export interface GameRow {
@@ -21,6 +22,8 @@ export interface GameRow {
   series: string | null;
   year: number | null;
   developer: string | null;
+  /** 开发商外键（可空）。空 = 没接上开发商库，只有 `developer` 那列文字。 */
+  developer_id: string | null;
   description: string | null;
   created_at: number;
 }
@@ -36,6 +39,8 @@ export interface Game {
   series: string | null;
   year: number | null;
   developer: string | null;
+  /** 开发商页的地址片段（`/developers/<id>`）。为 null 时详情页那个名字就不做链接。 */
+  developerId: string | null;
   /** 说明 / 简介（可空）。前台只拿它当卡片上的悬停提示，不进列表正文。 */
   description: string | null;
   createdAt: number;
@@ -52,6 +57,7 @@ function toGame(row: GameRow): Game {
     series: row.series,
     year: row.year,
     developer: row.developer,
+    developerId: row.developer_id,
     description: row.description,
     createdAt: row.created_at,
   };
@@ -65,11 +71,18 @@ export async function listGames(): Promise<Game[]> {
 /** 每页条数的上限。前台在线库与后台列表共用，顺手把「一次全捞」的口子堵死。 */
 export const MAX_PAGE_SIZE = 100;
 
-/** 分页筛选条件。`consoleType` 为 null / 省略 = 不限机种。 */
+/** 分页筛选条件。`consoleType` 为 null / 省略 = 不限机种；`developerId` 同理。 */
 export interface GamePageQuery {
   /** 模糊匹配 title / developer / series（不区分大小写） */
   keyword?: string;
   consoleType?: ConsoleType | null;
+  /**
+   * 只取某个开发商名下的游戏（开发商页在用）。
+   *
+   * 用**外键**筛而不是拿名字去 `LIKE`：名字是快照列，改一个字就全断，
+   * 而外键是稳定的 —— 用户要的「点开发商出他名下所有游戏」正是靠这一条。
+   */
+  developerId?: string | null;
 }
 
 /**
@@ -121,7 +134,7 @@ const SEARCH_CONDITION = `(
 export async function listGamesPage(
   offset: number,
   limit: number,
-  { keyword = '', consoleType = null }: GamePageQuery = {}
+  { keyword = '', consoleType = null, developerId = null }: GamePageQuery = {}
 ): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
   const needle = keyword.trim();
 
@@ -137,6 +150,10 @@ export async function listGamesPage(
   if (consoleType) {
     conditions.push(`console_type = ?${params.length + 1}`);
     params.push(consoleType);
+  }
+  if (developerId) {
+    conditions.push(`developer_id = ?${params.length + 1}`);
+    params.push(developerId);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -203,6 +220,24 @@ export const listGamesPageCached = unstable_cache(
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
 
+/**
+ * 开发商详情页那段「他名下的游戏」—— 和列表页同一个 TTL、同一个理由（见上）。
+ *
+ * 单独一个函数、单独一套键前缀（`games:by-developer`），而不是给
+ * `listGamesPageCached` 加第四个参数：那个函数是 `/games` 列表页在用，
+ * 键的形状不该为了另一个页面而变（改了会让线上那份缓存白失效一轮，
+ * 也让「缓存键有哪几维」这件事更难一眼看清）。
+ *
+ * ⚠️ 开发商**本身**（名字 / 简介 / 介绍）**没有缓存** —— 它只是一次单行查询，
+ * 而且后台改完名字应当立刻在页面上看到。有缓存的是「这个开发商名下有哪些游戏」。
+ */
+export const listGamesByDeveloperCached = unstable_cache(
+  async (developerId: string, offset: number, limit: number) =>
+    listGamesPage(offset, limit, { developerId }),
+  ['games:by-developer'],
+  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
+);
+
 export async function getGameRow(id: string): Promise<GameRow | null> {
   const rows = await query<GameRow>('SELECT * FROM games WHERE id = ?', [id]);
   return rows[0] ?? null;
@@ -244,6 +279,23 @@ export async function listGameStubs(): Promise<{ id: string; createdAt: number }
   return rows.map((row) => ({ id: row.id, createdAt: row.created_at }));
 }
 
+/**
+ * 由开发商 id 反查名字 —— `games.developer`（快照列）要跟着一起写。
+ *
+ * 为什么放在这里、而不是让接口层各传一份名字：`developer` 与 `developer_id`
+ * **必须同进同出**（搜索、列表卡片、详情页资料表读的是名字，开发商页读的是 id）。
+ * 让调用方自己保证两者一致，早晚会有人只传一个。
+ *
+ * 认不出的 id 当作「没选」处理（两个都置空），不给库里留一条指向空气的关联。
+ */
+async function resolveDeveloper(
+  developerId: string | null
+): Promise<{ id: string | null; name: string | null }> {
+  if (!developerId) return { id: null, name: null };
+  const row = await getDeveloperRow(developerId);
+  return row ? { id: row.id, name: row.name } : { id: null, name: null };
+}
+
 export interface NewGame {
   /** 由调用方生成：上传前要先拿它拼 R2 对象 key，所以 id 不能在插入时才产生。 */
   id: string;
@@ -255,17 +307,20 @@ export interface NewGame {
   language: string | null;
   series: string | null;
   year: number | null;
-  developer: string | null;
+  /** 开发商外键（`/api/admin/developers` 那个下拉框选出来的 id）。名字由本模块反查。 */
+  developerId: string | null;
   description: string | null;
 }
 
 export async function insertGame(input: NewGame): Promise<Game> {
   const { id } = input;
   const createdAt = Date.now();
+  const developer = await resolveDeveloper(input.developerId);
+
   await query(
     `INSERT INTO games
-       (id, title, image_url, rom_url, rom_name, console_type, language, series, year, developer, description, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, title, image_url, rom_url, rom_name, console_type, language, series, year, developer, developer_id, description, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.title,
@@ -276,7 +331,8 @@ export async function insertGame(input: NewGame): Promise<Game> {
       input.language,
       input.series,
       input.year,
-      input.developer,
+      developer.name,
+      developer.id,
       input.description,
       createdAt,
     ]
@@ -290,7 +346,8 @@ export async function insertGame(input: NewGame): Promise<Game> {
     language: input.language,
     series: input.series,
     year: input.year,
-    developer: input.developer,
+    developer: developer.name,
+    developerId: developer.id,
     description: input.description,
     createdAt,
   };
@@ -303,15 +360,18 @@ export interface GamePatch {
   language: string | null;
   series: string | null;
   year: number | null;
-  developer: string | null;
+  /** 同 `NewGame.developerId`：名字由本模块反查，调用方只给 id。 */
+  developerId: string | null;
   description: string | null;
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<void> {
+  const developer = await resolveDeveloper(patch.developerId);
+
   await query(
     `UPDATE games
         SET title = ?, console_type = ?, language = ?, series = ?, year = ?, developer = ?,
-            description = ?
+            developer_id = ?, description = ?
       WHERE id = ?`,
     [
       patch.title,
@@ -319,7 +379,8 @@ export async function updateGame(id: string, patch: GamePatch): Promise<void> {
       patch.language,
       patch.series,
       patch.year,
-      patch.developer,
+      developer.name,
+      developer.id,
       patch.description,
       id,
     ]

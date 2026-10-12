@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { cache } from 'react';
+import { cache, type ReactNode } from 'react';
 import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
 import GamesShell from '@/components/GamesShell';
 import ShareGameButton from '@/components/ShareGameButton';
@@ -143,7 +143,16 @@ function buildJsonLd(origin: string, locale: Locale, game: Game, t: Transl) {
         publisher: { '@id': `${origin}/#website` },
         ...(game.year ? { datePublished: String(game.year) } : {}),
         ...(game.developer
-          ? { author: { '@type': 'Organization', name: game.developer } }
+          ? {
+              author: {
+                '@type': 'Organization',
+                name: game.developer,
+                /* 接上了开发商库就指过去 —— 让搜索引擎把「这家公司」串成同一个实体 */
+                ...(game.developerId
+                  ? { url: `${origin}/developers/${game.developerId}` }
+                  : {}),
+              },
+            }
           : {}),
       },
       {
@@ -175,12 +184,34 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
    * 资料那一行行。**空的不占位**（后台所有字段都是选填）——
    * 一排「系列：—」比少一行更难看，对爬虫也毫无信息。
    * 机种永远有（它是必填列），排在第一个。
+   *
+   * ⚠️ 值故意收成 `ReactNode` 而不是 `string`：**开发商那一行现在是个链接**
+   * （2026-10-12 用户要的「点厂商看他名下的游戏」的入口就在这儿，见下面）。
+   * 所以标题下面那句摘要不能再从 `facts` 里拼 —— 见 `introLine`。
    */
-  const facts: { label: string; value: string }[] = [
+  const facts: { label: string; value: ReactNode }[] = [
     { label: t('gamesPage.field.console'), value: consoleLabel(game) },
     ...(game.year ? [{ label: t('gamesPage.field.year'), value: String(game.year) }] : []),
     ...(game.developer
-      ? [{ label: t('gamesPage.field.developer'), value: game.developer }]
+      ? [
+          {
+            label: t('gamesPage.field.developer'),
+            /*
+             * 接上了开发商库（`developerId` 非空）才是链接；没接上的老记录
+             * 保持纯文字 —— 那时候没有页面可去，画一个点不动的链接更糟。
+             */
+            value: game.developerId ? (
+              <Link
+                href={`/developers/${game.developerId}`}
+                className="text-accent transition-colors hover:underline"
+              >
+                {game.developer}
+              </Link>
+            ) : (
+              game.developer
+            ),
+          },
+        ]
       : []),
     ...(game.series ? [{ label: t('gamesPage.field.series'), value: game.series }] : []),
     ...(game.language
@@ -188,16 +219,22 @@ export default async function GameDetailPage({ params }: { params: Promise<{ id:
       : []),
   ];
 
+  /*
+   * 标题下那句摘要（机种之外那几个值用「 · 」串起来）。
+   * 它要的是**纯文本** —— 不能拿上面那份 `facts` 去 join（值里有 `<Link>`，
+   * join 出来会是 `[object Object]`），所以另拼一份。
+   */
+  const introLine = [game.year ? String(game.year) : null, game.developer, game.series, game.language ? game.language.toUpperCase() : null]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <GamesShell
       locale={locale}
       label="GAME"
       title={game.title}
-      intro={facts
-        .filter((fact) => fact.label !== t('gamesPage.field.console'))
-        .map((fact) => fact.value)
-        .join(' · ')}
-      back={{ href: '/games', label: 'gamesPage.backToGames' }}
+      intro={introLine}
+      back={{ href: '/games', label: 'gamesPage.backToGames', mode: 'history' }}
     >
       <script
         type="application/ld+json"

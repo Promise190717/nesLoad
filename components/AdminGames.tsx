@@ -11,6 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
 import { unwrapRom } from '@/lib/unwrap';
 import { CONSOLE_LABEL } from './CartridgeSprite';
@@ -26,8 +27,19 @@ interface AdminGame {
   series: string | null;
   year: number | null;
   developer: string | null;
+  /**
+   * 开发商外键（2026-10-12 加）。表单里那个下拉框选的就是它 —— 名字由服务端反查，
+   * 所以这里编辑时只认 id；`developer` 那列文字只在列表上显示用。
+   */
+  developerId: string | null;
   description: string | null;
   createdAt: number;
+}
+
+/** `/api/admin/developers/options` 返回的下拉项。 */
+interface DeveloperOption {
+  id: string;
+  name: string;
 }
 
 /** `/api/admin/games` 分页响应。 */
@@ -150,7 +162,18 @@ export default function AdminGames() {
   const [language, setLanguage] = useState('');
   const [series, setSeries] = useState('');
   const [year, setYear] = useState('');
-  const [developer, setDeveloper] = useState('');
+  /*
+   * 开发商：从 2026-10-12 起是**下拉框**（值 = developers.id），不再手填文字。
+   * 空串 = 未指定。取值列表由下面那条 effect 从后台接口拉。
+   */
+  const [developerId, setDeveloperId] = useState('');
+  const [developerOptions, setDeveloperOptions] = useState<DeveloperOption[]>([]);
+  /**
+   * 编辑一条「开发商那列有文字、却没接上开发商库」的老记录时，把那段文字记下来。
+   * 下拉框里没有它（选项只有 id），保存就会把它清掉 —— 这种时候得**明说**，
+   * 否则用户看不见数据没了。迁移之后理论上不该再有这种行，留着是防意外。
+   */
+  const [unlinkedDeveloper, setUnlinkedDeveloper] = useState('');
   /*
    * 说明 / 简介。**唯一一个多行字段**（其余全是单行 input）—— 用 textarea 而不是
    * `input`：它是给用户看的一两句介绍，会写整句中文，单行框里往回拖着看很难受。
@@ -219,6 +242,29 @@ export default function AdminGames() {
   }, [modalOpen]);
 
   /*
+   * 开发商下拉框的选项。**挂载时拉一次**就够 —— 这是「在开发商 tab 里新建完、
+   * 切回游戏列表要能选到它」这个场景的边界：tab 之间是客户端导航，
+   * 这个组件会整个重新挂载，所以每次进这一页拿到的都是新的一份。
+   *
+   * 拉失败就当空列表（下拉里只剩「未指定」）**不弹错**：它不该拦住整个上传流程，
+   * 而且那种情况下界面上还留着一句「去开发商库新建」的提示，用户知道该去哪儿。
+   */
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/admin/developers/options')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data: { developers?: DeveloperOption[] }) => {
+        if (!cancelled) setDeveloperOptions(data.developers ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDeveloperOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /*
    * 总页数由 total 算。`safePage` 只用来画「第几页 / 共几页」和按钮禁用态 ——
    * 越界不用在这里夹：服务端会把 offset 夹回最后一页，上面 setPage 已经跟上了。
    * 保留 Math.min 是为了两种极端下文字也不至于显示「3 / 2」：刚好删空最后一页的那一帧。
@@ -237,7 +283,8 @@ export default function AdminGames() {
     setLanguage('');
     setSeries('');
     setYear('');
-    setDeveloper('');
+    setDeveloperId('');
+    setUnlinkedDeveloper('');
     setDescription('');
     setImage(null);
     setRom(null);
@@ -259,7 +306,9 @@ export default function AdminGames() {
     setLanguage(game.language ?? '');
     setSeries(game.series ?? '');
     setYear(game.year === null ? '' : String(game.year));
-    setDeveloper(game.developer ?? '');
+    // 老记录（迁移前上传、或开发商那列是自由文本的）可能没有 id，那就退成「未指定」
+    setDeveloperId(game.developerId ?? '');
+    setUnlinkedDeveloper(game.developerId ? '' : game.developer ?? '');
     setDescription(game.description ?? '');
     setImage(null);
     setRom(null);
@@ -334,7 +383,8 @@ export default function AdminGames() {
             language: language || null,
             series: series.trim() || null,
             year: parsedYear,
-            developer: developer.trim() || null,
+            // 下拉框给的是 developers.id；名字由服务端反查后写进 developer 那列
+            developerId: developerId || null,
             description: description.trim() || null,
           }),
         });
@@ -346,7 +396,7 @@ export default function AdminGames() {
         form.set('language', language);
         form.set('series', series.trim());
         form.set('year', yearText);
-        form.set('developer', developer.trim());
+        form.set('developer_id', developerId);
         form.set('description', description.trim());
         form.set('image', image as File);
         form.set('rom', rom as File);
@@ -594,13 +644,41 @@ export default function AdminGames() {
                 />
               </label>
 
+              {/*
+                开发商：**下拉框**（2026-10-12 用户要求「添加游戏时发行商改成下拉形式」）。
+                选项来自开发商库（`/api/admin/developers/options`），选中值就是
+                `developers.id` —— 服务端拿到 id 再反查名字写进 `games.developer`，
+                所以「点开发商看他名下所有游戏」这条链是稳的（名字改了也断不了）。
+                下面那行小字指路：选项里没有想要的，就去开发商库新建一个。
+              */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {t('admin.field.developer')}
-                <input
-                  value={developer}
-                  onChange={(e) => setDeveloper(e.target.value)}
+                <select
+                  value={developerId}
+                  onChange={(e) => setDeveloperId(e.target.value)}
                   className={FIELD_CLASS}
-                />
+                >
+                  <option value="">{t('admin.developers.none')}</option>
+                  {developerOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-ink-600">
+                  {t('admin.developers.addHint')}{' '}
+                  <Link
+                    href="/admin/developers"
+                    className="text-ink-400 underline transition-colors hover:text-accent"
+                  >
+                    {t('admin.nav.developers')}
+                  </Link>
+                </span>
+                {unlinkedDeveloper && (
+                  <span className="text-[10px] text-danger">
+                    {t('admin.developers.unlinked', { name: unlinkedDeveloper })}
+                  </span>
+                )}
               </label>
 
               {/* 说明：本表唯一一个多行字段，`resize-y` 让它可以往下拉高一点写长句 */}

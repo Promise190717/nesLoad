@@ -1,15 +1,17 @@
 import type { MetadataRoute } from 'next';
+import { listDeveloperStubs } from '@/lib/server/developers';
 import { listGameStubs } from '@/lib/server/games';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
  * /sitemap.xml。
  *
- * 本站可收录的地址分四类：
+ * 本站可收录的地址分五类：
  *   · 房间那一页（`/`）—— 唯一的「应用」页；
  *   · `/privacy` / `/terms` 两页法务文档；
  *   · `/games` 游戏列表；
- *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）。
+ *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）；
+ *   · `/developers` 开发商列表 + 每家的 `/developers/<id>`（2026-10-12 加，同样现取）。
  * 游戏库 / 存档 / 联机 / 键位那些面板全是屏幕上的浮层，没有各自的 URL，
  * 所以不在这里 —— 别为了「看起来完整」往里塞不存在的路径，那是会被判成软 404 的。
  *
@@ -17,11 +19,10 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 而且**必须**能被收录 —— 隐私政策与条款要能直接被搜到、被第三方按固定地址检查，
  * 只挂在房间那颗钮的弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
  *
- * ⚠️ **游戏那三条是 2026-10-12 加的，而且是本文件里唯一的「动态部分」**：
- * 列表地址每款游戏两条，**从 D1 现读**（`listGameStubs`）。
- * 这正是用户要的「函数形式，这样增减游戏都会更新」—— 后台加一款游戏，
- * 下一次抓 sitemap 就多两条 URL，不需要改代码、也不需要重新部署。
- * 一次额外的 D1 查询换这个，很划算（sitemap 本来就是低频请求）。
+ * ⚠️ **游戏 / 开发商那几条是「动态部分」**：逐个从 D1 现读
+ * （`listGameStubs` / `listDeveloperStubs`）。这正是用户要的「函数形式，这样增减都会更新」——
+ * 后台加一款游戏、建一家开发商，下一次抓 sitemap 就多几条 URL，
+ * 不需要改代码、也不需要重新部署。一次额外的 D1 查询换这个，很划算。
  *
  * /admin 那几页**必须排除**（它们不是公开内容）：sitemap 里的一次都不列，
  * robots.txt 也挡了一道，页面自己还有 noindex。三处都做，是因为它们防的是不同的东西 ——
@@ -30,7 +31,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 静态那几条刻意**不写 `lastModified`**：本站没有按页面的真实修改时间（正文全在代码里，
  * 没有 CMS 时间戳）。写成 `new Date()` 等于每次抓取都声称「刚刚更新过」，
  * 反而会让搜索引擎学会忽略这个字段，比不写更糟。
- * **游戏那几条是例外**：`games.created_at` 就是真实的入库时间，写上是有信息量的。
+ * **游戏 / 开发商那几条是例外**：`created_at` 就是真实的入库时间，写上是有信息量的。
  * （注意它**不代表内容被改过** —— 后台改元数据不会动 created_at。宁可少报一次更新，
  * 也不要报一个假的「刚刚改过」。）
  *
@@ -56,6 +57,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     stubs = await listGameStubs();
   } catch (error) {
     console.error('[sitemap] 读取游戏列表失败，本次只输出静态地址', error);
+  }
+
+  // 开发商同理：读不到就只少这几条，别让整个 sitemap 挂掉
+  let developers: { id: string; createdAt: number }[] = [];
+  try {
+    developers = await listDeveloperStubs();
+  } catch (error) {
+    console.error('[sitemap] 读取开发商列表失败，本次略过开发商地址', error);
   }
 
   return [
@@ -87,6 +96,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         priority: 0.6,
       },
     ]),
+    /*
+     * 开发商列表给 0.7（介于游戏列表 0.9 和法务页 0.3 之间：它是内容入口，
+     * 但不是这个站的主体），每家的详情页 0.6 —— 和「游戏下载页」同档，
+     * 因为它的价值在同一类：指向一款款具体游戏。
+     */
+    ...(developers.length > 0
+      ? [
+          {
+            url: `${origin}/developers`,
+            changeFrequency: 'weekly' as const,
+            priority: 0.7,
+          },
+        ]
+      : []),
+    ...developers.map((developer) => ({
+      url: `${origin}/developers/${developer.id}`,
+      lastModified: new Date(developer.createdAt),
+      changeFrequency: 'monthly' as const,
+      priority: 0.6,
+    })),
     {
       url: `${origin}/privacy`,
       changeFrequency: 'yearly',

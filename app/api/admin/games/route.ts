@@ -128,7 +128,12 @@ export async function POST(request: Request) {
       language: optionalText(form.get('language')),
       series: optionalText(form.get('series')),
       year,
-      developer: optionalText(form.get('developer')),
+      /*
+       * 开发商：表单里是一个下拉框，传上来的是 **developers.id**（不是名字）。
+       * 名字由 `insertGame` 反查后一起写进 `games.developer`（快照列），
+       * 免得让「id 与名字」两处由调用方各自维护（见 lib/server/games.ts 的 resolveDeveloper）。
+       */
+      developerId: optionalText(form.get('developer_id')),
       description: optionalText(form.get('description')),
     });
 

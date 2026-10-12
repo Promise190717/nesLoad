@@ -61,7 +61,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     language: optionalText(body.language),
     series: optionalText(body.series),
     year,
-    developer: optionalText(body.developer),
+    // 开发商下拉框给的是 developers.id，名字由数据层反查（见 lib/server/games.ts）
+    developerId: optionalText(body.developerId),
     description: optionalText(body.description),
   };
 

@@ -141,6 +141,16 @@ const en = {
   'seo.gameDownload.title': 'Download the {title} ROM ({console})',
   'seo.gameDownload.description':
     'Download the ROM file for {title} ({console}) in one click, no sign-up needed. You can also play it right in the browser.',
+  /*
+   * 开发商两页（2026-10-12 加的）。`developers` 是列表页、`developer` 是单页，
+   * 和 games / game 同一套命名。`{count}` 同样是现读的条数。
+   */
+  'seo.developers.title': 'Game developers — Play their NES, SNES & Arcade games',
+  'seo.developers.description':
+    '{count} developers behind the games in the online library. Open one to see every title we have from that studio.',
+  'seo.developer.title': '{name} — Games from this developer',
+  'seo.developer.description':
+    'Every {name} game in the online library ({count}), playable in your browser or downloadable as a ROM file.',
 
   /*
    * 窄窗口下顶在房间前面那块提示。**标题和正文分开两个键** ——
@@ -599,8 +609,9 @@ const en = {
   'admin.login.error': 'Wrong username or password',
   'admin.login.failed': 'Sign-in failed — try again',
   'admin.logout': 'Sign out',
-  /* 后台左侧那两个 tab —— 游戏列表和留言本 2026-10-10 起分成两页，靠它俩切换 */
+  /* 后台左侧那几个 tab —— 游戏列表 / 开发商库 / 留言本，2026-10-12 起是三条 */
   'admin.nav.games': 'Games',
+  'admin.nav.developers': 'Developers',
   'admin.nav.feedback': 'Guestbook',
   'admin.upload.title': 'Add a game',
   'admin.field.title': 'Title',
@@ -639,6 +650,39 @@ const en = {
   'admin.search': 'Search',
   'admin.prev': 'Prev',
   'admin.next': 'Next',
+
+  /*
+   * 开发商库（2026-10-12 用户要的「游戏厂商库」）。口径统一叫**开发商** ——
+   * 它接的就是游戏表单里原来那个手填的 `developer` 字段（见 db/schema.sql 的注释）。
+   * 游戏表单里的下拉框、公开的开发商页，读的都是这一张表。
+   */
+  'admin.developers.title': 'Developers',
+  'admin.developers.empty': 'No developers yet.',
+  'admin.developers.searchPlaceholder': 'Search developer name / summary',
+  'admin.developers.addTitle': 'Add a developer',
+  'admin.developers.editTitle': 'Edit developer',
+  'admin.developers.view': 'View',
+  'admin.developers.gameCount': '{count} games',
+  /* 游戏表单那个下拉框里的空选项 */
+  'admin.developers.none': 'Unspecified',
+  /* 后半句会接一个指向开发商 tab 的链接（见 AdminGames 那个 select 下面） */
+  'admin.developers.addHint': 'Not in the list? Add it under',
+  'admin.developers.unlinked':
+    'This game says “{name}”, which is not linked to a developer. Pick one below, otherwise that text is cleared when you save.',
+  'admin.developers.nameRequired': 'Name is required.',
+  'admin.developers.badFounded': 'Founded year must be a whole number.',
+  'admin.developers.saved': 'Saved.',
+  'admin.developers.failed': 'Request failed.',
+  'admin.developers.deleteConfirm': 'Delete “{name}”? This cannot be undone.',
+  'admin.developers.field.name': 'Name',
+  'admin.developers.field.image': 'Logo / image',
+  'admin.developers.imageHint':
+    'Optional. Without one the page falls back to the first character of the name.',
+  'admin.developers.imageCurrent': 'Current: {name}. Leave empty to keep it.',
+  'admin.developers.field.founded': 'Founded',
+  'admin.developers.field.website': 'Website',
+  'admin.developers.field.summary': 'Summary',
+  'admin.developers.field.description': 'About',
 
   /* 留言本（房间地板上那本）。后台只管「解决没有」——正文不给改，理由见那条接口的注释。 */
   'admin.feedback.title': 'Guestbook',
@@ -703,6 +747,28 @@ const en = {
   /* 详情页正文：`fallbackDescription` 只在后台没填「说明」时顶上 */
   'gamesPage.fallbackDescription': '{title} is a {console} game.',
 
+  /*
+   * 开发商两页（2026-10-12 加的）。和上面 `gamesPage.*` 同一类：真路由、服务端组件、
+   * 整页没有 state。列表页 + 详情页共用一个 `heading`（两页的标签/标题都是它），
+   * 详情页里「这家公司的游戏」那一节另用 `gamesHeading`。
+   */
+  'developersPage.heading': 'Developers',
+  'developersPage.intro':
+    '{count} developers behind the games in the library. Open one to see everything we have from that studio.',
+  'developersPage.empty': 'No developers listed yet.',
+  'developersPage.gameCount': '{count} games',
+  'developersPage.gamesHeading': 'Games from {name}',
+  'developersPage.gamesEmpty': 'There is no game from this developer in the library yet.',
+  'developersPage.field.founded': 'Founded',
+  /* 详情页左上那颗返回。走**浏览器回退**（`GamesShell` 的 `back.mode: 'history'`，
+     和游戏详情页同一条规矩）：用户多半是从 `/developers` 列表或某款游戏点进来的，
+     回上一页比写死回 `/developers` 准。`href` 只是兜底 / 爬虫 / 中键新标签的落点。
+     页脚与面包屑里那条「全部开发商」仍是 `backToDevelopers`，别跟着改。 */
+  'developersPage.back': 'Back',
+  'developersPage.backToDevelopers': 'All developers',
+  'developersPage.notFoundTitle': 'Developer not found',
+  'developersPage.notFound': 'This developer is not in the library (any more).',
+
   'download.heading': 'Download the ROM',
   'download.hint': 'Click the button below — the download starts 6 seconds later.',
   'download.button': 'Start download',
@@ -750,6 +816,13 @@ const zh: Record<MessageKey, string> = {
   'seo.gameDownload.title': '下载《{title}》ROM（{console}）',
   'seo.gameDownload.description':
     '一键下载《{title}》（{console}）的 ROM 文件，无需注册。也可以直接在浏览器里玩。',
+  /* 开发商两页，见上面英文那份的注释 */
+  'seo.developers.title': '游戏开发商 —— 在线玩他们做的 NES / SFC / 街机游戏',
+  'seo.developers.description':
+    '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
+  'seo.developer.title': '{name} —— 这家开发商的游戏',
+  'seo.developer.description':
+    '{name} 在在线游戏库里的全部游戏（{count} 款），可以直接在浏览器里玩，也可以下载 ROM 文件。',
 
   'notice.desktopOnlyTitle': '仅限桌面端',
   'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 900px 以上。',
@@ -1010,6 +1083,7 @@ const zh: Record<MessageKey, string> = {
   'admin.login.failed': '登录失败，请重试',
   'admin.logout': '退出登录',
   'admin.nav.games': '游戏列表',
+  'admin.nav.developers': '开发商',
   'admin.nav.feedback': '留言本',
   'admin.upload.title': '添加游戏',
   'admin.field.title': '游戏名',
@@ -1019,7 +1093,7 @@ const zh: Record<MessageKey, string> = {
   'admin.field.language': '语言',
   'admin.field.series': '系列',
   'admin.field.year': '年份',
-  'admin.field.developer': '开发者',
+  'admin.field.developer': '开发商',
   /* 说明 / 简介，见上面英文那份的注释 */
   'admin.field.description': '说明',
   'admin.description.placeholder': '选填。鼠标停在游戏库那张卡片上时会显示这行字。',
@@ -1048,6 +1122,32 @@ const zh: Record<MessageKey, string> = {
   'admin.search': '搜索',
   'admin.prev': '上一页',
   'admin.next': '下一页',
+
+  /* 开发商库，见上面英文那份的注释 */
+  'admin.developers.title': '开发商',
+  'admin.developers.empty': '还没有开发商。',
+  'admin.developers.searchPlaceholder': '搜索开发商名字 / 简介',
+  'admin.developers.addTitle': '添加开发商',
+  'admin.developers.editTitle': '编辑开发商',
+  'admin.developers.view': '查看',
+  'admin.developers.gameCount': '{count} 款游戏',
+  'admin.developers.none': '未指定',
+  'admin.developers.addHint': '列表里没有？先去',
+  'admin.developers.unlinked':
+    '这条游戏现在写着「{name}」，但它没接上开发商。请在下面选一个，否则保存后这行字会被清掉。',
+  'admin.developers.nameRequired': '请填写开发商名字。',
+  'admin.developers.badFounded': '成立年份必须是整数。',
+  'admin.developers.saved': '已保存。',
+  'admin.developers.failed': '请求失败。',
+  'admin.developers.deleteConfirm': '删除「{name}」？此操作不可撤销。',
+  'admin.developers.field.name': '名字',
+  'admin.developers.field.image': '厂标 / 图片',
+  'admin.developers.imageHint': '选填。没有图时页面上用名字的第一个字占位。',
+  'admin.developers.imageCurrent': '当前：{name}。留空表示不换。',
+  'admin.developers.field.founded': '成立年份',
+  'admin.developers.field.website': '官网',
+  'admin.developers.field.summary': '简介',
+  'admin.developers.field.description': '介绍',
 
   'admin.feedback.title': '留言本',
   'admin.feedback.empty': '还没有留言。',
@@ -1085,12 +1185,27 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.shareFailed': '复制失败',
   'gamesPage.field.console': '类型',
   'gamesPage.field.year': '年份',
-  'gamesPage.field.developer': '开发者',
+  'gamesPage.field.developer': '开发商',
   'gamesPage.field.series': '系列',
   'gamesPage.field.language': '语言',
   'gamesPage.notFoundTitle': '找不到这个游戏',
   'gamesPage.notFound': '这个游戏不在游戏库里（可能已经被移除）。',
   'gamesPage.fallbackDescription': '《{title}》是一款 {console} 游戏。',
+
+  /* 开发商两页，见上面英文那份的注释 */
+  'developersPage.heading': '开发商',
+  'developersPage.intro':
+    '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
+  'developersPage.empty': '还没有登记任何开发商。',
+  'developersPage.gameCount': '{count} 款游戏',
+  'developersPage.gamesHeading': '{name} 的游戏',
+  'developersPage.gamesEmpty': '库里还没有这家公司的游戏。',
+  'developersPage.field.founded': '成立年份',
+  /* 见英文表里同一条上面的说明：详情页左上那颗，浏览器回退 */
+  'developersPage.back': '返回',
+  'developersPage.backToDevelopers': '全部开发商',
+  'developersPage.notFoundTitle': '找不到这个开发商',
+  'developersPage.notFound': '这个开发商已经不在库里了。',
 
   'download.heading': '下载 ROM',
   'download.hint': '点下面的按钮，6 秒后开始下载。',

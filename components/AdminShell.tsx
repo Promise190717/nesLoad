@@ -6,10 +6,15 @@ import type { ReactNode } from 'react';
 import { useI18n } from './I18nProvider';
 
 /**
- * 左侧那两个 tab。`href` 同时是**路由**和**高亮依据** —— 加了新页就往这里加一条。
+ * 左侧那几个 tab。`href` 同时是**路由**和**高亮依据** —— 加了新页就往这里加一条。
+ *
+ * 三条的顺序＝日常使用频率：游戏列表（默认页）→ 开发商库 → 留言本。
+ * 开发商（2026-10-12 加的「厂商库」）排在留言本前面，因为它和游戏列表是**同一件事的两半**：
+ * 添加游戏时那个开发商下拉框，读的就是这个库里新建的条目。
  */
 const TABS = [
   { href: '/admin/games', key: 'admin.nav.games' },
+  { href: '/admin/developers', key: 'admin.nav.developers' },
   { href: '/admin/feedback', key: 'admin.nav.feedback' },
 ] as const;
 
