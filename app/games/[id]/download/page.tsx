@@ -80,7 +80,7 @@ export default async function GameDownloadPage({ params }: { params: Promise<{ i
       title={t('download.heading')}
       /* 副标题写清「下的是哪一款」—— 从搜索结果直接落到这一页的人得马上确认没走错 */
       intro={`${game.title} · ${consoleLabel}`}
-      back={{ href: `/games/${id}`, label: 'gamesPage.backToGame' }}
+      back={{ href: `/games/${id}`, label: 'gamesPage.backToGame', mode: 'history' }}
       showAllGamesLink
     >
       <div className="mt-6 flex items-center gap-4">
