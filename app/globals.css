@@ -957,6 +957,38 @@ body {
   animation: toast-pop 0.18s ease-out;
 }
 
+/*
+ * 游戏卡片的入场：挨个浮上来。**两处共用这一条规则** ——
+ * ① 房间里的游戏库弹窗（components/GameLibraryPanel.tsx）；② 公开的游戏列表页（app/games/page.tsx）。
+ *
+ * 2026-10-12 用户要的：「游戏每一项出现时加动画」（列表页是同一天补的「和游戏库列表一样」）。
+ *
+ * 错峰**不在 CSS 里** —— 第几张晚多少毫秒是组件按 index 算好写进内联 `animation-delay` 的
+ * （`lib/card-stagger.ts` 是那两个参数的**唯一出口**，两处都从那里取）。一条 CSS 规则
+ * 没法给「第 n 个孩子」算出稳定的等差延迟（`nth-child` 能写，但要为十几张各写一条）。
+ * 所以这里只留「一张卡片长什么样」。
+ *
+ * 只动 opacity + translateY：**不碰 height / margin**，网格不重排、其余卡片不跟着跳。
+ *
+ * ⚠️ `backwards` 而不是 `both`：这一波里排在后面的卡片在延迟期间必须是**透明**的
+ * （否则全都会先亮一下再挨个重播），但动画结束之后**不要**留下一个 `translateY(0)` 的
+ * transform —— 那会让 `pixel-edge` 的像素描边进入合成层，125% / 150% 缩放下边会发虚
+ * （和 `.screen` 那条「别让 canvas 撑尺寸」是同一类坑）。`backwards` 正好只管延迟那一段。
+ */
+@keyframes card-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.card-in {
+  animation: card-in 0.24s ease-out backwards;
+}
+
 /* ------------------------------------------------------------------ *
  * 主题 / 语言开关 · 电视机大小选择器
  *
@@ -1252,6 +1284,84 @@ body {
 }
 
 /*
+ * 右上角那一行（**游戏列表 + 隐私政策 + 服务条款**）和它的移动端形态，
+ * **二选一**（2026-10-12 用户先要求「pc 模式下放在网页右上角、文字形式」，
+ * 又要求「游戏列表放在右上角的政策旁边」）：
+ *
+ *   · 桌面端 —— 页面**右上角三条常驻文字链接**（`.top-links`，在 ConsoleScene 里）；
+ *   · 移动端 —— 右侧那排开关最下面那颗盾牌钮 + 往左弹的弹层（`.rail-mobile` 包着）。
+ *
+ * 为什么移动端不也用右上角那三条：移动端那排开关是**横排顶在掌机上方**的
+ * （见上面第 2 条），掌机又占满整屏宽，右上角没有一块干净的落脚地；
+ * 而开关列里那颗钮本来就有地方、弹层也是现成的。
+ *
+ * ⚠️ 类名 2026-10-12 从 `.legal-links` 改成了 `.top-links`：那一行现在装着的不只是
+ * 法务两页，三个规则块（这里 + 下面两条高度门槛）都要跟着改，**别只改一处**。
+ *
+ * ⚠️ 这两条是**互补**的一对，改一条就得同时看另一条：漏掉 `.rail-mobile` 那条，
+ * 桌面端会出现两个入口（钮 + 链接）；漏掉 `.top-links` 那条，
+ * 手机上会出现三条压着掌机的链接。
+ */
+:root[data-mobile='on'] .top-links,
+:root:not([data-mobile='on']) .rail-mobile {
+  display: none;
+}
+
+/*
+ * 窗口一矮，**右上角那块就归电视机了** —— 那一行得让位、退回上面那颗盾牌钮。
+ * （用户 2026-10-12 提的：「现在屏幕拖小会遮挡电视机」。）
+ *
+ * ⚠️ 「游戏列表」**跟着这一行一起藏**：不单独为它留一条常驻链接。矮窗口下再塞第三行
+ * 照样会压到机身，而房间右侧那排开关里本来就有「游戏库」（同一批游戏，换个看法）。
+ *
+ * 门槛是**算出来的，别凭感觉调**：
+ *
+ *   机身竖向居中，顶边 = `50vh - 机身高/2`（推导见上面 `.lamp-cord` 那段），
+ *   机身高 ≈ 屏幕高 + 147。那一行链接钉在 `top-5`（20px）、字 11px ⇒ 底边 ≈ 33px。
+ *   要求机身顶边落在它们**下面**、再留 8px 余量：
+ *
+ *     50vh - (屏幕高 + 147)/2 ≥ 41   ⇒   视口高 ≥ 屏幕高 + 230
+ *
+ *   小档（屏 540）770 / 中档（630）860 / 大档（720）950，各档就是下面那三条。
+ *   矮于它 ⇒ 收链接、放回盾牌钮。那颗在右侧**上下居中**，机身顶上来的那段高度里
+ *   它还在机身右边，永远撞不上 —— 所以只要「够高」，宽度多少都不必判。
+ *
+ * 为什么按 `data-tv` 分三档而不是取一个最保守的 950 一刀切：一刀切会让
+ * **中 / 小档的用户在 1080p 屏上也看不到那两条链接**（1080p 上浏览器视口高约 950 上下，
+ * 大档正好卡在门槛上），白白退回一颗图标钮。
+ *
+ * ⚠️ 三条都带 `min-width: 900px`：900px 以下整排开关是 `display: none`
+ * （见上面那条 899px 的媒体查询），那时收掉链接就等于**一个入口都不剩**。
+ * 而窄窗口里屋子本来就不画（换成「请用桌面端」那句话），右上角空着 —— 照旧露链接。
+ * ⚠️ 顺带：特异性必须压过上面那两条基准规则（`:not([data-tv])` 那对是 030，
+ * 这几条是 040），所以选择器里 `[data-tv]` 和 `:not([data-mobile])` 一个都不能省。
+ */
+@media (min-width: 900px) and (max-height: 769px) {
+  :root[data-tv='small']:not([data-mobile='on']) .top-links {
+    display: none;
+  }
+  :root[data-tv='small']:not([data-mobile='on']) .rail-mobile {
+    display: block;
+  }
+}
+@media (min-width: 900px) and (max-height: 859px) {
+  :root[data-tv='medium']:not([data-mobile='on']) .top-links {
+    display: none;
+  }
+  :root[data-tv='medium']:not([data-mobile='on']) .rail-mobile {
+    display: block;
+  }
+}
+@media (min-width: 900px) and (max-height: 949px) {
+  :root[data-tv='large']:not([data-mobile='on']) .top-links {
+    display: none;
+  }
+  :root[data-tv='large']:not([data-mobile='on']) .rail-mobile {
+    display: block;
+  }
+}
+
+/*
  * 分组分隔线（`RailDivider`，28×1 的横线）也得跟着转过来 —— 横排之后一条横线
  * 夹在两排钮中间，看着像一根多余的脏线。改成竖的：宽 1px、高和钮差不多，
  * 左右给点外边距（桌面那份的 `my-1.5` 是竖排时的上下留白，这里用不上）。
@@ -1409,6 +1519,8 @@ body {
   .mp4-lyric,
   .mp4-jump,
   .link-blink,
+  /* 卡片入场：`animation: none` 连同内联的 `animation-delay` 一起失效 ⇒ 立刻全在 */
+  .card-in,
   .sky-clouds,
   .sky-stars > *,
   /* 猫那两段（见 .cat-peek 的注释）：关掉之后它停在自然位置，照样探得出来 */

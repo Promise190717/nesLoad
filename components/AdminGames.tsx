@@ -26,6 +26,7 @@ interface AdminGame {
   series: string | null;
   year: number | null;
   developer: string | null;
+  description: string | null;
   createdAt: number;
 }
 
@@ -150,6 +151,12 @@ export default function AdminGames() {
   const [series, setSeries] = useState('');
   const [year, setYear] = useState('');
   const [developer, setDeveloper] = useState('');
+  /*
+   * 说明 / 简介。**唯一一个多行字段**（其余全是单行 input）—— 用 textarea 而不是
+   * `input`：它是给用户看的一两句介绍，会写整句中文，单行框里往回拖着看很难受。
+   * 可空：老记录补列之后都是 NULL，留空就存 NULL（后台所有选填字段同一套写法）。
+   */
+  const [description, setDescription] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [rom, setRom] = useState<File | null>(null);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -231,6 +238,7 @@ export default function AdminGames() {
     setSeries('');
     setYear('');
     setDeveloper('');
+    setDescription('');
     setImage(null);
     setRom(null);
     if (imageRef.current) imageRef.current.value = '';
@@ -252,6 +260,7 @@ export default function AdminGames() {
     setSeries(game.series ?? '');
     setYear(game.year === null ? '' : String(game.year));
     setDeveloper(game.developer ?? '');
+    setDescription(game.description ?? '');
     setImage(null);
     setRom(null);
     setModalNotice(null);
@@ -326,6 +335,7 @@ export default function AdminGames() {
             series: series.trim() || null,
             year: parsedYear,
             developer: developer.trim() || null,
+            description: description.trim() || null,
           }),
         });
         if (!res.ok) throw new Error(await readError(res, t('admin.request.failed')));
@@ -337,6 +347,7 @@ export default function AdminGames() {
         form.set('series', series.trim());
         form.set('year', yearText);
         form.set('developer', developer.trim());
+        form.set('description', description.trim());
         form.set('image', image as File);
         form.set('rom', rom as File);
 
@@ -446,8 +457,17 @@ export default function AdminGames() {
                   alt=""
                   className="pixel-edge pxw-2 pxc-700 h-[46px] w-[34px] shrink-0 bg-ink-900 object-cover"
                 />
-                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
-                  {game.title}
+                {/*
+                  标题下面挂一行说明（只有填了的条目才有）。用**两行的一个 flex 列**
+                  而不是「标题 + 说明两个并列 span」：说明比标题长得多，并列会把右边的
+                  年份 / 开发者 / 按钮挤走。各自 truncate，行高由内容撑 —— 同一页里
+                  填了说明的那几条会比别的高一点，列表本来就不是等高的表格。
+                */}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-[12px] text-ink-100">{game.title}</span>
+                  {game.description && (
+                    <span className="truncate text-[10px] text-ink-500">{game.description}</span>
+                  )}
                 </span>
                 <span className="shrink-0 font-pixel text-[9px] text-accent">
                   {CONSOLE_LABEL[game.consoleType]}
@@ -580,6 +600,18 @@ export default function AdminGames() {
                   value={developer}
                   onChange={(e) => setDeveloper(e.target.value)}
                   className={FIELD_CLASS}
+                />
+              </label>
+
+              {/* 说明：本表唯一一个多行字段，`resize-y` 让它可以往下拉高一点写长句 */}
+              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+                {t('admin.field.description')}
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  placeholder={t('admin.description.placeholder')}
+                  className={`${FIELD_CLASS} resize-y`}
                 />
               </label>
 

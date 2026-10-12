@@ -1,7 +1,7 @@
 /*
  * 单条游戏的改 / 删。
  *
- * PATCH ：只改元数据（游戏名、类型、语言、系列、年份、开发者）。封面与 ROM
+ * PATCH ：只改元数据（游戏名、类型、语言、系列、年份、开发者、说明）。封面与 ROM
  *         不在可改范围内 —— 换文件等于换一份内容，删了重加更干净。
  * DELETE：先删 D1 记录，再尽力清理 R2 上的封面与 ROM 对象。
  *         顺序不能反：万一 R2 删成功而 DB 失败，就会留下一条指向空文件的记录。
@@ -62,6 +62,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     series: optionalText(body.series),
     year,
     developer: optionalText(body.developer),
+    description: optionalText(body.description),
   };
 
   try {

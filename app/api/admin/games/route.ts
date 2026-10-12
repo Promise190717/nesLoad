@@ -129,6 +129,7 @@ export async function POST(request: Request) {
       series: optionalText(form.get('series')),
       year,
       developer: optionalText(form.get('developer')),
+      description: optionalText(form.get('description')),
     });
 
     return NextResponse.json({ ok: true, game });

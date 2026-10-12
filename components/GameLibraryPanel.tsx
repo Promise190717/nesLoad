@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { cardDelayMs } from '@/lib/card-stagger';
 import type { ConsoleType } from '@/lib/emulator';
 import { formatTime, type MessageKey } from '@/lib/i18n';
 import type { Cartridge } from '@/lib/library';
@@ -21,6 +22,8 @@ export interface LibraryGame {
   series: string | null;
   year: number | null;
   developer: string | null;
+  /** 说明 / 简介（可空，后台那个「说明」字段）。卡片太小放不下正文，只当悬停提示用。 */
+  description: string | null;
   createdAt: number;
 }
 
@@ -130,6 +133,74 @@ async function fetchGames(
   };
 }
 
+/**
+ * 面板关掉时要留住的**那一页数据**。
+ *
+ * `key` 是它属于哪一次查询（`queryKeyOf` 的格式：`页码|关键词|机种`）——
+ * 复原的时候必须和当前条件**完全对上**才敢用，对不上宁可重新拉。
+ */
+interface LibrarySnapshot {
+  key: string;
+  games: LibraryGame[];
+  total: number;
+}
+
+/**
+ * 面板关掉之后要接着用的那一份「面板状态」。
+ *
+ * 为什么放在**模块级**而不是父级的 state：面板挂载条件是 `libraryOpen && <GameLibraryPanel/>`，
+ * 关一次就真的卸载了，组件内的 state 全没了 —— 而 2026-10-12 用户要的是
+ * 「关闭时什么样、进来还是什么样」：翻到第几页、筛了哪个机种、搜了什么、
+ * **列表里那 15 张**、滚到哪儿，全都不许变，也不想每次重开都白打一次列表接口。
+ *
+ * 参照物是同一个弹窗里的「历史」那条线：历史落在 IndexedDB 里，重开还在；
+ * 在线库这边理应享受同等待遇。机制上像是在手搓一个 Vue `<keep-alive>` ——
+ * ⚠️ 但**不是**把组件留在树上：面板是真的卸载（DOM、effect、监听器全清掉），
+ * 留下来的只是这一个普通对象，跟着**这页文档**一起活（F5 就没了）。
+ *
+ * ⚠️ 代价必须知道：数据也一起缓存了 ⇒ 期间后台改了库（新传 / 删了游戏），
+ * 面板里还是旧的那一批，要**换页 / 改筛选 / 提交搜索**才会重拉。
+ * 觉得这个代价划不来就把它去掉 —— 见下面那个 effect 里「settledKey === key 就跳过」那段。
+ */
+interface LibraryMemory {
+  tab: Tab;
+  consoleFilter: ConsoleFilter;
+  /** 已提交（真正生效）的搜索词 */
+  keyword: string;
+  /** 搜索框里**还没提交**的草稿也得留着：不然重开时搜索框是空的、列表却还是筛过的结果 */
+  searchDraft: string;
+  page: number;
+  /** 列表的滚动位置，见组件里那对「记录 / 恢复」的 effect */
+  scrollTop: number;
+  /** 上次真正拉回来的那一页（失败过、或还没拉过就是 null） */
+  snapshot: LibrarySnapshot | null;
+}
+
+/** 模块级单例。这里的初始值就是「从没打开过」时该有的样子。 */
+const libraryMemory: LibraryMemory = {
+  tab: 'library',
+  consoleFilter: 'all',
+  keyword: '',
+  searchDraft: '',
+  page: 1,
+  scrollTop: 0,
+  snapshot: null,
+};
+
+/**
+ * 重开时能直接顶上来的那批数据；条件对不上（或压根没拉过）就给 null。
+ *
+ * 为什么还要比一次 key：正常路径下记忆里的页码和 snapshot 一定是配套的，
+ * 但服务端**夹回页码**那条路径会让 `page` 和「数据实际是哪一页」短暂错位
+ * （见拉数据那个 effect 的 `.then`）。宁可比一下、少一次请求也不给，也别摆错一页。
+ */
+function restoreSnapshot(): LibrarySnapshot | null {
+  const snapshot = libraryMemory.snapshot;
+  if (!snapshot) return null;
+  const key = queryKeyOf(libraryMemory.page, libraryMemory.keyword, libraryMemory.consoleFilter);
+  return snapshot.key === key ? snapshot : null;
+}
+
 interface GameLibraryPanelProps {
   /** 正在载入的那盘游戏 id；非 null 时所有卡片都置灰，避免连点。 */
   loadingId: string | null;
@@ -183,27 +254,40 @@ export default function GameLibraryPanel({
    * 下面按「空串就不渲染」处理。见 i18n 里 games.remoteSlow 的说明。
    */
   const slowHint = t('games.remoteSlow');
-  const [tab, setTab] = useState<Tab>('library');
+  /*
+   * 重开时能直接顶上的那批数据（条件对不上就是 null）。**只在挂载那一次被读到** ——
+   * 下面几个 state 的初始值都用它。
+   */
+  const restored = restoreSnapshot();
+  /*
+   * `tab` / 筛选 / 页码 / 搜索框这几项的初始值全部取自 `libraryMemory`（惰性初始化，
+   * 只在挂载那一次读）—— 「关闭时什么样、进来还是什么样」就落在这里，加上下面那批数据。
+   *
+   * 不能用「挂载后 useEffect 里补一次 setState」那种写法：那是 `set-state-in-effect`
+   * 拦的路子（见下面拉数据那个 effect 的注释），而且会先渲染一帧第一页再跳走。
+   */
+  const [tab, setTab] = useState<Tab>(() => libraryMemory.tab);
 
   /* ---------------- 在线库：服务端分页 + 服务端筛选 ---------------- */
 
-  const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
-  const [searchDraft, setSearchDraft] = useState('');
+  const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>(() => libraryMemory.consoleFilter);
+  const [searchDraft, setSearchDraft] = useState(() => libraryMemory.searchDraft);
   /*
    * 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来。
    * 和后台那份是同一个理由，但这里的代价更硬 —— 过滤已经挪到服务端，
    * 边打字边过滤就是每敲一个字打一次接口 = 两次 D1 查询。
    */
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = useState(() => libraryMemory.keyword);
 
   /** 当前页码。翻页 = 重新打接口，见下面那个 effect。 */
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => libraryMemory.page);
 
   /** 本页数据。**只有这一页** —— 全量那份已经不存在了。 */
-  const [games, setGames] = useState<LibraryGame[]>([]);
+  const [games, setGames] = useState<LibraryGame[]>(() => restored?.games ?? []);
   /** 命中当前筛选条件的总条数（不是本页条数），用来算总页数。 */
-  const [total, setTotal] = useState(0);
-  const [state, setState] = useState<LoadState>('loading');
+  const [total, setTotal] = useState(() => restored?.total ?? 0);
+  /* 有复原数据就是「已经就绪」—— 因此重开那一帧画的就是完整的列表，不是「载入中…」 */
+  const [state, setState] = useState<LoadState>(restored ? 'ready' : 'loading');
 
   /*
    * 请求序号：翻页快了会撞上乱序响应，慢的旧响应不许覆盖新的。
@@ -228,7 +312,11 @@ export default function GameLibraryPanel({
    * 否则点了「下一页」列表纹丝不动，会以为按钮坏了。
    */
   const queryKey = queryKeyOf(page, keyword, consoleFilter);
-  const [settledKey, setSettledKey] = useState<string | null>(null);
+  /*
+   * 「哪一次查询的数据已经在手上了」。重开时若复原上了上次那批，它一开始就等于当时那个 key
+   * ⇒ `listLoading` 直接是 false（列表不压透明度），下面那个 effect 也因此**不发请求**。
+   */
+  const [settledKey, setSettledKey] = useState<string | null>(() => restored?.key ?? null);
   const listLoading = settledKey !== queryKey;
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -258,20 +346,43 @@ export default function GameLibraryPanel({
    *
    * **依赖里刻意没有 `tab`**：切到「历史」时不该多发一次请求（那是父级给的本地数据），
    * 切回来也不该重拉 —— 依赖不变，effect 就不重跑，列表还是原来那份。
-   * 面板每次打开都是全新挂载，所以「每次打开刷新一次」依然成立。
+   *
+   * ⚠️ `settledKey === queryKey` 就直接返回，这一条是给「重开」用的：
+   * 复原判断（`restoreSnapshot`）过了的话，面板**挂载时数据就已经在手上了** ——
+   * 用户 2026-10-12 要的是「关闭时什么样、进来还是什么样」，不想每次重开都白打一次
+   * 列表接口（服务端分页那一发背后是 COUNT + SELECT 两次 D1）。
+   *
+   * 为什么拿 `settledKey` 比、而不是用一个 `useRef` 记住「第一次别拉」：
+   * ① React 开发模式会把 effect 跑两遍（挂载 → 清理 → 再跑），ref 那套第二次就漏了，
+   *    开着 `pnpm dev` 调的时候会白拉一次、还很难看出为什么；
+   * ② 「手上这份数据属于哪次查询」本来就是 `settledKey` 的语义，比一次就够了 ——
+   *    翻页 / 改筛选时 key 必然对不上，该请求照样请求。
+   *
+   * ⚠️ 代价（用户知情）：数据也缓存了 ⇒ 期间后台新传 / 删掉的游戏要**换页 / 改筛选 /
+   * 提交搜索**（或刷新页面）才会反映出来。要改成「先摆旧的、后台静默再校对一次」，
+   * 把这一行判断删掉即可（其余都不用动）。
    */
   useEffect(() => {
+    if (settledKey === queryKeyOf(page, keyword, consoleFilter)) return;
+
     const requestId = ++listRequestId.current;
     const offset = (page - 1) * PAGE_SIZE;
 
     fetchGames(offset, keyword, consoleFilter)
       .then((data) => {
         if (listRequestId.current !== requestId) return;
+        // 服务端会把越界的 offset 夹回最后一页（例如筛选后结果变少了），跟着它走
+        const settledPage = Math.floor(data.offset / PAGE_SIZE) + 1;
         setGames(data.games);
         setTotal(data.total);
         setState('ready');
-        // 服务端会把越界的 offset 夹回最后一页（例如筛选后结果变少了），跟着它走
-        setPage(Math.floor(data.offset / PAGE_SIZE) + 1);
+        setPage(settledPage);
+        /* 这一页连同它的条件留在内存里，下次重开面板直接摆出来（见 LibraryMemory 的注释） */
+        libraryMemory.snapshot = {
+          key: queryKeyOf(settledPage, keyword, consoleFilter),
+          games: data.games,
+          total: data.total,
+        };
       })
       .catch(() => {
         if (listRequestId.current !== requestId) return;
@@ -284,7 +395,64 @@ export default function GameLibraryPanel({
         // 失败也算「落定」：否则会一直卡在 loading 上
         setSettledKey(queryKeyOf(page, keyword, consoleFilter));
       });
-  }, [page, keyword, consoleFilter]);
+    /*
+     * `settledKey` 也在依赖里：它是「手上这份数据属于哪次查询」的判据，上面那行守卫靠它。
+     * 多出来的那一次重跑会被守卫挡掉（刚落定的 key 一定等于当前 key），不会白请求。
+     */
+  }, [page, keyword, consoleFilter, settledKey]);
+
+  /*
+   * 把上面那五个值同步回模块级记忆。
+   *
+   * 写在 effect 里而不是塞进每个 setter：能改这几个状态的入口有六七处
+   * （切 tab / 点机种 / 提交搜索 / 翻页 / 服务端夹回页码），逐个改迟早漏掉一条路径。
+   *
+   * 这里只写一个普通对象，**不 setState** ⇒ 不受 `set-state-in-effect` 约束。
+   */
+  useEffect(() => {
+    libraryMemory.tab = tab;
+    libraryMemory.consoleFilter = consoleFilter;
+    libraryMemory.keyword = keyword;
+    libraryMemory.searchDraft = searchDraft;
+    libraryMemory.page = page;
+  }, [tab, consoleFilter, keyword, searchDraft, page]);
+
+  /*
+   * 滚动位置：记录在**卸载时**读 DOM，恢复在布局阶段拨回去。
+   *
+   * 一页 15 张封面在 720px 高的弹窗里是真要滚的（三行卡片），所以「回到上次那一页」
+   * 还得回到上次那个位置 —— 否则重开时停在列表顶上，翻过的页等于白翻。
+   *
+   * 记录为什么在卸载时读 DOM 而不是跟着上面那个 effect 走：`goToPage` 翻页时是把
+   * scrollTop 直接拨回 0 的（那是 DOM 操作，不经过 state），从 DOM 读一次就自动跟上了，
+   * 不必在每条改页码的路径上再同步一遍。
+   */
+  useEffect(() => {
+    const el = listRef.current;
+    return () => {
+      if (el) libraryMemory.scrollTop = el.scrollTop;
+    };
+  }, []);
+
+  /*
+   * 恢复滚动。三条讲究：
+   * ① 用 `useLayoutEffect`（不是 useEffect）—— 拨位置要在**浏览器绘制之前**做完，
+   *    否则重开时会先看见列表顶部闪一帧、再跳到上次的位置；
+   * ② 没有依赖数组，每次渲染后都试一次：重开时前几帧还是「载入中」，容器里没内容、
+   *    `scrollTop` 拨不动，得等这一页真渲染出来 —— 与其去猜哪一帧，不如每帧试一下，
+   *    拨成功就清掉 `pendingScroll`（一次性）；
+   * ③ 判据用 `scrollHeight > clientHeight` 而不是「有没有拿到元素」：内容不够长时
+   *    写 `scrollTop` 会被浏览器夹回 0，那就成了「已经恢复过了」的假信号。
+   */
+  const pendingScroll = useRef(libraryMemory.scrollTop);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    const top = pendingScroll.current;
+    if (!el || top <= 0) return;
+    if (el.scrollHeight <= el.clientHeight) return;
+    pendingScroll.current = 0;
+    el.scrollTop = top;
+  });
 
   // Esc 关面板（面板自持，不必依赖外层）
   useEffect(() => {
@@ -436,17 +604,39 @@ export default function GameLibraryPanel({
                     listLoading ? 'opacity-60' : ''
                   }`}
                 >
-                  {games.map((game) => {
+                  {games.map((game, index) => {
                     const busy = loadingId === game.id;
                     const meta = [game.year, game.developer].filter(Boolean).join(' · ');
                     const tag = languageTag(game.language);
                     return (
-                      <li key={game.id}>
+                      /*
+                       * 入场动效（`.card-in` + 错峰延迟）挂在 <li> 上。
+                       *
+                       * **不需要给 <ul> 做任何「换一批就重播」的机关**：翻页 / 改筛选 /
+                       * 提交搜索之后里面装的是另一批 id，`key` 全变了 ⇒ React 会把 <li>
+                       * 整个换掉，新元素上的 CSS 动画自然重播一遍；反过来，同一张卡片
+                       * 还在原来位置上时不该再动 —— 这正好也是 `key` 的语义。
+                       */
+                      <li
+                        key={game.id}
+                        className="card-in"
+                        style={{
+                          animationDelay: `${cardDelayMs(index)}ms`,
+                        }}
+                      >
+                        {/*
+                          悬停提示：有说明就把说明换行接在标题后面（原生 tooltip 的 `\n`
+                          在 Chrome / Firefox 里就是换行）。为什么不做成卡片上的第二行 ——
+                          卡片是一行五个的小格子，说明是整句中文，塞进去要么把卡片撑高、
+                          要么只剩半截，而且只有填了说明的那几张会变高。
+                        */}
                         <button
                           type="button"
                           disabled={loadingId !== null}
                           onClick={() => onPick(game)}
-                          title={game.title}
+                          title={
+                            game.description ? `${game.title}\n${game.description}` : game.title
+                          }
                           className={`pixel-edge pxw-2 pxc-700 block w-full bg-ink-850 text-left transition-colors enabled:hover:bg-ink-700 disabled:cursor-not-allowed ${
                             // 正在下的那张不置灰：进度条要看得清。其余卡片才跟着变暗
                             busy ? '' : 'disabled:opacity-50'

@@ -10,10 +10,19 @@ CREATE TABLE IF NOT EXISTS games (
   series        TEXT,                     -- 系列（可选）
   year          INTEGER,                  -- 年份（可选）
   developer     TEXT,                     -- 开发者（可选）
+  description   TEXT,                     -- 说明 / 简介（可选，2026-10-12 加）
   created_at    INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_created_at ON games (created_at DESC);
+
+-- ⚠️ 上面那列 `description` 是 2026-10-12 补的。**这个文件只对「还没建过表」的库有效**：
+--    `CREATE TABLE IF NOT EXISTS` 见表已存在就整句跳过，不会往老表里补列。
+--    已经上线的库要单独补一次（只增不删，全程没有 DELETE / UPDATE / DROP）：
+--      node --env-file=.env.local scripts/add-games-description.mjs
+--    为什么不把 `ALTER TABLE ... ADD COLUMN` 直接写进本文件：这个文件里每条语句都是
+--    `IF NOT EXISTS`、可以反复执行；ALTER 跑第二遍会报 `duplicate column name`，
+--    掺进来就把「重复执行无害」这个性质破坏了。
 
 -- 后台管理员账号
 CREATE TABLE IF NOT EXISTS users (

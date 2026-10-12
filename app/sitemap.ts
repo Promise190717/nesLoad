@@ -1,24 +1,38 @@
 import type { MetadataRoute } from 'next';
+import { listGameStubs } from '@/lib/server/games';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
  * /sitemap.xml。
  *
- * 本站可收录的地址只有**三条**：房间那一页（`/`），以及 `/privacy` 与 `/terms`
- * 两页法务文档。游戏库 / 存档 / 联机 / 键位全是屏幕上的浮层，没有各自的 URL，
+ * 本站可收录的地址分四类：
+ *   · 房间那一页（`/`）—— 唯一的「应用」页；
+ *   · `/privacy` / `/terms` 两页法务文档；
+ *   · `/games` 游戏列表；
+ *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）。
+ * 游戏库 / 存档 / 联机 / 键位那些面板全是屏幕上的浮层，没有各自的 URL，
  * 所以不在这里 —— 别为了「看起来完整」往里塞不存在的路径，那是会被判成软 404 的。
  *
  * 法务两页是 2026-10-12 加进来的：它们是**真正的路由**（理由见 app/privacy/page.tsx），
  * 而且**必须**能被收录 —— 隐私政策与条款要能直接被搜到、被第三方按固定地址检查，
  * 只挂在房间那颗钮的弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
  *
+ * ⚠️ **游戏那三条是 2026-10-12 加的，而且是本文件里唯一的「动态部分」**：
+ * 列表地址每款游戏两条，**从 D1 现读**（`listGameStubs`）。
+ * 这正是用户要的「函数形式，这样增减游戏都会更新」—— 后台加一款游戏，
+ * 下一次抓 sitemap 就多两条 URL，不需要改代码、也不需要重新部署。
+ * 一次额外的 D1 查询换这个，很划算（sitemap 本来就是低频请求）。
+ *
  * /admin 那几页**必须排除**（它们不是公开内容）：sitemap 里的一次都不列，
  * robots.txt 也挡了一道，页面自己还有 noindex。三处都做，是因为它们防的是不同的东西 ——
  * sitemap 是「主动推荐」，robots 是「请求别来」，noindex 是「来了也别收」。
  *
- * 刻意**不写 `lastModified`**：这个站没有按页面的真实修改时间（正文全在代码里，
+ * 静态那几条刻意**不写 `lastModified`**：本站没有按页面的真实修改时间（正文全在代码里，
  * 没有 CMS 时间戳）。写成 `new Date()` 等于每次抓取都声称「刚刚更新过」，
  * 反而会让搜索引擎学会忽略这个字段，比不写更糟。
+ * **游戏那几条是例外**：`games.created_at` 就是真实的入库时间，写上是有信息量的。
+ * （注意它**不代表内容被改过** —— 后台改元数据不会动 created_at。宁可少报一次更新，
+ * 也不要报一个假的「刚刚改过」。）
  *
  * `changeFrequency` / `priority` 是 Google 明确说**不看**的字段（Bing 会瞄一眼），
  * 留着只是给别的引擎一点排序提示。
@@ -32,12 +46,47 @@ export const dynamic = 'force-dynamic';
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const origin = await resolveSiteOrigin();
 
+  /*
+   * 游戏读不出来（D1 没配 / 临时打不通）时**不能让整个 sitemap 挂掉** ——
+   * 那样爬虫连首页和法务页的地址都拿不到，代价比少列一批游戏大得多。
+   * 所以这里吞掉异常、退回一份只剩静态地址的 sitemap，并在服务端日志里留一行。
+   */
+  let stubs: { id: string; createdAt: number }[] = [];
+  try {
+    stubs = await listGameStubs();
+  } catch (error) {
+    console.error('[sitemap] 读取游戏列表失败，本次只输出静态地址', error);
+  }
+
   return [
     {
       url: origin,
       changeFrequency: 'weekly',
       priority: 1,
     },
+    {
+      url: `${origin}/games`,
+      changeFrequency: 'daily',
+      priority: 0.9,
+    },
+    /*
+     * 详情页给 0.8、下载页给 0.6：详情页是「内容」，下载页是「动作」。
+     * 用户明确要求下载页也要能被收录，所以不能省 —— 但排序上让详情页在前。
+     */
+    ...stubs.flatMap((stub) => [
+      {
+        url: `${origin}/games/${stub.id}`,
+        lastModified: new Date(stub.createdAt),
+        changeFrequency: 'monthly' as const,
+        priority: 0.8,
+      },
+      {
+        url: `${origin}/games/${stub.id}/download`,
+        lastModified: new Date(stub.createdAt),
+        changeFrequency: 'monthly' as const,
+        priority: 0.6,
+      },
+    ]),
     {
       url: `${origin}/privacy`,
       changeFrequency: 'yearly',

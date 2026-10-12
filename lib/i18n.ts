@@ -113,6 +113,36 @@ const en = {
     'Pick a game from the online library, or drop your own ROM file onto the television. Nothing to install.',
 
   /*
+   * 游戏列表 / 详情 / 下载这三页的 SEO 文案（2026-10-12 加，用户要求
+   * 「每个页面的标题的说明都要写好」）。
+   *
+   * 和上面那组同理：跟着语言走，不写进界面（页面正文另有一组 `gamesPage.*`）。
+   * 三页都是**真路由**（`/games`、`/games/[id]`、`/games/[id]/download`），
+   * 要能被直接搜到 —— 所以描述里都要带「能玩、能下载、免安装」这几个词。
+   *
+   * 详情页 / 下载页的两条带占位符：`{title}` 是游戏名、`{console}` 是机种
+   * （NES / SFC / ARC，丝印那三个英文词，不进文案表）。
+   * 列表页那条带 `{count}` —— 条数是现从库里读的，写死会在增减游戏后变成假话。
+   */
+  'seo.games.title': 'All games — Play NES, SNES & Arcade Online',
+  'seo.games.description':
+    '{count} retro games in the online library, all playable in your browser: NES, SNES / SFC and arcade. Open a title for details, play it instantly, or download the ROM file.',
+  /*
+   * 搜索结果的标题与说明。**这两条不会进索引**（列表页有 `q` 时是 noindex, follow，
+   * 见 app/games/page.tsx 的注释）—— 它们服务的是**人**：标签页上写着搜了什么，
+   * 把链接发到聊天里时预览卡也该说得清。所以照「每个页面的标题说明都要写好」写。
+   */
+  'seo.games.search.title': 'Search results for “{keyword}”',
+  'seo.games.search.description':
+    '{count} games in the online library match “{keyword}”. Play them in your browser or download the ROM file.',
+  'seo.game.title': '{title} — Play {console} Online',
+  'seo.game.description':
+    'Play {title} ({console}) right in the browser — free, nothing to install. The ROM file is available for download too.',
+  'seo.gameDownload.title': 'Download the {title} ROM ({console})',
+  'seo.gameDownload.description':
+    'Download the ROM file for {title} ({console}) in one click, no sign-up needed. You can also play it right in the browser.',
+
+  /*
    * 窄窗口下顶在房间前面那块提示。**标题和正文分开两个键** ——
    * 标题走 font-pixel（一行短标签），正文走系统字体 12px（一句要读的话）。
    * 标题原先硬编码成 'DESKTOP ONLY'，2026-10-12 收进文案表：它下面那句正文本来就是
@@ -581,6 +611,9 @@ const en = {
   'admin.field.series': 'Series',
   'admin.field.year': 'Year',
   'admin.field.developer': 'Developer',
+  /* 说明 / 简介（2026-10-12 加的字段）。多行，可留空；前台只在游戏库卡片的悬停提示里露 */
+  'admin.field.description': 'Description',
+  'admin.description.placeholder': 'Optional. Shows up as a hover hint on the library card.',
   'admin.upload.submit': 'Upload',
   'admin.upload.submitting': 'Uploading…',
   'admin.upload.ok': 'Uploaded.',
@@ -616,6 +649,78 @@ const en = {
   'admin.feedback.markResolved': 'Mark resolved',
   'admin.feedback.markUnresolved': 'Mark open',
   'admin.feedback.failed': 'Request failed.',
+
+  /*
+   * 游戏列表 / 详情 / 下载三页的**界面文案**（2026-10-12）。
+   *
+   * 这三页和法务那两页同一类：真正的路由、**服务端组件**（语言在服务端读好，
+   * 见 lib/server/locale.ts），整页没有一个 state —— 唯一的交互是下载那个倒计时，
+   * 在客户端组件 `RomDownloadGate` 里。
+   *
+   * `topLinks.*` 是房间右上角那一行：`games` 是新加的入口，`label` 是那一行
+   * `<nav>` 的名字（它现在同时装着游戏列表和两页法务，所以不能再叫「法务」）。
+   */
+  'topLinks.label': 'Site pages',
+  'topLinks.games': 'Game list',
+
+  'gamesPage.heading': 'All games',
+  'gamesPage.intro':
+    '{count} games in the online library — NES, SNES / SFC and arcade. Click a cover for details, or start playing straight away.',
+  'gamesPage.empty': 'The library is empty right now.',
+  /*
+   * 列表页的搜索框（2026-10-12 加）。刻意**和房间弹窗那组 `games.search*` 各写一份** ——
+   * 那组是弹窗里的（客户端过滤一份已拉回来的列表），这组是**服务端搜索**（关键词进 URL
+   * `?q=`，跟着 D1 一起查）。两边行为不同、将来文案也会各走各的，共用键只会互相绊住。
+   * （`prev` / `next` / `empty` 也是这么两份的，见上面。）
+   *
+   * `searchResults` / `searchEmpty` 带 `{keyword}`：搜索页必须把「搜的是什么」写出来，
+   * 否则用户看到一屏结果不知道是自己搜的哪一句（尤其从别人发的链接点进来时）。
+   */
+  'gamesPage.searchLabel': 'Search the game library',
+  'gamesPage.searchPlaceholder': 'Search title / developer / series',
+  'gamesPage.searchSubmit': 'Search',
+  'gamesPage.searchClear': 'Clear search',
+  'gamesPage.searchResults': '“{keyword}” — {count} matching games.',
+  'gamesPage.searchEmpty': 'No games match “{keyword}”. Try a shorter word, or the game title.',
+  'gamesPage.prev': 'Prev',
+  'gamesPage.next': 'Next',
+  'gamesPage.backHome': 'Back to the room',
+  'gamesPage.backToGames': 'All games',
+  'gamesPage.backToGame': 'Back to the game',
+  'gamesPage.play': 'Play now',
+  'gamesPage.download': 'Download ROM',
+  /* 详情页「分享游戏」：点一下复制这一页的规范地址（见 components/ShareGameButton.tsx） */
+  'gamesPage.share': 'Share this game',
+  'gamesPage.shareCopied': 'Link copied',
+  'gamesPage.shareFailed': 'Copy failed',
+  'gamesPage.field.console': 'Console',
+  'gamesPage.field.year': 'Year',
+  'gamesPage.field.developer': 'Developer',
+  'gamesPage.field.series': 'Series',
+  'gamesPage.field.language': 'Language',
+  'gamesPage.notFoundTitle': 'Game not found',
+  'gamesPage.notFound': 'This game is not in the library (any more).',
+  /* 详情页正文：`fallbackDescription` 只在后台没填「说明」时顶上 */
+  'gamesPage.fallbackDescription': '{title} is a {console} game.',
+
+  'download.heading': 'Download the ROM',
+  'download.hint': 'Click the button below — the download starts 6 seconds later.',
+  'download.button': 'Start download',
+  'download.waiting': 'Starting in {seconds}s…',
+  'download.started': 'Download started — check your browser downloads.',
+  /* 兜底那条「没有反应？直接下载」2026-10-12 按用户要求去掉了（它绕开 6 秒缓冲），
+     所以 `download.manual` / `download.manualLink` 两条文案跟着删了。 */
+  'download.rights': 'Only download ROM files you are legally allowed to use.',
+  /* 首页那条 `?id=` 深链：从详情页点「开始游戏」过来，但库里已经没有这条了 */
+  'deepLink.notFound': 'That game could not be found — it may have been removed.',
+  /*
+   * 深链载入中那颗**独立弹窗**（ConsoleScene 的 `deepLinkGame`）：标题栏、进度条
+   * 上面那行、以及底部那句「下完会自己开始」。弹窗上的「取消」直接复用
+   * `games.cancel` —— 就是同一个动作、同一个词，没必要再抄一遍。
+   */
+  'deepLink.title': 'Loading game',
+  'deepLink.loading': 'Downloading the ROM…',
+  'deepLink.hint': 'Starts automatically once the download finishes.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -630,6 +735,21 @@ const zh: Record<MessageKey, string> = {
   'seo.intro':
     '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）和街机游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
   'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
+
+  /* 游戏列表 / 详情 / 下载三页的 SEO 文案，见上面英文那份的注释 */
+  'seo.games.title': '全部游戏 —— 在线玩 NES / SFC / 街机',
+  'seo.games.description':
+    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：NES、SFC（超级任天堂）和街机。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
+  /* 搜索结果两条，见上面英文那份的注释（人不索引、只给人看） */
+  'seo.games.search.title': '「{keyword}」的搜索结果',
+  'seo.games.search.description':
+    '在线游戏库里匹配「{keyword}」的游戏共 {count} 款。可以直接在浏览器里玩，也可以下载 ROM 文件。',
+  'seo.game.title': '{title} —— 在线玩 {console} 游戏',
+  'seo.game.description':
+    '直接在浏览器里玩《{title}》（{console}）—— 免费、免安装，也可以下载 ROM 文件。',
+  'seo.gameDownload.title': '下载《{title}》ROM（{console}）',
+  'seo.gameDownload.description':
+    '一键下载《{title}》（{console}）的 ROM 文件，无需注册。也可以直接在浏览器里玩。',
 
   'notice.desktopOnlyTitle': '仅限桌面端',
   'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 900px 以上。',
@@ -900,6 +1020,9 @@ const zh: Record<MessageKey, string> = {
   'admin.field.series': '系列',
   'admin.field.year': '年份',
   'admin.field.developer': '开发者',
+  /* 说明 / 简介，见上面英文那份的注释 */
+  'admin.field.description': '说明',
+  'admin.description.placeholder': '选填。鼠标停在游戏库那张卡片上时会显示这行字。',
   'admin.upload.submit': '上传',
   'admin.upload.submitting': '上传中…',
   'admin.upload.ok': '已上传。',
@@ -934,6 +1057,54 @@ const zh: Record<MessageKey, string> = {
   'admin.feedback.markResolved': '标记已解决',
   'admin.feedback.markUnresolved': '标记未解决',
   'admin.feedback.failed': '请求失败。',
+
+  /* 游戏列表 / 详情 / 下载三页的界面文案，见上面英文那份的注释 */
+  'topLinks.label': '站点页面',
+  'topLinks.games': '游戏列表',
+
+  'gamesPage.heading': '全部游戏',
+  'gamesPage.intro':
+    '在线游戏库共 {count} 款：NES、SFC（超级任天堂）和街机。点封面看详情，也可以直接开玩。',
+  'gamesPage.empty': '游戏库现在还是空的。',
+  /* 列表页的搜索框，见上面英文那份的注释（和房间弹窗那组 `games.search*` 各写一份） */
+  'gamesPage.searchLabel': '搜索游戏库',
+  'gamesPage.searchPlaceholder': '搜索标题 / 开发者 / 系列',
+  'gamesPage.searchSubmit': '搜索',
+  'gamesPage.searchClear': '清除搜索',
+  'gamesPage.searchResults': '「{keyword}」共 {count} 个结果。',
+  'gamesPage.searchEmpty': '没有匹配「{keyword}」的游戏，换个短一点的词，或者直接搜游戏名。',
+  'gamesPage.prev': '上一页',
+  'gamesPage.next': '下一页',
+  'gamesPage.backHome': '回到房间',
+  'gamesPage.backToGames': '全部游戏',
+  'gamesPage.backToGame': '返回游戏详情',
+  'gamesPage.play': '开始游戏',
+  'gamesPage.download': '下载 ROM',
+  'gamesPage.share': '分享游戏',
+  'gamesPage.shareCopied': '已复制',
+  'gamesPage.shareFailed': '复制失败',
+  'gamesPage.field.console': '类型',
+  'gamesPage.field.year': '年份',
+  'gamesPage.field.developer': '开发者',
+  'gamesPage.field.series': '系列',
+  'gamesPage.field.language': '语言',
+  'gamesPage.notFoundTitle': '找不到这个游戏',
+  'gamesPage.notFound': '这个游戏不在游戏库里（可能已经被移除）。',
+  'gamesPage.fallbackDescription': '《{title}》是一款 {console} 游戏。',
+
+  'download.heading': '下载 ROM',
+  'download.hint': '点下面的按钮，6 秒后开始下载。',
+  'download.button': '开始下载',
+  'download.waiting': '{seconds} 秒后开始…',
+  'download.started': '已开始下载，请查看浏览器的下载目录。',
+  /* 见上面 en 那份的说明：兜底那条「直接下载」连同它的文案一起删了 */
+  'download.rights': '请只下载你有权使用的 ROM 文件。',
+
+  'deepLink.notFound': '找不到这个游戏，可能已经被移除。',
+  /* 深链载入中那颗独立弹窗，见英文表里同一条上面的说明 */
+  'deepLink.title': '正在载入游戏',
+  'deepLink.loading': '正在下载 ROM…',
+  'deepLink.hint': '下载完成后自动开始',
 };
 
 const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };

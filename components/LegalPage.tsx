@@ -95,6 +95,16 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
             <Link href="/" className="text-ink-400 transition-colors hover:text-accent">
               {t('legal.back')}
             </Link>
+            {/*
+              游戏列表也放一条。**这一条主要是给爬虫的**：房间右上角那一行
+              （游戏列表 / 隐私政策 / 服务条款）在移动端是 `display: none`
+              （见 globals.css），而搜索引擎用的是**移动优先索引** ——
+              光靠那一行，`/games` 在爬虫眼里可能一条内链都没有。
+              法务两页本身在 sitemap 里，于是这里就成了一条「总会被爬到」的入口。
+            */}
+            <Link href="/games" className="text-ink-400 transition-colors hover:text-accent">
+              {t('topLinks.games')}
+            </Link>
           </div>
 
           <p className="mt-4 text-[11px] text-ink-500">

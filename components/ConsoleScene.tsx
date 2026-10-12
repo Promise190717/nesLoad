@@ -56,6 +56,7 @@ import {
 import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
 import { isSeason, nextSeason } from '@/lib/season';
 import { DEFAULT_TV_SIZE, isTvSize, TV_SIZES, type TvSize } from '@/lib/tv-size';
+import { CONSOLE_LABEL } from './CartridgeSprite';
 import FeedbackPanel from './FeedbackPanel';
 import GameLibraryPanel, { type LibraryGame } from './GameLibraryPanel';
 import HandheldConsole from './HandheldConsole';
@@ -157,13 +158,16 @@ const QUALITY_KEY = 'nesload:netplay-quality';
 const AUDIO_RETRY_LIMIT = 10;
 
 /**
- * 联机连上那枚提示挂多久。
+ * 房间顶上那枚提示挂多久。
  *
  * 4 秒：中文那一句是 16 个字、英文更长一点，够读完；再长就开始碍事了
  * （它飘在房间顶上，正对着吊灯）。比面板里「已复制」那枚（1.6s）
  * 长得多，因为那句只是确认一个动作，这句要读完一整个状态。
+ *
+ * 原本只服务联机（连上 / 对方离开），2026-10-12 起 `?id=` 深链也走同一个位置
+ * （找不到那款游戏时弹一句），所以名字从 `NETPLAY_*` 收了回来。
  */
-const NETPLAY_TOAST_MS = 4000;
+const TOAST_MS = 4000;
 
 /**
  * 「显像管关机」那一下挂多久（弹出卡带之后）。
@@ -352,6 +356,50 @@ function clearInviteCode() {
   window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
+/**
+ * 游戏详情页那颗「开始游戏」带过来的参数名（`/?id=<游戏 id>`）。
+ *
+ * 放在地址栏而不是页面状态里，是为了让这条路能**被直接分享 / 收藏**：
+ * 「在房间里打开这一款」本身就是一个值得分享的地址。
+ */
+const GAME_QUERY_PARAM = 'id';
+
+/**
+ * 从地址栏里抠出 `?id=`（游戏详情页「开始游戏」带过来的），没有就返回 null。
+ *
+ * 和 `readInviteCode` 同一套路（直接读 `location`，不用 `useSearchParams`：
+ * 那是根页面，为读一个参数把整棵树包进 `<Suspense>` 不划算）。
+ *
+ * 校验只做「像个 id」这一层：库里是 `randomUUID()`，所以只接受字母数字和连字符、
+ * 长度卡在 64 以内。不合规就当没有 —— 别拿一个明显不是 id 的串去打一次接口。
+ *
+ * ⚠️ 和 `?room=` 一样，**这一轮结束后要抹掉**（见 `clearGameId`）：留着的话用户按 F5
+ * 会又自动把这一款重下一遍 —— 而他刚点了取消、或者游戏早就跑起来了，刷新再来一次
+ * 不是他要的。注意抹的时机是「这一轮结束」，不是「读到就抹」：载入进行中按 F5
+ * 仍然该重开同一款（那时候还没结束）。
+ */
+function readGameId(): string | null {
+  const raw = new URLSearchParams(window.location.search).get(GAME_QUERY_PARAM)?.trim() ?? '';
+  return /^[A-Za-z0-9_-]{1,64}$/.test(raw) ? raw : null;
+}
+
+/**
+ * 把 `?id=` 从地址栏抹掉（走 `replaceState`，不留历史记录、不触发任何请求）。
+ *
+ * 2026-10-12 用户要求：**取消**和**载入完成**时都要抹，否则刷新页面会又自动把这一款
+ * 重下一遍 —— 用户以为自己已经退出这一款了。和 `clearInviteCode` 同一套路。
+ *
+ * 和 `?room=` 的区别只在**时机**：房间码是「读到就抹」（一次性的握手，留着会反复弹确认框），
+ * `?id=` 是「这一轮结束才抹」。别的一律不动 —— 只摘自己那一个参数，
+ * 联机那条 `?room=` 之类还在地址里的东西原样留着。
+ */
+function clearGameId() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(GAME_QUERY_PARAM)) return;
+  url.searchParams.delete(GAME_QUERY_PARAM);
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 export default function ConsoleScene() {
   const { t, locale, setLocale } = useI18n();
 
@@ -508,10 +556,16 @@ export default function ConsoleScene() {
   /**
    * 「隐私政策与服务条款」那颗钮左侧的弹层开着没有。
    *
+   * ⚠️ **这条链路 2026-10-12 之后只剩「移动端 + 桌面端矮窗口」**：那天用户要求「pc 模式下
+   * 隐私和服务条款全部放在网页右上角、文字形式」，桌面端够宽够高时改成右上角两条常驻文字链接
+   * （见下面 `.top-links` 那段），这颗钮由 `.rail-mobile` 在那些情况下藏掉；
+   * 窗口一矮（机身顶边会顶到右上角那两行）又换回它 —— 门槛见 globals.css。
+   * 手机上保留钮 + 弹层的理由是那一列在移动端是**横排**的，塞两条文字进去会把那行撑乱。
+   *
    * 和电视机大小那颗钮**同一套做法**（也是收进一颗钮、往左弹）——理由也一样：
    * 这一列是竖排的，两页并排会多占两行，而看法务页是**极低频**动作。
    *
-   * 区别在弹层里是**两条链接**（`<Link>`）而不是三个按钮：那两页是真正独立的路由
+   * 弹层里是**两条链接**（`<Link>`）而不是三个按钮：那两页是真正独立的路由
    * （见 app/privacy/page.tsx 的注释），点开就该跳过去，不需要在房间里再画一遍长文。
    */
   const [legalMenuOpen, setLegalMenuOpen] = useState(false);
@@ -552,16 +606,22 @@ export default function ConsoleScene() {
   /** 房主推过来的画面流。只有加入者会拿到，房主那边永远是 null */
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   /**
-   * 那枚几秒后自己消失的联机提示。null = 不显示。
+   * 房间顶上那枚几秒后自己消失的提示。null = 不显示。
    *
    * 存**键**而不是翻译好的字符串：它跟着语言走就行 —— 虽然只活几秒，
    * 但没有理由让它停在旧语言上（切语言不需要重开一局联机）。
    *
-   * 两种：`kind: 'ok'` 是「刚连上」（绿点 + 绿描边），`kind: 'danger'` 是「对方离开了」
-   * （红点 + 红描边，和面板里那行报错同一个色）。**颜色分开**是有意的 —— 前者是好事、
-   * 后者要人去处理（加入者得重新要一个码），长得一模一样会让人一眼扫过去以为还是「已连上」。
+   * 两种：`kind: 'ok'` 是「刚连上」（绿点 + 绿描边）、`kind: 'danger'` 是「对方离开了」
+   * 或「深链那款游戏不在了」（红点 + 红描边，和面板里那行报错同一个色）。
+   * **颜色分开**是有意的 —— 前者是好事、后者要人去处理（加入者得重新要一个码），
+   * 长得一模一样会让人一眼扫过去以为还是「已连上」。
+   *
+   * ⚠️ 这个位置是**共用的**（2026-10-12 起 `?id=` 深链也用），所以它不叫
+   * `netplayToast` 了。同一时刻只会有一条：深链那条读不到游戏就没了下文，
+   * 而联机提示是「对方动作」触发的，两者撞上的概率可以忽略；
+   * 真撞上也是后写的那条盖掉前一条，不会叠成两条。
    */
-  const [netplayToast, setNetplayToast] = useState<{
+  const [toast, setToast] = useState<{
     key: MessageKey;
     kind: 'ok' | 'danger';
   } | null>(null);
@@ -620,7 +680,7 @@ export default function ConsoleScene() {
          */
         if (next.status === 'connected' && lastStatus !== 'connected') {
           setNetplayOpen(false);
-          setNetplayToast({
+          setToast({
             key: next.role === 'host' ? 'netplay.toastHost' : 'netplay.toastGuest',
             kind: 'ok',
           });
@@ -644,9 +704,9 @@ export default function ConsoleScene() {
              * 「对方离开」的**唯一**指征，退房不会被误判。
              */
             if (next.status === 'waiting' && lastStatus === 'connected') {
-              setNetplayToast({ key: 'netplay.toastGuestLeft', kind: 'danger' });
+              setToast({ key: 'netplay.toastGuestLeft', kind: 'danger' });
             } else {
-              setNetplayToast(null);
+              setToast(null);
             }
           } else if (lastRole === 'guest') {
             /*
@@ -663,7 +723,7 @@ export default function ConsoleScene() {
              * 所以用 `lastError !== 'host-left'` 挡重复即可。
              */
             if (next.error === 'host-left' && lastError !== 'host-left') {
-              setNetplayToast({ key: 'netplay.toastHostLeft', kind: 'danger' });
+              setToast({ key: 'netplay.toastHostLeft', kind: 'danger' });
             } else if (next.error === 'room-full') {
               /*
                * 房间已满，被房主请出来了。
@@ -674,17 +734,17 @@ export default function ConsoleScene() {
                * `netplay.errRoomFull` 明明白白摆在那儿。
                * 顺带把「刚连上」的绿 toast 收掉：那是假象（我们其实没连成）。
                */
-              setNetplayToast(null);
+              setToast(null);
               setNetplayOpen(true);
             } else if (next.error === null) {
               // 没挂原因码 = 是我自己点的退房（或真掉线），不该说「房主已离开」，清掉
-              setNetplayToast(null);
+              setToast(null);
             }
             // next.error === 'host-left' 且 lastError 也是它：同一次断开的重复上报，
             // 提示已经在屏幕上，什么都不做（重开会把 4 秒计时器重置）
           } else {
             // 没进过房间（建房失败 / 校验不过）：没有「对方」可言，清掉就是了
-            setNetplayToast(null);
+            setToast(null);
           }
         }
 
@@ -799,6 +859,32 @@ export default function ConsoleScene() {
   /* ---------------- 在线游戏库 ---------------- */
 
   const [libraryOpen, setLibraryOpen] = useState(false);
+  /**
+   * `/?id=<游戏 id>` 那条深链的**独立弹窗**开着没有；`deepLinkGame` 是它的数据。
+   *
+   * 为什么拆成两个 state（2026-10-12 用户要求）：**弹窗要在「知道有 id」那一刻就立起来**，
+   * 不能等数据回来。原先是有 id 就先打接口、数据到了才开窗 —— 于是从详情页点「开始游戏」
+   * 过来的头几百毫秒是一间什么也没发生的房间，看着像没反应。现在 `deepLinkOpen` 先亮、
+   * 里面转 loading 动画，`deepLinkGame` 到了再换成封面和名字。
+   *
+   * 和 `libraryOpen` 刻意分开：深链是「有人把一盘具体的游戏递到你手里」，
+   * 不该先把整个游戏库摊开、再从十几张封面里挑出这一张来载入（用户点了「开始游戏」，
+   * 眼前却闪过一整个游戏库）。这个弹窗只有封面、名字、进度和取消。
+   *
+   * 关闭时机和游戏库面板一致：ROM 整包到手就收掉（见 `loadRemote`），
+   * 之后核心包的加载进度由电视机屏幕接着显示。两件事都由 `closeDeepLink` 一起关。
+   */
+  const [deepLinkOpen, setDeepLinkOpen] = useState(false);
+  /** 深链那一款的数据；null = 还没到（弹窗里摆 loading 骨架） */
+  const [deepLinkGame, setDeepLinkGame] = useState<LibraryGame | null>(null);
+  /**
+   * 正在飞的**深链取数**请求的取消把手（`GET /api/games/<id>` 那一小段）。
+   *
+   * 和 `romAbortRef` 分开：这是**两段不同的下载** —— 先要一条数据（毫秒级），
+   * 再要 ROM 整包（几十 MB）。弹窗上那颗「取消」得把两段都掐掉，所以 `cancelDeepLink`
+   * 两个都 abort；而「载入完成」只看第二段。
+   */
+  const deepLinkAbortRef = useRef<AbortController | null>(null);
   /** 正在从游戏库载入的那盘游戏 id；非 null 时弹窗里的卡片全部置灰 */
   const [libraryLoadingId, setLibraryLoadingId] = useState<string | null>(null);
   /**
@@ -873,8 +959,16 @@ export default function ConsoleScene() {
    * 窄屏（< 900px）时指引整块是 display:none，用户根本看不到；**这里照样把它置开**，
    * 因为「标记」只在 onClose 里写（见 closeTour）—— 他看不到就没机会关，标记也就写不进去，
    * 之后换到宽窗口还会补上这一遍。这正是我们要的。
+   *
+   * **带 `?id=` 深链进来时让位**（下面那个 effect 会去载入那一款）：
+   * 指引是 z-[60] 的一整层，会把「正在载入」的进度盖住，用户看完指引才发现游戏早开始了。
+   * 指引本身没丢 —— 这次不写标记（`closeTour` 才会写），他下次正常进站照样会看到。
+   *
+   * ⚠️ 这里读地址栏，而**参数是不会被抹掉的**（见 `readGameId` 的注释），
+   * 所以这个判断和下面那个 effect 谁先跑都成立，不依赖 effect 的声明顺序。
    */
   useEffect(() => {
+    if (readGameId()) return;
     if (localStorage.getItem(TOUR_KEY) === null) setTourOpen(true);
   }, []);
 
@@ -1071,6 +1165,22 @@ export default function ConsoleScene() {
   }, [controller, activeId, loadFile]);
 
   /**
+   * 收起深链那颗弹窗（`deepLinkOpen` + `deepLinkGame`），**并把地址栏上的 `?id=` 一起摘掉**。
+   *
+   * 两件事必须绑在一起：只把弹窗收起来、参数还挂在地址上，用户按一下 F5 就又自动
+   * 把这一款重下一遍（他自己以为已经退出了）—— 这正是 2026-10-12 用户要求抹掉参数的原因。
+   *
+   * 幂等，所以调用点可以有好几处（取数失败 / 取消 / 整包到手 / `finally` / 防重入早退），
+   * 谁先到谁抹，后来的都是空操作。`clearGameId` 自己会判断有没有这个参数，
+   * 从游戏库 / 历史那条路进来（地址上本来就没有 `?id=`）调它也是空操作。
+   */
+  const closeDeepLink = useCallback(() => {
+    clearGameId();
+    setDeepLinkOpen(false);
+    setDeepLinkGame(null);
+  }, []);
+
+  /**
    * 从远程地址载入一盘 ROM —— **在线库点选**和**点历史里那一行**共用这一段。
    *
    * 两条路的差别只有「这份字符串描述从哪儿来」：在线库那条由 `romFromGame` 现拼，
@@ -1081,10 +1191,14 @@ export default function ConsoleScene() {
    * 走的是和本地拖入同一条 `loadFile`，所以 BIOS 装置、存档槽这些既有逻辑全都自动带上；
    * 文件名必须用库里存的 `romName` —— 街机 FBNeo 拿 zip 文件名认驱动。
    *
-   * 下载这段**面板一直开着**并显示进度条：ROM 整包拉下来之前关掉弹窗，用户就只看到
+   * 下载这段**窗口一直开着**并显示进度条：ROM 整包拉下来之前关掉它，用户就只看到
    * 一片空荡荡的房间，不知道是在下载还是卡住了。拉完再关窗、交给 `loadFile`——
    * 后面核心包的下载进度由电视机屏幕里的进度条接着显示。
-   * 从历史点进来也是这一套（历史里只存了地址，一样要下），所以面板不会被提前关掉。
+   * 从历史点进来也是这一套（历史里只存了地址，一样要下），所以窗口不会被提前关掉。
+   *
+   * 「窗口」是哪一颗由入口决定：从游戏库 / 历史进来的是**游戏库面板**（`libraryOpen`），
+   * 从 `/?id=` 深链进来的是那颗**只有这一款的独立弹窗**（`deepLinkOpen`）。
+   * 两条路都要关，所以下面两处各关一次，多关一次是空操作（`closeDeepLink` 也是幂等的）。
    *
    * **可取消**（2026-10-12）：面板底部那条状态栏上的「取消」就是 abort 这一笔 fetch。
    * 整包几十 MB 的街机 romset 下到一半发现选错了，原先只能等它下完 —— 现在能掐掉。
@@ -1093,7 +1207,12 @@ export default function ConsoleScene() {
    */
   const loadRemote = useCallback(
     async (rom: RemoteRom) => {
-      if (libraryLoadingId !== null) return;
+      // 防重入：同一时刻只放一笔进去。真撞上了（深链那条几乎不可能）也顺手把
+      // 深链弹窗收掉，免得它挂在那儿一直转
+      if (libraryLoadingId !== null) {
+        closeDeepLink();
+        return;
+      }
       setLibraryLoadingId(rom.id);
       setRomDownload({ title: rom.name });
       setLibraryProgress(null);
@@ -1110,10 +1229,16 @@ export default function ConsoleScene() {
         const res = await fetch(rom.romUrl, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await readBodyWithProgress(res, setLibraryProgress);
-        // 整包到手 = 可取消的那一段结束了，后面交给 loadFile（面板关闭、进度转到屏幕上）
+        // 整包到手 = 可取消的那一段结束了，后面交给 loadFile（窗口关闭、进度转到屏幕上）
         setRomDownload(null);
         const file = new File([blob], rom.romName, { type: 'application/octet-stream' });
         setLibraryOpen(false);
+        /*
+         * 深链那颗独立弹窗一起收掉，**顺带把地址栏的 `?id=` 摘掉** —— 这就是用户说的
+         * 「载入完成」那个时机：游戏已经跑起来了，刷新页面不该再自动重下一遍。
+         * （不是从深链进来的话，弹窗本来就是 null、地址上也没这个参数，整个是空操作。）
+         */
+        closeDeepLink();
         await loadFile(file);
 
         /*
@@ -1141,9 +1266,16 @@ export default function ConsoleScene() {
         setLibraryLoadingId(null);
         setRomDownload(null);
         setLibraryProgress(null);
+        /*
+         * 失败 / 被取消时**也得把深链那颗弹窗收掉、参数也摘掉** —— 上面 try 里那次
+         * 只覆盖「整包下到手」这条顺路，取消 / 出错走的是这里：那一笔已经不是
+         * 「在载入了」，弹窗留着只会一直转，参数留着刷新就会重来一遍。
+         * （成功路径上这句是空操作，前面已经关过一次。）
+         */
+        closeDeepLink();
       }
     },
-    [libraryLoadingId, loadFile]
+    [libraryLoadingId, loadFile, closeDeepLink]
   );
 
   /** 在线库那张卡片点下来 —— 把响应形状转成远程载入要的那份描述。 */
@@ -1159,6 +1291,23 @@ export default function ConsoleScene() {
   const cancelRemoteLoad = useCallback(() => {
     romAbortRef.current?.abort();
   }, []);
+
+  /**
+   * 取消深链这一整轮：**先把两段请求都真掐断，再收拾现场**。
+   *
+   * 弹窗上那颗「取消」和 `Esc` 都走这里。深链这条路上前后有两段下载，可能同时活着：
+   * ① 「要一条数据」（`deepLinkAbortRef`，毫秒级 —— 弹窗刚立起来、还在转 loading 的那几帧
+   * 用户就能点到取消）；② 「下 ROM 整包」（`cancelRemoteLoad`）。两个都 abort，
+   * 只掐一个会留下另一段在后台跑（尤其 ①：不掐的话它回来还会 `loadRemoteGame`，
+   * 于是**用户点了取消，游戏却自己开始下**）。
+   *
+   * 空操作很安全：两段都没在飞时两个 ref 都是 null。
+   */
+  const cancelDeepLink = useCallback(() => {
+    deepLinkAbortRef.current?.abort();
+    cancelRemoteLoad();
+    closeDeepLink();
+  }, [cancelRemoteLoad, closeDeepLink]);
 
   /* ---------------- 卡带列表 ---------------- */
 
@@ -1406,6 +1555,107 @@ export default function ConsoleScene() {
 
   const dismissInvite = useCallback(() => setPendingRoom(null), []);
 
+  /* ---------------- 游戏详情页「开始游戏」带过来的 `?id=` ---------------- */
+
+  /*
+   * `loadRemoteGame` 的**最新一份**。
+   *
+   * 下面那个深链 effect 只在挂载时跑一次（它不该因为别的原因重跑），而它要调用的
+   * `loadRemoteGame` 会随 `libraryLoadingId` 变化换身份（见 `loadRemote` 的依赖数组）。
+   * 直接在闭包里捕获的话，异步回来的那一刻用的还是**第一帧**那份 ——
+   * 那份眼里的 `libraryLoadingId` 永远是 null，防重入的闸就形同虚设。
+   * 用 ref 拿最新的一份，顺带让那个 effect 的依赖数组可以干干净净地空着。
+   */
+  const loadRemoteGameRef = useRef(loadRemoteGame);
+  useEffect(() => {
+    loadRemoteGameRef.current = loadRemoteGame;
+  }, [loadRemoteGame]);
+
+  /**
+   * `/?id=<游戏 id>` —— 游戏详情页那颗「开始游戏」点过来就是这个地址。
+   *
+   * 流程：读地址栏 → **立刻立起 `deepLinkOpen` 那颗独立弹窗**（里面先转 loading）
+   * → 打 `/api/games/<id>` 拿这一款 → 到了就填进去（封面 + 名字 + 下载进度 + 取消）
+   * 并照游戏库那套载入（`loadRemoteGame`：下载进度、取消、写历史全都自动带上），
+   * 没有就在房间顶上弹一句「找不到这个游戏」、弹窗一并收掉。
+   *
+   * ⚠️ **弹窗不能等数据**（2026-10-12 用户要求，原话「判断有id弹窗就出现 加载中loading动画」）：
+   * 一开始是先 fetch、数据回来才开窗，于是从详情页点「开始游戏」过来的头几百毫秒是
+   * 一间什么也没发生的房间 —— 看着像点了没反应。现在「有 id」本身就立刻开窗。
+   *
+   * ⚠️ **参数读到先留着、等这一轮结束再抹**（`clearGameId`，包在 `closeDeepLink` 里）：
+   * 载入进行中按 F5 仍然该重开同一款，所以读到的那一刻**不动它**；等取数失败 / 取消 /
+   * 整包下完时（`closeDeepLink` 的各个调用点）才摘掉 —— 那时候用户已经「离开这一款」了，
+   * 参数留着只会让刷新又自动重下一遍（2026-10-12 用户要求）。
+   *
+   * 库里没有这一款（后台删了、或者链接是从别处抄来的）时只弹一句提示、不载入 ——
+   * 这是用户明确要求的那条「没有提示找不到」。⚠️ 这时**必须 `closeDeepLink()`**：
+   * 弹窗已经先行立起来了，不收掉就会永远停在那条 loading 动画上。
+   *
+   * ⚠️ 2026-10-12 改：原先这里开的是**整个游戏库面板**（`setLibraryOpen(true)`），
+   * 于是「开始游戏」会先把十几张封面摊开、再从里面把这一张捞出来载入 ——
+   * 用户只想玩那一款，却先看见一整个库闪一下。现在只开这一款的小弹窗。
+   */
+  useEffect(() => {
+    const gameId = readGameId();
+    if (!gameId) return;
+
+    const controller = new AbortController();
+    deepLinkAbortRef.current = controller;
+    let alive = true;
+
+    /*
+     * 有 id 就**立刻**把弹窗立起来，数据后面再填（这是这个 effect 存在的第一件事）。
+     *
+     * 为什么写成微任务而不是直接 `setDeepLinkOpen(true)`：effect 里同步 setState 会撞上
+     * React 编译器那条 `react-hooks/set-state-in-effect`（本仓库既有的 error 里就有它）。
+     * 推到微任务**不影响观感** —— 它跑在浏览器绘制之前，用户看到的仍然是「点进去弹窗就在」，
+     * 而不是原先那样先空着等一次网络往返。
+     */
+    void Promise.resolve().then(() => {
+      if (alive) setDeepLinkOpen(true);
+    });
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/games/${encodeURIComponent(gameId)}`, {
+          signal: controller.signal,
+        });
+        const game = res.ok ? ((await res.json()) as { game?: LibraryGame }).game : undefined;
+        /*
+         * 卸载（换页 / 热更新）之后别再往下走，尤其别在卸载后 setState；
+         * `signal.aborted` 是「用户在 loading 那几百毫秒里就点了取消」——
+         * 这时**绝不能**再走到下面的 `loadRemoteGame`，否则用户刚取消，游戏自己开始下。
+         */
+        if (!alive || controller.signal.aborted) return;
+        if (!game) {
+          closeDeepLink();
+          setToast({ key: 'deepLink.notFound', kind: 'danger' });
+          return;
+        }
+        setDeepLinkGame(game);
+        void loadRemoteGameRef.current(game);
+      } catch (error) {
+        // 用户自己掐的（abort）：不是故障，静悄悄收场就行
+        if (isAbortError(error)) return;
+        console.error('[nesload] 深链载入失败：', gameId, error);
+        if (alive) {
+          closeDeepLink();
+          setToast({ key: 'deepLink.notFound', kind: 'danger' });
+        }
+      } finally {
+        // 只清自己那一笔的把手（和 romAbortRef 那边同一个理由）
+        if (deepLinkAbortRef.current === controller) deepLinkAbortRef.current = null;
+      }
+    })();
+
+    return () => {
+      alive = false;
+      // 换页 / 热更新：还在飞的那一笔也掐掉，别让它回来往已卸载的组件上 setState
+      controller.abort();
+    };
+  }, [closeDeepLink]);
+
   /**
    * 那枚提示自己退场。几秒后收掉 —— 它只回答「连上了没有」，
    * 看完就不该继续占着房间（要复查还有右侧那颗联机钮和面板）。
@@ -1415,10 +1665,10 @@ export default function ConsoleScene() {
    * 所以这里不会出现「新提示刚冒出来就被上一个计时器收走」。
    */
   useEffect(() => {
-    if (!netplayToast) return;
-    const timer = setTimeout(() => setNetplayToast(null), NETPLAY_TOAST_MS);
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), TOAST_MS);
     return () => clearTimeout(timer);
-  }, [netplayToast]);
+  }, [toast]);
 
   /**
    * 房主：插上卡带就把画面推给对方。
@@ -1893,6 +2143,9 @@ export default function ConsoleScene() {
       netplayOpen ||
       keybindOpen ||
       libraryOpen ||
+      // 深链那颗「正在载入某一款」的弹窗也算「开着的东西」（它一起来就开着，
+      // 不必等数据 —— 见 `deepLinkOpen`）
+      deepLinkOpen ||
       legendOpen ||
       noteOpen ||
       feedbackOpen ||
@@ -1911,6 +2164,13 @@ export default function ConsoleScene() {
       setNetplayOpen(false);
       setKeybindOpen(false);
       setLibraryOpen(false);
+      /*
+       * 深链那颗弹窗：Esc 不只是「收起来」，还要**把这一轮真掐掉**。
+       * 只收不掐的话，用户以为关掉了，实际上请求还在后台飞、下完还会自己开始游戏
+       * —— 那是个看不见的下载，比不关更糟。整个动作就是弹窗里那颗「取消」
+       * （`cancelDeepLink`：取数那段 + ROM 那两段都 abort，再抹掉地址上的 `?id=`）。
+       */
+      if (deepLinkOpen) cancelDeepLink();
       setLegendOpen(false);
       setNoteOpen(false);
       setFeedbackOpen(false);
@@ -1928,6 +2188,8 @@ export default function ConsoleScene() {
     netplayOpen,
     keybindOpen,
     libraryOpen,
+    deepLinkOpen,
+    cancelDeepLink,
     legendOpen,
     noteOpen,
     feedbackOpen,
@@ -1960,7 +2222,19 @@ export default function ConsoleScene() {
    */
   useEffect(() => {
     if (netplayState.role !== 'guest') return;
-    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || paintingOpen || tourOpen) return;
+    if (
+      saveOpen ||
+      netplayOpen ||
+      keybindOpen ||
+      legendOpen ||
+      noteOpen ||
+      feedbackOpen ||
+      paintingOpen ||
+      tourOpen ||
+      // 深链那颗载入弹窗也挡着键盘（它上面有一颗「取消」，输入不该漏到游戏里 / 对面去）
+      deepLinkOpen
+    )
+      return;
 
     /*
      * 「物理键 → 钮」由**加入者自己的 1P 键位**反查得到。
@@ -2070,7 +2344,7 @@ export default function ConsoleScene() {
        */
       releaseAll();
     };
-  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen]);
+  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen, deepLinkOpen]);
 
   /**
    * 面板关掉之后，把焦点从按钮上摘掉。
@@ -2085,10 +2359,22 @@ export default function ConsoleScene() {
    * 摘掉焦点后事件目标落回 body，核心才会重新读键盘。
    */
   useEffect(() => {
-    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || paintingOpen || tourOpen) return;
+    if (
+      saveOpen ||
+      netplayOpen ||
+      keybindOpen ||
+      legendOpen ||
+      noteOpen ||
+      feedbackOpen ||
+      paintingOpen ||
+      tourOpen ||
+      // 深链那颗载入弹窗也挡着键盘（它上面有一颗「取消」，输入不该漏到游戏里 / 对面去）
+      deepLinkOpen
+    )
+      return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) active.blur();
-  }, [saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen]);
+  }, [saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen, deepLinkOpen]);
 
   /**
    * 点完按钮就把焦点摘掉。
@@ -2097,12 +2383,19 @@ export default function ConsoleScene() {
    * 点一下角落的主题 / 语言开关 —— 焦点都会留在那颗 `<button>` 上，之后核心就不读键盘了。
    * 这里统一收口：只要是按钮被点过，就把焦点放回 body。
    *
-   * 只对 `<button>` 生效：`<input>`（房间码输入框）点了不能 blur，否则刚点进去就失焦、
-   * 一个字都打不进来。
+   * **`<a>` 也算**（2026-10-12 补）：那天右上角加了隐私 / 服务条款两条常驻文字链接，
+   * 它们也是可聚焦元素、还带 `target="_blank"` —— 点完新标签拿走焦点，
+   * 用户切回这间屋子时焦点仍落在那条链接上，键盘照样是死的。路由类 `<a>` 被 blur
+   * 不会取消它的跳转（`pointerup` 早于 `click`），所以照 blur 不误。
+   *
+   * 只对 `<button>` / `<a>` 生效：`<input>`（房间码输入框）点了不能 blur，
+   * 否则刚点进去就失焦、一个字都打不进来。
    */
   useEffect(() => {
     const onPointerUp = (e: PointerEvent) => {
-      if (e.target instanceof HTMLButtonElement) e.target.blur();
+      if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLAnchorElement) {
+        e.target.blur();
+      }
     };
     document.addEventListener('pointerup', onPointerUp);
     return () => document.removeEventListener('pointerup', onPointerUp);
@@ -2153,6 +2446,75 @@ export default function ConsoleScene() {
       </div>
 
       {/*
+        **页面右上角那一行**：游戏列表 + 隐私政策 + 服务条款。
+        （2026-10-12 用户要求：「隐私和服务条款全部放在网页右上角、文字形式」，
+        之后又要「游戏列表放在右上角的政策旁边」—— 于是这一行收了三样东西。）
+
+        法务那两条原先只是右侧开关列里那颗盾牌钮、点开往左弹一层。现在桌面端
+        **够宽够高时**用常驻文字、把那颗钮收起来（包裹层带 `.rail-mobile`），
+        **窗口一矮又换回那颗钮**（门槛见下）；移动端始终走那颗钮 + 弹层
+        （手机上那排开关是横排的，塞不下这三条文字）。
+
+        为什么桌面端要改成「常驻的文字」：法务入口按惯例就该一直露在页首 / 页脚，
+        收进一颗钮、再点开才看得见反而不合规矩；游戏列表更是一条正经内容入口 ——
+        它得能被点到、也被爬虫顺着走。整行只占右上角一小条，
+        不压电视机、也不在那间屋子的视觉重心上（那一列开关才是要克制的地方）。
+
+        **窗口一矮整行退回那颗盾牌钮**（globals.css 里按 `data-tv` 分了三档高度门槛）：
+        机身是竖向居中的，窗口矮下来它的顶边就会顶到这一行上 ——
+        门槛怎么算的写在 globals.css 那三条媒体查询上面，别凭感觉调这个 `top-5`。
+        ⚠️ **「游戏列表」跟着一起藏**：这里不单独为它留一条常驻链接。
+        代价可接受 —— 房间右侧那排开关里本来就有「游戏库」（同一批游戏，只是换个看法），
+        而矮窗口下再挤第三行进去就会压到机身上。
+
+        ⚠️ 判据走 **CSS 的 `<html data-mobile>`**（globals.css 里那几条），
+        而不是 React 的 `mobile` state：那个 state 是挂载后才写进去的，用它渲染会先按
+        桌面端画一遍、再「啪」地换掉；属性那套由首屏内联脚本在**首次绘制前**就写好了，
+        和屋子 / 掌机二选一用的是同一个判据。这里也不能改成"窗口窄就藏" ——
+        桌面端窗口缩到 900px 以下时那排开关整排藏掉（见 899px 那条媒体查询），
+        这行链接**恰恰是那时唯一还点得到的法务入口**（窄窗口里屋子换成「请用桌面端」，
+        右上角是空的）。
+
+        **三页都 `target="_blank"`**：它们都是真正独立的路由，点过去整间屋子
+        （正在跑的游戏、联机房间、屏幕上那盘卡带）就没了。游戏列表也不例外 ——
+        它是「去看看有什么」，不是「现在换一盘」。`rel="noopener noreferrer"` 配套。
+
+        两条竖线是纯装饰（`aria-hidden`）—— 不给它字面分隔符，
+        读屏念出来就是三个干净的链接名，中间不该多一个「那个点」。
+      */}
+      <nav
+        aria-label={t('topLinks.label')}
+        className="top-links absolute right-6 top-5 z-40 flex items-center gap-3"
+      >
+        <Link
+          href="/games"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-ink-300 transition-colors hover:text-accent"
+        >
+          {t('topLinks.games')}
+        </Link>
+        <span aria-hidden className="h-[10px] w-px bg-ink-500" />
+        <Link
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-ink-300 transition-colors hover:text-accent"
+        >
+          {t('legal.privacy')}
+        </Link>
+        <span aria-hidden className="h-[10px] w-px bg-ink-500" />
+        <Link
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-ink-300 transition-colors hover:text-accent"
+        >
+          {t('legal.terms')}
+        </Link>
+      </nav>
+
+      {/*
         右侧竖排开关：**上下居中贴右边**，并且**按功能分成三组**
         （用户 2026-10-10 要求：外观 / 游戏 / 帮助，组间拉开）。
 
@@ -2168,6 +2530,8 @@ export default function ConsoleScene() {
         最下面那颗（盾牌）2026-10-12 加：点开往左弹出隐私政策 / 服务条款两条链接。
         它是**低频入口**，和「电视机大小」一样收进一颗钮、往左弹（见那颗钮的注释），
         不占常驻位置 —— 房间的视觉重心是那台电视机，这一列越长越抢戏。
+        ⚠️ 同日之后它**只剩移动端**：桌面端被用户要求改成页面右上角两条常驻文字链接
+        （见下面 `.top-links`），包裹层的 `.rail-mobile` 让它在桌面端不显示。
 
         原先是横着摆在右上角，整排压住了机身右上角（说明那块更是直接盖在电视机上）。
         竖过来之后宽度只有原来的一半不到，场景横向又空出来，不再和电视机抢地方。
@@ -2411,13 +2775,24 @@ export default function ConsoleScene() {
         </button>
 
         {/*
-          隐私政策与服务条款。点开在**钮的左侧**弹出两条链接 ——
-          和「电视机大小」同一套弹层写法（`right-full` + 垂直居中 + 点外面 / Esc 收起，
-          收起逻辑两个弹层共用，见上面那个 pointerdown 的 effect）。
+          **右上角那一行的移动端形态**：游戏列表 + 隐私政策 + 服务条款，
+          收进一颗盾牌钮、点开往左弹一层。
 
-          链接**在新标签打开**（`target="_blank"`）：这两页是真正独立的路由，
+          桌面端只在「窗口不够宽、或不够高」时才露这一颗
+          （包裹层带 `.rail-mobile`，其余情况由 globals.css 藏掉 —— 那时用页面右上角
+          那三条常驻文字链接，见上面 `<nav className="top-links">` 那段注释）。
+          移动端一律是它。
+
+          点开在**钮的左侧**弹出三条链接 —— 和「电视机大小」同一套弹层写法
+          （`right-full` + 垂直居中 + 点外面 / Esc 收起，收起逻辑两个弹层共用，
+          见上面那个 pointerdown 的 effect）。
+
+          2026-10-12 加的「游戏列表」也放在这一层里：那一条在桌面上是右上角的一行文字，
+          手机上塞不进那一行（横排的开关列 + 满宽的掌机），弹层是它唯一的位置。
+
+          链接**在新标签打开**（`target="_blank"`）：这几页是真正独立的路由，
           点过去会把房间整页换掉 —— 正在跑的游戏、联机房间、屏幕上那盘卡带全没了。
-          法务页是「看一眼就回来」的东西，不该有这种代价。
+          它们都是「看一眼就回来」的东西，不该有这种代价。
 
           `rel="noopener noreferrer"` 是配 `target="_blank"` 的标准写法：
           新页面拿不到 `window.opener`，也就改不动这个房间的地址栏。
@@ -2425,10 +2800,12 @@ export default function ConsoleScene() {
           点完顺手把弹层收掉（`onClick`）—— 不关的话切回来它还挂着，
           而 Esc / 点外面那两条路都要用户再动一次手。
         */}
-        <div ref={legalMenuRef} className="relative">
+        <div ref={legalMenuRef} className="rail-mobile relative">
           <button
             type="button"
             onClick={() => setLegalMenuOpen(v => !v)}
+            /* 钮的 aria-label 仍说法务：它露在**房间**里，而那间屋子上的语义是「法务入口」
+               （游戏列表在弹层里只是一条附带链接）。文案键 `legal.open` 两处共用。 */
             title={t('legal.open')}
             aria-label={t('legal.open')}
             aria-expanded={legalMenuOpen}
@@ -2443,6 +2820,15 @@ export default function ConsoleScene() {
             <div className="rail-menu pixel-edge pxw-2 absolute right-full top-1/2 mr-1.5 -translate-y-1/2 bg-ink-800 p-1">
               {/* `<Link>` 是行内元素，**必须加 `block`** 才能撑满整个可点区域
                   （和 AdminShell 那列 tab 同一个坑）。 */}
+              <Link
+                href="/games"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setLegalMenuOpen(false)}
+                className="block whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-300 transition-colors hover:text-accent"
+              >
+                {t('topLinks.games')}
+              </Link>
               <Link
                 href="/privacy"
                 target="_blank"
@@ -2760,6 +3146,111 @@ export default function ConsoleScene() {
       />
 
       {/*
+        `/?id=` 深链的这一款 —— **独立弹窗**（见 `deepLinkOpen` / `deepLinkGame`）。
+
+        为什么不是把游戏库面板打开：用户点的是「开始游戏」，他要的就是这一款，
+        把十几张封面摊开、再从里面挑出这一张来，纯属多闪一下。这里只有
+        封面 + 名字 + 进度 + 取消，说的和面板底部那条状态栏是同一件事。
+
+        ⚠️ **开窗的判据是 `deepLinkOpen` 而不是 `deepLinkGame`**：有 id 就立刻开窗、
+        里面先转 loading（`deepLinkGame` 还是 null 的那几百毫秒），数据到了再填进封面和
+        名字 —— 这样从详情页点「开始游戏」的反馈是**立刻**的（2026-10-12 用户要求）。
+        所以下面每一处用 `deepLinkGame` 的地方都得先过一遍空值。
+
+        ⚠️ **不给点背景关闭**：这一笔下载是有实体的（几十 MB 正在飞），
+        点一下外面就关掉、下载却还在跑，比关不掉更糟。要退出只有两条路：
+        等它下完（弹窗自己收掉、画面交给屏幕），或者点「取消」（= 把两段请求都 abort）。
+        Esc 走的也是取消（见上面那条 effect）。
+
+        两条路都会经 `closeDeepLink` —— 收弹窗的同时**把地址栏上的 `?id=` 一起摘掉**，
+        否则用户以为退出了，按一下 F5 又自动把这款重下一遍。
+      */}
+      {deepLinkOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
+          <div className="absolute inset-0 bg-ink-950/70" />
+
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('deepLink.title')}
+            className="relative w-[400px] max-w-full bg-ink-800 pixel-edge pxw-4 pxc-600"
+          >
+            <div className="border-b-2 border-ink-900 bg-ink-850 px-4 py-3 text-[12px] text-ink-200">
+              {t('deepLink.title')}
+            </div>
+
+            <div className="flex gap-4 px-4 py-4">
+              {/*
+                封面按 3:4 裁（和游戏库网格里那些一致）。数据还没到时它就是一块空的
+                灰底 —— 占位骨架，不是「图挂了」：底下那句「载入中…」会说清在等什么。
+              */}
+              <div className="h-[96px] w-[72px] shrink-0 overflow-hidden bg-ink-900 pixel-edge pxw-2 pxc-500">
+                {deepLinkGame && (
+                  <>
+                    {/* R2 公网域名，不走 next/image（理由同 GameLibraryPanel 里那张封面） */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={deepLinkGame.imageUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                {/* 名字那一行先拿一块灰条占住，免得数据一到弹窗就长高跳一下 */}
+                {deepLinkGame ? (
+                  <p className="truncate text-[13px] text-ink-100">{deepLinkGame.title}</p>
+                ) : (
+                  <span className="block h-[15px] w-2/3 bg-ink-700" />
+                )}
+                <p className="mt-1 h-[10px] font-pixel text-[7px] text-ink-400">
+                  {deepLinkGame ? CONSOLE_LABEL[deepLinkGame.consoleType] : null}
+                </p>
+
+                {/*
+                  两段不一样的文案：数据还没到说「载入中…」（这时候还没开始下 ROM，
+                  说「正在下载 ROM」是句假话），数据到了才是 `deepLink.loading`。
+                */}
+                <p className="mt-3 text-[11px] text-ink-300">
+                  {deepLinkGame ? t('deepLink.loading') : t('games.loading')}
+                </p>
+                <span className="relative mt-2 block h-[6px] w-full overflow-hidden bg-ink-900">
+                  {libraryProgress === null ? (
+                    <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
+                  ) : (
+                    <span
+                      className="absolute inset-y-0 left-0 bg-accent"
+                      style={{ width: `${Math.round(libraryProgress * 100)}%` }}
+                    />
+                  )}
+                </span>
+
+                <div className="mt-2 flex items-center gap-2">
+                  {/* 固定宽度：百分数从 9% 跳到 100% 时右边那颗钮不许跟着挪 */}
+                  <span className="w-[34px] shrink-0 text-[10px] text-ink-500">
+                    {libraryProgress === null ? '' : `${Math.round(libraryProgress * 100)}%`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={cancelDeepLink}
+                    className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[24px] shrink-0 items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors hover:bg-danger hover:text-ink-950"
+                  >
+                    {t('games.cancel')}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <p className="border-t-2 border-ink-900 bg-ink-850 px-4 py-2 text-[10px] text-ink-400">
+              {t('deepLink.hint')}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/*
         在线游戏库。和上面三块一样浮在房间上、不进屏幕。
         弹窗里两个 tab：「游戏库」是在线列表（选中的那盘由父级记 loadingId，
         弹窗据此把卡片置灰、并显示下载进度），「历史」是**从游戏库点开过的那批**——
@@ -2962,9 +3453,10 @@ export default function ConsoleScene() {
       <OnboardingTour open={tourOpen && !pendingRoom} onClose={closeTour} />
 
       {/*
-        联机提示。几秒后自己消失（见上面那个 setTimeout 的 effect）。
-        两种内容：刚连上（ok）/ 对方离开（warn），都由 netplay 的 onState 写进来 ——
-        它认的是「刚连上」和「已连接 → 断开」这两个跳变。
+        房间顶上那枚提示。几秒后自己消失（见上面那个 setTimeout 的 effect）。
+        两种内容：① 联机 —— 刚连上（ok）/ 对方离开（danger），由 netplay 的 onState
+        写进来（它认的是「刚连上」和「已连接 → 断开」这两个跳变）；
+        ② `?id=` 深链那款游戏在库里找不到（danger），由下面那个深链 effect 写进来。
 
         几个刻意的选择：
         - **层级压在面板之下**（z-40，面板是 z-50）：它不是面板，只是一句回执，
@@ -2976,18 +3468,16 @@ export default function ConsoleScene() {
           两个 transform 落在一个元素上会互相顶掉，见 globals.css 那段注释。
         - 房间是桌面端专用的（900px 起），不用考虑窄屏换行。
       */}
-      {netplayToast && (
+      {toast && (
         <div className="pointer-events-none fixed left-1/2 top-6 z-40 -translate-x-1/2">
           <div
             role="status"
-            className={`toast-pop pixel-edge ${netplayToast.kind === 'ok' ? 'pxc-ok' : 'pxc-danger'} pxw-3 flex items-center gap-2 bg-ink-800 px-3 py-2`}
+            className={`toast-pop pixel-edge ${toast.kind === 'ok' ? 'pxc-ok' : 'pxc-danger'} pxw-3 flex items-center gap-2 bg-ink-800 px-3 py-2`}
           >
             <span
-              className={`h-[7px] w-[7px] shrink-0 ${netplayToast.kind === 'ok' ? 'bg-ok' : 'bg-danger'}`}
+              className={`h-[7px] w-[7px] shrink-0 ${toast.kind === 'ok' ? 'bg-ok' : 'bg-danger'}`}
             />
-            <span className="text-[12px] whitespace-nowrap text-ink-100">
-              {t(netplayToast.key)}
-            </span>
+            <span className="text-[12px] whitespace-nowrap text-ink-100">{t(toast.key)}</span>
           </div>
         </div>
       )}

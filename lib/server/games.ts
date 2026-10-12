@@ -5,6 +5,7 @@
  * 结构把列名转成前端友好的 camelCase，且**不**把 rom_url 暴露出去（前台按 id 走代理取 ROM）。
  */
 
+import { unstable_cache } from 'next/cache';
 import type { ConsoleType } from '@/lib/emulator';
 import { query } from './d1';
 
@@ -20,6 +21,7 @@ export interface GameRow {
   series: string | null;
   year: number | null;
   developer: string | null;
+  description: string | null;
   created_at: number;
 }
 
@@ -34,6 +36,8 @@ export interface Game {
   series: string | null;
   year: number | null;
   developer: string | null;
+  /** 说明 / 简介（可空）。前台只拿它当卡片上的悬停提示，不进列表正文。 */
+  description: string | null;
   createdAt: number;
 }
 
@@ -48,6 +52,7 @@ function toGame(row: GameRow): Game {
     series: row.series,
     year: row.year,
     developer: row.developer,
+    description: row.description,
     createdAt: row.created_at,
   };
 }
@@ -164,9 +169,79 @@ export async function listGamesPage(
   return { games: rows.map(toGame), total, offset: safeOffset, limit };
 }
 
+/**
+ * `/games` 列表页的数据缓存时长（秒）。**这个数只写在这里**，页面那边读常量。
+ *
+ * 30 分钟是用户 2026-10-12 定的。这一页的味道偏向「静态页」：给搜索引擎和过路访客看，
+ * 内容变一次要等后台传新游戏，而每次渲染却要打**两次 D1**（COUNT + SELECT，见上）。
+ * 半小时的代价是「后台上传的新游戏最多晚半小时才出现在列表页上」——
+ * 对一个自助收录的站点，这个交换是划算的。
+ */
+export const GAMES_PAGE_REVALIDATE_SECONDS = 1800;
+
+/**
+ * 带缓存的列表读取 —— **只给 `/games` 列表页用**，别处的调用方继续用 `listGamesPage`。
+ *
+ * ⚠️ 为什么不直接在 `listGamesPage` 里加缓存：那个函数被三个地方共用 ——
+ * 前台在线库弹窗（`/api/games`）、后台列表（`/api/admin/games`）、以及列表页。
+ * 后两个**必须立刻看到刚上传的数据**（后台传完一款游戏，列表里却要等半小时才出现，
+ * 那是 bug 不是缓存）。所以缓存是**页面这一侧的策略**，不该下沉到数据层。
+ *
+ * 参数刻意都是**扁平的基本类型**（offset / limit / keyword），而不是收一个
+ * `GamePageQuery` 对象：`unstable_cache` 把入参当作缓存键的一部分，扁平参数拼出来的键
+ * 稳定可读，传对象则依赖属性的序列化顺序，将来加个字段可能悄悄改变键、把缓存打散。
+ * 列表页没有机种筛选（`consoleType` 只有房间那个弹窗在用），所以这里不收它。
+ *
+ * 缓存键里**不含语言**，这是对的：返回的 `Game` 全部是库里的原文（标题、说明、
+ * 开发者……库本身就只存一份），跟 cookie 无关；语言只决定界面文案，那部分照常每次渲染。
+ * 也就是说中英文访客共用同一份缓存是**有意**的，不是漏了一个维度。
+ */
+export const listGamesPageCached = unstable_cache(
+  async (offset: number, limit: number, keyword: string) =>
+    listGamesPage(offset, limit, { keyword }),
+  ['games:list'],
+  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
+);
+
 export async function getGameRow(id: string): Promise<GameRow | null> {
   const rows = await query<GameRow>('SELECT * FROM games WHERE id = ?', [id]);
   return rows[0] ?? null;
+}
+
+/**
+ * 按 id 取一条**对外结构**的游戏。
+ *
+ * 和 `getGameRow` 的分工：那个返回数据库原始行（带 `rom_url`，只有服务端自己用），
+ * 这个返回 `Game` —— 也就是 `/api/games` 列表里每一条的形状，**不含** rom_url。
+ *
+ * 给两条路用：① 公开的单条接口 `/api/games/[id]`（首页的 `?id=` 深链靠它取数据）；
+ * ② 游戏详情页 / 下载页（那两个是服务端组件，直接调这个，不走 HTTP 绕一圈）。
+ *
+ * 详情页那条也刻意走这里而不是 getGameRow：换来的是「详情页看到的字段」
+ * 和「接口吐出来的字段」天然一致 —— 多一个字段少一个字段不会只在一边生效。
+ */
+export async function getGame(id: string): Promise<Game | null> {
+  const row = await getGameRow(id);
+  return row ? toGame(row) : null;
+}
+
+/**
+ * 全部游戏的「骨架」（只有 id 与创建时间），给 sitemap 用。
+ *
+ * 为什么不复用 `listGamesPage`：那个会 `SELECT *`（带上封面 URL / ROM key 一堆用不上的列）
+ * 而且被 `MAX_PAGE_SIZE` 卡在 100 条 —— sitemap 恰恰是要**一条不漏**地列全。
+ * 这里只取两列，几百上千条也就几十 KB。
+ *
+ * 排序和列表一致（`created_at DESC, id DESC`），这样 sitemap 里的顺序和站点上的顺序对得上。
+ *
+ * `LIMIT` 上界是防呆：真到几十万条时 sitemap 本身也该拆索引了（`sitemap.xml` 单文件
+ * 有 5 万条 / 50 MB 的硬上限）。现在的量级离它很远，先按一个宽松的上界兜住。
+ */
+export async function listGameStubs(): Promise<{ id: string; createdAt: number }[]> {
+  const rows = await query<{ id: string; created_at: number }>(
+    'SELECT id, created_at FROM games ORDER BY created_at DESC, id DESC LIMIT 20000'
+  );
+  return rows.map((row) => ({ id: row.id, createdAt: row.created_at }));
 }
 
 export interface NewGame {
@@ -181,6 +256,7 @@ export interface NewGame {
   series: string | null;
   year: number | null;
   developer: string | null;
+  description: string | null;
 }
 
 export async function insertGame(input: NewGame): Promise<Game> {
@@ -188,8 +264,8 @@ export async function insertGame(input: NewGame): Promise<Game> {
   const createdAt = Date.now();
   await query(
     `INSERT INTO games
-       (id, title, image_url, rom_url, rom_name, console_type, language, series, year, developer, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, title, image_url, rom_url, rom_name, console_type, language, series, year, developer, description, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.title,
@@ -201,6 +277,7 @@ export async function insertGame(input: NewGame): Promise<Game> {
       input.series,
       input.year,
       input.developer,
+      input.description,
       createdAt,
     ]
   );
@@ -214,6 +291,7 @@ export async function insertGame(input: NewGame): Promise<Game> {
     series: input.series,
     year: input.year,
     developer: input.developer,
+    description: input.description,
     createdAt,
   };
 }
@@ -226,12 +304,14 @@ export interface GamePatch {
   series: string | null;
   year: number | null;
   developer: string | null;
+  description: string | null;
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<void> {
   await query(
     `UPDATE games
-        SET title = ?, console_type = ?, language = ?, series = ?, year = ?, developer = ?
+        SET title = ?, console_type = ?, language = ?, series = ?, year = ?, developer = ?,
+            description = ?
       WHERE id = ?`,
     [
       patch.title,
@@ -240,6 +320,7 @@ export async function updateGame(id: string, patch: GamePatch): Promise<void> {
       patch.series,
       patch.year,
       patch.developer,
+      patch.description,
       id,
     ]
   );
