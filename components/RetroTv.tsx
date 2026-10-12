@@ -1,24 +1,24 @@
-import {
-  useEffect,
-  useRef,
-  type ButtonHTMLAttributes,
-  type DragEvent,
-  type RefObject
-} from 'react';
+import type { ButtonHTMLAttributes, DragEvent, RefObject } from 'react';
 import packageJson from '@/package.json';
-import { SCREEN_HEIGHT, SCREEN_WIDTH, VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
+import { VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
+import ConsoleScreen, { deriveScreenState } from './ConsoleScreen';
 import { useI18n } from './I18nProvider';
 
 /*
- * 机身尺寸（2026-10-08 整体放大到 1.25 倍；2026-10-09 去掉插卡舱，高度减 70px）。
+ * 机身尺寸。
  *
- * 屏幕是 720×540（NES 画面的 4:3），**尺寸写在屏幕那个 div 的 class 上**（h-[540px]
- * w-[720px]，见下面那段注释 —— 别删、别改成让 canvas 撑）。机身宽度 =
- * 720 + 内圈左右外边距 10×2 = **740px**。顶沿、前面板、底座都是跟着屏幕走的固定值，
- * 只改屏幕会让比例散掉 —— 下面这些是**一套**，要动就一起动：
+ * 屏幕是 720×540（NES 画面的 4:3），**尺寸写在屏幕那个 div 的 class 上**
+ * （`h-[var(--tv-screen-h)] w-[var(--tv-screen-w)]`，见下面那段注释 —— 别删、
+ * 别改成让 canvas 撑，也别改成内联 style）。机身宽度 = 屏幕 + 内圈左右外边距 10×2。
  *
- *   屏幕 720×540（class 上）· 内圈外边距 m-[8px] mx-2.5 · 内圈描边 pxw-4 · 机身描边 pxw-6
- *   顶沿 30 · 前面板（py-2.5 撑出来）· 底座 450×18
+ * ⚠️ 2026-10-12 起这些数字**不再是常量**：屏幕 / 机身 / 底座 / 桌面的尺寸都由
+ * `<html data-tv>` 那组 CSS 变量给（三档：小 / 中 / 大，默认「小」= 原来的 720×540）。
+ * 变量写在 globals.css，档位的类型和循环顺序在 lib/tv-size.ts。
+ * 顶沿、内圈外边距、像素描边、前面板、底座**高**这些刻意不随档位变
+ * （理由见 globals.css 那段注释），所以下面这些是「不随档位动的那一套」：
+ *
+ *   顶沿 30 · 内圈外边距 m-[8px] mx-2.5 · 内圈描边 pxw-4 · 机身描边 pxw-6
+ *   前面板（py-2.5 撑出来）· 底座高 18（宽跟 --tv-base-w）
  *
  * 底部那个 68px 的**插卡舱已经撤掉**（2026-10-09，用户要求）：拖拽落点本来就是整机，
  * 卡槽只是个多余的入口，留着还白占 70px 高度。现在「怎么开始玩」由屏幕里的提示负责。
@@ -26,20 +26,22 @@ import { useI18n } from './I18nProvider';
  * 场景原先 = 屏幕 766 那版 + 间距 16 + 卡带架 220 ≈ 1002，加 main 的 px-6 是 1050px，
  * 断点 1100px。卡带架 2026-10-09 撤掉、屏幕外边距同期从 15 收到 10 之后只剩
  * 740 + px-6 = **788px**，断点仍是 **900px**（当初按 814 定的，余量还在，不用动）。
- * 改这里要同步 globals.css 的断点与上方那段注释，
- * 以及 i18n.ts 的 notice.desktopOnly（中英各一处）。
+ * **那个 900px 不随尺寸档位走**（媒体查询读不到 data-tv）：中 / 大档在 900~1000px
+ * 宽的窗口里会被 main 的 overflow 从两侧切掉一点 —— 机身是居中的，所以左右对称地切。
+ * 这是已知取舍，不为它加自适应。
+ * 改这里要同步 globals.css 的断点与上方那段注释，以及 i18n.ts 的 notice.desktopOnly。
  *
  * ⚠️ globals.css / i18n.ts / README 里写的「机身 766 / 屏幕外边距 15」是屏幕还自己带
  * 15px 外边距时的数字，2026-10-10 起实际是 **740 / 10** —— 那几处文案没跟着改。
  */
 
 /**
- * 机身宽度 = 屏幕 720 + 内圈左右外边距 10×2 = 740。
+ * 「小档」（默认档）的机身宽度 = 屏幕 720 + 内圈左右外边距 10×2 = 740。
  *
- * 组件里**没有**写死 width（宽度是上面那套尺寸自己撑出来的），这里只是把它导出去。
- * 早先 ConsoleScene 的键位表要按**机身**对中（而不是按「机身 + 卡带架」整排对中）时
- * 用过它；键位表 2026-10-09 挪到右上角之后已无人引用，保留是为了让机身宽度有个
- * 唯一出处 —— 改屏幕尺寸或那两道外边距时，对着这个值核一遍。
+ * 2026-10-12 起机身宽度跟着尺寸档位变，**真正的出处是 globals.css 的 `--tv-w`**
+ * （= `--tv-screen-w` + 20px），这个常量只是「小档那个值」的一份副本 ——
+ * 组件里**没有**写死 width（宽度是尺寸那套自己撑出来的），它也不被任何地方引用，
+ * 留着是给「改屏幕尺寸 / 那两道外边距」时留个对照物。
  */
 export const TV_WIDTH = 740;
 
@@ -48,6 +50,14 @@ interface RetroTvProps {
   /** 全屏目标就是这个屏幕，不是整页 */
   screenRef: RefObject<HTMLDivElement | null>;
   rom: LoadedRom | null;
+  /**
+   * 「显像管关机」那一下正在放 —— 弹出卡带之后的约 0.4 秒。
+   *
+   * 由 ConsoleScene 的 `eject` 点亮（**不是**从 `rom` 变 null 反推的：从游戏库载入失败
+   * 也会把 rom 清成 null，那不是「关机」；加入者被自动弹卡带时屏幕马上就有房主的画面，
+   * 更不该闪这一下）。所以这里收的是一个明确的信号，不是猜出来的状态。
+   */
+  crtOff: boolean;
   /** 房主推过来的画面。联机时加入者靠它出画面（本机不跑模拟器） */
   remoteStream: MediaStream | null;
   /**
@@ -62,9 +72,7 @@ interface RetroTvProps {
    * **本机**模拟器暂停着（房主自己按的那颗钮）。
    *
    * 两个用处：机身那颗 PWR 灯多出第三个颜色（accent），以及屏幕里那句
-   * `PAUSED / PRESS RESUME ON THE PANEL`。后者不能省 —— 暂停之后画面就是**冻住的
-   * 最后一帧**，和「卡死了」长得完全一样，而解除暂停的那个钮在机身上，
-   * 屏幕里不指一下就只能靠猜（见下面那层提示的注释）。
+   * `PAUSED / PRESS RESUME ON THE PANEL`。
    *
    * 加入者永远拿到 false，他那边的暂停走 `remotePaused`。
    */
@@ -73,18 +81,31 @@ interface RetroTvProps {
    * 房主那边暂停着（= `netplayState.remotePaused`）。
    *
    * 加入者本机没有模拟器，`paused` 对他永远是 false —— 房主按下的那次暂停，
-   * 只能从这条 prop 进来。对他而言这**不是可选提示**：屏幕上放的是房主的
-   * `<video>`，房主一暂停它就冻在最后一帧，和「卡死 / 掉线」长得一模一样，
-   * 而他本机连一颗暂停钮都没有（面板那排因为没有卡带全是灰的）。
+   * 只能从这条 prop 进来。
    */
   remotePaused: boolean;
+  /**
+   * 联机已经连上（`netplayState.status === 'connected'`）—— 屏幕左上角那颗小灯。
+   *
+   * 两侧都亮（房主、加入者），因为它回答的是「对面还在不在」这个问题，而**房主同样会忘**
+   * ——「刚连上」那枚提示只活 4 秒，之后房间里唯一还写着「已连接」的地方是右侧那颗联机钮
+   * 和联机面板，两个都不是盯着游戏看的人会留意的东西。
+   */
+  netplayLive: boolean;
+  /**
+   * **房主**开着房、还没有人进来（`status === 'waiting' && role === 'host'`）—— PWR 灯变黄。
+   *
+   * 为什么只认房主：加入者那边的 `'waiting'` 只是「正在对上」的一瞬（对上就进 connected），
+   * 而房主是真的可以**无限期**等下去 —— 那正是需要一个灯来回答的状态。
+   * 它排在 PWR 灯颜色表的最前面，所以房主没插卡带（没画面）时也是黄的，不是暗的。
+   */
+  netplayWaiting: boolean;
   busy: boolean;
   /**
    * 正在插卡带。null = 没在载入。
    *
    * `ratio` 是核心包的下载进度（0..1），null 表示拿不到字节数（核心已在
-   * CacheStorage 里、或响应没有 Content-Length）—— 这时**屏幕上**画一条来回滑的
-   * 「不确定」进度条，总之必须让用户看到「在动」。
+   * CacheStorage 里、或响应没有 Content-Length）。
    */
   loading: { ratio: number | null } | null;
   /** 有存档可读 —— 一个槽都没有时「读档」按钮是灰的 */
@@ -109,32 +130,29 @@ interface RetroTvProps {
 
 /**
  * 电视机（游戏机已并进来：顶沿有一条散热缝）。机身下沿原来有个插卡舱，2026-10-09 撤了。
+ *
+ * **这里只剩壳**：顶沿（散热缝 + 版本铭牌）、机身内圈、前面板（PWR / VOL / 五个功能钮）、
+ * 底座。屏幕整块（canvas / 房主推来的画面 / 待机提示 / 暂停层 / 载入进度 / 关机白线 /
+ * 联机小灯 / 全屏退出口）2026-10-12 抽进了 `components/ConsoleScreen.tsx` ——
+ * 移动端那台掌机用的是同一块屏幕，一份实现两处用，免得两边慢慢漂成两种行为。
+ * 屏幕里的那些规矩（基本不放文案、配色走 crt-*、叠层不写 z-index）都记在那边。
+ *
  * canvas 必须始终留在 DOM 里（未插卡带时也一样），否则 Nostalgist 找不到渲染目标。
  *
- * **没插卡带时屏幕里放的是「怎么开始玩」的提示**（拖进来 / 点屏幕选文件 / 点游戏库），
- * 叠在那片雪花之上 —— 插卡舱撤掉之后没有别的地方能说清这件事，
- * 新用户对着一片雪花只会以为坏了。
- *
- * 屏幕里**只放状态提示**：这一句、`RELEASE TO LOAD`、`WAITING FOR HOST`、载入进度条、
- * 以及暂停时的 `PAUSED`（暂停后画面冻住，不提示就看着像卡死 —— 本机暂停和**房主暂停**
- * 都会出这一层，只是副标题不同，见下面那层的注释）。
- * 要读的说明（存档列表 / 联机 / 键位 / 按键说明）一律走浮在房间上的弹窗。
- * 提示文字走 font-pixel，那套字模**没有汉字**，所以只能是英文（和 PWR / VOL /
- * EXIT FULLSCREEN 同一套做法，也因此不进 i18n 文案表）。
- * 屏幕内部的配色一律用 crt-* 令牌而不是 ink-*：屏幕底永远是黑的，
- * 而 ink-* 会随主题翻转，浅色主题下就成了黑底黑字。
- *
- * 联机时加入者这边**没有模拟器**：屏幕上放的是一条 `<video>`（房主推来的画面），
- * 四个面板按钮因为没有本地卡带而全部变灰。
- * 这些都由 remoteStream / remotePlaying 两个 prop 表达。
+ * 前面板那五颗钮一律看 `rom`（本机有没有插卡带），不看有没有画面：
+ * 加入者屏幕上是房主的画面，但这些按钮管的是本机的模拟器，本机没有模拟器，
+ * 所以它们该是灰的。PWR 灯则相反 —— 有画面就亮。
  */
 export default function RetroTv({
   canvasRef,
   screenRef,
   rom,
+  crtOff,
   remoteStream,
   remotePlaying,
   remotePaused,
+  netplayLive,
+  netplayWaiting,
   paused,
   busy,
   loading,
@@ -155,37 +173,45 @@ export default function RetroTv({
 }: RetroTvProps) {
   const { t } = useI18n();
   const hot = fileOver;
-  /** 载入进度（整数百分比）。null = 拿不到字节数，屏幕上画一条不确定进度条 */
-  const loadPct =
-    loading && loading.ratio !== null ? Math.round(loading.ratio * 100) : null;
-
   /*
-   * 有画面 = 本机插着卡带，或者房主推了画面过来。两者只会有一个成立：
-   * 加入者一收到画面就会把自己本地的卡带弹掉（见 ConsoleScene）。
+   * 屏幕那三个派生状态（有没有画面 / 在等房主 / 要不要盖暂停层）**不在这里算** ——
+   * 判断只有一份，在 ConsoleScreen 的 `deriveScreenState` 里；这里借它算一下 PWR 灯的颜色，
+   * 免得机身那颗灯和屏幕里那层提示对不上。
    */
-  const hasPicture = Boolean(rom) || Boolean(remoteStream);
-  /** 房主在玩、画面还没到 —— 这时该说「等一下」，不该招呼用户拖 ROM 进来 */
-  const waitingForHost = !rom && remotePlaying && !remoteStream;
-
+  const { hasPicture, showPaused } = deriveScreenState({
+    rom,
+    remoteStream,
+    remotePlaying,
+    paused,
+    remotePaused,
+  });
   /**
-   * 屏幕上要不要盖暂停层。
-   *
-   * 两个来源都算：本机暂停（房主自己按的），或**房主的画面**正被房主暂停着。
-   * 后者必须同时要求 `remoteStream` 到手 —— 只有画面真的在屏幕上、又停住了，
-   * 才有「为什么不动」这回事。流还没到的那段空当由 `WAITING FOR HOST` 顶着，
-   * 两层都画会在屏幕正中叠成一团（两层都是居中、pointer-events-none）。
-   *
-   * 注意判据用的是 `remoteStream` 而不是 `hasPicture`：加入者在切换的瞬间本机可能
-   * 还插着自己的卡带（房主一出画面他才把它弹掉），那时 hasPicture 为真但屏幕上的
-   * 画面是本机的、跟着本机跑 —— 拿它当判据会给本机画面凭空盖一层 PAUSED。
-   */
-  const showPaused = paused || (remotePaused && Boolean(remoteStream));
-  /**
-   * PWR 灯。有画面在跑是绿的，暂停了变 accent（本机暂停、房主暂停都算），
-   * 完全没画面就暗着。灯是机身上离屏幕最近的状态读数，两种暂停它都该跟着变 ——
+   * PWR 灯。颜色回答的是「这台机器现在在干什么」（**按优先级从上往下**）：
+   *   房主等人进房 → warn（黄）；没画面 → 暗（ink-600）；暂停 → accent（琥珀）；
+   *   **单人**跑着 → ok（绿）；**联机**跑着 → info（蓝）。
+   * 灯是机身上离屏幕最近的状态读数，两种暂停它都该跟着变 ——
    * 加入者那台虽然没插卡带，屏幕上确实是房主停住的画面。
+   *
+   * 「等人进房」为什么排最前：房主开着房、还没插卡带时是**没有画面**的，若按
+   * 「没画面就暗」处理，他就完全看不出自己还开着房 —— 而那正是他最需要被提醒的事。
+   *
+   * 「联机中」判的是 `netplayLive`（房间已连上），不是「对面在推流」：房主自己开着房、
+   * 玩本机那盘卡带时本机并没有 remoteStream，可那恰恰是**更**需要提醒的一侧
+   * （他最容易忘了自己还开着房）。所以两侧都是蓝的 —— 判据和屏幕左上角那颗联机小灯一样，
+   * 只是那颗仍是绿的（那颗管「对面还在不在」，这颗管「这台机器在联机模式」）。
+   * 暂停优先于联机 —— 用户说了「默认不变」，暂停那一档照旧是 accent。
+   *
+   * ⚠️ 掌机（HandheldConsole）里有一颗**同款** PWR 灯，取值必须和这里一字不差。
    */
-  const pwrClass = !hasPicture ? 'bg-ink-600' : showPaused ? 'bg-accent' : 'bg-ok';
+  const pwrClass = netplayWaiting
+    ? 'bg-warn'
+    : !hasPicture
+      ? 'bg-ink-600'
+      : showPaused
+        ? 'bg-accent'
+        : netplayLive
+          ? 'bg-info'
+          : 'bg-ok';
 
   return (
     <div
@@ -234,213 +260,28 @@ export default function RetroTv({
         {/* 机身内圈 + 屏幕 */}
         <div className="relative m-[8px] mx-2.5 bg-ink-900 pixel-edge pxw-4 pxc-700">
           {/*
-            屏幕尺寸**必须写在这行 class 上**（h-[540px] w-[720px]）。
-
-            不能省、也不能改成「让 canvas 撑出尺寸」—— 那正是 2026-10-10 用户报的
-            「点第二款游戏后整个游戏区域变大」：尺寸类被删过一次，屏幕就变成由 canvas
-            的**固有尺寸**决定（canvas 是屏幕里唯一在流里的孩子），而 canvas 的尺寸会
-            被三方轮番改：
-
-              · 核心启动时先把 canvas 设成 64×64 探一下，发现「CSS 没锁死尺寸」就把
-                探之前的 clientWidth 写死回内联样式（核心自己的日志：
-                「Canvas size should be set using CSS properties!」）；
-              · 核心随后按 devicePixelRatio 把后备存储设成 720×dpr（125% 缩放 = 900）；
-              · Nostalgist 每次 launch 又往 canvas 写一次 width/height: 100%。
-
-            于是设备缩放比被一次一次乘进机身：100% 缩放的机器上看不出来，
-            125% / 150% 上每换一盘游戏整台机器就大一圈（720 → 900 → 1125…）。
-            写死尺寸之后，canvas 怎么改都只动它自己（它仍是 class 上的 h-full w-full，
-            照样填满屏幕），机身纹丝不动。
-
-            另外：全屏规则 `.screen:fullscreen { width:100vw; height:100vh }` 写在
-            globals.css 里，是**未分层**的样式，优先级高于 Tailwind 的 utilities 层，
-            所以这两个尺寸类不会顶掉全屏尺寸 —— 别改成内联 style，内联会顶掉全屏。
+            屏幕整块（canvas + 屏幕上叠的那几层）2026-10-12 抽进了 ConsoleScreen ——
+            移动端那台掌机用的是同一块屏幕，一份实现两处用，免得两边慢慢漂成两种行为。
+            尺寸仍由屏幕自己的 class 决定（见 ConsoleScreen 顶部那段注释），
+            全屏那条未分层的 `.screen:fullscreen` 也照旧有效。
           */}
-          <div
-            ref={screenRef}
-            data-tour="screen"
-            className="screen crt relative h-[540px] w-[720px] overflow-hidden bg-black"
-          >
-            {/*
-              canvas 必须始终留在 DOM 里，但没画面时要把它藏起来：
-              模拟器退出后 canvas 会保留最后一帧画面（浏览器不会主动清空），
-              雪花只有 0.72 不透明度，那一帧会透出来，看着像游戏还在跑。
-              visibility: hidden 不改变布局，也不影响 Nostalgist 量尺寸。
-              联机时房主那边 canvas 是画面源头，当然要留着 —— 只有加入者这边才藏。
-            */}
-            <canvas
-              ref={canvasRef}
-              width={SCREEN_WIDTH}
-              height={SCREEN_HEIGHT}
-              className={`pixelated block h-full w-full ${
-                rom && !remoteStream ? '' : 'invisible'
-              }`}
-            />
-
-            {/*
-              房主推来的画面。定位到绝对层是为了压住 canvas —— canvas 在正常流里，
-              定位元素天然画在它上面。刻意**不给 z-index**：它要盖住 canvas，
-              但必须落在 .crt 的两层伪元素（扫描线 z-5 / 边角暗角 z-6）之下，
-              写成 z-10 会把显像管的质感一起糊掉。
-            */}
-            {remoteStream && <RemoteScreen stream={remoteStream} volume={volume} />}
-
-            {/*
-              没画面 = 没有信号，整块屏幕就是一片雪花。
-              这一层刻意不给 z-index：它要盖住 canvas，但必须落在 .crt 的两层伪元素
-              （扫描线 z-5 / 边角暗角 z-6）之下。若写成 z-10，不透明的噪点会把扫描线
-              和暗角一起糊掉，显像管的质感就没了。
-              亮度只由 opacity 控制，CSS 里那份噪点本身保持原样。
-            */}
-            {!hasPicture && (
-              <div className="noise absolute inset-0 opacity-[0.72]" />
-            )}
-
-            {/*
-              没有画面时的提示 —— 屏幕里**没插卡带时**那一处状态提示（见组件头注释）。
-              三种「空屏」分开说：
-
-                · 房主在玩、画面还没到 → WAITING FOR HOST，等一下就行；
-                · 文件正悬停在机身上 → RELEASE TO LOAD（拖拽落点本来就是整机，
-                  机身描边这时也变成了 accent 色）；
-                · 其余 → 怎么开始玩的三行。
-
-              整块屏幕就是按钮，点它 = 选 ROM 文件；拖拽由根元素的 onDrop 接，
-              事件从这一层冒泡上去，这里不用管。载入中不显示 —— 那时屏幕里是进度条，
-              两样东西叠在一起会打架。
-
-              配色走 crt-*（屏幕底永远是黑的，ink-* 会随主题翻转）。
-              那层 drop-shadow 是为了压住雪花：像素字直接叠在噪点上会糊掉。
-            */}
-            {!hasPicture &&
-              !loading &&
-              (waitingForHost ? (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <span className="font-pixel text-[9px] text-crt-ink-400 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
-                    WAITING FOR HOST
-                  </span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={onPickFile}
-                  title={t('screen.pick')}
-                  aria-label={t('screen.srLabel')}
-                  className="absolute inset-0 flex items-center justify-center"
-                >
-                  <span className="flex flex-col items-center gap-[14px] drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
-                    {hot ? (
-                      <span className="font-pixel text-[13px] text-crt-accent">
-                        RELEASE TO LOAD
-                      </span>
-                    ) : (
-                      <>
-                        <span className="font-pixel text-[11px] text-crt-ink-200">
-                          DRAG &amp; DROP A ROM
-                        </span>
-                        <span className="font-pixel text-[9px] text-crt-ink-400">
-                          OR CLICK TO CHOOSE A FILE
-                        </span>
-                        <span className="font-pixel text-[9px] text-crt-ink-400">
-                          OR LAUNCH FROM LIBRARY
-                        </span>
-                      </>
-                    )}
-                  </span>
-                </button>
-              ))}
-
-            {/*
-              暂停提示。**必须在屏幕里**，光靠机身那颗 PWR 灯不够。
-
-              最要紧的一点：暂停之后画面是**冻住的最后一帧**，和「卡死了」长得一模一样。
-              不写这一句，用户看到的就是一台「坏了」的电视。
-
-              起因（2026-10-10，用户提的）：P 是全局快捷键，全屏、手搁在键盘上时很容易误触，
-              按完画面就不动了。**现在 P 已经撤掉**（键盘快捷键全取消），暂停只剩机身面板那颗
-              钮这一个入口，所以下面那句提示必须指到**面板上**，不能再写「按 P」——
-              那会教用户去按一个已经不存在的键。
-
-              和别的状态提示互斥：暂停意味着本机跑着卡带（`paused` 只在
-              `controller.isRunning` 时才可能为 true），所以那句「怎么开始玩」不会同时出现，
-              载入进度也不会（载入会先把 paused 复位）。
-
-              **联机时这一层对加入者同样要出**，只是话不一样（见下面那句副标题）：
-              他屏幕上是房主推来的画面，房主一暂停那条 `<video>` 就冻在最后一帧，
-              而他本机没有模拟器、也没有那颗暂停钮（面板那排全是灰的）——
-              不告诉他，他只会以为游戏卡死或者掉线了。**两侧都需要这层提示，
-              但能做的事完全不同，所以文案必须分开**，不能共用「PRESS RESUME」那句。
-
-              那层半透明底是拿来压住冻结画面的：什么都不垫的话，亮场景里这行字会糊掉。
-              配色走 crt-*（屏幕底永远是黑的，ink-* 会随主题翻转）。
-              文字走 font-pixel，那套字模没有汉字 —— 屏幕上所有提示都只能是英文，
-              因此和 PWR / VOL 一样不进 i18n 文案表。
-
-              刻意**不写 z-index**：要盖住 canvas，又必须落在 .crt 的扫描线（z-5）/
-              暗角（z-6）之下，否则显像管质感会被一起糊掉（和上面几层同一个理由）。
-              pointer-events-none：它只是一句话，不该变成点击 / 拖拽的落点 ——
-              全屏退出口是 z-40，压在它上面，不受影响。
-            */}
-            {showPaused && (
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-[12px] bg-crt-950/60">
-                <span className="blink font-pixel text-[20px] text-crt-accent drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
-                  PAUSED
-                </span>
-                {/*
-                  两句话分的是「谁按的」：
-                    · 本机暂停 → 用的就是那颗钮自己的词（i18n 的 panel.resume = Resume），
-                      照着去面板上找得到；
-                    · 房主暂停 → 加入者没有任何可操作的东西（连钮都是灰的），
-                      所以不写「按哪儿」，只说明白「在等谁」，顺带把「不是卡死」讲清楚。
-                */}
-                <span className="font-pixel text-[9px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
-                  {paused ? 'PRESS RESUME ON THE PANEL' : 'WAITING FOR HOST TO RESUME'}
-                </span>
-              </div>
-            )}
-
-            {/*
-              载入进度。**从机身下沿挪到屏幕里**的 —— 用户要求进度条出现在电视上，
-              而插卡舱 2026-10-09 整个撤掉了。屏幕里没画面时本来是一片雪花，
-              进度条叠在雪花之上，让「正在读卡带」这件事看得见。
-
-              刻意**不写 z-index**：要盖住雪花，又必须落在 .crt 的扫描线（z-5）/ 暗角（z-6）
-              之下，否则会把显像管质感糊掉。配色走 crt-* 而不是 ink-*（屏幕底永远是黑的，
-              ink-* 会随主题翻转，浅色主题下就成了黑底黑字）。
-              百分数是**读数**、不是文案。
-            */}
-            {loading && (
-              <div className="absolute inset-x-0 bottom-[52px] flex items-center justify-center gap-3">
-                <div className="relative h-[10px] w-[300px] overflow-hidden border-2 border-crt-ink-500 bg-crt-950/90">
-                  {loadPct === null ? (
-                    <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-crt-accent/70" />
-                  ) : (
-                    <span
-                      className="absolute inset-y-0 left-0 bg-crt-accent"
-                      style={{ width: `${loadPct}%` }}
-                    />
-                  )}
-                </div>
-                {/* 百分数全是数字，font-pixel 没有掉字形的问题；宽度写死，位数变化时不抖 */}
-                <span className="w-[34px] shrink-0 font-pixel text-[9px] text-crt-ink-300">
-                  {loadPct === null ? '' : `${loadPct}%`}
-                </span>
-              </div>
-            )}
-
-            {/*
-              全屏时唯一的退出口。它是功能件不是文案 —— 平时（非全屏）不显示。
-              z-40 压在屏幕里那层提示之上：全屏 + 没插卡带时两样会同时出现，
-              提示是铺满整屏的按钮，不抬起来就点不到这个退出口。
-            */}
-            <button
-              type="button"
-              onClick={onExitFullscreen}
-              className="fs-exit pixel-edge pxw-2 absolute right-6 top-6 z-40 items-center bg-crt-950/85 px-4 py-3 font-pixel text-[11px] text-crt-ink-200 hover:text-crt-accent"
-            >
-              EXIT FULLSCREEN
-            </button>
-          </div>
+          <ConsoleScreen
+            canvasRef={canvasRef}
+            screenRef={screenRef}
+            rom={rom}
+            crtOff={crtOff}
+            remoteStream={remoteStream}
+            remotePlaying={remotePlaying}
+            remotePaused={remotePaused}
+            netplayLive={netplayLive}
+            paused={paused}
+            loading={loading}
+            volume={volume}
+            fileOver={fileOver}
+            variant="desktop"
+            onTap={onPickFile}
+            onExitFullscreen={onExitFullscreen}
+          />
         </div>
 
         {/*
@@ -448,10 +289,6 @@ export default function RetroTv({
           面板高度就由它们撑出来，多余的空只会让机身显得虚胖。
           （2026-10-10 按钮整体收小之后，这里跟着从 py-3 收到 py-2.5，否则
           按钮瘦了、面板没瘦，四周那圈空反而更显眼。）
-
-          五个按钮一律看 `rom`（本机有没有插卡带），不看有没有画面：
-          加入者屏幕上是房主的画面，但这些按钮管的是本机的模拟器，本机没有模拟器，
-          所以它们该是灰的。PWR 灯则相反 —— 有画面就亮。
 
           按钮宽度**写死 52px**、整排用 `ml-auto` 贴右边：之前是 `flex-1` 撑满，
           4 个格子分掉整条面板，每个按钮宽到 110px，太大也太散；中间试过 64px，
@@ -543,8 +380,11 @@ export default function RetroTv({
         </div>
       </div>
 
-      {/* 底座 */}
-      <div className="mx-auto mt-[3px] h-[18px] w-[450px] bg-ink-700 pixel-edge pxw-4 pxc-500" />
+      {/*
+        底座。宽跟尺寸档位（`--tv-base-w`：450 / 520 / 600），高固定 18 ——
+        高跟着放大的话底座会变成一堵墙，而它在机身最下面，本来只是给机身一个落脚点。
+      */}
+      <div className="mx-auto mt-[3px] h-[18px] w-[var(--tv-base-w)] bg-ink-700 pixel-edge pxw-4 pxc-500" />
 
       <div className="ground-shadow absolute inset-x-12 -bottom-[8px] h-[8px]" />
     </div>
@@ -552,77 +392,12 @@ export default function RetroTv({
 }
 
 /**
- * 房主推来的画面。
+ * 音量条两端的小方钮。20px 见方，和面板按钮同一套描边与配色。
  *
- * `srcObject` 只能通过属性赋值（没有 HTML 属性可以写），所以这里必须挂 ref + effect。
- * `autoPlay` 不能省 —— 不播的话就是一张静止的黑图；`playsInline` 是给 iOS 的，
- * 不加会强行全屏。刻意不加 `muted`：房主那边的声音也一起推过来了，
- * 静音等于白抓一路音频。
- *
- * `volume` 是**本机**的音量档位（机身那颗 VOL）。加入者没有模拟器，房主推来的
- * 声音只在这条 `<video>` 上 —— 见下面那个 effect 的注释。
+ * `export` 是为了让移动端那台掌机（`HandheldConsole`）复用 —— 它下面也有一排音量，
+ * 和这里是同一个控件，没必要抄一份（抄了就会慢慢漂成两种手感）。
  */
-function RemoteScreen({
-  stream,
-  volume,
-}: {
-  stream: MediaStream;
-  volume: number;
-}) {
-  const ref = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = ref.current;
-    if (!video) return;
-    video.srcObject = stream;
-    /*
-     * 自动播放有可能被拦下：带声音的媒体在没有用户手势时不许自己播。
-     * 用户刚点过「加入房间」，多数情况下放得出来；万一被拦，退一步先静音播 ——
-     * 至少把画面给出来，没声音总比黑屏强。
-     */
-    void video.play().catch(() => {
-      video.muted = true;
-      void video.play().catch(() => undefined);
-    });
-    return () => {
-      // 换流 / 卸载时断开，否则旧的 MediaStream 会被 video 一直攥着
-      if (video.srcObject === stream) video.srcObject = null;
-    };
-  }, [stream]);
-
-  /*
-   * 音量：第 n 档 = n / VOLUME_MAX，0 档静音。
-   *
-   * 为什么非接不可：机身那颗 VOL 原先只喂给 `controller.setVolume()`（模拟器音量），
-   * 而加入者本机没有模拟器实例 —— 那个调用只是把档位记下来就返回了，一点声音都改不动。
-   * 加入者听见的声音全来自这条 <video>，所以档位必须落到 `video.volume` 上，
-   * 否则他拖音量条只有格子会动（也压不到 0）。
-   *
-   * 0 档另外写一次 `muted`：单把 volume 归零也能静音，但「自动播放被拦」那条兜底
-   * 走的就是 muted（见上），两边语义统一之后，用户把档位从 0 往上推时能确定地放出声音。
-   * 挂载瞬间这两个 effect 的先后不会打架：`play()` 是异步的，它失败时的 `muted = true`
-   * 发生在音量写入之后，那时即便档位大于 0 也只是暂时静音，用户一动音量就恢复 ——
-   * 极端情况，不值得为它加一层状态同步。
-   */
-  useEffect(() => {
-    const video = ref.current;
-    if (!video) return;
-    video.volume = volume / VOLUME_MAX;
-    video.muted = volume === 0;
-  }, [volume]);
-
-  return (
-    <video
-      ref={ref}
-      autoPlay
-      playsInline
-      className="absolute inset-0 h-full w-full object-contain"
-    />
-  );
-}
-
-/** 音量条两端的小方钮。20px 见方，和面板按钮同一套描边与配色。 */
-function VolBtn({
+export function VolBtn({
   label,
   className = '',
   ...props

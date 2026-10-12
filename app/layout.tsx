@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { I18nProvider } from '@/components/I18nProvider';
+import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
 import { SITE_NAME, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import { readLocale } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -54,6 +55,26 @@ export async function generateMetadata(): Promise<Metadata> {
      * 并加上链接 —— iOS Safari 尤其爱干这事，点在像素风的界面上会非常出戏。
      */
     formatDetection: { telephone: false, email: false, address: false },
+    /*
+     * iOS 的「添加到主屏幕」。Next 会把这几项翻成 `apple-mobile-web-app-*` 那组 meta。
+     *
+     * 这里**只写 iOS 那套**：Android / 桌面端的可安装性走的是 PWA 标准那条路 ——
+     * 清单由 app/manifest.ts 按文件约定提供（`<link rel="manifest">` 是 Next 自动插的，
+     * 别在这里再写一遍 `manifest` 字段，两处都写只会打架）。
+     * 180×180 的 iOS 主屏图标同理，走文件约定 `app/apple-icon.png`，不在这里写 `icons`。
+     *
+     * `title` 只能是英文：这行字 iOS 只在「添加到主屏幕」那一刻读一次，
+     * 而它是**静态**的 —— 跟不了语言。理由和 manifest 里 name 那条一模一样，见 app/manifest.ts。
+     *
+     * `statusBarStyle: 'black'` 而不是 `'black-translucent'`：后者会让页面顶到状态栏底下，
+     * 必须配 `env(safe-area-inset-*)` 才不被遮住，而掌机和房间都没处理安全区。
+     * 黑色状态栏最稳 —— 深色主题下和房间底色（#08080a）几乎分不出边界。
+     */
+    appleWebApp: {
+      capable: true,
+      title: SITE_NAME.en,
+      statusBarStyle: 'black',
+    },
     openGraph: {
       type: 'website',
       url: '/',
@@ -113,29 +134,41 @@ export const viewport: Viewport = {
 };
 
 /**
- * 首屏必须在样式生效前把 <html> 上的四个属性落到实处，否则会闪一帧：
+ * 首屏必须在样式生效前把 <html> 上的六个属性落到实处，否则会闪一帧：
  *   - `data-theme`：不写就会先闪一帧深色（浅色主题的用户最明显）。
  *   - `data-lamp`：不写的话，吊灯会先按「亮着」画出来再灭掉（熄灭时最明显）。
  *   - `data-season`：不写就会先闪一帧冬天（窗外是春夏秋冬四季）。
  *   - `data-simple`：不写的话，开着简洁模式的人会先看到满屋子杂物再「唰」地消失。
+ *   - `data-tv`：不写就会先按「小」档画一台电视机，再「啪」地长成大档 ——
+ *     它动的是**整间屋子的尺寸**（屏幕 / 桌子 / 地板线 / 吊灯线），
+ *     比前四个都显眼（尺寸由 globals.css 那组 --tv-* 变量推出来，见 lib/tv-size.ts）。
+ *   - `data-mobile`（'on' / 'off'）：移动端要画的是**另一台机器**（掌机，见
+ *     components/HandheldConsole.tsx），不写就会先画一帧桌面那间屋子 ——
+ *     那一下比前面五个加起来都显眼（整页换掉）。
  * 所以这里用内联脚本而不是 useEffect —— useEffect 跑在首次绘制之后。
- * 代价是服务端 HTML 上没有这四个属性，因此 <html> 需要 suppressHydrationWarning。
+ * 代价是服务端 HTML 上没有这六个属性，因此 <html> 需要 suppressHydrationWarning。
  *
- * **默认值 + 手动覆盖**，但四个属性的落盘策略不同：
+ * **默认值 + 手动覆盖**，但六个属性的落盘策略不同：
  *   - 主题：记住，写 localStorage（刷新后还在）。
  *   - 灯：默认跟主题（白天关、夜晚开），手动点灯**也记住**（写 localStorage）。
  *   - 季节：默认**按农历算**（见下），点窗户只是**当次会话的临时覆盖，不落盘** ——
  *     刷新就回到按农历算的那一季。所以下面这段**不读 localStorage**，
  *     只管按农历算一个默认值；`nesload:season` 这个键已经废弃（旧值不再被读取）。
  *   - 简洁模式：记住，写 localStorage（`nesload:simple`，`'on'` 才是开）。
+ *   - 电视机大小：记住，写 localStorage（`nesload:tv`，`small` / `medium` / `large`，
+ *     认不出的值一律当 `small`）。**只读这一个键**，尺寸本身在 CSS 里。
+ *   - 移动端：**不落盘**，每次现判 —— 它是设备的属性，不是用户的偏好
+ *     （同一台手机永远是移动端，换成桌面端就该变回来）。
  * 季节和主题**无关**：切主题不会重置季节，季节只看农历
  * （雪夜、晴冬都能有，屋里开不开灯是两回事）。
  *
  * ⚠️ 季节那段的农历逻辑是从 `lib/season.ts` **手抄**过来的（内联脚本没法 import），
  * **改那边必须同步这里**。抄的是：Intl 的 chinese 日历取农历月 → 正月–三月春、
  * 四月–六月夏、七月–九月秋、其余冬；拿不到农历就退回公历月。
+ * 同理，`data-tv` 的合法值抄的是 `lib/tv-size.ts` 的 `TvSize`，那边加档位要同步这里；
+ * `data-mobile` 的判定抄的是 `lib/device.ts` 的 `isMobileDevice()`，**改那边必须同步这里**。
  */
-const BOOT_INIT = `(function(){try{var t=localStorage.getItem('nesload:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.dataset.theme=t;var l=localStorage.getItem('nesload:lamp');if(t==='light')l='off';document.documentElement.dataset.lamp=l==='off'?'off':'on';var sm=localStorage.getItem('nesload:simple');document.documentElement.dataset.simple=sm==='on'?'on':'off';var s;try{var p=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric'}).formatToParts(new Date());var v='';for(var i=0;i<p.length;i++){if(p[i].type==='month'){v=p[i].value;}}var m=parseInt(v,10);if(!(m>=1&&m<=12)){m=new Date().getMonth()+1;}s=m<=3?'spring':m<=6?'summer':m<=9?'autumn':'winter';}catch(err){s='winter';}document.documentElement.dataset.season=s;}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.dataset.lamp='on';document.documentElement.dataset.simple='off';document.documentElement.dataset.season='winter';}})();`;
+const BOOT_INIT = `(function(){try{var t=localStorage.getItem('nesload:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.dataset.theme=t;var l=localStorage.getItem('nesload:lamp');if(t==='light')l='off';document.documentElement.dataset.lamp=l==='off'?'off':'on';var sm=localStorage.getItem('nesload:simple');document.documentElement.dataset.simple=sm==='on'?'on':'off';var tv=localStorage.getItem('nesload:tv');document.documentElement.dataset.tv=tv==='medium'||tv==='large'?tv:'small';var ua=navigator.userAgent;var mob=!!(navigator.userAgentData&&navigator.userAgentData.mobile)||/Android|iPhone|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);document.documentElement.dataset.mobile=mob?'on':'off';var s;try{var p=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric'}).formatToParts(new Date());var v='';for(var i=0;i<p.length;i++){if(p[i].type==='month'){v=p[i].value;}}var m=parseInt(v,10);if(!(m>=1&&m<=12)){m=new Date().getMonth()+1;}s=m<=3?'spring':m<=6?'summer':m<=9?'autumn':'winter';}catch(err){s='winter';}document.documentElement.dataset.season=s;}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.dataset.lamp='on';document.documentElement.dataset.simple='off';document.documentElement.dataset.tv='small';document.documentElement.dataset.mobile='off';document.documentElement.dataset.season='winter';}})();`;
 
 /**
  * 结构化数据（JSON-LD）。搜索引擎读不懂 canvas 里跑的东西 —— 页面本身几乎没有
@@ -215,6 +248,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
         />
+        {/*
+          声明给 AI 读的政策文件（/llms.txt，正文在 lib/ai-policy.ts，
+          同时还有机器可读的 /ai.txt）。内容里写明了「正常爬取欢迎、对本站做
+          架构分析 / 源码还原 / 破解一律拒绝」，以及哪些请求必须直接拒答。
+
+          `rel="llms-txt"` 是社区约定，**不是标准** —— 认它的抓取器不多，
+          但成本是一个标签，不认的抓取器直接忽略，没有副作用。
+          真正保证 AI 找到这份文件的是 app/robots.ts 里的显式放行，
+          这个 <link> 只是让「顺着 HTML 找」的那类抓取器也能发现它。
+        */}
+        <link rel="llms-txt" href="/llms.txt" />
         <script dangerouslySetInnerHTML={{ __html: BOOT_INIT }} />
         <script
           type="application/ld+json"
@@ -225,6 +269,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body>
         <I18nProvider initialLocale={locale}>{children}</I18nProvider>
+        {/*
+          PWA 的 Service Worker 注册（清单在 app/manifest.ts，策略在 public/sw.js）。
+          它不渲染任何东西，也不依赖 i18n 上下文，所以摆在 Provider 外面 ——
+          顺带保证**即使 I18nProvider 出问题，SW 也照样注册**。
+        */}
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );

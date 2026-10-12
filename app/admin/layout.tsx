@@ -19,7 +19,7 @@ import { readLocale } from '@/lib/server/locale';
  *
  * 标题走 i18n：后台是双语界面（AdminShell 里那句 t('admin.title')），
  * 浏览器标签页不该是另一种语言。根 layout 的 title 模板会补上站名后缀，
- * 结果就是「后台 · 复古游戏屋」/「Admin · Retro Game House」。
+ * 结果就是「后台 · 游戏小屋」/「Admin · Game Hut」。
  */
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await readLocale();

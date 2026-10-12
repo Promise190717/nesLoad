@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -11,6 +12,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
+import { unwrapRom } from '@/lib/unwrap';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
@@ -25,6 +27,16 @@ interface AdminGame {
   year: number | null;
   developer: string | null;
   createdAt: number;
+}
+
+/** `/api/admin/games` 分页响应。 */
+interface GamePage {
+  games: AdminGame[];
+  /** 匹配当前关键词的总条数（不是本页条数），用来算总页数。 */
+  total: number;
+  /** 服务端夹回有效范围后的 offset —— 以它为准，别用请求时那个。 */
+  offset: number;
+  limit: number;
 }
 
 type Notice = { tone: 'ok' | 'error'; text: string };
@@ -54,12 +66,27 @@ const FIELD_CLASS =
 
 const LABEL_CLASS = 'flex flex-col gap-1 text-[10px] text-ink-400';
 
-/** 拉取已上传列表。抽成模块级函数，便于 effect 与增删改后共用。 */
-async function fetchGames(): Promise<AdminGame[]> {
-  const res = await fetch('/api/admin/games');
+/**
+ * 拉取**一页**列表。抽成模块级函数，便于 effect 与增删改后共用。
+ *
+ * 搜索词一起带给接口：分页之后本地就没有全量数据了，过滤只能落在服务端
+ * （否则搜出来的东西会随翻页变，等于没搜）。
+ */
+async function fetchGames(offset: number, keyword: string): Promise<GamePage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
+  if (keyword) params.set('q', keyword);
+
+  const res = await fetch(`/api/admin/games?${params}`);
   if (!res.ok) throw new Error(String(res.status));
-  const data = (await res.json()) as { games?: AdminGame[] };
-  return data.games ?? [];
+
+  const data = (await res.json()) as Partial<GamePage>;
+  return {
+    games: data.games ?? [],
+    total: data.total ?? 0,
+    // 老服务端（没走分页的那版）不会给 offset，退回请求值即可
+    offset: data.offset ?? offset,
+    limit: data.limit ?? PAGE_SIZE,
+  };
 }
 
 /**
@@ -77,24 +104,37 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 /**
- * 后台 · 游戏列表 tab：列表（分页 + 搜索）+ 添加 / 编辑弹窗 + 删除。
+ * 后台 · 游戏列表 tab：列表（**服务端分页** + 搜索）+ 添加 / 编辑弹窗 + 删除。
  * 鉴权由各接口自查（见 lib/server/admin-guard.ts），这里只负责界面与调接口。
  *
  * 顶栏、退出登录、左侧 tab 栏都在 `AdminShell` 里（由服务端 layout 包着），
  * 这个组件只画**这一页的内容** —— 原先它俩（列表 + 留言本）挤在一个页面里，
  * 2026-10-10 拆成了两个 tab，各自一个路由。
  */
+/**
+ * 本页要拉取的 offset。抽成 memo 的「一个对象」而不是 effect 里现算 `(page-1)*PAGE_SIZE`，
+ * 是为了让 effect 的依赖写得直白：它变 = 页码变。
+ */
+function useListQuery(page: number) {
+  return useMemo(() => ({ offset: (page - 1) * PAGE_SIZE }), [page]);
+}
+
 export default function AdminGames() {
   const { t } = useI18n();
   const router = useRouter();
 
   const [games, setGames] = useState<AdminGame[]>([]);
+  const [total, setTotal] = useState(0);
   const [listLoaded, setListLoaded] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   // 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来，避免边打字边过滤
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageNotice, setPageNotice] = useState<Notice | null>(null);
+  /** 增删改之后 +1，用来触发重新拉当前页（effect 的唯一刷新开关）。 */
+  const [listVersion, setListVersion] = useState(0);
+  /** 请求序号：翻页快了会撞上乱序响应，慢的旧响应不许覆盖新的。 */
+  const listRequestId = useRef(0);
 
   // 初值必须在这里给，effect 里改会让「打开即编辑」闪一下空表单。
   const [modalOpen, setModalOpen] = useState(false);
@@ -117,24 +157,46 @@ export default function AdminGames() {
 
   const isEditing = editingId !== null;
 
-  // 首屏加载列表。setState 走 .then/.catch 回调 —— 直接在 effect 体里同步
-  // setState 会被 react-hooks/set-state-in-effect 拦下。
+  /** 本页要拉的 offset（随页码变）。 */
+  const listQuery = useListQuery(page);
+
+  /** 增删改后重新拉一遍当前页（同一条路径给「上传完跳回第一页」用）。 */
+  const reloadList = useCallback(() => setListVersion((n) => n + 1), []);
+
+  /*
+   * 每次翻页 / 搜索 / 增删改都重新拉**当前这一页**，不再一次性把全库拉回来。
+   * setState 走 .then/.catch 回调 —— 直接在 effect 体里同步 setState 会被
+   * react-hooks/set-state-in-effect 拦下。
+   *
+   * `listQuery` 是 memo 出来的，它变 = 页码变；`listVersion` 只在增删改时递增。
+   */
   useEffect(() => {
-    let cancelled = false;
-    fetchGames()
-      .then((list) => {
-        if (!cancelled) setGames(list);
+    /*
+     * 请求序号：翻页快了会撞上乱序响应，慢的旧响应不许覆盖新的。
+     * 放在 ref 里而不是用闭包里的 cancelled 标记 —— 后者的清理跑在
+     * effect 重新执行时，两个请求的清理都等于「本轮请求被取消」，分不开谁是谁。
+     */
+    const requestId = ++listRequestId.current;
+    const { offset } = listQuery;
+
+    fetchGames(offset, keyword)
+      .then((data) => {
+        if (listRequestId.current !== requestId) return;
+        setGames(data.games);
+        setTotal(data.total);
+        // 服务端会把越界的 offset 夹回最后一页（例如刚把最后一页删空了），跟着它走
+        setPage(Math.floor(data.offset / PAGE_SIZE) + 1);
       })
       .catch(() => {
-        if (!cancelled) setGames([]);
+        if (listRequestId.current !== requestId) return;
+        setGames([]);
+        setTotal(0);
       })
       .finally(() => {
-        if (!cancelled) setListLoaded(true);
+        if (listRequestId.current !== requestId) return;
+        setListLoaded(true);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [listQuery, keyword, listVersion]);
 
   // 弹窗打开时支持 Esc 关闭
   useEffect(() => {
@@ -149,24 +211,13 @@ export default function AdminGames() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen]);
 
-  /** 搜索结果：游戏名 / 开发者 / 系列 / 语言任一命中即可。 */
-  const matchedGames = useMemo(() => {
-    const needle = keyword.toLowerCase();
-    if (!needle) return games;
-    return games.filter((game) =>
-      [game.title, game.developer, game.series, languageLabel(game.language)].some((field) =>
-        field?.toLowerCase().includes(needle)
-      )
-    );
-  }, [games, keyword]);
-
   /*
-   * 页码夹回有效范围（纯计算，不靠 effect）：在最后一页删掉几条后，page 可能
-   * 已经越界，直接 slice 会得到空列表 —— 夹一下就行，省掉一次 setState。
+   * 总页数由 total 算。`safePage` 只用来画「第几页 / 共几页」和按钮禁用态 ——
+   * 越界不用在这里夹：服务端会把 offset 夹回最后一页，上面 setPage 已经跟上了。
+   * 保留 Math.min 是为了两种极端下文字也不至于显示「3 / 2」：刚好删空最后一页的那一帧。
    */
-  const pageCount = Math.max(1, Math.ceil(matchedGames.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
-  const pagedGames = matchedGames.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const applySearch = () => {
     setKeyword(searchDraft.trim());
@@ -223,7 +274,17 @@ export default function AdminGames() {
     const file = e.target.files?.[0] ?? null;
     setRom(file);
     if (!file) return;
-    const detected = await detectConsole(file);
+    /*
+     * 先拆一层压缩包再认机种。
+     *
+     * 有些 ROM 是**压缩包伪装成 ROM 扩展名**（`.smc` / `.nes` 里其实是 zip），
+     * 直接 `detectConsole` 会把它们一律判成街机 —— 预填错之后，游戏库里那条
+     * 「机种筛选」也跟着错（用户按 SNES 筛，这盘却不出现）。规则见 `lib/unwrap.ts`。
+     *
+     * 只是**预填**，用户仍可手动改；真正载入时 `loadRom` 会自己再拆一次。
+     */
+    const unwrapped = await unwrapRom(file);
+    const detected = await detectConsole(unwrapped?.file ?? file);
     if (detected) setConsoleType(detected);
   };
 
@@ -283,14 +344,13 @@ export default function AdminGames() {
         // 失败时把服务端细节原样抛出来，交给 catch 显示
         if (!res.ok) throw new Error(await readError(res, t('admin.upload.failed')));
         setPageNotice({ tone: 'ok', text: t('admin.upload.ok') });
-        // 列表按 created_at 倒序，新条目在第一页 —— 跳回去才看得到刚传的那条
+        // 列表按 created_at 倒序，新条目在第一页 —— 跳回去才看得到刚传的那条。
+        // 本来就在第一页时 setPage 不改值、effect 也不会重跑，所以另加一次版本号。
         setPage(1);
       }
 
-      // 列表刷新失败不影响「这次保存成功了」这个结论，静默忽略
-      await fetchGames()
-        .then(setGames)
-        .catch(() => undefined);
+      // 重拉当前页。失败不影响「这次保存成功了」这个结论，effect 里已经吞掉错误。
+      reloadList();
       resetForm();
       setModalOpen(false);
       setEditingId(null);
@@ -311,7 +371,7 @@ export default function AdminGames() {
       const res = await fetch(`/api/admin/games/${game.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await readError(res, t('admin.request.failed')));
       // 行消失就是最好的反馈，不必再弹成功提示
-      setGames(await fetchGames());
+      reloadList();
       setPageNotice(null);
       router.refresh();
     } catch (error) {
@@ -367,17 +427,18 @@ export default function AdminGames() {
           </p>
         )}
 
-        {listLoaded && games.length === 0 && (
+        {listLoaded && total === 0 && !keyword && (
           <p className="text-[11px] text-ink-500">{t('admin.list.empty')}</p>
         )}
 
-        {games.length > 0 && matchedGames.length === 0 && (
+        {/* 库里有东西、只是没搜到 —— 和「库是空的」分开说，否则会以为库坏了 */}
+        {listLoaded && total === 0 && keyword && (
           <p className="text-[11px] text-ink-500">{t('admin.noMatch')}</p>
         )}
 
-        {pagedGames.length > 0 && (
+        {games.length > 0 && (
           <ul className="flex flex-col divide-y-2 divide-ink-900">
-            {pagedGames.map((game) => (
+            {games.map((game) => (
               <li key={game.id} className="flex items-center gap-3 py-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img

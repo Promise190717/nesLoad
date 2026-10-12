@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ConsoleType } from '@/lib/emulator';
 import { formatTime, type MessageKey } from '@/lib/i18n';
 import type { Cartridge } from '@/lib/library';
@@ -43,7 +43,7 @@ function languageTag(value: string | null): { text: string; pixel: boolean } | n
 }
 
 /**
- * 两个 tab：在线库（R2 + D1 上传的那批）和本机历史（载入过的卡带）。
+ * 两个 tab：在线库（R2 + D1 上传的那批）和本机历史（**从游戏库点开过的那批**）。
  * 默认落在「游戏库」——弹窗的主要用途还是去挑一盘没玩过的。
  */
 type Tab = 'library' | 'history';
@@ -62,51 +62,95 @@ type ConsoleFilter = ConsoleType | 'all';
 const CONSOLE_FILTERS: readonly ConsoleFilter[] = ['all', 'nes', 'snes', 'arcade'];
 
 /**
- * 游戏库列表的**进程内缓存**。
+ * 在线库列表每页条数。
  *
- * 面板由父级「打开时才挂载」，每次打开都是一次全新挂载 —— 把缓存放在模块级
- * 而不是组件 state 里，才能做到「只有第一次打开才真的打接口」：之后每次打开直接命中，
- * 连一次请求都不发。
+ * 网格是**响应式**的：宽屏一行 5 个（`md:grid-cols-5`）、中等一行 4 个、窄屏一行 3 个
+ * （见下面 `<ul>` 的类名）。所以 15 这个数只保证**宽屏**下正好是三整行。
  *
- * 页面刷新会连同缓存一起清掉，那时再拉一次。列表是后台上传的、更新频率极低，
- * 没必要为它做跨会话的持久化（localStorage / sessionStorage）。
+ * **和后台那份（AdminGames 的 `PAGE_SIZE = 10`）是两套数**，别一起改：
+ * 后台是一行一条的表格，前台是一行几张封面。两边唯一的共同点是分页条的样子。
+ *
+ * 服务端 `/api/games` 的默认 limit 也是 15（那边的 `DEFAULT_LIMIT`），两处对齐 ——
+ * 但**刻意不共享常量**：一个在客户端当切片尺寸，一个在服务端当兜底值。
  */
-let gamesCache: LibraryGame[] | null = null;
-/** 正在飞的请求。挂在模块级是为了去重：连点两次不会打两遍接口。 */
-let gamesRequest: Promise<LibraryGame[]> | null = null;
+const PAGE_SIZE = 15;
 
-function fetchGames(): Promise<LibraryGame[]> {
-  if (gamesCache) return Promise.resolve(gamesCache);
-  if (gamesRequest) return gamesRequest;
+/** `/api/games` 的分页响应。 */
+interface GamePage {
+  games: LibraryGame[];
+  /** 命中当前筛选条件的**总条数**（不是本页条数），用来算总页数。 */
+  total: number;
+  /** 服务端夹回有效范围后的 offset —— 以它为准，别用请求时那个去算页码。 */
+  offset: number;
+  limit: number;
+}
 
-  gamesRequest = fetch('/api/games')
-    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-    .then((data: { games?: LibraryGame[] }) => {
-      gamesCache = data.games ?? [];
-      return gamesCache;
-    })
-    .catch((error) => {
-      // 失败不留缓存，下次打开还有机会重试
-      gamesRequest = null;
-      throw error;
-    });
+/**
+ * 把「一次查询」压成一个字符串。用来判断当前这一页数据是不是已经落定了
+ * （见组件里的 `listLoading`）—— 换了页码 / 关键词 / 机种就是另一次查询。
+ *
+ * 放在模块级而不是组件里，是为了让 effect 里也能直接调用它：
+ * 模块级函数引用稳定，不会被 `react-hooks/exhaustive-deps` 要求塞进依赖数组。
+ */
+function queryKeyOf(page: number, keyword: string, consoleType: ConsoleFilter): string {
+  return `${page}|${keyword}|${consoleType}`;
+}
 
-  return gamesRequest;
+/**
+ * 拉取**一页**在线库。
+ *
+ * 2026-10-12 起是**真正的服务端分页**：翻页 / 换机种 / 提交搜索都会重新打这个接口。
+ * 原先那套「整库一次拉回、缓存在模块级、之后每次打开零请求」的写法已经删掉 ——
+ * 需求就是「不要一次全部加载」。
+ *
+ * 代价是每次翻页 / 改筛选 = 2 次 D1 查询（COUNT + SELECT，见 lib/server/games.ts）。
+ * 所以**搜索刻意保持提交式**（点「搜索」或回车才发），不边打字边请求。
+ *
+ * 抽成模块级函数（不碰组件 state），effect 直接调用即可。
+ */
+async function fetchGames(
+  offset: number,
+  keyword: string,
+  consoleType: ConsoleFilter
+): Promise<GamePage> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
+  if (keyword) params.set('q', keyword);
+  if (consoleType !== 'all') params.set('console', consoleType);
+
+  const res = await fetch(`/api/games?${params}`);
+  if (!res.ok) throw new Error(String(res.status));
+
+  const data = (await res.json()) as Partial<GamePage>;
+  return {
+    games: data.games ?? [],
+    total: data.total ?? 0,
+    // 老响应（没走分页的那版）不给 offset / limit，退回请求值即可
+    offset: data.offset ?? offset,
+    limit: data.limit ?? PAGE_SIZE,
+  };
 }
 
 interface GameLibraryPanelProps {
   /** 正在载入的那盘游戏 id；非 null 时所有卡片都置灰，避免连点。 */
   loadingId: string | null;
+  /**
+   * 正在下载的那盘游戏**标题**，底部那条状态栏用；null = 没有下载在跑，整条不渲染。
+   * 由父级给而不是在这里 `games.find(...)`：分页之后它可能不在当前这一页上，
+   * 那时候就找不着了，状态栏会变成一句没有主语的「正在载入…」。
+   */
+  downloadingTitle: string | null;
   /** ROM 下载进度（0..1）；null = 拿不到总字节数，画不确定进度条 */
   progress: number | null;
-  /** 本机载入过的卡带，「历史」tab 用 */
+  /** 取消这一笔 ROM 下载（只覆盖整包下载那一段，见 ConsoleScene 的注释） */
+  onCancelLoad: () => void;
+  /** 从游戏库点开过的那批游戏，「历史」tab 用。**只存字符串**（名字 / 封面 / 下载地址） */
   cartridges: Cartridge[];
-  /** 当前插着的那盘卡带的 id，历史里给它上高亮 */
+  /** 当前插着的那盘游戏的 id，历史里给它上高亮 */
   activeId: string | null;
   onPick: (game: LibraryGame) => void;
-  /** 从「历史」里挑一盘本机卡带（走 IndexedDB，不用下载） */
-  onPickCartridge: (id: string) => void;
-  /** 从「历史」里移除一盘。原先这个 × 只在卡带架上，架子撤掉后挪到这儿 */
+  /** 从「历史」里挑一盘。传整条记录而不是 id：记录里就带着下载地址，父级不必再查一遍 */
+  onPickCartridge: (cartridge: Cartridge) => void;
+  /** 从「历史」里移除一条 */
   onRemoveCartridge: (id: string) => void;
   onClose: () => void;
 }
@@ -115,18 +159,22 @@ interface GameLibraryPanelProps {
  * 在线游戏库：全屏弹窗，列出后台上传到 R2/D1 的游戏，点一个直接载入。
  * 和存档 / 联机 / 按键三块面板同一套视觉 —— 浮在房间上、**不进屏幕**。
  *
- * 「历史」tab 列出本机载入过的卡带（`cartridges`），数据由父级从 IndexedDB 现取 ——
- * 面板自己不去读库：载入完那一盘要刷新历史，而父级本来就持有这份 state
- * （卡带历史那份就是它），两处各拉一次迟早会不同步。
+ * 「历史」tab 列出**从游戏库点开过**的那批（`cartridges` —— 只存名字 / 封面地址 /
+ * 下载地址几个字符串，见 lib/library.ts），数据由父级从 IndexedDB 现取 ——
+ * 面板自己不去读库：载入完那一盘要刷新历史，而父级本来就持有这份 state，
+ * 两处各拉一次迟早会不同步。
+ * 点一行 = 照存下来的地址重新下一遍，所以下载期间那套置灰 / 进度也是同一套。
  */
 export default function GameLibraryPanel({
   loadingId,
+  downloadingTitle,
   progress,
   cartridges,
   activeId,
   onPick,
   onPickCartridge,
   onRemoveCartridge,
+  onCancelLoad,
   onClose,
 }: GameLibraryPanelProps) {
   const { t, locale } = useI18n();
@@ -136,54 +184,107 @@ export default function GameLibraryPanel({
    */
   const slowHint = t('games.remoteSlow');
   const [tab, setTab] = useState<Tab>('library');
-  // 有缓存时**首帧就是 ready** —— 惰性初始化直接吃缓存，连一次「载入中」都不闪。
-  const [games, setGames] = useState<LibraryGame[]>(() => gamesCache ?? []);
-  const [state, setState] = useState<LoadState>(() => (gamesCache ? 'ready' : 'loading'));
 
-  /* ---------------- 在线库的筛选（纯本地，不再打接口） ---------------- */
+  /* ---------------- 在线库：服务端分页 + 服务端筛选 ---------------- */
 
   const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('all');
   const [searchDraft, setSearchDraft] = useState('');
   /*
-   * 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来，不边打字边过滤 ——
-   * 列表里全是封面图，每敲一个字就重排一遍网格太抖。和后台那份同一套写法。
+   * 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来。
+   * 和后台那份是同一个理由，但这里的代价更硬 —— 过滤已经挪到服务端，
+   * 边打字边过滤就是每敲一个字打一次接口 = 两次 D1 查询。
    */
   const [keyword, setKeyword] = useState('');
 
-  /** 机种 + 关键词过滤后的列表。数据源就是已经拉回来的 `games`。 */
-  const matchedGames = useMemo(() => {
-    const needle = keyword.toLowerCase();
-    return games.filter((game) => {
-      if (consoleFilter !== 'all' && game.consoleType !== consoleFilter) return false;
-      if (!needle) return true;
-      return [game.title, game.developer, game.series].some((field) =>
-        field?.toLowerCase().includes(needle)
-      );
-    });
-  }, [games, consoleFilter, keyword]);
+  /** 当前页码。翻页 = 重新打接口，见下面那个 effect。 */
+  const [page, setPage] = useState(1);
 
-  const applySearch = () => setKeyword(searchDraft.trim());
+  /** 本页数据。**只有这一页** —— 全量那份已经不存在了。 */
+  const [games, setGames] = useState<LibraryGame[]>([]);
+  /** 命中当前筛选条件的总条数（不是本页条数），用来算总页数。 */
+  const [total, setTotal] = useState(0);
+  const [state, setState] = useState<LoadState>('loading');
 
-  // 只有第一次打开（缓存为空）才真的打接口；之后每次打开都命中缓存、这里直接返回。
-  // setState 一律放在 .then/.catch 回调里 —— 直接在 effect 体里同步 setState
-  // 会被 react-hooks/set-state-in-effect 拦下。
+  /*
+   * 请求序号：翻页快了会撞上乱序响应，慢的旧响应不许覆盖新的。
+   * 放在 ref 里而不是用闭包里的 cancelled 标记 —— 后者的清理跑在 effect 重新执行时，
+   * 两轮请求的清理都等于「本轮被取消」，分不开谁是谁。（和后台那份同一套。）
+   */
+  const listRequestId = useRef(0);
+
+  /** 列表滚动容器。翻页后要把它拨回顶部，否则第 2 页一进来就停在半截上。 */
+  const listRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * `listLoading` 是**派生**出来的，不是一个 state：
+   *
+   *   settledKey !== queryKey  →  这次查询还在飞
+   *
+   * 为什么不直接存一个 `loading` state：那样得在 effect 体里同步 `setLoading(true)`，
+   * 会被 `react-hooks/set-state-in-effect` 拦下（下面 effect 前那段注释记过这条规则）。
+   * 派生值天然没这个问题，也少一次重渲染。
+   *
+   * 只有「首次打开」和「翻页 / 改筛选」时才是 true —— 后者用来给网格压一点透明度，
+   * 否则点了「下一页」列表纹丝不动，会以为按钮坏了。
+   */
+  const queryKey = queryKeyOf(page, keyword, consoleFilter);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  const listLoading = settledKey !== queryKey;
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  /*
+   * 页码一律按 `safePage` 走（渲染、按钮禁用态都是）：服务端会把越界的 offset
+   * 夹回最后一页、下面的 effect 再 `setPage` 跟上，但在那一帧之前 `page` 可能
+   * 还停在旧页码上。夹一下，文字就不会闪出「3 / 2」。
+   */
+  const safePage = Math.min(page, pageCount);
+
+  const applySearch = () => {
+    setKeyword(searchDraft.trim());
+    // 结果集换了，旧页码没有意义 —— 回到第一页
+    setPage(1);
+  };
+
+  /** 翻页 + 把列表拨回顶部。 */
+  const goToPage = (next: number) => {
+    setPage(next);
+    listRef.current?.scrollTo({ top: 0 });
+  };
+
+  /*
+   * 每次翻页 / 换机种 / 提交搜索都重新拉**当前这一页**（服务端分页，不再一次全捞）。
+   * setState 一律放在 .then/.catch 回调里 —— 直接在 effect 体里同步 setState
+   * 会被 react-hooks/set-state-in-effect 拦下。
+   *
+   * **依赖里刻意没有 `tab`**：切到「历史」时不该多发一次请求（那是父级给的本地数据），
+   * 切回来也不该重拉 —— 依赖不变，effect 就不重跑，列表还是原来那份。
+   * 面板每次打开都是全新挂载，所以「每次打开刷新一次」依然成立。
+   */
   useEffect(() => {
-    if (gamesCache) return;
-    let cancelled = false;
-    fetchGames()
-      .then((items) => {
-        if (cancelled) return;
-        setGames(items);
+    const requestId = ++listRequestId.current;
+    const offset = (page - 1) * PAGE_SIZE;
+
+    fetchGames(offset, keyword, consoleFilter)
+      .then((data) => {
+        if (listRequestId.current !== requestId) return;
+        setGames(data.games);
+        setTotal(data.total);
         setState('ready');
+        // 服务端会把越界的 offset 夹回最后一页（例如筛选后结果变少了），跟着它走
+        setPage(Math.floor(data.offset / PAGE_SIZE) + 1);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (listRequestId.current !== requestId) return;
+        setGames([]);
+        setTotal(0);
         setState('error');
+      })
+      .finally(() => {
+        if (listRequestId.current !== requestId) return;
+        // 失败也算「落定」：否则会一直卡在 loading 上
+        setSettledKey(queryKeyOf(page, keyword, consoleFilter));
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [page, keyword, consoleFilter]);
 
   // Esc 关面板（面板自持，不必依赖外层）
   useEffect(() => {
@@ -240,8 +341,11 @@ export default function GameLibraryPanel({
 
         {/*
           在线库的筛选条：机种 + 搜索。**只在「游戏库」tab 出现** ——
-          两者筛的都是那份在线列表；「历史」是本机卡带、最多 10 盘，不值得再压一排控件。
-          两处都**只过滤已经拉回来的 `games`**（数据本来就在本机），不会再打接口。
+          两者筛的都是在线列表；「历史」是从游戏库点开过的那批、最多 10 条，不值得再压一排控件。
+
+          2026-10-12 起这两个筛选都**下发到服务端**（跟着分页查询一起走）：
+          按页取数之后本地就没有全量数据了，再在本地 filter 只能筛当页那几条，
+          翻页会换一批结果，等于没筛。
         */}
         {tab === 'library' && (
           <div className="flex flex-wrap items-center gap-2 border-b-2 border-ink-900 bg-ink-800 px-4 py-2">
@@ -251,7 +355,11 @@ export default function GameLibraryPanel({
                   key={value}
                   type="button"
                   aria-pressed={consoleFilter === value}
-                  onClick={() => setConsoleFilter(value)}
+                  onClick={() => {
+                    setConsoleFilter(value);
+                    // 换了机种就是换了一份结果集，回到第一页（同 applySearch）
+                    setPage(1);
+                  }}
                   className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-2 text-[10px] transition-colors ${
                     consoleFilter === value
                       ? 'bg-accent text-ink-950'
@@ -296,24 +404,39 @@ export default function GameLibraryPanel({
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-4">
           {tab === 'library' ? (
             <>
               {state === 'loading' && (
                 <p className="text-[12px] text-ink-400">{t('games.loading')}</p>
               )}
               {state === 'error' && <p className="text-[12px] text-danger">{t('games.failed')}</p>}
-              {state === 'ready' && games.length === 0 && (
+              {/* 库是空的 —— 没带任何筛选，就是真的一条都没有 */}
+              {state === 'ready' && total === 0 && !keyword && consoleFilter === 'all' && (
                 <p className="text-[12px] text-ink-400">{t('games.empty')}</p>
               )}
               {/* 库里有东西、只是被筛掉了 —— 和「库是空的」分开说，否则会以为库坏了 */}
-              {state === 'ready' && games.length > 0 && matchedGames.length === 0 && (
+              {state === 'ready' && total === 0 && (keyword || consoleFilter !== 'all') && (
                 <p className="text-[12px] text-ink-400">{t('games.noMatch')}</p>
               )}
 
-              {state === 'ready' && matchedGames.length > 0 && (
-                <ul className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3">
-                  {matchedGames.map((game) => {
+              {state === 'ready' && games.length > 0 && (
+                /*
+                 * 一行最多五个，屏幕变窄依次降到 4 个、最少 3 个
+                 * （`md` = 768px、`sm` = 640px）。**不用 auto-fill**：那种写法列数
+                 * 随宽度浮动，同一页在不同窗口下会挤成不同的行数，「一页 15 条」就没了准头。
+                 *
+                 * 翻页期间压一点透明度（`listLoading`）—— 新旧数据占的是同一批位置，
+                 * 不给点反馈会以为「下一页」没反应。这是相对后台那份**多做的一点**：
+                 * 后台是整页列表，刷新的感觉本来就明显。
+                 */
+                <ul
+                  aria-busy={listLoading}
+                  className={`grid grid-cols-3 gap-3 transition-opacity sm:grid-cols-4 md:grid-cols-5 ${
+                    listLoading ? 'opacity-60' : ''
+                  }`}
+                >
+                  {games.map((game) => {
                     const busy = loadingId === game.id;
                     const meta = [game.year, game.developer].filter(Boolean).join(' · ');
                     const tag = languageTag(game.language);
@@ -391,9 +514,10 @@ export default function GameLibraryPanel({
             <p className="text-[12px] text-ink-400">{t('games.historyEmpty')}</p>
           ) : (
             /*
-              历史用**行**而不是卡片：本机卡带没有封面（封面是在线上传时才有的），
-              硬凑成网格会是一排空框。行也正好和存档列表同一套读法 ——
-              左边是谁、右边是时间，点哪条载入哪条。
+              历史用**行**而不是卡片：一行装得下的信息比卡片多（标题可能很长），
+              而且正好和存档列表同一套读法 —— 左边是谁、右边是时间，点哪条载入哪条。
+              左边那张缩略图是这次改造才有的：历史里存了封面地址（`imageUrl`），
+              点进去之前能认一眼是哪盘。
             */
             <ul className="flex flex-col">
               {cartridges.map((cartridge) => (
@@ -407,15 +531,31 @@ export default function GameLibraryPanel({
                     type="button"
                     disabled={loadingId !== null}
                     aria-current={cartridge.id === activeId}
-                    onClick={() => onPickCartridge(cartridge.id)}
+                    onClick={() => onPickCartridge(cartridge)}
                     title={t('games.historyLoad', { name: cartridge.name })}
                     className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2.5 text-left text-[12px] text-ink-200 transition-colors enabled:hover:bg-ink-700 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
                   >
+                    {/*
+                      封面缩略图。同样走 <img> 不走 next/image（R2 公网域名没在
+                      next.config 里登记 remotePatterns）；没有封面地址时整块不渲染 ——
+                      `src=""` 在部分浏览器里是个裂图图标，比空着难看。
+                    */}
+                    {cartridge.imageUrl && (
+                      <span className="block h-[30px] w-[22px] shrink-0 overflow-hidden bg-ink-900">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={cartridge.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                      </span>
+                    )}
                     {/* 机种标签全是 ASCII（NES / SFC / ARC），走 font-pixel 不掉字形 */}
                     <span className="shrink-0 font-pixel text-[8px] text-ink-500">
                       {CONSOLE_LABEL[cartridge.console]}
                     </span>
-                    {/* 文件名可能很长（含中文），系统字体 + truncate */}
+                    {/* 游戏标题可能很长（含中文），系统字体 + truncate */}
                     <span
                       className={`min-w-0 flex-1 truncate ${
                         cartridge.id === activeId ? 'text-accent' : ''
@@ -440,6 +580,97 @@ export default function GameLibraryPanel({
             </ul>
           )}
         </div>
+        {/*
+          翻页条固定在滚动区**外面**（面板底边），不跟着列表一起滚 ——
+          后台那份是整页滚动、翻页条自然跟在列表后面；这里列表是一个定高弹窗里的
+          滚动区，跟在后面就意味着「想翻页得先滚到底」。只有一页时整条不渲染。
+
+          请求飞行期间两个按钮都禁用：现在翻页是真的要等一次接口（两次 D1 查询），
+          不禁用的话连点会把页码堆成队列，最后停在哪一页全看响应回来的顺序。
+        */}
+        {tab === 'library' && state === 'ready' && pageCount > 1 && (
+          <div className="flex items-center justify-end gap-3 border-t-2 border-ink-900 bg-ink-850 px-4 py-2">
+            {/*
+              翻页中的标识。**必须有**：翻页现在是真的要等一次接口（两次 D1 查询），
+              而列表里新旧数据占的是同一批位置，只靠网格变淡太含蓄，看着像没反应。
+              样式用项目里既有的「来回滑的亮条」（load-slide，核心包 / ROM 下载都是它），
+              这样「在动」这件事全站是同一套语言。
+            */}
+            {listLoading && (
+              <span className="mr-auto flex items-center gap-2 text-[10px] text-ink-400">
+                <span className="relative h-[6px] w-14 shrink-0 overflow-hidden bg-ink-900">
+                  <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
+                </span>
+                {t('games.loading')}
+              </span>
+            )}
+            <button
+              type="button"
+              disabled={listLoading || safePage <= 1}
+              onClick={() => goToPage(safePage - 1)}
+              className="pixel-edge pxw-2 pxc-500 flex h-[24px] items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t('games.prev')}
+            </button>
+            {/* 纯数字，和后台那份一样不进文案表 */}
+            <span className="text-[10px] text-ink-500">
+              {safePage} / {pageCount}
+            </span>
+            <button
+              type="button"
+              disabled={listLoading || safePage >= pageCount}
+              onClick={() => goToPage(safePage + 1)}
+              className="pixel-edge pxw-2 pxc-500 flex h-[24px] items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {t('games.next')}
+            </button>
+          </div>
+        )}
+        {/*
+          正在从在线库拉 ROM 时，面板底部这条状态栏：进度 + 取消。
+          条件用 `downloadingTitle`（= 父级的「整包下载中」）而**不是** `loadingId` ——
+          后者在下载完之后还活着（要挡到 `loadFile` 跑完），拿它当条件会在
+          「面板被重新打开、核心还在启动」的那几秒里显示一条停在 100% 的假进度。
+
+          为什么值得单独占一条（卡片封面上本来就叠了一条 6px 的进度）：
+          ① 得说清**是哪一张**在载入 —— 面板里十几张封面，只有一条细进度不够读；
+          ② 「取消」需要一个落脚点 —— 卡片本身是个 <button>，里面塞不下第二个按钮
+             （HTML 不允许按钮嵌套），而这条栏是面板级的，天然能放。
+
+          取消的**边界**：只覆盖 ROM 整包下载这一段。下载完面板就关了、交给 `loadFile`
+          启动模拟器，那之后的进度在电视机屏幕上，这里管不到 —— Nostalgist 没有公开的
+          取消接口。
+        */}
+        {downloadingTitle !== null && (
+          <div className="flex items-center gap-3 border-t-2 border-ink-900 bg-ink-850 px-4 py-2">
+            <span className="min-w-0 flex-1 truncate text-[11px] text-ink-200">
+              {t('games.loadingRom', { name: downloadingTitle })}
+            </span>
+            <span className="relative h-[6px] w-32 shrink-0 overflow-hidden bg-ink-900">
+              {progress === null ? (
+                <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
+              ) : (
+                <span
+                  className="absolute inset-y-0 left-0 bg-accent"
+                  style={{ width: `${Math.round(progress * 100)}%` }}
+                />
+              )}
+            </span>
+            {/* 固定宽度：百分数从 9% 跳到 100% 时后面的按钮不许跟着挪 */}
+            {progress !== null && (
+              <span className="w-[34px] shrink-0 text-right text-[10px] text-ink-500">
+                {Math.round(progress * 100)}%
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onCancelLoad}
+              className="pixel-edge pxw-2 pxc-500 flex h-[24px] shrink-0 items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors hover:bg-danger hover:text-ink-950"
+            >
+              {t('games.cancel')}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

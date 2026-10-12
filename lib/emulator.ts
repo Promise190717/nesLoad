@@ -10,6 +10,7 @@ import {
   type ButtonName,
   type KeyBindings,
 } from './keybindings';
+import { unwrapRom } from './unwrap';
 
 /*
  * 音频旁路要赶在核心启动之前装好 —— 核心一启动就会建 AudioContext 并把音频节点
@@ -61,15 +62,21 @@ const CORE_MAP: Record<ConsoleType, string> = {
 };
 
 /**
- * 屏幕尺寸 = canvas 后备存储的**基准**尺寸，720×540（NES 画面的 4:3）。
+ * 屏幕尺寸的**基准**，720×540（NES 画面的 4:3）。
  *
- * 三处用同一组数字：Nostalgist 的 launch `size`（见 `loadRom`）、canvas 的
- * width/height 属性（RetroTv 用这两个常量）、以及 RetroTv 里那个屏幕 div 的
- * `h-[540px] w-[720px]`（Tailwind 类吃不到 TS 常量，只能各写一份，改这里要跟着改）。
+ * 两处用同一组数字：Nostalgist 的 launch `size`（见 `loadRom`）、canvas 的
+ * width/height 属性（RetroTv 用这两个常量）。
+ *
+ * ⚠️ **屏幕的显示尺寸已经不在这里了**（2026-10-12 加电视机尺寸档位之后）：
+ * 那是 globals.css 里的 `--tv-screen-w / -h`，按 `<html data-tv>` 取小 / 中 / 大
+ * 三档，**小档正好等于这两个数**。所以这里只是「启动时给核心的一个基准」，
+ * 换档不用动它 —— 核心用 ResizeObserver 盯着 canvas 元素，CSS 尺寸一变就按
+ * `contentRect × devicePixelRatio` 重设后备存储（见 public/cores/*.js），
+ * 所以「基准 720×540、实际显示 880×660」这种组合也是对的。
  *
  * 注意它只是**基准**：核心起来之后会按 `devicePixelRatio` 把后备存储改成
  * 720×dpr（125% 缩放 = 900×675）来保证清晰度，那是核心的事，屏幕的显示尺寸由
- * RetroTv 写死的 CSS 决定，两者不互相牵制。
+ * 那组 CSS 变量决定，两者不互相牵制。
  */
 export const SCREEN_WIDTH = 720;
 export const SCREEN_HEIGHT = 540;
@@ -406,7 +413,27 @@ export class EmulatorController {
     // 先退出正在运行的实例，避免多个核心叠加占用内存
     await this.exit();
 
-    const consoleType = await detectConsole(file);
+    /*
+     * 有些 ROM 是**压缩包伪装成 ROM**（`jojos-....smc` 前四字节其实是 `PK\x03\x04`），
+     * 也有些就是老老实实的 `.zip` 里装一盘 NES / SFC。两种都得先拆开 —— 否则
+     * `detectConsole` 会把它们一律判成**街机**（任何 `PK\x03\x04` 都当 romset），
+     * 然后交给 FBNeo 拿文件名当驱动名查表，查不到就**完全静默地失败**。
+     *
+     * 判定规则、以及为什么这不会误伤街机 romset（靠内层扩展名区分），都在 `lib/unwrap.ts`。
+     *
+     * 拆出来的 ROM **只喂给 NES / SFC 那条路**；街机仍然拿**原始文件**去
+     * `resolveArcadeCore()` —— romset 本身就该是 zip，被拆开反而坏事。
+     */
+    const unwrapped = await unwrapRom(file);
+    const romFile = unwrapped?.file ?? file;
+    if (unwrapped) {
+      console.info(
+        `[nesload] 「${file.name}」是个压缩包，已解出内层「${unwrapped.innerName}」` +
+          `（${romFile.size} 字节）`
+      );
+    }
+
+    const consoleType = await detectConsole(romFile);
     if (!consoleType) {
       throw new UnsupportedRomError();
     }
@@ -437,8 +464,12 @@ export class EmulatorController {
      * NES / SFC 不掺和，照旧走 `CORE_MAP`。
      */
     let core = CORE_MAP[consoleType];
-    let romFileName = file.name;
-    let romContent: Blob = file;
+    /*
+     * 非街机喂的是**拆包后的** `romFile`（`unwrapRom` 没命中时它恒等于原 `file`，
+     * 没有额外开销）。街机分支下面会立刻覆盖这两个变量，用原始文件重新决定。
+     */
+    let romFileName = romFile.name;
+    let romContent: Blob = romFile;
     if (consoleType === 'arcade') {
       const resolved = await resolveArcadeCore(file);
       core = resolved.core;
@@ -516,7 +547,8 @@ export class EmulatorController {
          * `resolveArcadeCore()` 按内容认出来纠正过的（见 `lib/arcade-core.ts`）。
          *
          * 内容同理用 `romContent`：街机那盘可能是**重打包过**的（补了 zip 里的 rom 名），
-         * 也可能取自整合包的内层 zip。NES / SFC 下它恒等于 `file`，没有额外开销。
+         * 也可能取自整合包的内层 zip；NES / SFC 那条路则可能是 `unwrapRom()` 从压缩包里
+         * 解出来的。只有「原样拖进来的普通 ROM」那一种情况它才等于 `file`。
          */
         rom: { fileName: romFileName, fileContent: romContent },
         ...coreSource,
@@ -541,6 +573,21 @@ export class EmulatorController {
           audio_volume: levelToDb(Math.max(1, this.volumeLevel)),
           audio_mute_enable: this.volumeLevel === 0,
           input_overlay_enable: false,
+          /*
+           * 像素游戏不需要双线性过滤。
+           *
+           * 开着的话每一帧都要对整块画面多做一次重采样：像素边缘被抹开（画面发糊），
+           * 而且这块 canvas 的后备存储是**按 devicePixelRatio 放大过的**
+           * （720×540 在 2 倍屏上就是 1440×1080），全屏重采样的代价跟着翻四倍。
+           * 核心构建的默认值不保证是关的，这里钉死。
+           */
+          video_smooth: false,
+          /*
+           * Nostalgist 的默认配置里写的是 `video_shader_enable: true`，但这个项目的
+           * CRT 质感是**纯 CSS** 做的（扫描线 + 暗角，见 RetroTv / globals.css），
+           * 核心侧从头到尾没有 shader 预设 —— 那条渲染管线整条都用不上，关掉省一层。
+           */
+          video_shader_enable: false,
         },
         /*
          * 初始尺寸**写死屏幕尺寸，不要读 `canvas.width/height`**。

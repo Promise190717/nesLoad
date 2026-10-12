@@ -31,6 +31,18 @@
   --color-accent: #e8b339;
   --color-ok: #4ade80;
   --color-danger: #f87171;
+  /*
+   * 联机蓝。目前**唯一**的用处是机身那颗 PWR 灯的「联机中」档 ——
+   * 别把它当通用蓝去铺大面积，需要中性蓝时优先走 ink 灰阶。
+   */
+  --color-info: #60a5fa;
+  /*
+   * 黄。目前**唯一**的用处是机身 PWR 灯的「房主在等人进房」那一档。
+   * ⚠️ 它和 accent（琥珀）是**邻近色**：深色下分得开（#facc15 更亮、更饱和），
+   * 浅色下会有点接近（#a16207 vs #a9761a）—— 真觉得糊在一起就把 `pwrClass` 里
+   * 那一档换成 bg-accent（那就和「暂停」同色了）。
+   */
+  --color-warn: #facc15;
 
   /*
    * 屏幕内部（显像管）专用色，一律不跟随主题翻转。
@@ -106,6 +118,9 @@
   --color-accent: #a9761a;
   --color-ok: #1f9d55;
   --color-danger: #c0392b;
+  /* 和上面那三个一样取同色系更深的一档（浅色面板上要压得住） */
+  --color-info: #1d4ed8;
+  --color-warn: #a16207;
 
   --shadow-ground: rgba(0, 0, 0, 0.16);
   --vignette: rgba(120, 110, 90, 0.22);
@@ -116,6 +131,63 @@
   --wall-seam: rgba(0, 0, 0, 0.05);
 
   --floor-seam: rgba(120, 100, 80, 0.22);
+}
+
+/* ------------------------------------------------------------------ *
+ * 电视机尺寸档位（小 / 中 / 大）
+ *
+ * 档位挂在 `<html data-tv>` 上（首屏由 layout.tsx 的内联脚本 BOOT_INIT 写入，
+ * 和主题 / 吊灯 / 简洁模式 / 季节同一套路）。尺寸**全部由下面这几条变量推出来**，
+ * React 不下发任何尺寸 —— 那颗钮只负责翻属性（见 components/ConsoleScene.tsx）。
+ *
+ * 为什么非走 CSS 不可：屏幕的宽高**不能**写成内联 style，内联会顶掉下面那条
+ * **未分层**的 `.screen:fullscreen`，全屏直接失效（见 components/RetroTv.tsx
+ * 屏幕那段注释）。写成变量 + 工具类（`w-[var(--tv-screen-w)]`）就不会。
+ *
+ * 一条链，改一个要连着看：
+ *   --tv-screen-w / -h   屏幕（4:3；小档 = 原来的 720×540）
+ *   --tv-w               机身宽 = 屏幕 + 内圈左右外边距 10×2（RetroTv 里那两道 mx-2.5）
+ *   --tv-base-w          底座宽（跟着机身粗一档）
+ *   --desk-w             桌面宽 = 机身 + 左右各 140。那两条 140 是**桌面露在机身外的
+ *                        窄带**，桌上的书 / 杯子 / 盆栽 / 卡带就摆在带子里 ——
+ *                        **不能收窄**，一收窄大档下这几样就被机身吃掉了
+ *                        （用户 2026-10-12 明确要求「不要遮挡」）。
+ *   --lamp-cord-base     吊灯线的长度基准，跟着屏幕高走（见下面 .lamp-cord）
+ *
+ * **三档等距**：每档 +120 宽 / +90 高（720/840/960），底座跟着 +70。
+ * **大档封顶在 960×720**（= 小档的 4/3）：再往上，1080 高的窗口上桌腿就会被
+ * main 的 overflow 从下沿切掉一截 —— 桌面露出来的高度 =
+ * `(100vh - 机身高)/2 - DESK_HEIGHT`，机身高 ≈ 屏幕高 + 147（见 .lamp-cord 那段）。
+ * 960 时机身 ≈ 867，1080 的窗口还剩 ~106px 余量（桌腿 98 刚好放得下）。
+ * 用户 2026-10-12 的原话是「大的时候比例可以大点，现在最大的还是有点小」，
+ * 所以大档从原来的 880×660 提到了 960×720（中档顺带从 800 提到 840，让三档等距）。
+ *
+ * 机身里除屏幕之外的部件（顶沿 30、内圈外边距 8 / 10、像素描边 4 / 6、前面板那排钮、
+ * 底座高 18）**刻意不跟着放大**：像素描边经不起非整数缩放（放大过的固定 px 会糊边），
+ * 而面板上那排钮是给人点的，跟着放大只会把面板挤爆。屏幕变大之后机身相对变薄 ——
+ * 正好也是真实大电视的样子。
+ * ------------------------------------------------------------------ */
+:root {
+  --tv-screen-w: 720px;
+  --tv-screen-h: 540px;
+  --tv-w: calc(var(--tv-screen-w) + 20px);
+  --tv-base-w: 450px;
+  --desk-w: calc(var(--tv-w) + 280px);
+  --lamp-cord-base: calc(var(--tv-screen-h) / 2 + 124.5px);
+}
+
+/* 中档：屏幕 840×630（比小档宽 120 / 高 90） */
+:root[data-tv='medium'] {
+  --tv-screen-w: 840px;
+  --tv-screen-h: 630px;
+  --tv-base-w: 520px;
+}
+
+/* 大档：屏幕 960×720（比小档宽 240 / 高 180 = 小档的 4/3；封顶理由见上面那段注释） */
+:root[data-tv='large'] {
+  --tv-screen-w: 960px;
+  --tv-screen-h: 720px;
+  --tv-base-w: 600px;
 }
 
 html,
@@ -174,6 +246,21 @@ body {
 }
 .pxc-accent {
   --px-c: var(--color-accent);
+}
+/*
+ * 「成功」那一路的描边。目前只有联机连上那枚提示在用 —— 它要和面板（默认 ink 描边）、
+ * 警示（danger）区分开，一眼看出是「成了」而不是「有东西要读」。
+ */
+.pxc-ok {
+  --px-c: var(--color-ok);
+}
+/*
+ * 「出事了」那一路的描边 —— 目前只有「对方离开了房间」那枚提示在用
+ * （联机面板里的报错文字也是同一族的 danger 色）。和 pxc-ok 配成一对：
+ * 一件「成了」、一件「要处理」，飘在同一个位置，靠颜色一眼分开。
+ */
+.pxc-danger {
+  --px-c: var(--color-danger);
 }
 /*
  * 「一张纸」的描边。纸是**物件**、固定色，所以不走 ink 令牌 ——
@@ -236,8 +323,8 @@ body {
  * 和主题 / 吊灯 / 季节同一套路：DOM 属性是唯一真相，React 那份 state 只为了 aria）。
  * 挂点上的 `room-*` 类由 components/RoomBackdrop.tsx 各自提供。
  *
- * 用 `display: none` 而不是 visibility / opacity：藏起来的那四块里有**四个可点元素**
- * （吊灯、窗户玻璃、地上的留言本、右下角那张纸片），只有 display:none 能把它们
+ * 用 `display: none` 而不是 visibility / opacity：藏起来的那四块里有**五个可点元素**
+ * （吊灯、窗户玻璃、地上的留言本、右下角那张纸片、那台 MP4），只有 display:none 能把它们
  * 同时移出布局、Tab 顺序和无障碍树 —— 否则会留下一片点得到却看不见的热区，
  * 而且挡住机身的拖拽落点。
  */
@@ -293,6 +380,71 @@ body {
   display: none;
 }
 
+/*
+ * 窗外那点「活气」：夜里星星慢闪、白天云慢慢飘（2026-10-12 加）。
+ *
+ * 只加动效，**不新增景物** —— 月亮和云本来就画在四季的景色里（见 RoomBackdrop 的
+ * RoomWindow），原先只是全都钉死在原地。这里把它们各自归成一个 `<g>` 再让那组动。
+ *
+ * 星星：`<g class="sky-stars">` 里逐颗错开，靠 `nth-child` 给不同的周期与相位。
+ * `animation-delay` 一律取**负值** —— 负延迟等于「从周期的中途开始」，
+ * 页面一打开星星就是「已经闪了一会儿」的样子；给正值的话所有星星会同时从最亮起步，
+ * 一眼就看出是同一套动画。
+ *
+ * 云：`<g class="sky-clouds">` 整组一起飘。位移量取 **62 个单位** ——
+ * 正好是 viewBox 的宽度（`RoomWindow` 里那个 62×62），而且每季的第二朵云都
+ * **刻意摆在第一朵的左边 62 格**（x 减 62）。于是飘满一个周期之后，画面和起点
+ * 逐像素相同，循环无缝（`preserveAspectRatio="none"` + 310px 宽 → 1 单位 = 5px，
+ * 62 单位 = 310px 走 90 秒 ≈ 3.4px/s）。
+ * ⚠️ 挪云朵位置时**两朵必须一起挪、间距保持 62**，否则接缝会露出来。
+ *
+ * 关于单位：CSS `transform` 的长度在 SVG 元素上落在**该元素自己的本地坐标系**里 ——
+ * 也就是 viewBox 单位。依据是规范那两句拼起来：§1.2「本地坐标系（也叫用户坐标系）……
+ * 一个单位等于一个 CSS 像素」+ §12「一个平移单位 = 本地坐标系中的 1 像素」；
+ * viewBox 的 5 倍缩放是在这一层**外面**再乘一道。所以这里写的 62px 是「62 格」，
+ * 落到屏幕上是 62 × 5 = 310px。
+ * ⚠️ **别按屏幕像素去调这个数**：想改速度就改时长（90s），想改距离就改这个 62
+ * —— 但那样第二朵云的间距必须跟着一起改（见上面那条）。
+ *
+ * 八组（四季 × 昼夜）里只有当前那两组是 `display: block` 的，其余的不渲染 ——
+ * 所以给多少个元素挂动画都不心疼。
+ */
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.22;
+  }
+}
+.sky-stars > * {
+  animation: star-twinkle 4.2s ease-in-out infinite;
+}
+.sky-stars > *:nth-child(3n) {
+  animation-duration: 5.6s;
+  animation-delay: -1.4s;
+}
+.sky-stars > *:nth-child(3n + 1) {
+  animation-delay: -2.9s;
+}
+.sky-stars > *:nth-child(3n + 2) {
+  animation-duration: 3.4s;
+  animation-delay: -0.8s;
+}
+
+@keyframes cloud-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(62px);
+  }
+}
+.sky-clouds {
+  animation: cloud-drift 90s linear infinite;
+}
+
 /* ------------------------------------------------------------------ *
  * 吊灯（见 components/RoomBackdrop.tsx 的 RoomLamp）
  *
@@ -307,21 +459,32 @@ body {
 /*
  * 灯线长度跟着窗口高度缩。
  *
- * 房间是竖向居中的：机身顶边到天花板 ≈ (100vh - 719px) / 2 + 16px
- * （719 = 机身 ~687 + main 的 py-4；16 是 main 的上内边距）。
- * 灯罩 26 + 灯泡 13 + 吸盘 8 + 一点留白 4 = 51px 是灯线之外必须占掉的高度，
- * 所以灯线 ≤ (100vh - 719px) / 2 + 16px - 51px = 50vh - 394.5px。
+ * 房间是竖向居中的：机身顶边到天花板 ≈ (100vh - 机身高 - main 的 py-4 32px) / 2 + 16px
+ * （16 是 main 的上内边距）。灯罩 26 + 灯泡 13 + 吸盘 8 + 一点留白 4 = 51px 是灯线
+ * 之外必须占掉的高度，所以
+ *
+ *   灯线 ≤ 50vh - 机身高/2 - 51px
+ *
+ * 机身高 ≈ 屏幕高 + 147（顶沿 30 + 内圈上下外边距 16 + 前面板 + 底座 21；147 是按
+ * 2026-10-09 实测的机身 ~687 反推的），代进去：
+ *
+ *   灯线 ≤ 50vh - 屏幕高/2 - 124.5px
+ *
  * 上限 34px（窗口够高就不再变长），下限 0（再矮就贴顶，剩下的交给机身遮住）。
  *
- * **改电视机尺寸必须同步这个数** —— 它和 RetroTv 顶部那段尺寸注释、
- * globals.css 底部的 900px 断点是同一条链上的。
+ * **只有「屏幕高的一半」跟着尺寸档位变**（见上面那组 --tv-* 变量），所以那个
+ * 124.5px 收进 `--lamp-cord-base` 里：
+ *   --lamp-cord-base = 屏幕高 / 2 + 124.5
+ * 机身变高 1 档 → 居中之后它的顶边反而**往上**走半档 → 灯线就得短半档。
+ * 忘了跟的后果是灯吊得比设计高 / 低一截，和机身顶边之间空一道（或灯罩钻进机身）。
  *
- * 2026-10-09 撤掉底部插卡舱、机身矮了 70px，这里跟着从 429.5 收到 394.5：
- * 机身矮 70 → 居中之后它的顶边反而**往下**走了 35 → 天花板到机身顶边多了 35
- * → 灯线可以长 35。忘了改的后果是灯吊得比设计高一截，和机身顶边之间空一道。
+ * 2026-10-09 撤掉底部插卡舱、机身矮了 70px，这里跟着从 429.5 收到 394.5
+ * （= 540/2 + 124.5，就是「小档」那个值）；2026-10-12 加尺寸档位之后改由变量推。
+ * ⚠️ 改机身里那些固定部件（顶沿 / 前面板 / 底座）时要连这个 124.5 一起核 ——
+ * 它和 RetroTv 顶部那段尺寸注释、globals.css 底部的 900px 断点是同一条链上的。
  */
 .lamp-cord {
-  height: clamp(0px, calc(50vh - 394.5px), 34px);
+  height: clamp(0px, calc(50vh - var(--lamp-cord-base)), 34px);
 }
 
 .lamp-glow {
@@ -423,6 +586,31 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
+ * 屏幕提示的字号补偿（只对中文生效）
+ *
+ * 屏幕上那几句提示走 `font-pixel`（Press Start 2P）—— 那套字模**没有汉字**，
+ * 中文只能落到系统字体上（见 RetroTv 组件头注释）。同一个 px 值下，系统汉字的
+ * 笔画比像素字粗、密，10px 以下就开始黏在一起（机身前面板那排「暂停 / 存档 / 读档」
+ * 当初也是因为这个才定在 10px 不再往下）。
+ *
+ * 所以中文比英文各抬 1px，**英文维持原设计尺寸不动** —— 靠
+ * `<html data-locale>` 命中（切语言时由 I18nProvider 同步，见那边）。
+ * 两档对应关系（元素上的工具类 → 中文值）：
+ *   `.screen-hint-sm`  text-[11px] → 12px   「DRAG & DROP A ROM」那行主提示
+ *   `.screen-hint-xs`  text-[10px] → 11px   副提示（怎么选文件 / 等房主 / 暂停副标题）
+ *
+ * 这几条是**未分层**的，优先级高于 Tailwind 的 utilities 层，所以能压过元素上那两个
+ * `text-[10px]` / `text-[11px]` 工具类（和 `.screen:fullscreen` 压过尺寸类同一个道理）。
+ * 工具类只设了 font-size、没设 line-height，所以这里改字号不会带出行高问题。
+ * ------------------------------------------------------------------ */
+:root[data-locale='zh'] .screen-hint-xs {
+  font-size: 11px;
+}
+:root[data-locale='zh'] .screen-hint-sm {
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ *
  * 全屏
  * 全屏的是屏幕本身而不是整页：canvas 撑满视口，用 object-fit 做等比留边，
  * 所以任何窗口比例下画面都不会被拉变形。
@@ -453,13 +641,32 @@ body {
 
 /*
  * 无信号雪花。
- * 没插卡带时这就是整块屏幕的内容，所以噪点必须先去色 —— feTurbulence 默认吐彩色，
- * 直接铺上去是「彩色噪点」，不像电视。亮度不在这里调，交给使用处的 opacity。
+ *
+ * ⚠️ **2026-10-12 起暂时没有使用处**：待机态换成了纯黑（用户选的「方案 B」，
+ * 见 RetroTv 里 standby 那段注释）。这份样式**故意留着**，是给「刚弹出卡带 /
+ * 载入失败」那一下的闪现过渡准备的（待定，用户还没点头）—— 参数是上一轮按用户
+ * 要求专门调过的，删掉就要重调。要用的时候记得连 `prefers-reduced-motion` 那条一起看。
+ *
+ * 噪点必须先去色 —— feTurbulence 默认吐彩色，直接铺上去是「彩色噪点」，不像电视。
+ * 亮度不在这里调，交给使用处的 opacity。
+ *
+ * 2026-10-12 用户反馈「雪花点太密集」（原话「雪花点太密集改大一点 变化速度慢一点」），
+ * 所以两处一起调，**不要只动一处**：
+ *
+ *   · `baseFrequency` 0.85 → 0.4：fractalNoise 的特征尺度约等于 1/f 像素，
+ *     0.85 出的是 1px 级的细砂，0.4 才有 2~3px 的颗粒（f 越小点越大）。
+ *   · `numOctaves` 4 → 2：八度是往基础层上叠更细的高频，叠得越多越像雾。
+ *     砍到 2 层之后颗粒的边界清楚了，「点」才立得起来。
+ *   · 抖动周期 0.6s → 1.2s：原来一秒换 5 组位置，眼睛看着发慌。
+ *
+ * 贴图仍是 140×140 且 `background-size` 也是 140px（**1:1**）—— 没有放大位图，
+ * 所以颗粒边缘是硬的，不会糊。`stitchTiles='stitch'` 负责让 140 的边界接得上，
+ * 颗粒变大之后这条更不能去掉（否则平铺的格子会显出来）。
  */
 .noise {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.4' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 140px 140px;
-  animation: noise-jitter 0.6s steps(3, end) infinite;
+  animation: noise-jitter 1.2s steps(3, end) infinite;
 }
 
 @keyframes noise-jitter {
@@ -492,6 +699,173 @@ body {
 }
 
 /*
+ * 待机光标（屏幕里那个方块）。和 `.blink` **不是一回事**：那条是 1 ↔ 0.45 的「呼吸」，
+ * 用在这里读起来像在打盹；光标要的是**硬开硬关** —— 亮着就是在等输入。
+ * 两个关键帧只差 0.1%，插值那一小段 ≈ 1ms，肉眼就是硬切，不需要再套 steps()。
+ */
+@keyframes cursor-blink {
+  0%,
+  49.9% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.cursor-blink {
+  animation: cursor-blink 1.06s linear infinite;
+}
+
+/*
+ * 「显像管关机」—— 弹出卡带时屏幕上那 0.4 秒（见 ConsoleScene 的 eject / RetroTv）。
+ *
+ * 两段接力，合起来才是老电视断电的样子：
+ *
+ *   1. `.crt-off-picture`（挂在 canvas 上）—— 画面**纵向压扁**成一条亮线。
+ *      模拟器退出后 canvas 会保留最后一帧（浏览器不主动清空，见 RetroTv 里那段注释），
+ *      所以这一下压的是**真实的游戏画面**，不是一块黑。
+ *      `scaleY(0.01)`：540px 的屏幕压成 ~5px，正好是那条线。
+ *   2. `.crt-off-line`（屏幕正中那条白线）—— 亮线**横向收成一个点**再灭掉。
+ *      延后 0.2s 出场，接在第一段的尾巴上；两段之间留一点重叠，
+ *      否则画面已经压成一条了、线还没出来，中间会空掉一帧。
+ *
+ * 白线**不依赖 canvas 里有没有画面**：最后一帧偏暗时压扁了也看不见，
+ * 这条线才是保底的那一下。它俩都刻意**不写 z-index** —— 要盖住画面，
+ * 又要落在 .crt 的扫描线（z-5）/ 暗角（z-6）之下（和屏幕里其他几层同一个理由）。
+ *
+ * 位移一律走 `transform`（不触发重排）；`transform-origin` 取正中，
+ * 所以线是从两头往中间收，不是从一端扫过去。
+ */
+.crt-off-picture {
+  animation: crt-off-picture 0.24s cubic-bezier(0.4, 0, 1, 1) both;
+  transform-origin: 50% 50%;
+}
+@keyframes crt-off-picture {
+  from {
+    transform: scaleY(1);
+  }
+  to {
+    transform: scaleY(0.01);
+  }
+}
+
+.crt-off-line {
+  animation: crt-off-line 0.22s cubic-bezier(0.4, 0, 1, 1) 0.2s both;
+  transform-origin: 50% 50%;
+}
+@keyframes crt-off-line {
+  0% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  65% {
+    transform: scaleX(0.3);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+}
+
+/*
+ * 联机时屏幕左上角那颗「已连接」小灯（见 RetroTv）。
+ *
+ * 常亮的话就是一颗死灯；这里让它每 2.4 秒**快速暗一下**（88% 之前一直是亮的，
+ * 最后 12% 掉到 0.28）—— 读起来是「活着」而不是「在闪」。
+ * 走 `steps(1, end)`：亮暗之间**硬切**，和 `.cursor-blink` 同一个道理，
+ * 中间插值出来的软过渡在一屋子硬边像素里很出戏。
+ */
+@keyframes link-blink {
+  0%,
+  86% {
+    opacity: 1;
+  }
+  88%,
+  100% {
+    opacity: 0.28;
+  }
+}
+.link-blink {
+  animation: link-blink 2.4s steps(1, end) infinite;
+}
+
+/*
+ * 地板上那台 MP4（见 RoomBackdrop 的 RoomFloorItems）在播放时，屏幕里那两段动画。
+ *
+ * 两段的「像像素」都不是靠画像素点，而是靠**硬切**：
+ *   - `.mp4-lyric` —— 那一列「歌词」匀速往上走。屏幕高 30px、每行占 6px，
+ *     元素里排的是**五行两遍**（十行），所以走满 `-50%` 正好接回第一行，循环无缝。
+ *     这里是线性插值、**故意不套 steps()**：歌词滚动本来就得连着走，
+ *     真要一卡一卡地跳，读起来像掉帧。
+ *   - `.mp4-jump` —— 底部那几条电平条。高度**只在整数像素之间跳**（3 → 6 → 10 → 7 → 4），
+ *     靠 `steps(1, end)` 把每一段都变成「保持 → 到点硬切」。这一条才是用户说的
+ *     「像素跳跃」；相位差由组件那边的 `animation-delay` 给，别写死在这里。
+ *     ⚠️ 高度值必须全是整数：写成 3px → 10px 直接插值会路过 6.5px，
+ *     半像素在屏幕上是一条抗锯齿的软边，跟满屋子的硬边像素不是一回事。
+ */
+@keyframes mp4-lyric {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.mp4-lyric {
+  animation: mp4-lyric 3.6s linear infinite;
+}
+
+@keyframes mp4-jump {
+  0% {
+    height: 3px;
+  }
+  20% {
+    height: 6px;
+  }
+  40% {
+    height: 10px;
+  }
+  60% {
+    height: 7px;
+  }
+  80% {
+    height: 4px;
+  }
+  100% {
+    height: 3px;
+  }
+}
+.mp4-jump {
+  animation: mp4-jump 0.6s steps(1, end) infinite;
+}
+
+/*
+ * 地板上那台 MP4 的**横向锚点**（见 RoomBackdrop 的 RoomFloorItems）。
+ *
+ * 它是「贴在**右侧桌腿右边**」的，所以**绝不能写死一个 left** —— 桌面宽跟着电视机
+ * 尺寸档位走（`--desk-w` = 机身 + 280：小 1020 / 中 1140 / 大 1260），
+ * 桌腿是 `right-[38px] w-[46px]` 挂在桌面右沿上的，桌子一变宽，腿就整体右移。
+ * 写死坐标的话，切到中 / 大档机器就和桌腿叠在一起了。
+ *
+ * 算式（`50%` 是地板容器的中线 = 机身中线，百分比按容器的 1020 宽算）：
+ *   50% + --desk-w/2 - 38（腿离桌面右沿）- 46（腿宽） = 腿的**右**边缘
+ *   再 +8 留一点缝 → 机器左缘
+ * 合并起来就是 `50% + --desk-w/2 - 30px`。
+ *
+ * 耳机线那个 SVG 的**右边沿要正好落在机器左缘**，所以它比机器再往左让 300px
+ * （SVG 自己的 viewBox 是 300 宽，本地 x=300 就是「贴着机身左缘」）。
+ * 两个值必须一起改：只动一个，线就和机器脱开了。
+ */
+.mp4-anchor {
+  left: calc(50% + var(--desk-w) / 2 - 30px);
+}
+.mp4-cord-anchor {
+  left: calc(50% + var(--desk-w) / 2 - 330px);
+}
+
+/*
  * 插卡带时的进度条。核心包已经在 CacheStorage 里、或响应没有 Content-Length 时
  * 拿不到字节数，这时用一段来回滑的亮条表示「还在动」—— 比一条静止的灰条好读。
  * 滑动块本身是 1/3 宽，所以 -100%..300% 正好是从轨道左外侧滑到右外侧。
@@ -513,19 +887,96 @@ body {
   }
 }
 
-/* ------------------------------------------------------------------ *
- * 主题 / 语言分段开关
- * 高亮状态完全由 <html data-theme> 与 <html data-locale> 驱动，
- * React 不持有主题状态，语言状态也不参与高亮 —— 属性就是唯一真相。
- * ------------------------------------------------------------------ */
-.theme-seg,
-.locale-seg {
-  display: flex;
-  /* 右侧那排开关是竖排的，两个分段控件也跟着竖过来 —— 横着放会让这一列宽出一倍 */
-  flex-direction: column;
+/*
+ * 联机连上那枚提示的入场。只为说清「它是刚冒出来的」——**出场不做动效**：
+ * 几秒后干脆地消失更像系统回执，也不会让人盯着等它走。
+ *
+ * 只动 opacity / translateY，**居中那层 translate 留在容器上**（见 ConsoleScene）：
+ * 同一个元素上既有 Tailwind 的 `-translate-x-1/2` 又有这段动画的 transform，
+ * 动画期间会把居中顶掉，提示会从屏幕左半边滑进来。
+ */
+@keyframes toast-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.theme-seg > button,
-.locale-seg > button {
+.toast-pop {
+  animation: toast-pop 0.18s ease-out;
+}
+
+/* ------------------------------------------------------------------ *
+ * 主题 / 语言开关 · 电视机大小选择器
+ *
+ * 主题和语言 2026-10-12 各自收成**一颗钮**（用户要求「点一下来回切、换图标就行」，
+ * 原来是「白天 / 夜晚」「中 / EN」两格常驻的分段控件）：点一下翻到另一边，
+ * 主题那颗换图标、语言那颗换短标签。
+ *
+ * 露哪一颗图标**完全由 <html data-theme> 驱动**，和原来分段控件的高亮是同一套路：
+ * 属性就是唯一真相，React 不持有主题 ⇒ **首帧就是对的**，不会先按默认主题画一颗
+ * 再「啪」地换过来。这也是这里**不能**改用 React state 挑图标的原因。
+ *
+ * 图标画的是**切过去之后**的那一颗：当前是夜晚就露太阳 —— 和 title 说的
+ * 「切换到白天模式」同一个方向，悬停一看就懂。
+ * ------------------------------------------------------------------ */
+.theme-toggle {
+  /* 和旁边那几颗方钮等高：13px 图标 + p-1.5(6px) × 2 = 25px */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-toggle > span {
+  display: inline-flex;
+}
+/*
+ * 默认（属性还没写上、或者 JS 压根没跑）：露太阳。
+ * `data-theme='dark'` 时保持这份默认，只有 light 要翻过来 ——
+ * 于是不必给 dark 另写一条，也就不存在「两条都没命中、两颗图标一起露着」的窗口。
+ */
+.theme-toggle .theme-icon-dark {
+  display: none;
+}
+:root[data-theme='light'] .theme-toggle .theme-icon-light {
+  display: none;
+}
+:root[data-theme='light'] .theme-toggle .theme-icon-dark {
+  display: inline-flex;
+}
+
+/*
+ * 语言那颗：一颗钮只装一个短标签，露的是**另一种语言**（当前中文 → EN），
+ * 和主题钮同一方向。
+ *
+ * `min-width` 兜住「中」比「EN」窄那几像素 —— 不兜的话每次切换整排钮会横向抖一下。
+ * 行高写 13px，和主题钮的图标对齐，两颗钮一样高。
+ */
+.locale-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 25px;
+  font-size: 10px;
+  line-height: 13px;
+  letter-spacing: 0.04em;
+}
+
+/*
+ * 电视机大小那个选择器仍是**横排**的三格：它从钮的左边弹出来，横着只占一行、
+ * 不往上下长（见 ConsoleScene 那颗钮）。三个格子宽度写死一致 ——
+ * 中英文字数不一样（大 / 小 / 中 vs L / M / S），不写死会宽窄不齐。
+ *
+ * 高亮同样不吃 React：按 <html data-tv> 命中对应的那一格 —— 见下面那组选择器。
+ */
+.tv-size-seg {
+  display: flex;
+  flex-direction: row;
+}
+.tv-size-seg > button {
+  min-width: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -538,14 +989,12 @@ body {
     color 0.1s,
     background-color 0.1s;
 }
-.theme-seg > button:hover,
-.locale-seg > button:hover {
+.tv-size-seg > button:hover {
   color: var(--color-ink-100);
 }
-:root[data-theme='dark'] .theme-seg > .seg-dark,
-:root[data-theme='light'] .theme-seg > .seg-light,
-:root[data-locale='zh'] .locale-seg > .seg-zh,
-:root[data-locale='en'] .locale-seg > .seg-en {
+:root[data-tv='large'] .tv-size-seg > .seg-large,
+:root[data-tv='medium'] .tv-size-seg > .seg-medium,
+:root[data-tv='small'] .tv-size-seg > .seg-small {
   color: var(--color-ink-950);
   background: var(--color-accent);
 }
@@ -603,7 +1052,7 @@ body {
  *
  * `opacity` 必须一起列 —— 过渡简写是整条属性覆盖，漏掉它会把吊灯 `.lamp-glow`
  * 自己那条 `transition: opacity` 吃掉，灯就不淡入了。
- * 同理，`!important` 是必须的：`.lamp-bulb`、`.theme-seg > button` 这些自己带
+ * 同理，`!important` 是必须的：`.lamp-bulb`、`.tv-size-seg > button` 这些自己带
  * transition 的元素，不加的话它们的声明会赢过这里。
  * ------------------------------------------------------------------ */
 :root.theme-fading,
@@ -650,7 +1099,13 @@ body {
  * 以及 i18n.ts 的 notice.desktopOnly（中英各一处，里面写死了这个数字）和 README。
  */
 @media (max-width: 899px) {
-  .stage {
+  .stage,
+  /*
+   * 右侧那排开关（`.rail`）也一起藏掉。2026-10-12 之前它带的是 `stage` 类、
+   * 靠这一条跟着藏；加移动端时把类名分开了（移动端要让开关栏留着、只藏屋子），
+   * 所以这里必须显式补上 `.rail`。
+   */
+  .rail {
     display: none;
   }
   .pc-notice {
@@ -666,10 +1121,264 @@ body {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * 移动端（掌机）
+ *
+ * **判据是设备，不是窗口宽度**（用户 2026-10-12 明确要求）：属性挂在
+ * `<html data-mobile>` 上，首屏由 layout.tsx 的内联脚本按 UA / 触摸能力写入
+ * （判定逻辑在 lib/device.ts，两边是抄的一份，**改一处要同步另一处**）。
+ *
+ * 这里做四件事：
+ *   1. 藏掉桌面那间屋子（`.stage`）和窄窗口那块提示（`.pc-notice`）—— 屋子是横向
+ *      铺开的，缩到手机上每样东西都只剩几十像素，整间换成掌机
+ *      （components/HandheldConsole.tsx）。
+ *   2. 把右侧那排开关（`.rail`）从「竖排贴右沿」改成「横排顶在掌机上方」——
+ *      竖排会压住掌机机身，而这一列本来就窄，横过来正好一行放得下。
+ *      顺带藏掉三颗只有桌面端才有意义的钮（`.rail-desktop`：全屏 / 简洁模式 /
+ *      电视机大小 —— 掌机不需要全屏入口，屋子那套「简洁模式」「尺寸档位」在移动端
+ *      也没有对象可调）。
+ *   3. 屏幕尺寸：桌面那三档是写死的 px（720 / 840 / 960），手机装不下 ——
+ *      直接改那组 `--tv-*` 变量（见上面「电视机尺寸档位」那段），
+ *      尺寸链一个字都不用重写。
+ *   4. `main` 本身：掌机比视口高时得能滚，且不能因为 `justify-center` 把顶部切掉。
+ *   5. 屏幕内圈（`.screen-frame`）在掌机上收成「屏幕宽 + 左右各 4px 内衬」并居中，
+ *      配合 `main` 左右内边距 10→6 ⇒ 屏幕比桌面那套算法宽一大截，而**机身 / 内圈两级
+ *      描边都留着**（详见第 3、4 条）。
+ *
+ * ⚠️ 这几条都是**未分层**的（写在 Tailwind 的 utilities 之外），所以能压过元素上的
+ * 工具类（`right-6` / `top-1/2` / `-translate-y-1/2` / `flex-col` / `px-6` /
+ * `overflow-hidden`）—— 和 `.screen:fullscreen` 压过尺寸类同一个道理。
+ * 同理，下面那条媒体查询里 `.rail { display: none }`（900px 以下藏开关栏）——
+ * 窄窗口 + 移动端同时成立时以移动端为准，这是要的。但**注意特异性只对同一个属性生效**：
+ * 这里的选择器虽然更高，若某条属性这里没声明，那条媒体查询照样落地。
+ * `display` 就是这么栽过的（手机视口下整排开关全没了），所以第 2 条里必须显式写上。
+ *
+ * ⚠️⚠️ 还有一条更阴的：**压缩器会吃掉你以为生效的声明**。Turbopack 用 Lightning CSS，
+ * 它把 `transform: none` + `translate: none` 合并成一条 `transform: translate3d(0,0,0)`，
+ * `translate: none` 直接不产出 —— 于是 `-translate-y-1/2` 的 -50% 还在，开关栏被顶出屏幕
+ * 上半截（`getBoundingClientRect().top` 量到 -16，肉眼就是「整排开关不见了」）。
+ * 要清掉 Tailwind 的 `translate` / `transform` 工具类，**别写 `translate: none`**，
+ * 改成覆盖它用的自定义属性（`--tw-translate-y: 0px`）—— 变量不会被合并。
+ * ------------------------------------------------------------------ */
+
+/* 1. 藏掉屋子与窄窗口提示。操作指引圈的是屋子里的东西，也一并藏（和窄窗口那条同理） */
+:root[data-mobile='on'] .stage,
+:root[data-mobile='on'] .pc-notice,
+:root[data-mobile='on'] .tour {
+  display: none;
+}
+
+/* 2. 开关栏：横排、居中、顶在掌机上方 */
+:root[data-mobile='on'] .rail {
+  /*
+   * `display` 必须在这里显式写一遍。窄窗口那条媒体查询里有 `.rail { display: none }`
+   * （900px 以下藏开关栏），而**特异性只对同一个属性生效** —— 上面那个选择器确实更高，
+   * 但它没声明 `display`，那条 `display: none` 就照旧落地。实测：390×844 的手机视口下
+   * 整排开关会一个都看不见（`.rail` 的 computed display 是 none）。
+   */
+  display: flex;
+  position: static;
+  /*
+   * 清掉 `-translate-y-1/2` 那 -50% —— 但**不能**写 `translate: none`。
+   *
+   * Tailwind 4 的 `-translate-y-1/2` 走的是 `translate` 属性（`translate: var(--tw-translate-x)
+   * var(--tw-translate-y)`，变量在 utilities 层）。本来 `translate: none` 靠「未分层压过分层」
+   * 就赢了，可 Turbopack 的 Lightning CSS 会把它**优化掉**：`transform: none` + `translate: none`
+   * 被合并成一条 `transform: translate3d(0,0,0)`，`translate: none` 直接消失（实测编译产物里
+   * 就只剩前者）—— 那 -50% 照旧生效，开关栏被顶出屏幕上半截（`top` 量到 -16）。
+   *
+   * 所以改成压**工具类自己用的那个自定义属性**：声明的是变量，压缩器不会合并它，
+   * 而 `translate` 那条声明仍在 utilities 层里、读的就是这个被覆盖后的值。
+   */
+  --tw-translate-y: 0px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 4px 6px;
+}
+
+/* 桌面端才有的三颗：全屏 / 简洁模式 / 电视机大小 */
+:root[data-mobile='on'] .rail-desktop {
+  display: none;
+}
+
+/*
+ * 分组分隔线（`RailDivider`，28×1 的横线）也得跟着转过来 —— 横排之后一条横线
+ * 夹在两排钮中间，看着像一根多余的脏线。改成竖的：宽 1px、高和钮差不多，
+ * 左右给点外边距（桌面那份的 `my-1.5` 是竖排时的上下留白，这里用不上）。
+ */
+:root[data-mobile='on'] .rail-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 3px;
+}
+
+/*
+ * 横排之后弹层不能再往左开（`right-full` 会顶到屏幕外）——
+ * 改成从钮的**下方**往下弹、右对齐。
+ */
+:root[data-mobile='on'] .rail-menu {
+  right: 0;
+  left: auto;
+  top: calc(100% + 6px);
+  /* 同上：`-translate-y-1/2` 的 -50% 只能用变量压，写 `translate: none` 会被压缩器吃掉 */
+  --tw-translate-y: 0px;
+  margin: 0;
+}
+
+/*
+ * 3. 屏幕尺寸：4:3、**只按宽度算高**，宽度贴着机身的边（手机屏本来就小，用户 2026-10-12
+ *    原话「游戏屏幕尽量大点」「游戏区域两侧有白边……宽度铺满」）。
+ *
+ * ⚠️ 这里走了两版，别退回任何一版：
+ *   ① 原版 `100vw - 80`（屏幕 310/390）—— 内圈被撑满拉宽、屏幕缩在左上角，
+ *      右边干空 40px、左右不对称（下面 `.screen-frame` 就是修这个的）。
+ *   ② 「横向全部收掉」那一版（`100vw`、`main` 左右内边距 0）—— 屏幕是顶到边了，
+ *      但**机身的侧壁整条没了**（描边画在盒子外，被 `overflow-x: hidden` 裁掉），
+ *      用户当场反馈「你怎么把游戏机的边框 UI 都给干没了」。
+ *      所以边框必须留着，能省的只是**内衬**。
+ *   现在：`100vw - 28` = 两边各让出 14px —— 机身描边 6 + 内圈描边 4 + 内圈内衬 4
+ *   （第 4 条把 `main` 左右内边距从 10 收到 6，正好让机身那 6px 描边落在视口边上）。
+ *   390 上屏幕 362（原版 310、全收版 390），比原版宽 52、比全收版只少 28。
+ *
+ * 4:3 且**只按宽度算高**（`--tv-screen-h`）—— 不给「按高度反推宽度」的方案留口子：
+ * 高度一旦参与，屏幕在小手机上就会被按钮挤小，和「尽量大」相反。
+ *
+ * 560 是上限：再宽就不像掌机了（平板上取到这个值，那时机身比屏幕宽，屏幕居中）。
+ *
+ * 只改 `--tv-screen-w`，高由它算出来 —— 和桌面那三档走的是**同一条尺寸链**
+ * （`.screen` 上的 `h-[var(--tv-screen-h)] w-[var(--tv-screen-w)]` 一个字都不用动），
+ * 所以全屏那条未分层的 `.screen:fullscreen` 照旧压得过这两个工具类。
+ */
+:root[data-mobile='on'] {
+  --tv-screen-w: min(560px, calc(100vw - 28px));
+  --tv-screen-h: calc(var(--tv-screen-w) * 3 / 4);
+}
+
+/*
+ * 屏幕内圈（`.screen-frame`，挂在内圈那层上；桌面端不需要，见下）。
+ *
+ * `width: fit-content` + 左右 `auto`：内圈自己就是「屏幕 + 左右内衬」，居中摆 ——
+ * 屏幕不会再被拉宽的内圈甩到左上角去（上面第 3 条那个坑），平板上取到 560 上限时也自动居中。
+ * `padding: 0 4px` 是**只留 4px 内衬**（原来是 10）：这圈内衬就是用户说的「白边」
+ * （浅色主题下内圈底色比机身还亮，看着就是屏幕两侧各镶了一条白的），收到 4px 之后
+ * 只剩一条细线，而内圈本身（描边 + 一点点衬边）还在，机身不至于变成一块贴纸。
+ *
+ * 上下那 8px 外边距（组件里的 `my-[8px]`）留着：屏幕上沿与顶沿、下沿与功能排之间
+ * 得有一道机身的底色。
+ *
+ * 为什么桌面端不挂这个类：那边机身宽度本来就是**内容撑出来的**（`items-center` 的
+ * 竖排舞台），内圈自然等于屏幕 + 20，没这个问题，而且客厅那台电视机要的正是四周留边
+ * （内衬 10px）。这条规则直接冲着「掌机机身撑满一行」去，写死给掌机用最省事。
+ */
+:root[data-mobile='on'] .screen-frame {
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 0 4px;
+}
+
+/*
+ * 4. main：内容比视口高时能滚，且从顶部开始排（`justify-center` 会把溢出的部分切掉）。
+ *
+ * **左右内边距 10 → 6**：掌机机身要尽量横向铺开（第 3 条），但机身的 pxw-6 描边是画在
+ * 盒子外的，6 正好让它顶到视口左右两边、一点不裁 —— 再小就会把描边切掉一截（那正是
+ * 「边框 UI 没了」那版踩的坑）。上下那 10px 不动。
+ */
+:root[data-mobile='on'] .room {
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/*
+ * 5. 掌机手柄钮（十字键那四颗 + 面键，`--pad-btn`）的尺寸台阶。
+ *
+ * 用户 2026-10-12 要求「上下左右和 b a 等操作按钮，判断屏幕的大小，可以适当加大，
+ * 现在太小了」—— 原来四档手机全写死 36px（`h-[36px] w-[36px]`）。
+ *
+ * **为什么是台阶、不是 `clamp()` 连续算**：这些钮是 `pixel-edge pxw-2`（描边画在盒子
+ * 外的像素方块），尺寸一旦是 43.7 这种小数，方块就落在半像素上、描边和 `font-pixel`
+ * 一起发虚。台阶保证每一档都是整数，也顺带让「哪台机器用多大」一眼能读出来。
+ *
+ * 上限不是拍的 —— 控制区那一行是 `D-pad + gap-3 + 面键` 横着摆（`justify-between`），
+ * 最宽的那套面键是**三列**（SFC / 街机的菱形、六键）：
+ *   · 机身内容宽 = 100vw − 12（`.room` 左右各 6，见第 4 条）
+ *   · 减去容器 `px-4`(32) 与中间 `gap-3`(12)：可用 = 100vw − 56
+ *   · D-pad 宽 = 3b + 4（格间 2px×2）；三列面键宽 = 3b + 2×FACE_GAP = 3b + 28
+ *   · ⇒ 6b + 32 ≤ 100vw − 56，也就是 **b ≤ (100vw − 88) / 6**
+ * 再留 20px 上下余量取整。于是：360 → 40、390 → 44、430 → 50 都是这一条算出来的
+ * 上限再退一档。⚠️ 触顶的后果不是「变窄」而是**两边的钮互相压在一起**
+ * （都是固定宽，flex 只能缩容器）—— 加档之前先用上面那个式子核一遍。
+ *
+ * 320 那档（默认值）**刻意不动**：它本来就贴边，`--tv-screen-w` 还要给屏幕让地方，
+ * 再长就会把机身顶出滚动。
+ *
+ * `--pad-font` 是钮上那个字（▲ / B / A，`font-pixel`）的字号，跟着钮一起长；
+ * 也取整数，理由同上。数字是按「字约占钮宽的三成」配的，别单独改其中一个。
+ *
+ * ⚠️ 这里只动**十字键和面键**。SELECT / START 那两个胶囊、以及屏幕下面那排功能钮
+ * 不在这次调整里（用户没提，而且那两排的上下间距是为了防误触专门调过的）。
+ */
+:root[data-mobile='on'] {
+  --pad-btn: 36px;
+  --pad-font: 11px;
+}
+@media (min-width: 360px) {
+  :root[data-mobile='on'] {
+    --pad-btn: 40px;
+    --pad-font: 12px;
+  }
+}
+@media (min-width: 390px) {
+  :root[data-mobile='on'] {
+    --pad-btn: 44px;
+    --pad-font: 13px;
+  }
+}
+@media (min-width: 430px) {
+  :root[data-mobile='on'] {
+    --pad-btn: 50px;
+    --pad-font: 15px;
+  }
+}
+@media (min-width: 480px) {
+  :root[data-mobile='on'] {
+    --pad-btn: 54px;
+    --pad-font: 16px;
+  }
+}
+
+
 @media (prefers-reduced-motion: reduce) {
   .blink,
-  .noise {
+  .noise,
+  .toast-pop,
+  .cursor-blink,
+  .mp4-lyric,
+  .mp4-jump,
+  .link-blink,
+  .sky-clouds,
+  .sky-stars > * {
     animation: none;
+  }
+
+  /*
+   * 关机收缩那两段**不是「关掉动画」就完事**的：`.crt-off-picture` 一旦
+   * `animation: none`，canvas 就会停在原尺寸上（eject 期间它是刻意保持可见的），
+   * 那帧旧画面会僵在屏幕上 0.4 秒再突然消失 —— 比动效本身更难受。
+   * 所以这里改成**直接黑掉**：画面立刻透明、白线不画。系统要的是「别动」，
+   * 不是「把动作留着」。
+   */
+  .crt-off-picture {
+    animation: none;
+    opacity: 0;
+  }
+  .crt-off-line {
+    display: none;
   }
 }
 

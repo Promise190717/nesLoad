@@ -27,10 +27,10 @@ export const DEFAULT_LOCALE: Locale = 'en';
 export const LOCALE_COOKIE = 'nesload_locale';
 
 /**
- * 站点名（品牌）。2026-10-10 用户定的：中文叫「复古游戏屋」。
+ * 站点名（品牌）。2026-10-10 定名、**2026-10-12 用户改成「游戏小屋」**（英文 Game Hut）。
  *
  * **为什么是「按语言的映射」而不是一个字符串**：站名会出现在 <title>、description、
- * JSON-LD、分享图上，而这些全都跟着语言走（中文用户看到「复古游戏屋 — 在浏览器里…」，
+ * JSON-LD、分享图上，而这些全都跟着语言走（中文用户看到「游戏小屋 — 在浏览器里…」，
  * 英文用户该看到英文写法，不能是一串汉字）。
  *
  * **为什么不写成下面文案表里的一个键**（`meta.siteName`）：分享图那支
@@ -41,13 +41,16 @@ export const LOCALE_COOKIE = 'nesload_locale';
  * 唯一的源在这里：别在标题 / description 里手写站名，用 `{site}` 占位
  * （见下面 meta.title / seo.intro，translate() 会把它替换掉）—— 改名才只改一处。
  *
+ * ⚠️ **改 `en` 会牵动分享图**：lib/og-image.tsx 里站名那行的字号是按**字符数量**量过的
+ * （名字长短直接决定字号），改完记得回去核一遍，那边注释写了算法。
+ *
  * ⚠️ 这是**对外的展示名**。仓库名 / npm 包名（package.json 的 `nesload`）、
  * localStorage 与 IndexedDB 的键前缀（`nesload:*`、`nesload_locale`）、
  * 联机的 APP_ID（lib/netplay.ts）都**不是**它，改这些会让老用户的数据和联机房间全部失联。
  */
 export const SITE_NAME: Record<Locale, string> = {
-  zh: '复古游戏屋',
-  en: 'Retro Game House',
+  zh: '游戏小屋',
+  en: 'Game Hut',
 };
 
 /** 英文是基准表，中文必须逐键对齐（漏键会在编译期报错）。 */
@@ -109,6 +112,13 @@ const en = {
   'seo.howTo':
     'Pick a game from the online library, or drop your own ROM file onto the television. Nothing to install.',
 
+  /*
+   * 窄窗口下顶在房间前面那块提示。**标题和正文分开两个键** ——
+   * 标题走 font-pixel（一行短标签），正文走系统字体 12px（一句要读的话）。
+   * 标题原先硬编码成 'DESKTOP ONLY'，2026-10-12 收进文案表：它下面那句正文本来就是
+   * 翻译过的，中英混着摆看着像漏翻（中文同样靠字体回退显示，见 screen.* 那段注释）。
+   */
+  'notice.desktopOnlyTitle': 'DESKTOP ONLY',
   'notice.desktopOnly':
     'This room is desktop-only. Widen your browser window to at least 900px.',
 
@@ -123,17 +133,56 @@ const en = {
    */
   'simple.enter': 'Simple mode: keep only the wall, TV, desk and floor',
   'simple.exit': 'Exit simple mode',
+  /*
+   * 电视机大小。右侧那排里那颗钮**点开是个选择器**（大 / 中 / 小，横排弹在钮的左边），
+   * 当前那一档在 CSS 里高亮（见 globals.css 的 `.tv-size-seg`），所以这里只有：
+   * 钮自己的名字、三个选项的名字、以及选项读屏时那句完整的话。
+   */
+  'tvSize.open': 'TV size',
+  'tvSize.opt.large': 'Large',
+  'tvSize.opt.medium': 'Medium',
+  'tvSize.opt.small': 'Small',
+  'tvSize.pick': 'Set the TV size to {level}',
   'locale.toZh': '切换到中文',
   'locale.toEn': 'Switch to English',
   'fullscreen.enter': 'Fullscreen the game screen',
   'fullscreen.exit': 'Exit fullscreen',
 
   /*
-   * 屏幕里那条提示的**无障碍名字**。屏幕上显示的是英文像素字（font-pixel 没有汉字，
-   * 见 RetroTv），但读屏软件念出来的应该是用户当前的语言，所以这两条留在文案表里。
+   * 屏幕里那块提示的**无障碍名字**（整块屏幕就是按钮，点它 = 选 ROM 文件）。
    */
   'screen.pick': 'Click to choose a ROM file, or drop one here',
   'screen.srLabel': 'Choose a ROM file to run',
+
+  /*
+   * 屏幕里那几句提示的**可见文字**。
+   *
+   * **2026-10-12 起进文案表了**。之前只有英文、不进表，理由是 `font-pixel`
+   * （Press Start 2P）没有汉字字形 —— 现在中文靠**字体回退**显示（落到系统自带的
+   * 中文字体上，Windows 通常是新宋体；和机身面板那排「暂停 / 存档 / 读档 / 重载 / 弹出」
+   * 同一个路子，那排本来就是系统字体）。英文那几句的**大写和字面一个字都没动**，
+   * 所以 en 用户看到的还是原来那几句。
+   *
+   * 中文刻意压到最短：屏幕就 720×540，字越大越糊；10px 是这套界面上中文的下限
+   * （再小笔画就黏在一起了，见 RetroTv 里那几处的字号注释）。
+   * 全大写是**英文那一侧的排版风格**，中文不跟（汉字没有大小写）。
+   */
+  'screen.dragDrop': 'DRAG & DROP A ROM',
+  'screen.orClick': 'OR CLICK TO CHOOSE A FILE',
+  'screen.orLibrary': 'OR LAUNCH FROM LIBRARY',
+  'screen.release': 'RELEASE TO LOAD',
+  /*
+   * 移动端的待机提示（2026-10-12）。移动端**只能从在线游戏库载入** ——
+   * 手机上没有拖拽、也没有「选本地文件」那条路（点屏幕 = 打开游戏库），
+   * 所以桌面那三行（拖 / 点 / 库）换成这两行，措辞也不再提文件。
+   * 两行 + 光标，结构和桌面那套一一对应（主提示 `.screen-hint-sm`，副提示 `.screen-hint-xs`）。
+   */
+  'screen.mobileLibrary': 'LAUNCH FROM LIBRARY',
+  'screen.mobileTap': 'TAP THE SCREEN TO OPEN THE LIBRARY',
+  'screen.waitingHost': 'WAITING FOR HOST',
+  'screen.paused': 'PAUSED',
+  'screen.resumeOnPanel': 'PRESS RESUME ON THE PANEL',
+  'screen.waitHostResume': 'WAITING FOR HOST TO RESUME',
 
   'panel.resume': 'Resume',
   'panel.pause': 'Pause',
@@ -221,12 +270,54 @@ const en = {
     'The host runs the emulator and the stream on one machine. If it cannot keep up, the whole game slows down (slow motion). Drop a level if that happens — this only applies on the host.',
   'netplay.copy': 'Copy',
   'netplay.copied': 'Copied',
+  /*
+   * 「分享」= 复制一条**带房间码的链接**（`?room=XXXX`），对方点开就能确认加入。
+   * 和上面那条「复制」的分工：那条复制的是**码**（4 个字符，念给对方听），
+   * 这条复制的是**整条链接**（发给对方点）。
+   */
+  'netplay.share': 'Share',
+  'netplay.shareCopied': 'Link copied',
+  /*
+   * 打开分享链接时先弹这个确认框，**不直接进房间** ——
+   * 光点一条链接就被塞进陌生人的房间太突然了，而且对方可能已经走了。
+   */
+  'netplay.inviteTitle': 'Room invite',
+  'netplay.inviteBody': 'Join room {code}?',
+  'netplay.inviteJoin': 'Join',
+  'netplay.inviteCancel': 'Cancel',
   'netplay.connected': 'Connected',
   'netplay.waiting': 'Waiting for the other player',
+  /*
+   * 加入者侧的「还没连上」——和上面那句是**两码事**。
+   * `waiting` 对房主是「房间开好了、等对方来」，对加入者却是「我正在连过去」。
+   * 给加入者看「等待对方加入」会让他误以为自己是房主（明明是他输码去投奔别人）。
+   * 所以按角色分开，文案由 NetplayPanel 现选（见 334 行附近那段）。
+   */
+  'netplay.joining': 'Joining the room…',
   'netplay.waitingGame': 'Connected — waiting for the host to load a cartridge',
   'netplay.hostPlaying': 'Host is playing',
   /** 房主按了暂停 —— 挂在游戏名后面的小标（屏幕里那层 PAUSED 说的是同一件事） */
   'netplay.paused': 'Paused',
+  /*
+   * 刚连上那枚几秒后自己消失的提示。**分两句**：房主等的是「对方进来了」，
+   * 加入者等的是「连上房主了」，两边的关注点不是一件事。
+   *
+   * 它同时是「你是谁」的第一句话 —— 面板在连上的瞬间就被自动收掉了，
+   * 那一刻屏幕上没有别处写着这件事。和下面两句同一个理由：**不列键位**。
+   */
+  'netplay.toastHost': 'Connected · the other player is in · you are player 1',
+  'netplay.toastGuest': 'Connected to the host · you are player 2',
+  /*
+   * 对方离开那两枚提示。和上面「刚连上」共用同一条提示通道（`netplayToast`），
+   * 只是**颜色换成警示**（见 ConsoleScene 那段注释）。
+   *
+   * 分开写是因为两边的处境完全不同：房主是「人走了、房间还开着」（可以干等对方回来），
+   * 加入者是「房主走了、房间已经没了」（手里的码再也招不到人，得重新要一个）。
+   * 后一句和 `netplay.errHostLeft` 说的是同一件事，但那句只在联机面板里出现，
+   * 而面板在连上的瞬间就被自动收掉了 —— 所以离开时也得各有一枚浮出来的提示。
+   */
+  'netplay.toastHostLeft': 'The host left — the room is closed',
+  'netplay.toastGuestLeft': 'Player 2 left the room',
   /*
    * 这两句**刻意不列键位**。原先各写了一段「默认键位：…」，用户改过键位之后它就开始
    * 说假话（`playerLegend()` 那段注释记过同一个坑）。键位只由实时值生成，在「Controls」
@@ -246,6 +337,8 @@ const en = {
   'netplay.errHandshake': 'Handshake timed out — the other player may have left.',
   /* 加入者专用：房主退出了，房间已经被我们主动销毁 */
   'netplay.errHostLeft': 'The host left the room — it has been closed.',
+  /* 加入者专用：房间已经有一对在玩了。本站只支持 1 对 1，第三个人会被房主请出去 */
+  'netplay.errRoomFull': 'That room is already full — this game is one-on-one only.',
   'netplay.errUnknown':
     'Could not connect to the other player. The browser console has the exact reason.',
 
@@ -285,23 +378,32 @@ const en = {
 
   /*
    * 在线游戏库（服务端上传的那批游戏）。和本机历史是两回事：
-   * 历史是这台机器上载入过的（`library.*`），这里是 R2 + D1 里的公共库。
+   * 历史只记「这台机器从游戏库点开过哪几盘」（`library.*`，纯字符串记录），
+   * 这里是 R2 + D1 里的公共库、全部游戏都在。
    */
   'games.open': 'Game library',
   'games.title': 'Game library',
   'games.close': 'Close',
   'games.empty': 'The library is empty — nothing has been uploaded yet',
   'games.loading': 'Loading…',
+  /*
+   * 从在线库载入一盘时，面板底部那条状态栏。
+   * 带游戏名 —— 面板里同时有十几张封面，只说「载入中」还得让人自己找是哪一张。
+   */
+  'games.loadingRom': 'Loading {name}…',
+  /* 上面那条状态栏右边的取消钮。只覆盖 ROM 整包下载这一段，见 ConsoleScene 的注释。 */
+  'games.cancel': 'Cancel',
   'games.failed': 'Could not load the game library',
   /*
-   * 弹窗里的两个 tab：「游戏库」是在线库，「历史」是本机载入过的卡带 ——
-   * 就是这台机器上载入过的那批（上限 10 盘）。两者刻意分开：在线库是公共的，
-   * 历史只属于这台机器，混在一起会分不清哪盘是自己拖进来的。
+   * 弹窗里的两个 tab：「游戏库」是在线库，「历史」是**从游戏库点开过的那批** ——
+   * 上限 10 盘，只存名字 / 封面地址 / 下载地址（2026-10-12 改造，见 lib/library.ts）。
+   * 两者刻意分开：在线库是公共的、全部游戏都在，历史只是「我最近点过哪几盘」。
+   * 自己拖进来的本地文件**不进历史** —— 它没有可重新下载的地址，存了也点不动。
    */
   'games.tabLibrary': 'Game library',
   'games.tabHistory': 'History',
-  'games.historyEmpty': 'Nothing loaded yet — cartridges you load will show up here',
-  'games.historyLoad': '{name}\nClick to load',
+  'games.historyEmpty': 'Nothing opened from the library yet',
+  'games.historyLoad': '{name}\nClick to load again',
   /*
    * 在线库列表上那排筛选：机种 + 搜索。两者都只在**已经拉回来的那份列表**上过滤
    * （客户端过滤，不再打接口）。「全部」那一档和 NES / SFC / ARC 并排，
@@ -311,6 +413,15 @@ const en = {
   'games.searchPlaceholder': 'Search title / developer / series',
   'games.search': 'Search',
   'games.noMatch': 'No matching games.',
+  /*
+   * 列表下方的翻页条。和后台 `admin.prev` / `admin.next` 同一套写法
+   * （只有上一页 / 下一页 + `第几页 / 共几页`，没有跳页和页码按钮组）。
+   *
+   * 页码本身是纯数字，不进文案表 —— 和后台一样直接写 `{n} / {m}`。
+   * 走系统字体：按钮上是词，不是丝印。
+   */
+  'games.prev': 'Prev',
+  'games.next': 'Next',
   /*
    * 在线库的加载速度提示。**刻意只有中文版**（英文是空串，组件那边按「空串不渲染」处理）：
    * 那句话是说给国内用户听的 —— 文件存在境外，慢是常态。英文界面下读者多半就在境外，
@@ -328,6 +439,16 @@ const en = {
   'note.title': 'A note',
   'note.close': 'Close',
   'window.cycle': 'Change the season outside',
+  /*
+   * 地板上那台 MP4。整台机器就是一个 <button>（点一下播放 / 暂停），
+   * 所以这两条是它的**无障碍名字**，和吊灯那两条同一写法 —— 描述「点下去会发生什么」。
+   *
+   * 刻意**不写歌名**：名字进了 aria-label 就得跟着语言走，而歌名是个专有名词，
+   * 翻译反而更糊涂；而且曲目是使用者自己放进 `public/audio/` 的，写死一个名字
+   * 在他换成别的歌之后就成了假话。说的是「这台机器」，不是「这首歌」。
+   */
+  'mp4.play': 'Play a song on the MP4 player',
+  'mp4.pause': 'Pause the MP4 player',
 
   /*
    * 地上那本留言本（点开是留言列表 + 提交框）。
@@ -353,6 +474,24 @@ const en = {
   'feedback.unresolved': 'Open',
 
   /*
+   * 隐私政策 / 服务条款（2026-10-12 加）。**正文不在这张表里**，在 lib/legal.ts ——
+   * 那两页是长文档、结构化存储，理由见那边的顶部注释。这里只有**房间界面**要用的几个词：
+   * 右侧竖排那颗钮的名字，以及它左边弹层里的两条链接。
+   *
+   * `legal.open` 是那颗钮的 title / aria（描述它点开什么）；
+   * `legal.privacy` / `legal.terms` 既是弹层里那两条链接的文字，也是两页自己的标题
+   * （和留言本那颗钮借 `feedback.title` 同一个路子：它就是最准的说法，没必要另起一个键）。
+   */
+  'legal.open': 'Privacy & Terms',
+  'legal.privacy': 'Privacy Policy',
+  'legal.terms': 'Terms of Service',
+  /* 两页顶部那行「最后更新」。日期由页面按语言格式化后传进来 */
+  'legal.updated': 'Last updated {date}',
+  'legal.back': 'Back to the game room',
+  /* 页脚那个小标题，后面跟着邮箱 */
+  'legal.contact': 'Contact us:',
+
+  /*
    * 初次打开的操作指引（两步）。指向屏幕和右侧那排开关 —— 靠 `data-tour` 属性找元素，
    * 见 components/OnboardingTour.tsx。是给人读的说明，所以走系统字体、中英两版。
    *
@@ -370,7 +509,7 @@ const en = {
     'Drag a .nes / .sfc / arcade .zip file onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
   'tour.rail.title': 'The switch rail',
   'tour.rail.body':
-    'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor). Games: Library (online games and this machine’s history), Netplay, Key bindings. Help: Controls help, and the Guestbook.',
+    'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Library (online games and this machine’s history), Netplay, Key bindings. Help: Controls help, and the Guestbook.',
 
   /* 后台（登录 + 录入），独立于房间界面。 */
   'admin.title': 'Admin',
@@ -444,6 +583,7 @@ const zh: Record<MessageKey, string> = {
     '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）和街机游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
   'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
 
+  'notice.desktopOnlyTitle': '仅限桌面端',
   'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 900px 以上。',
 
   'theme.toDark': '切换到夜晚模式',
@@ -452,6 +592,12 @@ const zh: Record<MessageKey, string> = {
   'lamp.turnOff': '关灯',
   'simple.enter': '简洁模式：只保留背景墙、电视机、桌子和地面',
   'simple.exit': '退出简洁模式',
+  /* 电视机大小，见上面英文那份的注释（点开是 大 / 中 / 小 三档的选择器） */
+  'tvSize.open': '电视机大小',
+  'tvSize.opt.large': '大',
+  'tvSize.opt.medium': '中',
+  'tvSize.opt.small': '小',
+  'tvSize.pick': '把电视机大小设为「{level}」',
   'locale.toZh': '切换到中文',
   'locale.toEn': '切换到英文',
   'fullscreen.enter': '游戏画面全屏',
@@ -459,6 +605,19 @@ const zh: Record<MessageKey, string> = {
 
   'screen.pick': '点击选择 ROM 文件，或把文件拖到这里',
   'screen.srLabel': '选择要运行的 ROM 文件',
+
+  /* 屏幕里那几句提示的可见文字（英文那侧全大写，中文不跟） */
+  'screen.dragDrop': '把 ROM 拖进来',
+  'screen.orClick': '或点屏幕选择文件',
+  'screen.orLibrary': '或从游戏库启动',
+  'screen.release': '松手载入',
+  /* 移动端的待机提示 —— 移动端只能从在线游戏库载入，见 en 那边同一段的注释 */
+  'screen.mobileLibrary': '从游戏库载入游戏',
+  'screen.mobileTap': '点屏幕打开游戏库',
+  'screen.waitingHost': '等待房主画面',
+  'screen.paused': '已暂停',
+  'screen.resumeOnPanel': '按机身面板的继续键',
+  'screen.waitHostResume': '等待房主继续',
 
   'panel.resume': '继续',
   'panel.pause': '暂停',
@@ -510,12 +669,28 @@ const zh: Record<MessageKey, string> = {
     '出画质量会影响流畅度,建议使用均衡档。',
   'netplay.copy': '复制',
   'netplay.copied': '已复制',
+  /* 「分享」= 复制带房间码的链接，见英文表里同一条上面的说明 */
+  'netplay.share': '分享',
+  'netplay.shareCopied': '链接已复制',
+  /* 打开分享链接时的确认框 */
+  'netplay.inviteTitle': '房间邀请',
+  'netplay.inviteBody': '加入房间 {code}？',
+  'netplay.inviteJoin': '加入',
+  'netplay.inviteCancel': '取消',
   'netplay.connected': '已连接',
   'netplay.waiting': '等待对方加入',
+  // 加入者侧的「还没连上」是另一回事（我正在连过去），理由同英文版
+  'netplay.joining': '正在加入房间…',
   'netplay.waitingGame': '已连接，等房主插上卡带',
   'netplay.hostPlaying': '房主正在玩',
   /** 房主按了暂停 —— 挂在游戏名后面的小标（屏幕里那层 PAUSED 说的是同一件事） */
   'netplay.paused': '已暂停',
+  // 和英文版同一个理由：分两句说（房主等的和加入者等的不是一件事）、都不列键位
+  'netplay.toastHost': '已连上 · 对方进来了 · 你是 1P',
+  'netplay.toastGuest': '已连上房主 · 你是 2P',
+  // 对方离开那两枚提示，理由同英文版：房主「人走了房间还在」、加入者「房主走了房间没了」，两码事
+  'netplay.toastHostLeft': '房主已离开 · 房间已关闭',
+  'netplay.toastGuestLeft': '玩家二已离开房间',
   // 和英文版同一个理由：这里不列键位，改过键位之后那段清单就会说假话
   'netplay.youAreHost':
     '你是 1P。插上卡带后画面会自动推给对方。键位就是你自己的那套，当前值见「按键说明」。',
@@ -530,6 +705,8 @@ const zh: Record<MessageKey, string> = {
   'netplay.errPassword': '房间码对不上。',
   'netplay.errHandshake': '握手超时，对方可能已经离开了。',
   'netplay.errHostLeft': '房主已离开房间，房间已关闭。',
+  // 加入者专用：房间已有一对在玩（本站只支持 1 对 1，第三个人会被房主请出去）
+  'netplay.errRoomFull': '房间已满，本游戏只支持 1 对 1。',
   'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
 
   'keybind.title': '自定义按键',
@@ -560,15 +737,21 @@ const zh: Record<MessageKey, string> = {
   'games.close': '关闭',
   'games.empty': '游戏库还是空的 —— 还没有上传过游戏',
   'games.loading': '载入中…',
+  /* 载入某盘游戏时面板底部那条状态栏，见英文表里同一条上面的说明 */
+  'games.loadingRom': '正在载入 {name}…',
+  'games.cancel': '取消',
   'games.failed': '游戏库读取失败',
   'games.tabLibrary': '游戏库',
   'games.tabHistory': '历史',
-  'games.historyEmpty': '还没有载入过卡带 —— 载入过的会出现在这里',
-  'games.historyLoad': '{name}\n点击载入',
+  'games.historyEmpty': '还没有从游戏库载入过游戏',
+  'games.historyLoad': '{name}\n点击重新载入',
   'games.filterAll': '全部',
   'games.searchPlaceholder': '搜索标题 / 开发者 / 系列',
   'games.search': '搜索',
   'games.noMatch': '没有匹配的游戏。',
+  /* 翻页条，见英文表里同一条上面的说明 */
+  'games.prev': '上一页',
+  'games.next': '下一页',
   /* 只有中文版，英文那份是空串 —— 见英文表里同一条上面的说明 */
   'games.remoteSlow':
     '提示：在线游戏库的文件存放在境外服务器，载入可能偏慢。',
@@ -578,6 +761,9 @@ const zh: Record<MessageKey, string> = {
   'note.title': '一张纸',
   'note.close': '关闭',
   'window.cycle': '换一换窗外的季节',
+  /* 地板上那台 MP4，见上面英文那份的注释（整台机器是一个按钮，这里只有它的名字） */
+  'mp4.play': '在 MP4 上放首歌',
+  'mp4.pause': '暂停 MP4',
 
   'feedback.open': '翻一翻地上那本留言本',
   'feedback.title': '留言本',
@@ -597,6 +783,14 @@ const zh: Record<MessageKey, string> = {
   'feedback.resolved': '已解决',
   'feedback.unresolved': '未解决',
 
+  /* 隐私政策 / 服务条款，正文在 lib/legal.ts（见英文表里那一组上面的注释） */
+  'legal.open': '隐私与服务条款',
+  'legal.privacy': '隐私政策',
+  'legal.terms': '服务条款',
+  'legal.updated': '最后更新 {date}',
+  'legal.back': '返回游戏屋',
+  'legal.contact': '联系我们：',
+
   'tour.title': '操作指引',
   'tour.skip': '跳过',
   'tour.back': '上一步',
@@ -608,7 +802,7 @@ const zh: Record<MessageKey, string> = {
     '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
   'tour.rail.body':
-    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）。游戏：游戏库（在线库 + 本机历史）、联机、自定义按键。帮助：按键说明、留言本。',
+    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：游戏库（在线库 + 本机历史）、联机、自定义按键。帮助：按键说明、留言本。',
 
   'admin.title': '后台',
   'admin.login.title': '后台登录',
@@ -704,7 +898,7 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
 /**
  * 存档列表 / 游戏库历史里那种「2026/10/08 16:21」的时间戳。
  *
- * 带上年份是为了跨年之后还能分清 —— 存档只有 5 份、历史最多 10 盘，最旧的那份可能放很久。
+ * 带上年份是为了跨年之后还能分清 —— 存档只有 5 份、历史最多 10 条，最旧的那条可能放很久。
  * 放在这里是因为它**跟着语言走**（zh-CN 与 en-US 的日期写法不同），而存档面板和游戏库
  * 历史都要用；两处各写一份迟早会漂成两种格式。
  */

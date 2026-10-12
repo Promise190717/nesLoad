@@ -19,7 +19,7 @@ import { SITE_NAME } from './i18n';
  *
  * **2. 图上一律英文。** 和屏幕提示同一个原因：默认字体没有汉字，中文会渲染成豆腐块。
  *    alt 文本倒是跟着语言走（在 layout 的 metadata 里给的），读屏用户不吃这个亏。
- *    站名也因此取 `SITE_NAME.en`（「复古游戏屋」写成 Retro Game House）——
+ *    站名也因此取 `SITE_NAME.en`（「游戏小屋」写成 Game Hut）——
  *    中文名直接画上去就是一排方框。
  *
  * **3. 尺寸写死 1200×630。** 这是 Facebook / X / LinkedIn / Slack 的共同推荐尺寸（1.91:1），
@@ -131,15 +131,21 @@ export function renderOgImage(): ImageResponse {
 
             {/*
               站名。letterSpacing 拉得很开是「电子感」的主要来源。
-              字号 76 是量出来的：屏幕内宽约 852px，而 "Retro Game House" 有 16 个字符，
-              按默认字体的平均字宽（约 0.52em）加上 4px 字距，
-              再大就会顶破机身边框 —— 站名一旦变长（或改成别家名字）记得回来核一下。
+              字号 104 是量出来的 —— 而且**这回的瓶颈在纵向，不在横向**：
+              屏幕里从上面那行 eyebrow（20px）到最下面那行副标题（20px）高度都是死的，
+              中间留给站名这一块的只有百来像素；lineHeight 是 1，所以
+              fontSize + marginBottom(22) 顶到那儿就溢出去了，104 还留着余量。
+              横向反倒很松 —— 「Game Hut」只有 8 个字符，占不到屏幕净宽的一半。
+
+              历史：上一个名字 "Retro Game House" 有 16 个字符，**横向**才是瓶颈，那时定的
+              是 76。所以「字号跟名字长度绑着」这件事在两个方向上都成立，
+              **下次改名（尤其是改长）记得把宽、高两头都核一遍**。
             */}
             <div
               style={{
                 display: 'flex',
                 color: '#ffffff',
-                fontSize: 76,
+                fontSize: 104,
                 fontWeight: 700,
                 letterSpacing: 4,
                 lineHeight: 1,

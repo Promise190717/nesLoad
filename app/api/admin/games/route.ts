@@ -3,7 +3,7 @@
  *
  * POST：multipart/form-data 收「图片 + ROM + 元数据」，先把两个文件传到 R2，
  *       成功后再写 D1（顺序很重要：反过来会出现有记录却没文件的坏数据）。
- * GET ：给后台管理页拉已上传的游戏列表。
+ * GET ：给后台管理页拉**一页**游戏列表，见下面 GET 的注释。
  *
  * 鉴权由本文件的 assertAdmin 自查（接口不挂 middleware，原因见 admin-guard.ts）。
  */
@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { insertGame, listGames } from '@/lib/server/games';
+import { insertGame, listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
@@ -45,12 +45,32 @@ function asFile(value: FormDataEntryValue | null): File | null {
   return value instanceof File && value.size > 0 ? value : null;
 }
 
-export async function GET() {
+/** 从查询串里取一个非负整数，去掉小数与负号（别让 -1 / NaN 传到 SQL 里）。 */
+function intParam(value: string | null, fallback: number): number {
+  if (value === null) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/**
+ * 分页返回列表。
+ *
+ * 参数：`offset`（跳过几条）、`limit`（本页条数，默认 10）、`q`（可选关键词）。
+ *
+ * 搜索做在服务端：以前是全量拉回来在浏览器里 filter，一旦改成按页取数，本地 filter
+ * 就只能筛当页那几条 —— 翻页会换一批结果，等于没搜。所以关键词随查询一起下发。
+ */
+export async function GET(request: Request) {
   const denied = await assertAdmin();
   if (denied) return denied;
 
+  const params = new URL(request.url).searchParams;
+  const offset = intParam(params.get('offset'), 0);
+  const limit = Math.min(intParam(params.get('limit'), 10) || 10, MAX_PAGE_SIZE);
+  const keyword = params.get('q')?.trim() ?? '';
+
   try {
-    return NextResponse.json({ games: await listGames() });
+    return NextResponse.json(await listGamesPage(offset, limit, { keyword }));
   } catch (error) {
     console.error('[admin] 列表读取失败', error);
     return fail('list-failed', (error as Error).message, 500);

@@ -34,10 +34,20 @@ import type { ConsoleType } from './emulator';
  * 去掉 I L O 是因为和 1 0 太像，去掉 U 是为了避免和 V 混淆时拼出脏话。
  */
 const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const CODE_LENGTH = 4;
+export const CODE_LENGTH = 4;
 
 /** 输入时常见的看错：把 0 打成 O、1 打成 I/L、V 打成 U。归一回去而不是直接报错。 */
 const CONFUSABLE: Record<string, string> = { O: '0', I: '1', L: '1', U: 'V' };
+
+/**
+ * 分享链接里那个 query 参数名：`?room=XXXX`。
+ *
+ * 房间码本来是**带外传递**的（见文件头那段：没有房间列表，得有人念给你听），
+ * 这个参数是那条通道的延伸 —— 让整条链接可以直接发出去。
+ * **写的一方（NetplayPanel 拼链接）和读的一方（ConsoleScene 解析链接）共用这一个常量**，
+ * 别在两边各写一遍 `'room'`，改的时候必然漏一个。
+ */
+export const ROOM_QUERY_PARAM = 'room';
 
 /**
  * 同一张「网」的标识。两端 appId 一致才能互相发现 —— 改它等于换一张网，
@@ -232,6 +242,8 @@ export type NetplayError =
   | 'handshake'
   /** 加入者专用：房主退出了房间（房间已被本机主动销毁，不是「暂时掉线」） */
   | 'host-left'
+  /** 加入者专用：房间已经有一对在玩了（1 对 1，第三个来的人被房主请出去） */
+  | 'room-full'
   /** 其他，原文见 console */
   | 'join-failed';
 
@@ -250,6 +262,21 @@ function classifyJoinError(raw: string): NetplayError {
 export interface RemoteGame {
   name: string;
   console: ConsoleType;
+}
+
+/**
+ * 把会话消息里的 `c` 字段还原成机种。
+ *
+ * 必须**逐个认**，不能像原先那样只分 snes / 其余一律 nes：机种现在有三个
+ * （nes / snes / arcade），而移动端掌机的面键是**按机种长**的（NES 两颗、SFC 四颗、
+ * 街机六颗 —— 见 HandheldConsole 的 FACE_ROWS）。街机被误判成 nes 的话，
+ * 加入者手上只有两颗面键，拳皇那种六键游戏直接没法玩。
+ *
+ * 认不出（老版本客户端不发 `c`、或者发了脏值）一律落到 `nes`：它是**按钮最少**的那套，
+ * 少给一颗最多是不方便，多给一颗会让人以为按了没反应。
+ */
+function readConsole(raw: unknown): ConsoleType {
+  return raw === 'snes' || raw === 'arcade' ? raw : 'nes';
 }
 
 export interface NetplayState {
@@ -329,6 +356,22 @@ type SessionMessage = {
   z?: 0 | 1;
 };
 
+/**
+ * 控制指令：房主对**某一个** peer 说的话，和游戏数据无关。
+ *
+ * 目前只有一种 —— `full`：房间已经有一对了，房主把第三个来的人请出去。
+ * 本站是严格的 1 对 1（玩家位只有两个、输入注入靠键位表反查，见文件顶部的说明），
+ * 所以**不能**像 Trystero 那样放任多人进来（传输层支持多人，是我们自己不支持）。
+ * 为什么不当场就把人踢掉：房主没有「踢人」的 API，能做的只是告诉对方「满了」，
+ * 由**对方自己** `leave()` —— 这也是唯一干净的做法（否则那个 peer 会一直挂在房间里，
+ * `getPeers()` 里多一条、`heldButtons` 那本账也会串）。
+ *
+ * 和 ButtonMessage / SessionMessage 一样必须是 `type`（隐式索引签名，见上）。
+ */
+type ControlMessage = {
+  t: 'full';
+};
+
 /** 空状态。界面拿它做初值，控制器也拿它做复位。 */
 export const IDLE_NETPLAY_STATE: NetplayState = {
   status: 'idle',
@@ -402,6 +445,7 @@ export class NetplayController {
   private room: Room | null = null;
   private buttonAction: MessageAction<ButtonMessage> | null = null;
   private sessionAction: MessageAction<SessionMessage> | null = null;
+  private controlAction: MessageAction<ControlMessage> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private state: NetplayState = IDLE_NETPLAY_STATE;
   /**
@@ -476,6 +520,7 @@ export class NetplayController {
     this.room = null;
     this.buttonAction = null;
     this.sessionAction = null;
+    this.controlAction = null;
     this.localGame = null;
     this.localPaused = false;
 
@@ -652,6 +697,7 @@ export class NetplayController {
     this.room = room;
     this.buttonAction = room.makeAction<ButtonMessage>('b');
     this.sessionAction = room.makeAction<SessionMessage>('s');
+    this.controlAction = room.makeAction<ControlMessage>('c');
 
     this.buttonAction.onMessage = (data) => {
       // 对面可能发了脏数据（版本不一致），字段不对就当没收到
@@ -672,7 +718,7 @@ export class NetplayController {
       const playing = data.p === 1;
       const game: RemoteGame | null =
         playing && typeof data.n === 'string'
-          ? { name: data.n, console: data.c === 'snes' ? 'snes' : 'nes' }
+          ? { name: data.n, console: readConsole(data.c) }
           : null;
 
       this.state = {
@@ -691,6 +737,21 @@ export class NetplayController {
       if (!playing) this.callbacks.onRemoteStream(null);
     };
 
+    this.controlAction.onMessage = (data) => {
+      /*
+       * 房主说「房间满了」。只有加入者会收到这一条（房主自己不发给自己）。
+       *
+       * 必须**由加入者自己**退出房间：房主没有踢人的 API，而且此时房间还没被
+       * 正式认领（下面的 onPeerJoin 会把这个 peer 晾着不动），对方不走的话
+       * 会一直挂在 `getPeers()` 里。退完再报 `room-full`，界面据此提示。
+       *
+       * 顺序和 `host-left` 那边同一个道理：`leave()` 先同步把 state 清空、
+       * `.then` 里的 `fail()` 再挂原因码，所以不会被覆盖。
+       */
+      if (data?.t !== 'full') return;
+      void this.leave().then(() => this.fail('room-full'));
+    };
+
     // 房主推来的画面。注意这里**不**直接决定「屏幕显示什么」——
     // 那是 remotePlaying 说了算（见 SessionMessage 的注释）。
     room.onPeerStream = (stream) => {
@@ -698,6 +759,22 @@ export class NetplayController {
     };
 
     room.onPeerJoin = (peerId) => {
+      /*
+       * 房间已满 —— 我们是严格的 1 对 1，第三个来的人必须请出去。
+       *
+       * `peerId` 是单值槽（房间状态只存一个 peer），要是不拦，后来者会**顶掉**
+       * 前一个 —— 房主屏幕开始收新人的输入、旧人却还以为自己连着。传输层
+       * （Trystero）本来就允许一个房间挂多个 peer，所以这里得我们自己把关。
+       *
+       * 做法：**只发一句「满了」，然后什么都不做** —— 不认领这个 peer、不记它的 id、
+       * 不补发画面/会话状态。对方收到后会自己 `leave()`（见 controlAction.onMessage），
+       * 于是这次 onPeerJoin 连带的 `onPeerLeave` 也不会影响台上那一对（因为压根没认领）。
+       */
+      if (this.state.peerId && this.state.peerId !== peerId) {
+        void this.controlAction?.send({ t: 'full' }, { target: peerId }).catch(() => undefined);
+        return;
+      }
+
       this.state = { ...this.state, status: 'connected', peerId, error: null };
       this.callbacks.onState(this.state);
       this.startPing(peerId);
@@ -714,7 +791,14 @@ export class NetplayController {
       this.sendSession();
     };
 
-    room.onPeerLeave = () => {
+    room.onPeerLeave = (peerId) => {
+      /*
+       * 走的是「被请出去的那个第三个人」—— 他从头到尾就没被认领过
+       * （`state.peerId` 不是他），这一整套收尾都不该跑，否则会把台上的房间
+       * 误当成「对方走了」给清掉。直接忽略。
+       */
+      if (this.state.peerId && peerId !== this.state.peerId) return;
+
       this.stopPing();
       // 对方可能是直接关的页面 —— 他欠的那些 keyup 永远不会到，得我们替他松开
       this.releaseHeld();

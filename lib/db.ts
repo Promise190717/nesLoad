@@ -14,8 +14,11 @@
 
 const DB_NAME = 'nesload';
 
-/** 版本 1 只有 cartridges；版本 2 加了 saves（存档槽）；版本 3 加了 bios（街机 BIOS）。 */
-const DB_VERSION = 3;
+/**
+ * 版本 1 只有 cartridges；版本 2 加了 saves（存档槽）；版本 3 加了 bios（街机 BIOS）；
+ * 版本 4 把 cartridges 从「存 ROM Blob」改成「只存字符串」（见 lib/library.ts）。
+ */
+const DB_VERSION = 4;
 
 export const STORE_CARTRIDGES = 'cartridges';
 export const STORE_SAVES = 'saves';
@@ -40,8 +43,21 @@ export function openDb(): Promise<IDBDatabase | null> {
       return;
     }
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      /*
+       * 版本 4 的迁移：卡带历史原先把 ROM 本体（Blob）整个存进来，现在只记
+       * 名字 / 封面地址 / 下载地址几个字符串（见 lib/library.ts）。
+       *
+       * 旧记录里躺着几 MB 的 Blob、键还是 `机种:大小:文件名`，跟新 schema 对不上，
+       * 所以**整个 store 删掉重建**，不做逐条搬运。历史是纯便利数据，丢了不影响
+       * 任何东西 —— 游戏本体在服务端，自己拖进来的文件用户手上也还有一份。
+       *
+       * 新库（oldVersion = 0）没有这个 store，下面那句 `contains` 会把它挡掉。
+       */
+      if (event.oldVersion < 4 && db.objectStoreNames.contains(STORE_CARTRIDGES)) {
+        db.deleteObjectStore(STORE_CARTRIDGES);
+      }
       // 只补缺的，不动已有的：从版本 1 升上来的库里 cartridges 还在，
       // 只是多一个 saves 而已。
       if (!db.objectStoreNames.contains(STORE_CARTRIDGES)) {

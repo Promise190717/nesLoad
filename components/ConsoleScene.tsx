@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   useCallback,
   useEffect,
@@ -9,6 +10,8 @@ import {
 } from 'react';
 import { getAudioTrack } from '@/lib/audio-tap';
 import { getBios, getBiosInfo, isNeoGeoBios, putBios, type BiosInfo } from '@/lib/bios';
+import { chiptuneUrl } from '@/lib/chiptune';
+import { readMobileFlag } from '@/lib/device';
 import {
   EmulatorController,
   VOLUME_MAX,
@@ -17,15 +20,19 @@ import {
   type ConsoleType,
   type LoadedRom,
 } from '@/lib/emulator';
-import { formatTime, type Locale } from '@/lib/i18n';
+import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import {
   captureFpsFor,
+  CODE_LENGTH,
   DEFAULT_STREAM_QUALITY,
   IDLE_NETPLAY_STATE,
   NetplayController,
   remotePlayer,
+  ROOM_QUERY_PARAM,
   type NetplayMode,
+  type NetplayRole,
   type NetplayState,
+  type NetplayStatus,
   type StreamQuality,
 } from '@/lib/netplay';
 import {
@@ -42,15 +49,18 @@ import {
   listCartridges,
   pruneCartridges,
   putCartridge,
-  readCartridge,
   removeCartridge,
   type Cartridge,
+  type RemoteRom,
 } from '@/lib/library';
 import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
 import { isSeason, nextSeason } from '@/lib/season';
+import { DEFAULT_TV_SIZE, isTvSize, TV_SIZES, type TvSize } from '@/lib/tv-size';
 import FeedbackPanel from './FeedbackPanel';
 import GameLibraryPanel, { type LibraryGame } from './GameLibraryPanel';
+import HandheldConsole from './HandheldConsole';
 import { useI18n } from './I18nProvider';
+import JoinRoomPrompt from './JoinRoomPrompt';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
 import OnboardingTour from './OnboardingTour';
@@ -65,15 +75,17 @@ import {
   RoomWindow,
 } from './RoomBackdrop';
 import {
+  BroomIcon,
   ExpandIcon,
   HelpIcon,
   KeyboardIcon,
-  LibraryIcon,
-  MinimalIcon,
   MoonIcon,
   NoteIcon,
   PlayersIcon,
+  ShieldIcon,
+  StoreIcon,
   SunIcon,
+  TvSizeIcon,
 } from './icons';
 
 const THEME_KEY = 'nesload:theme';
@@ -96,6 +108,23 @@ const LAMP_KEY = 'nesload:lamp';
  * <html data-simple>。真正藏东西的是 CSS，见 globals.css 里 `:root[data-simple='on']`。
  */
 const SIMPLE_KEY = 'nesload:simple';
+
+/**
+ * 电视机尺寸档位（`small` / `medium` / `large`）。首屏由 layout 的内联脚本读进
+ * `<html data-tv>`。真正定尺寸的是 CSS，见 globals.css 里那组 `--tv-*` 变量 ——
+ * 尺寸**不进 React**（内联 style 会顶掉全屏规则，完整理由见 lib/tv-size.ts 顶部注释）。
+ */
+const TV_KEY = 'nesload:tv';
+
+/**
+ * 档位 → 选择器里那一格的文案（大 / 中 / 小，英文是 Large / Medium / Small）。
+ * 显示顺序不在这里，在 `TV_SIZES`（lib/tv-size.ts）—— 那份是唯一出处。
+ */
+const TV_OPT_KEY: Record<TvSize, MessageKey> = {
+  large: 'tvSize.opt.large',
+  medium: 'tvSize.opt.medium',
+  small: 'tvSize.opt.small',
+};
 
 /**
  * 操作指引「看过了没有」的标记。
@@ -121,13 +150,33 @@ const QUALITY_KEY = 'nesload:netplay-quality';
 /** 等音频轨的最长尝试次数（每次 500ms，共 5 秒）—— 见下面的「声音迟到」注释 */
 const AUDIO_RETRY_LIMIT = 10;
 
+/**
+ * 联机连上那枚提示挂多久。
+ *
+ * 4 秒：中文那一句是 16 个字、英文更长一点，够读完；再长就开始碍事了
+ * （它飘在房间顶上，正对着吊灯）。比面板里「已复制」那枚（1.6s）
+ * 长得多，因为那句只是确认一个动作，这句要读完一整个状态。
+ */
+const NETPLAY_TOAST_MS = 4000;
+
+/**
+ * 「显像管关机」那一下挂多久（弹出卡带之后）。
+ *
+ * **必须 ≥ globals.css 里那两段动画的总时长**：画面压扁 0.24s，白线延后 0.2s 再走 0.22s，
+ * 合起来 0.42s。给早了会在白线还没收完时把 `crt-off-picture` 那个 class 摘掉 ——
+ * canvas 会立刻从「一条线」弹回整屏，动画的尾巴直接被切掉。多出来的那 20ms 是余量。
+ */
+const CRT_OFF_MS = 440;
+
 type Theme = 'dark' | 'light';
 
-/** 分段开关的两个选项。文案刻意用短标签：中文一个字、英文两个字母，宽度才对称。 */
-const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
-  { value: 'zh', label: '中' },
-  { value: 'en', label: 'EN' },
-];
+/**
+ * 语言钮上那个短标签。里面装的都是**短标签**（中文一个字、英文两个字母），
+ * 按钮才窄 —— 这一列是竖排的，长文案会把整排撑宽。
+ *
+ * 注意用它的时候取的是**另一种语言**（当前中文 → 露 EN），见下面那颗钮。
+ */
+const LOCALE_LABEL: Record<Locale, string> = { zh: '中', en: 'EN' };
 
 /**
  * 抓一条「画面 + 声音」的流，给联机时的加入者看。
@@ -158,7 +207,7 @@ function createCaptureStream(canvas: HTMLCanvasElement | null, fps: number): Med
  * 纯装饰，`aria-hidden`（分组信息对读屏没有意义，逐个按钮本来就能读）。
  */
 function RailDivider() {
-  return <span aria-hidden className="my-1.5 h-px w-7 bg-ink-600" />;
+  return <span aria-hidden className="rail-divider my-1.5 h-px w-7 bg-ink-600" />;
 }
 
 /**
@@ -206,6 +255,88 @@ async function readBodyWithProgress(
   return new Blob(chunks, { type: 'application/octet-stream' });
 }
 
+/**
+ * 这个错误是不是「用户主动取消」。
+ *
+ * 不写成 `error instanceof DOMException`：跨 realm（iframe / worker）或某些
+ * polyfill 下，abort 抛出来的会退化成普通 Error，继承关系靠不住，按 `name` 认最稳。
+ * 浏览器原生的 AbortError 本身就是这个名字（见 AbortController.abort()）。
+ */
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'AbortError'
+  );
+}
+
+/**
+ * 这个播放失败是不是**浏览器的自动播放策略**拦下的（而不是音源本身有问题）。
+ *
+ * 两种失败要分开处理：策略拦下时换什么音源都播不出来，而音源缺失时必须换。
+ * 同样按 `name` 认而不写 `instanceof DOMException`（理由见上面 isAbortError）。
+ * 点那台 MP4 本来就是一次用户手势，正常走不到这里 —— 留着是别让策略问题
+ * 被当成「文件不在」，白合成一段兜底音。
+ */
+function isAutoplayBlocked(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'NotAllowedError'
+  );
+}
+
+/**
+ * 把在线库的一条游戏转成「载入一盘远程 ROM」需要的那份字符串描述。
+ *
+ * 转换放在这儿而不是 `lib/library.ts` 里：那份描述（`RemoteRom`）是库层的类型，
+ * 而 `LibraryGame` 是 `/api/games` 的响应形状 —— 让 lib 反向依赖组件的类型不合适。
+ * 两边的字段名本来就不一样（`title` / `consoleType`），正好在这儿对齐一次。
+ *
+ * `romUrl` 在这儿拼出来（而不是让 `putCartridge` 自己拼）：历史记录里存的是**完整地址**，
+ * 点历史那一行直接照着它重新下一遍，不依赖 `id` 的拼法。
+ */
+function romFromGame(game: LibraryGame): RemoteRom {
+  return {
+    id: game.id,
+    name: game.title,
+    romUrl: `/api/games/${game.id}/rom`,
+    imageUrl: game.imageUrl,
+    romName: game.romName,
+    console: game.consoleType,
+  };
+}
+
+/**
+ * 从地址栏里抠出分享链接带进来的房间码（`?room=XXXX`），没有就返回 null。
+ *
+ * **不用 next/navigation 的 `useSearchParams`**：它要求调用方外面套一层 `<Suspense>`，
+ * 而这是根页面 —— 为读一个参数把整棵树包起来不划算。这个邀请也只在客户端有意义
+ * （SSR 那会儿压根没有地址栏），直接读 `location` 更省事。
+ *
+ * 校验只做「4 位字母数字」这一层：格式不对就当没有，别弹一个注定连不上的确认框。
+ * 大小写、以及 O/0、I/L/1 这些看错的字符都交给 `netplay.join` 归一化 —— 那边是唯一权威。
+ */
+function readInviteCode(): string | null {
+  const raw = new URLSearchParams(window.location.search).get(ROOM_QUERY_PARAM)?.trim() ?? '';
+  if (raw.length !== CODE_LENGTH || !/^[A-Za-z0-9]+$/.test(raw)) return null;
+  return raw.toUpperCase();
+}
+
+/**
+ * 把 `?room` 从地址栏抹掉（走 `replaceState`，不留历史记录）。
+ *
+ * 读到就抹：留着的话用户按 F5 会再弹一次确认框，从地址栏复制出去的链接也会带着
+ * 一个已经处理过的房间码。抹掉不影响分享链接本身 —— 那条还在对方手里，
+ * 他再点一次照样能进。
+ */
+function clearInviteCode() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(ROOM_QUERY_PARAM)) return;
+  url.searchParams.delete(ROOM_QUERY_PARAM);
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 export default function ConsoleScene() {
   const { t, locale, setLocale } = useI18n();
 
@@ -221,12 +352,41 @@ export default function ConsoleScene() {
    */
   const loadingRef = useRef(false);
 
+  /**
+   * 当前这盘 ROM 的文件本身 —— 「改完键位重载」直接拿它重新插一次。
+   *
+   * 2026-10-12 之前重载是回 IndexedDB 取 `readCartridge(activeId)` 的，那条路已经
+   * 不存在了：历史现在只存字符串（见 lib/library.ts），本机拖进来的文件更是从来没
+   * 有对应的记录。攥着文件本体是唯一还能覆盖**两种来源**的办法。
+   *
+   * 代价是这盘文件（大到几十 MB 的街机 romset）在整局游戏期间不会被回收。可接受：
+   * 这块 Blob 在下完那一刻本来就已经在内存里了（`new File([blob], …)`），
+   * 浏览器对大 Blob 也多半是落到磁盘上；换来的是重载不必再下一遍、也不必联网。
+   */
+  const lastRomRef = useRef<File | null>(null);
+
   // 用 state 的惰性初始化持有实例：只会创建一次，
   // 同时避免在渲染期间读写 ref（react-hooks/refs 规则禁止）
   const [controller] = useState(() => new EmulatorController());
 
   const [rom, setRom] = useState<LoadedRom | null>(null);
   const [paused, setPaused] = useState(false);
+
+  /**
+   * 「显像管关机」那一下正在放（弹出卡带之后的约 0.4 秒）。
+   *
+   * 屏幕收缩的动画**整个交给 CSS**（`.crt-off-picture` / `.crt-off-line`），
+   * 这里只负责「什么时候挂上、什么时候摘掉」——和主题过渡那套
+   * （`theme-fading` + 定时器）是同一个做法。
+   *
+   * 为什么不从 `rom` 变 null 反推：清空 `rom` 的路不止一条 —— 从游戏库载入失败
+   * 也会走（见 loadFile 的 catch），那不是「关机」；加入者被自动弹卡带时屏幕马上
+   * 就有房主的画面，更不该闪这一下。所以由 `eject` **明确点亮**。
+   */
+  const [crtOff, setCrtOff] = useState(false);
+  /** 上面那 440ms 的定时器。用 ref 不用 state —— 它跟渲染没有任何关系。 */
+  const crtOffTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [busy, setBusy] = useState(false);
   /*
    * 正在插卡带。`ratio` 是核心包的下载进度（0..1），null 表示「拿不到字节数」——
@@ -267,6 +427,36 @@ export default function ConsoleScene() {
 
   const [fileOver, setFileOver] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+
+  /**
+   * 是不是移动设备（手机 / 平板）。
+   *
+   * **真身在 `<html data-mobile>` 上**（首屏由 layout.tsx 的内联脚本写入，见 lib/device.ts），
+   * CSS 按它切（藏掉整间屋子、把右侧那排开关挪到顶上）。这里这份 state 只负责
+   * **决定渲染哪一台** —— 房间（RetroTv）还是掌机（HandheldConsole）。
+   *
+   * 为什么非要有这一份、不能让 CSS 两家都渲染：两台机器里各有一个 canvas，而
+   * Nostalgist 只认 `canvasRef` 指的那一个 —— 同时挂在 DOM 里，模拟器会被挂到
+   * 后渲染的那台上。所以必须二选一。
+   *
+   * 默认 false（服务端没有 navigator，水合前后要一致），挂载后再从属性同步 ——
+   * 和键位 / 吊灯 / 简洁模式 / 电视机尺寸同一套路。移动端首屏那一帧房间虽然会渲染，
+   * 但 `:root[data-mobile='on'] .stage` 已经把它藏掉了，所以**不会闪**。
+   */
+  const [mobile, setMobile] = useState(false);
+
+  /**
+   * 主题（白天 / 夜晚）。
+   *
+   * **真身在 `<html data-theme>` 上**：首屏由 layout 的内联脚本按 localStorage /
+   * 系统偏好写入，钮上露太阳还是月亮由 CSS 按那个属性切（见 globals.css 的
+   * `.theme-toggle`）—— 所以这份 state **不负责挑图标**，那样会先按默认主题画一颗、
+   * 挂载后再「啪」地换过来。它**只喂那两个 `title / aria-label`**：`title` 是属性
+   * 驱动不了的，而 React 在首帧又无从得知主题（服务端没有 localStorage），
+   * 只能是这份默认值，挂载后再从属性同步 —— 和那盏灯一样，纯文案的事。
+   */
+  const [theme, setTheme] = useState<Theme>('dark');
+
   /**
    * 吊灯开着没有。
    *
@@ -282,11 +472,57 @@ export default function ConsoleScene() {
    */
   const [simple, setSimple] = useState(false);
 
+  /**
+   * 电视机尺寸档位。真身在 `<html data-tv>` 上（首屏由 layout 的内联脚本写入），
+   * 这份 state **只为了那颗钮的图标和 aria**，挂载后再从属性同步 —— 和上面那盏灯一样。
+   * 尺寸本身不在这里：它是 globals.css 里一组跟着属性走的 CSS 变量
+   * （为什么不能是 React 下发的内联尺寸，见 lib/tv-size.ts 顶部注释）。
+   */
+  const [tvSize, setTvSize] = useState<TvSize>(DEFAULT_TV_SIZE);
+  /**
+   * 「电视机大小」那颗钮左侧的档位选择器开着没有。
+   *
+   * 纯 UI 状态：不落盘、不进 `<html data-*>`（尺寸本身才需要持久化，那份在 data-tv 上）。
+   * 为什么是弹出而不是常驻分段控件 —— 右侧这一列是**竖排**的，三档并排会多占两行，
+   * 而调尺寸是低频动作，没必要一直露着（见那颗钮的注释）。
+   */
+  const [tvMenuOpen, setTvMenuOpen] = useState(false);
+  /** 钮 + 弹层那个包裹层。只为了判断「点的是不是菜单自己」（点外面就收起来）。 */
+  const tvMenuRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 「隐私政策与服务条款」那颗钮左侧的弹层开着没有。
+   *
+   * 和电视机大小那颗钮**同一套做法**（也是收进一颗钮、往左弹）——理由也一样：
+   * 这一列是竖排的，两页并排会多占两行，而看法务页是**极低频**动作。
+   *
+   * 区别在弹层里是**两条链接**（`<Link>`）而不是三个按钮：那两页是真正独立的路由
+   * （见 app/privacy/page.tsx 的注释），点开就该跳过去，不需要在房间里再画一遍长文。
+   */
+  const [legalMenuOpen, setLegalMenuOpen] = useState(false);
+  /** 同上，钮 + 弹层那个包裹层。 */
+  const legalMenuRef = useRef<HTMLDivElement>(null);
+
   /* ---------------- 联机 ---------------- */
 
   const [netplayOpen, setNetplayOpen] = useState(false);
   const [netplayState, setNetplayState] = useState<NetplayState>(IDLE_NETPLAY_STATE);
   const [netplayBusy, setNetplayBusy] = useState(false);
+  /**
+   * 分享链接带进来的房间码，等用户确认。null = 没有待确认的邀请。
+   *
+   * 挂成 state（而不是每次渲染现读地址栏）：确认框要能被「加入 / 取消」清掉，
+   * 而地址栏是外部状态，清不掉 —— 而且读完就抹（见下面那个 effect）。
+   */
+  const [pendingRoom, setPendingRoom] = useState<string | null>(null);
+  /**
+   * 联机面板输入框的初始值 —— 从分享链接确认加入时带进来的那个码。
+   *
+   * 它同时当 `<NetplayPanel>` 的 `key` 用：码一变就重挂载面板、输入框跟着重新初始化。
+   * 不这么做就得在面板里写一个「prop 变了同步进 state」的 effect，而那条路会被
+   * `react-hooks/set-state-in-effect` 拦下。
+   */
+  const [joinPrefill, setJoinPrefill] = useState<string | null>(null);
   /**
    * 选的链路。默认 `lan`（只 STUN）—— 这是不依赖任何外部配置就能跑的那一档，
    * `wan` 要构建期配了 TURN 才有意义（没配时面板会把它标成开发中）。
@@ -300,6 +536,20 @@ export default function ConsoleScene() {
   const [streamQuality, setStreamQuality] = useState<StreamQuality>(DEFAULT_STREAM_QUALITY);
   /** 房主推过来的画面流。只有加入者会拿到，房主那边永远是 null */
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  /**
+   * 那枚几秒后自己消失的联机提示。null = 不显示。
+   *
+   * 存**键**而不是翻译好的字符串：它跟着语言走就行 —— 虽然只活几秒，
+   * 但没有理由让它停在旧语言上（切语言不需要重开一局联机）。
+   *
+   * 两种：`kind: 'ok'` 是「刚连上」（绿点 + 绿描边），`kind: 'danger'` 是「对方离开了」
+   * （红点 + 红描边，和面板里那行报错同一个色）。**颜色分开**是有意的 —— 前者是好事、
+   * 后者要人去处理（加入者得重新要一个码），长得一模一样会让人一眼扫过去以为还是「已连上」。
+   */
+  const [netplayToast, setNetplayToast] = useState<{
+    key: MessageKey;
+    kind: 'ok' | 'danger';
+  } | null>(null);
 
   /**
    * 联机控制器，和 EmulatorController 一样用惰性初始化持有。
@@ -308,21 +558,136 @@ export default function ConsoleScene() {
    * useState 之前就建好了 —— 闭包捕获的是那个稳定引用，所以不需要 ref。
    * 本地角色由控制器回传，避免回调反过来引用 netplay 自己（那样是循环引用）。
    */
-  const [netplay] = useState(
-    () =>
-      new NetplayController({
-        onState: (next) => setNetplayState(next),
-        onRemoteButton: (button, down, role) => {
+  const [netplay] = useState(() => {
+    /*
+     * 上一次的状态。只为认出「刚连上」这个**跳变** —— 控制器每两秒回来一次 ping，
+     * 那也会走 onState（状态对象是新的，`status` 没变），不记上一次的话
+     * 那枚提示会被反复重放。
+     *
+     * 为什么这件事写在 onState 里、而不是一个 useEffect：连上是个**控制器报上来的事件**
+     * （对方什么时候进房间不由我们定），不是从渲染结果反推出来的状态。挂在 effect 里
+     * 还得同步 setState，白引一条 cascading render 的 lint 报错。
+     */
+    let lastStatus: NetplayStatus = IDLE_NETPLAY_STATE.status;
+    /*
+     * 上一次的本地角色。断开那一刻要先知道「我是房主还是加入者」才能选对文案，
+     * 而加入者那条路径上 `role` 会在报事件之前就被 `leave()` 清成 null
+     * （见 lib/netplay.ts 的 onPeerLeave）—— 所以不能读 `next.role`，得读上一次的。
+     */
+    let lastRole: NetplayRole | null = IDLE_NETPLAY_STATE.role;
+    /*
+     * 上一次的原因码。加入者侧认「房主已离开」靠 `error === 'host-left'`，
+     * 而那次报错会**紧随 `leave()` 之后的第二次 onState** 才到（中间隔着一次 error:null），
+     * 所以还要记一次旧值，才能挡住同一次断开的重复上报（见下面分支里的注释）。
+     */
+    let lastError = IDLE_NETPLAY_STATE.error;
+    /*
+     * 只在**有角色时**更新它：断开时控制器报上来的两次状态里 `role` 都已经是 null
+     * （`leave()` 先清空、`fail()` 再挂原因码），要是照着 `next.role` 覆盖，
+     * 第二次带着 `host-left` 回来时 `lastRole` 早变 null 了，又选不出该弹哪句。
+     * 所以它保住的是「**上一次还在房间里时我是什么角色**」。
+     */
+    const rememberRole = (role: NetplayRole | null) => {
+      if (role) lastRole = role;
+    };
+
+    return new NetplayController({
+      onState: (next) => {
+        setNetplayState(next);
+
+        /*
+         * 刚连上：把联机面板收掉，换一枚几秒后自己消失的提示
+         * （退场见下面那个 setTimeout，文案见 lib/i18n.ts 的 netplay.toast*）。
+         *
+         * 为什么非收面板不可：面板开着时它自己就是「已连接」的唯一显示处（那颗绿点
+         * 加延迟读数），可它把整个房间盖住了 —— 连上的那一刻用户想看的是游戏。
+         * 而且这是个异步到达的事件，停在那一屏上等十几秒很难受。
+         */
+        if (next.status === 'connected' && lastStatus !== 'connected') {
+          setNetplayOpen(false);
+          setNetplayToast({
+            key: next.role === 'host' ? 'netplay.toastHost' : 'netplay.toastGuest',
+            kind: 'ok',
+          });
+        } else if (next.status !== 'connected') {
           /*
-           * 只有房主本机跑着模拟器。加入者屏幕上是房主推来的画面，
-           * 本机连模拟器都没有，注入无处可去 —— 所以这里是单向的。
+           * 断开这一段要分清三件完全不同的事，不能笼统地「一断就报对方走了」：
+           *
+           *   ① **我自己点了「离开房间」** —— 谁也没走，是我退的房。
+           *   ② **房主走了 / 对方走了** —— 这才该弹「对方离开了」。
+           *   ③ 单纯掉线（网络抽风、握手失败）—— 不报。
+           *
+           * 用 `lastStatus === 'connected'` 只能认出「刚才还连着」，区分不了 ①②③ ——
+           * 加入者自己退房时走的也是 `leave()` 这一条，表现和「房主走了」几乎一样
+           * （都会落到 IDLE）。所以必须用各自的**可靠信号**，见下。
            */
-          if (role !== 'host') return;
-          controller.pressButton(button, remotePlayer(role), down);
-        },
-        onRemoteStream: (stream) => setRemoteStream(stream),
-      })
-  );
+          if (lastRole === 'host') {
+            /*
+             * 房主侧：房主**自己退房**会落到 `idle`（`leave()` 给的是 IDLE_NETPLAY_STATE）；
+             * 而「加入者走了、房间还开着」是 `onPeerLeave` 把状态改成 `waiting`
+             * （见 lib/netplay.ts，房主那条分支）—— 所以 `waiting` 是房主侧
+             * 「对方离开」的**唯一**指征，退房不会被误判。
+             */
+            if (next.status === 'waiting' && lastStatus === 'connected') {
+              setNetplayToast({ key: 'netplay.toastGuestLeft', kind: 'danger' });
+            } else {
+              setNetplayToast(null);
+            }
+          } else if (lastRole === 'guest') {
+            /*
+             * 加入者侧：房主走的那条 `onPeerLeave` 会**明确挂上** `error: 'host-left'`
+             * （`leave()` → `fail('host-left')`）；而加入者自己点「离开房间」走的是
+             * `leave()`，`error` 留在 null。两个状态长得几乎一样，**只有这个原因码能分开** ——
+             * 用它才能避免「自己退房却提示房主离开」这种错报。
+             *
+             * ⚠️ 这里**不能**再要求 `lastStatus === 'connected'`：房主离开时控制器会**连发两次**
+             * `onState` —— 先是 `leave()` 的 `{idle, error:null}`，紧接着 `fail('host-left')`
+             * 的 `{idle, error:'host-left'}`。第一次就已经把 `lastStatus` 刷成 `idle` 了，
+             * 等第二次带着 `host-left` 回来时再比对 `lastStatus` 一定不成立。
+             * 改用「原因码**从无到有**」这个跳变：`fail()` 后它一直挂着，
+             * 所以用 `lastError !== 'host-left'` 挡重复即可。
+             */
+            if (next.error === 'host-left' && lastError !== 'host-left') {
+              setNetplayToast({ key: 'netplay.toastHostLeft', kind: 'danger' });
+            } else if (next.error === 'room-full') {
+              /*
+               * 房间已满，被房主请出来了。
+               *
+               * 这枚提示**不能走 toast**：用户刚点了「加入」，正等着进屋，一句浮着几秒
+               * 就消失的话不够 —— 得让他看清「为什么没进去」。所以反而要把联机面板
+               * **重新打开**（它在「刚连上」那一刻被自动收掉了），让面板底部那行红字
+               * `netplay.errRoomFull` 明明白白摆在那儿。
+               * 顺带把「刚连上」的绿 toast 收掉：那是假象（我们其实没连成）。
+               */
+              setNetplayToast(null);
+              setNetplayOpen(true);
+            } else if (next.error === null) {
+              // 没挂原因码 = 是我自己点的退房（或真掉线），不该说「房主已离开」，清掉
+              setNetplayToast(null);
+            }
+            // next.error === 'host-left' 且 lastError 也是它：同一次断开的重复上报，
+            // 提示已经在屏幕上，什么都不做（重开会把 4 秒计时器重置）
+          } else {
+            // 没进过房间（建房失败 / 校验不过）：没有「对方」可言，清掉就是了
+            setNetplayToast(null);
+          }
+        }
+
+        lastStatus = next.status;
+        rememberRole(next.role);
+        lastError = next.error;
+      },
+      onRemoteButton: (button, down, role) => {
+        /*
+         * 只有房主本机跑着模拟器。加入者屏幕上是房主推来的画面，
+         * 本机连模拟器都没有，注入无处可去 —— 所以这里是单向的。
+         */
+        if (role !== 'host') return;
+        controller.pressButton(button, remotePlayer(role), down);
+      },
+      onRemoteStream: (stream) => setRemoteStream(stream),
+    });
+  });
 
   /* ---------------- 按键 ---------------- */
 
@@ -347,6 +712,33 @@ export default function ConsoleScene() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   /**
+   * 地板上那台 MP4 在不在放（见 `RoomFloorItems`）。
+   *
+   * **全屋唯一一件「状态就留在 React 里」的可点物件。** 吊灯 / 简洁模式 / 电视机尺寸
+   * 那几件之所以把真身挂到 `<html data-*>`，是因为它们要在**首屏之前**就生效
+   * （CSS 直接按属性画），而这里没有这个问题 —— 刷新页面本来就该停（浏览器也不允许
+   * 刷新后自己响起来），所以既不必落盘，也不必进 DOM 属性。
+   */
+  const [mp4Playing, setMp4Playing] = useState(false);
+  /** 那台 MP4 的 `<audio>`。挂在 JSX 末尾（和 ROM 的 file input 并排），不参与布局。 */
+  const mp4AudioRef = useRef<HTMLAudioElement>(null);
+  /**
+   * 已经退到兜底音源（现场摇的 8-bit 小段）了没有。
+   *
+   * 只退一次：一旦确认那个 mp3 放不出来，之后就一直走合成的，不再回头试文件 ——
+   * 否则每点一次都要先失败一次（失败那一下还会在 console 里刷一行），点得越多越像坏了。
+   */
+  const mp4FallbackRef = useRef(false);
+  /**
+   * 当前这一段兜底音的 `blob:` 地址。
+   *
+   * **一次性资源**：`chiptuneUrl()` 现在每次都现摇一段新的（用户要「每次都不一样」），
+   * 所以换下一段时必须把上一段 `revokeObjectURL()` 掉，否则每点一次就漏几十到一百多 KB。
+   * 卸载时也要还回去（它不再是模块级缓存了）。
+   */
+  const mp4UrlRef = useRef<string | null>(null);
+
+  /**
    * 操作指引开着没有。**初次访问自动打开**（下面那个 effect），之后靠「重看操作指引」
    * 再打开（在按键说明弹窗里）。
    *
@@ -361,8 +753,25 @@ export default function ConsoleScene() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   /** 正在从游戏库载入的那盘游戏 id；非 null 时弹窗里的卡片全部置灰 */
   const [libraryLoadingId, setLibraryLoadingId] = useState<string | null>(null);
+  /**
+   * 「ROM 整包正在下载」这一段的状态（面板底部那条栏 + 取消入口），非 null 就是下载中。
+   *
+   * 和 `libraryLoadingId` **刻意分开**：后者从点击一直活到 `loadFile` 结束（防重入、
+   * 卡片置灰），而这一条只覆盖整包下载那一段。拿到 blob 就置回 null —— 后面
+   * `loadFile` 还要跑一会儿（下载核心包），那段时间面板已经自动关了；若这时用户
+   * 又打开面板，不该看见一条停在 100%、点了取消也没用的假进度条。
+   */
+  const [romDownload, setRomDownload] = useState<{ title: string } | null>(null);
   /** ROM 下载进度（0..1）；null = 拿不到总字节数，弹窗里画不确定进度条 */
   const [libraryProgress, setLibraryProgress] = useState<number | null>(null);
+  /**
+   * 正在飞的那笔 ROM 下载的取消把手。
+   *
+   * 用 ref 而不是 state：`cancelRemoteLoad` 得在**不重渲染**的前提下拿到它，
+   * 而它是「当前这一笔」的标识、不是要画出来的东西。
+   * 非 null 就等于「有下载在飞」，和 `romDownload !== null` 同步。
+   */
+  const romAbortRef = useRef<AbortController | null>(null);
 
   // 刷新页面后，已经装过的 BIOS 还得在页脚那行状态里体现出来
   useEffect(() => {
@@ -533,12 +942,19 @@ export default function ConsoleScene() {
           // 换了一盘卡带，存档列表也要跟着换 —— 槽位是按 ROM 文件名分的
           setSaves(await listSaves(loaded.name));
 
-          // 载入即入架；putCartridge 会刷新 lastPlayedAt，
-          // 于是这盘自然排到最前面，超出 10 盘的旧卡带被淘汰
-          const meta = await putCartridge(file, loaded.console);
-          await pruneCartridges();
-          setLibrary(await listCartridges());
-          if (meta) setActiveId(meta.id);
+          /*
+           * 这盘文件攥在手上：「改完键位重载」靠它重新插一次，不必再回 IndexedDB 取。
+           * 本地拖入和从游戏库下载都走这条路，两种来源的重载行为因此完全一致。
+           */
+          lastRomRef.current = file;
+
+          /*
+           * **本地拖入不进历史**（2026-10-12）：历史只记从游戏库点开的游戏 ——
+           * 只有那些才带着 id / 封面地址 / 下载地址，本地文件没有可重新下载的地址，
+           * 存进去也点不动。所以这里先把「当前是历史里哪一盘」清掉；
+           * 从游戏库那条路（loadRemote）会在 loadFile 返回之后把它设回去。
+           */
+          setActiveId(null);
         }
       } catch (e) {
         /*
@@ -557,6 +973,8 @@ export default function ConsoleScene() {
         setRom(null);
         setSaves([]);
         setActiveId(null);
+        // 没插上就不该留着上一盘的文件 —— 重载拿它去插只会再失败一次
+        lastRomRef.current = null;
       } finally {
         loadingRef.current = false;
         setBusy(false);
@@ -564,15 +982,6 @@ export default function ConsoleScene() {
       }
     },
     [bios, controller, netplay]
-  );
-
-  const loadFromLibrary = useCallback(
-    async (id: string) => {
-      const file = await readCartridge(id);
-      if (!file) return;
-      await loadFile(file);
-    },
-    [loadFile]
   );
 
   /**
@@ -585,18 +994,26 @@ export default function ConsoleScene() {
    * 重来之前先把当前进度存成快照、回来再读回去：改个键位就把游戏打回标题画面太亏。
    * 读档失败不算致命 —— 最差就是回到标题画面，卡带还是插着的。
    *
+   * 用的文件是 `lastRomRef` 里攥着的那盘，**不再回 IndexedDB 取**（2026-10-12）：
+   * 历史现在只存字符串，本地拖入的文件更是没有记录 —— 只有攥着本体才能两种来源通吃。
+   *
    * 走的是 loadFile，所以「加入者（房主正在出画面）不接受本地载入」那道闸照样生效：
    * 他本来就插不了卡带，也就无所谓重载。房主不受影响 —— `remotePlaying` 是加入者
    * 才有的状态（只有加入者会收到 `'s'` 消息）。
    */
   const reloadRom = useCallback(async () => {
-    if (!controller.isRunning || !activeId) return;
+    const file = lastRomRef.current;
+    if (!controller.isRunning || !file) return;
     setBusy(true);
     try {
       const snapshot = await controller.saveState();
-      const file = await readCartridge(activeId);
-      if (!file) return;
+      /*
+       * loadFile 会把「当前是历史里哪一盘」清掉（它不认识来源，见那边注释），
+       * 重载完补回来 —— 否则按一次重载，历史里那行的高亮就没了。
+       */
+      const keepId = activeId;
       await loadFile(file);
+      if (keepId) setActiveId(keepId);
       if (snapshot && controller.isRunning) await controller.loadStateFrom(snapshot);
     } catch (e) {
       console.warn('重载卡带失败', e);
@@ -606,36 +1023,94 @@ export default function ConsoleScene() {
   }, [controller, activeId, loadFile]);
 
   /**
-   * 从在线游戏库载入：按 id 走本站代理把 ROM 拉回来，再当成一个文件插进卡带槽。
+   * 从远程地址载入一盘 ROM —— **在线库点选**和**点历史里那一行**共用这一段。
    *
-   * 走的是和本地拖入同一条 `loadFile`，所以 BIOS 装置、卡带历史、存档槽这些既有
-   * 逻辑全都自动带上；文件名必须用后库存的 `romName` —— 街机 FBNeo 拿 zip 文件名认驱动。
+   * 两条路的差别只有「这份字符串描述从哪儿来」：在线库那条由 `romFromGame` 现拼，
+   * 历史那条直接从 IndexedDB 里存的记录拿来（`Cartridge extends RemoteRom`，
+   * 多带的两个时间戳被 `putCartridge` 逐字段挑掉，不会写脏）。
+   * 所以下载、取消、写历史、置高亮这套逻辑只有一份。
+   *
+   * 走的是和本地拖入同一条 `loadFile`，所以 BIOS 装置、存档槽这些既有逻辑全都自动带上；
+   * 文件名必须用库里存的 `romName` —— 街机 FBNeo 拿 zip 文件名认驱动。
    *
    * 下载这段**面板一直开着**并显示进度条：ROM 整包拉下来之前关掉弹窗，用户就只看到
    * 一片空荡荡的房间，不知道是在下载还是卡住了。拉完再关窗、交给 `loadFile`——
    * 后面核心包的下载进度由电视机屏幕里的进度条接着显示。
+   * 从历史点进来也是这一套（历史里只存了地址，一样要下），所以面板不会被提前关掉。
+   *
+   * **可取消**（2026-10-12）：面板底部那条状态栏上的「取消」就是 abort 这一笔 fetch。
+   * 整包几十 MB 的街机 romset 下到一半发现选错了，原先只能等它下完 —— 现在能掐掉。
+   * 取消只覆盖**这一段**；`loadFile` 启动核心之后的进度在屏幕里，管不到（Nostalgist
+   * 没有公开的取消接口）。
    */
-  const loadRemoteGame = useCallback(
-    async (game: LibraryGame) => {
+  const loadRemote = useCallback(
+    async (rom: RemoteRom) => {
       if (libraryLoadingId !== null) return;
-      setLibraryLoadingId(game.id);
+      setLibraryLoadingId(rom.id);
+      setRomDownload({ title: rom.name });
       setLibraryProgress(null);
+
+      /*
+       * 一笔下载一个 controller。abort 它 = 同时掐掉请求和响应体流，
+       * `readBodyWithProgress` 里的 `reader.read()` 随即抛 AbortError ——
+       * 整条路径自然收场，不需要额外的「已取消」标志位。
+       */
+      const controller = new AbortController();
+      romAbortRef.current = controller;
+
       try {
-        const res = await fetch(`/api/games/${game.id}/rom`);
+        const res = await fetch(rom.romUrl, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await readBodyWithProgress(res, setLibraryProgress);
-        const file = new File([blob], game.romName, { type: 'application/octet-stream' });
+        // 整包到手 = 可取消的那一段结束了，后面交给 loadFile（面板关闭、进度转到屏幕上）
+        setRomDownload(null);
+        const file = new File([blob], rom.romName, { type: 'application/octet-stream' });
         setLibraryOpen(false);
         await loadFile(file);
+
+        /*
+         * **载入成功才写历史** —— 失败的不进，免得历史里堆一批点不动的死条目。
+         * 写的是字符串（名字 / 封面地址 / 下载地址 / 文件名），ROM 本体不落库。
+         *
+         * 从历史点进来时也走这里：同一盘覆盖写、只刷新 lastPlayedAt，于是它排到最前，
+         * 超出 10 条的旧记录被淘汰 —— 历史因此是「最近玩过」而不是「第一次玩过」。
+         */
+        const meta = await putCartridge(rom);
+        await pruneCartridges();
+        setLibrary(await listCartridges());
+        // loadFile 里先把标记清成了 null（它不认识来源），到这儿才算落定
+        if (meta) setActiveId(meta.id);
       } catch (e) {
-        console.error('[nesload] 从游戏库载入失败：', game.title, e);
+        // 用户自己掐的：不是故障，只留一行 info，别惊动 console.error
+        if (isAbortError(e)) console.info('[nesload] 已取消载入：', rom.name);
+        else console.error('[nesload] 从游戏库载入失败：', rom.name, e);
       } finally {
+        /*
+         * 只清自己那一笔的把手。正常时序下这里不会有别人（下一盘要等
+         * `libraryLoadingId` 复位才点得动），但别留下「把新那笔的把手抹掉」的可能。
+         */
+        if (romAbortRef.current === controller) romAbortRef.current = null;
         setLibraryLoadingId(null);
+        setRomDownload(null);
         setLibraryProgress(null);
       }
     },
     [libraryLoadingId, loadFile]
   );
+
+  /** 在线库那张卡片点下来 —— 把响应形状转成远程载入要的那份描述。 */
+  const loadRemoteGame = useCallback(
+    (game: LibraryGame) => loadRemote(romFromGame(game)),
+    [loadRemote]
+  );
+
+  /**
+   * 取消正在下载的 ROM（面板底部那条状态栏上的按钮）。
+   * 空操作很安全：没有下载在飞时 `romAbortRef.current` 就是 null。
+   */
+  const cancelRemoteLoad = useCallback(() => {
+    romAbortRef.current?.abort();
+  }, []);
 
   /* ---------------- 卡带列表 ---------------- */
 
@@ -665,7 +1140,36 @@ export default function ConsoleScene() {
     setSaves([]);
     setSaveOpen(false);
     setActiveId(null);
-  }, [controller]);
+    // 卡带取出来了，攥着的那份文件也一起放掉（几十 MB 的街机 romset 别白占着）
+    lastRomRef.current = null;
+
+    /*
+     * 屏幕上那一下「显像管关机」（画面收成一条线再灭掉，见 globals.css）。
+     *
+     * **只在屏幕真的会变黑时才放**：加入者那条路（房主的画面正推过来，本机这盘卡带
+     * 是被上面那个 effect 自动弹掉的）屏幕上马上就有新画面，再闪一条亮线只会像故障。
+     * 用 `netplay.current` 而不是 `netplayState`，省得把这个回调的依赖搅大
+     * （和 loadFile 里那道「房主在出画面就不接受本地载入」的闸同一个理由）。
+     *
+     * 定时器连点也安全：清掉上一支再挂新的，不会出现「第二次弹出被第一次的定时器提前收掉」。
+     */
+    if (!netplay.current.remotePlaying) {
+      setCrtOff(true);
+      if (crtOffTimer.current !== null) clearTimeout(crtOffTimer.current);
+      crtOffTimer.current = setTimeout(() => {
+        setCrtOff(false);
+        crtOffTimer.current = null;
+      }, CRT_OFF_MS);
+    }
+  }, [controller, netplay]);
+
+  /** 卸载时把那支定时器还掉（否则动画还没走完就换页，会在已卸载的组件上 setState）。 */
+  useEffect(
+    () => () => {
+      if (crtOffTimer.current !== null) clearTimeout(crtOffTimer.current);
+    },
+    []
+  );
 
   const togglePause = useCallback(async () => {
     if (!controller.isRunning) return;
@@ -753,6 +1257,30 @@ export default function ConsoleScene() {
     [controller]
   );
 
+  /**
+   * 掌机上虚拟键的落点（`HandheldConsole` 的 `onButton`）。
+   *
+   * 和键盘那条路**合流**：单机 / 房主 → 打进本机模拟器（玩家 1）；
+   * 加入者 → 转发给房主（他本机没有模拟器 —— 见下面那段键盘转发的注释，
+   * 两者是同一个约定：**加入者的输入由房主注入成 2P**）。
+   *
+   * 玩家号只可能是 1：虚拟键代表的是**手上这台机器的 1P**。加入者在游戏里其实是 2P，
+   * 那个号位由房主按自己的表决定，和这里无关。
+   *
+   * 依赖里带 `netplayState.role`：角色一变，这个回调就换一份，
+   * 虚拟键那边用 ref 转了一手（见 HandheldConsole），所以不会打断正按着的键。
+   */
+  const handleVirtualButton = useCallback(
+    (button: ButtonName, down: boolean) => {
+      if (netplayState.role === 'guest') {
+        netplay.sendButton(button, down);
+        return;
+      }
+      controller.pressButton(button, 1, down);
+    },
+    [controller, netplay, netplayState.role]
+  );
+
   /* ---------------- 联机 ---------------- */
 
   /*
@@ -795,6 +1323,54 @@ export default function ConsoleScene() {
       setNetplayBusy(false);
     }
   }, [netplay]);
+
+  /* ---------------- 分享链接进来的房间邀请 ---------------- */
+
+  /*
+   * 首屏读一次地址栏里的 `?room=XXXX`。读到就**先把参数抹掉**再亮确认框：
+   * 抹晚了用户一刷新就会再弹一遍（见 clearInviteCode 的注释）。
+   *
+   * setState 塞进微任务：直接在 effect 体里同步调用会被 `react-hooks/set-state-in-effect`
+   * 拦下 —— 同文件里其他几处用 `.then/.catch` 是同一个理由。
+   */
+  useEffect(() => {
+    const code = readInviteCode();
+    if (!code) return;
+    clearInviteCode();
+    queueMicrotask(() => setPendingRoom(code));
+  }, []);
+
+  /**
+   * 确认加入：开面板 + 预填码 + **直接连**。
+   *
+   * 点一次就够了 —— 确认框上那个「加入」已经是一次明确的表态，
+   * 再让用户到面板里点一次「加入」是重复动作。预填的码留在输入框里是为了
+   * **连不上时**（房主已经走了、握手超时）用户不用重新输一遍。
+   */
+  const acceptInvite = useCallback(() => {
+    if (!pendingRoom) return;
+    const code = pendingRoom;
+    setPendingRoom(null);
+    setJoinPrefill(code);
+    setNetplayOpen(true);
+    void joinRoom(code);
+  }, [pendingRoom, joinRoom]);
+
+  const dismissInvite = useCallback(() => setPendingRoom(null), []);
+
+  /**
+   * 那枚提示自己退场。几秒后收掉 —— 它只回答「连上了没有」，
+   * 看完就不该继续占着房间（要复查还有右侧那颗联机钮和面板）。
+   *
+   * 和 NetplayPanel 里「已复制」那枚同一套路：存的是内容本身，内容一变就重新计时。
+   * 「重新连接」时上一条已经在掉线那一刻被清掉了（见 netplay 的 onState），
+   * 所以这里不会出现「新提示刚冒出来就被上一个计时器收走」。
+   */
+  useEffect(() => {
+    if (!netplayToast) return;
+    const timer = setTimeout(() => setNetplayToast(null), NETPLAY_TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [netplayToast]);
 
   /**
    * 房主：插上卡带就把画面推给对方。
@@ -886,8 +1462,9 @@ export default function ConsoleScene() {
   const themeFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
-   * 主题状态刻意不放进 React：首屏由 layout 的内联脚本写到 <html data-theme>，
-   * 图标的高亮交给 CSS 按属性切换。这样既没有水合不一致，也不用在 effect 里 setState。
+   * 主题的**真相不在这里**：首屏由 layout 的内联脚本写到 `<html data-theme>`，
+   * 钮上露太阳还是月亮交给 CSS 按属性切（见 globals.css 的 `.theme-toggle`）。
+   * 下面那次 `setTheme` 只喂 title / aria-label，见上面那份 state 的注释。
    *
    * **吊灯跟着主题走**：切白天自动关灯、切夜晚自动开灯（用户要求）。
    * 手动点灯只是**临时覆盖** —— 下次切主题、或者刷新页面（首屏脚本按主题决定）
@@ -903,6 +1480,7 @@ export default function ConsoleScene() {
       /** 真正落主题。两条路径都走它 —— View Transition 那条要把它塞进回调里。 */
       const commit = () => {
         root.dataset.theme = next;
+        setTheme(next);
         applyLamp(next === 'dark');
       };
 
@@ -911,9 +1489,9 @@ export default function ConsoleScene() {
        * 推出去（`::view-transition-*` 那几条在 globals.css），观感就是「光从左上角
        * 漫过来」。这样**不用在动画中途改主题**，也不会出现一整屏纯色。
        *
-       * 回调里**只改 DOM 属性、不碰 setState**：快照是在回调（及其返回的 promise）
-       * 结束后立刻拍的，而 `applyLamp` 里那次 setState 只影响 aria，重渲染跑在
-       * 快照之后也无所谓，画面一模一样。
+       * 回调里只改 DOM 属性 + 两次**纯文案**的 setState（`setTheme` 喂 title、
+       * `applyLamp` 喂 aria）：快照是在回调（及其返回的 promise）结束后立刻拍的，
+       * 重渲染跑在快照之后也无所谓，画面和快照一模一样。
        */
       if (typeof document.startViewTransition === 'function') {
         document.startViewTransition(commit);
@@ -950,6 +1528,19 @@ export default function ConsoleScene() {
     [applyLamp]
   );
 
+  /**
+   * 主题钮：读 DOM 属性取当前值再翻过来（白天 ⇄ 夜晚）。
+   *
+   * 和 `toggleLamp` 同一个写法 —— `<html data-theme>` 是唯一真相（首屏脚本写的），
+   * 所以不依赖 React 那份 state，连点两下也不会因为 state 批处理丢掉一次翻转。
+   *
+   * 属性缺失（理论上不会，首屏脚本必写）时按「当前是夜晚」处理 —— 和 state 的
+   * 默认值一致，翻过去就是白天。
+   */
+  const toggleTheme = useCallback(() => {
+    applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  }, [applyTheme]);
+
   /** 点灯：把当前状态翻过来（读的是 DOM 属性，和上面同一份真相） */
   const toggleLamp = useCallback(() => {
     applyLamp(document.documentElement.dataset.lamp !== 'on');
@@ -978,6 +1569,32 @@ export default function ConsoleScene() {
   }, [applySimple]);
 
   /**
+   * 把电视机尺寸设到某一档（大 / 中 / 小）。
+   *
+   * 和 `applySimple` 同一套路：**先写 DOM 属性、再同步 React** —— `<html data-tv>`
+   * 是唯一真相，React 那份只为了那颗钮的 aria。属性是唯一真相，所以这里不必
+   * 「读当前值再算下一档」，直接落目标档即可（选择器里三档都是明码的）。
+   *
+   * 尺寸本身一个字都不用在这里改：它是 globals.css 里一组跟着 `data-tv` 走的 CSS 变量
+   * （屏幕 / 机身 / 底座 / 桌面宽 / 灯线长度）。窗户、日历、桌子、地板都是**锚在机身
+   * 上**的，跟着走即可 —— 换档只需要动这一处属性。
+   *
+   * **正在玩的时候换档也不用重插卡带**：核心用 ResizeObserver 盯着 canvas 元素，
+   * 尺寸一变就按 `contentRect × devicePixelRatio` 重设后备存储
+   * （`RPE.observer=new ResizeObserver(...)` + `observer.observe(Module.canvas)`，
+   * 见 public/cores/*.js），所以画面会自己重新量一遍，不会停在旧尺寸上被拉伸。
+   */
+  const applyTvSize = useCallback((next: TvSize) => {
+    document.documentElement.dataset.tv = next;
+    setTvSize(next);
+    try {
+      localStorage.setItem(TV_KEY, next);
+    } catch {
+      // 隐私模式下写不进去，忽略即可
+    }
+  }, []);
+
+  /**
    * 换窗外的季节：切到下一季（春→夏→秋→冬→春）。
    *
    * 和 `toggleLamp` 一样**读 DOM 属性取当前值** —— `<html data-season>` 是唯一真相，
@@ -997,12 +1614,126 @@ export default function ConsoleScene() {
   }, []);
 
   /**
+   * 摇一段新的兜底音、换上去、放起来。**每次点都会重摇** —— 用户要的就是
+   * 「每次点击都不一样」，所以这里不重用上一段，也不缓存。
+   *
+   * 换 `src` 是直接改 DOM 不走 React：JSX 里那个 `src` 是**常量**，React 只在自己那份
+   * props 变了才会重写属性，所以这次改写不会被下一次重渲染顶掉（包括 `onEnded` 那次）。
+   * 哪天有人把它改成动态的，这里就会被打回原样 —— 到时候得改成 state。
+   */
+  const playFallback = useCallback((audio: HTMLAudioElement) => {
+    const url = chiptuneUrl();
+    if (!url) {
+      console.warn('[mp4] 兜底音源没合成出来，这次就不放了');
+      setMp4Playing(false);
+      return;
+    }
+
+    const previous = mp4UrlRef.current;
+    mp4UrlRef.current = url;
+    audio.src = url;
+    // 换掉 src 之后上一段就没人用了，还回去（不还就是每点一次漏一段）
+    if (previous) URL.revokeObjectURL(previous);
+
+    void audio.play().then(
+      () => setMp4Playing(true),
+      (error: unknown) => {
+        console.warn('[mp4] 兜底音源也放不出来：', error);
+        setMp4Playing(false);
+      }
+    );
+  }, []);
+
+  /**
+   * 地板那台 MP4：点一下播放 / 暂停。
+   *
+   * 首选音源是 `/audio/i-miss-you.mp3`（下面那个 `<audio>` 的 `src`）—— 这个文件不在
+   * 仓库里（有版权，要自己放进 `public/audio/`，见该目录的 README）。
+   *
+   * **放不出来就退到现场摇的 8-bit 小段**（`lib/chiptune.ts`）。那条路只在
+   * 「音源本身有问题」时走：文件不在、格式解不了，`play()` 都会以 `NotSupportedError`
+   * 拒掉；自动播放策略那种（`NotAllowedError`）换音源也没用，不换。
+   *
+   * 退过去之后**每次点都现摇一段新的**（`playFallback`），所以连点几下听到的都不一样；
+   * 那一段也**不循环**，放一遍就停（`onEnded` 把播放态收回去）。真歌的 `loop` 不受影响。
+   *
+   * 播放状态**等 `play()` 真的 resolve 了才置起来**（而不是点下去就先亮）：
+   * 放不出来时屏幕不该显示成「正在播」。
+   */
+  const toggleMp4 = useCallback(() => {
+    const audio = mp4AudioRef.current;
+    if (!audio) return;
+
+    if (!audio.paused) {
+      audio.pause();
+      setMp4Playing(false);
+      return;
+    }
+
+    /*
+     * 已经是兜底模式了：每次点都摇一段新的，而不是把上一段重播一遍
+     * （兜底那段是一遍过的，重播也只会从头再放同一段 —— 那就「每次都一样」了）。
+     * 顺带一提：这里也意味着「暂停后接着放」在兜底模式下不成立，点了就是新的一段。
+     */
+    if (mp4FallbackRef.current) {
+      playFallback(audio);
+      return;
+    }
+
+    void audio.play().then(
+      () => setMp4Playing(true),
+      (error: unknown) => {
+        if (isAutoplayBlocked(error)) {
+          console.warn('[mp4] 放不出来：', error);
+          setMp4Playing(false);
+          return;
+        }
+
+        /*
+         * 文件不在 / 格式解不了 —— 从此改用现场摇的兜底音。
+         * `loop` 也一并撤掉：兜底那段是**一遍过**的，不是那首歌。
+         */
+        mp4FallbackRef.current = true;
+        audio.loop = false;
+        console.info(
+          '[mp4] i-miss-you.mp3 放不出来，改用现场合成的 8-bit 小段' +
+            '（每次点都不一样，放一遍就停）。' +
+            '要听原曲就把文件放到 public/audio/i-miss-you.mp3（见该目录的 README）。',
+          error
+        );
+        playFallback(audio);
+      }
+    );
+  }, [playFallback]);
+
+  /**
+   * 卸载时把那台 MP4 停掉 —— 不然换了页面它还在响。
+   *
+   * 顺便把兜底音那个 `blob:` 地址还回去：它是**一次性资源**（每点一次摇一段新的），
+   * 不是模块级缓存，卸载时不留着。真歌那条路没有 blob，`mp4UrlRef` 是 null，空操作。
+   */
+  useEffect(
+    () => () => {
+      mp4AudioRef.current?.pause();
+      if (mp4UrlRef.current) URL.revokeObjectURL(mp4UrlRef.current);
+      mp4UrlRef.current = null;
+    },
+    []
+  );
+
+  /**
    * 挂载后把 React 那份对齐到属性上（首屏是内联脚本写的，React 无从得知）。
    * 和键位一样是「挂载后再读」—— 服务端没有 localStorage，惰性初始化会两边不一致。
    */
   useEffect(() => {
+    // 主题只认那两个合法值：属性还没写上 / 取值意外时，按 state 的默认「夜晚」走
+    setTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
     setLampOn(document.documentElement.dataset.lamp === 'on');
     setSimple(document.documentElement.dataset.simple === 'on');
+    const tv = document.documentElement.dataset.tv;
+    setTvSize(isTvSize(tv) ? tv : DEFAULT_TV_SIZE);
+    // 移动端那台掌机 / 桌面端那间屋子，二选一（属性由首屏内联脚本写，见 lib/device.ts）
+    setMobile(readMobileFlag());
   }, []);
 
   useEffect(() => {
@@ -1028,6 +1759,32 @@ export default function ConsoleScene() {
   }, []);
 
   /**
+   * 点别处收起右侧那两个弹层（电视机大小 / 隐私与服务条款）。
+   *
+   * 两个弹层共用这一条：它们都是浮在房间上的小面板、都没有遮罩，收起逻辑一模一样
+   * （判据都是「按下的位置不在钮 + 弹层那个包裹层里」），分成两份只会慢慢漂成两种行为。
+   * 哪一边开着就收哪一边 —— 点开另一个的钮时，前一个也顺手收掉，不会两个同时挂着。
+   *
+   * 用 `pointerdown` 而不是 `click`：后者要等抬起，而且如果抬起时指针已经在别的元素上
+   * （拖拽过），`click` 根本不派发。
+   *
+   * 必须在**同一个**包裹层里放钮和弹层，否则点钮本身也会被当成「点外面」——
+   * 那样弹层刚开就被这一条关掉（`pointerdown` 早于 `click`），钮看着像失灵。
+   */
+  useEffect(() => {
+    if (!tvMenuOpen && !legalMenuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (tvMenuRef.current?.contains(target)) return;
+      if (legalMenuRef.current?.contains(target)) return;
+      setTvMenuOpen(false);
+      setLegalMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [tvMenuOpen, legalMenuOpen]);
+
+  /**
    * Esc 关面板。
    *
    * **键盘快捷键（P / R / F5 / F8）2026-10-10 全部取消了**（用户要求）。
@@ -1050,7 +1807,11 @@ export default function ConsoleScene() {
       legendOpen ||
       noteOpen ||
       feedbackOpen ||
-      tourOpen;
+      tourOpen ||
+      // 右侧那两个弹层（电视机大小 / 隐私与服务条款）也算「开着的东西」——
+      // 它们浮在房间上，Esc 该能收掉它们
+      tvMenuOpen ||
+      legalMenuOpen;
 
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -1063,6 +1824,8 @@ export default function ConsoleScene() {
       setLegendOpen(false);
       setNoteOpen(false);
       setFeedbackOpen(false);
+      setTvMenuOpen(false);
+      setLegalMenuOpen(false);
       // 指引自己也挂了一个 Esc（见 OnboardingTour），这里再兜一次。
       // 两条路都通到 closeTour，重复调用只是多写一次标记，无副作用。
       if (tourOpen) closeTour();
@@ -1078,6 +1841,8 @@ export default function ConsoleScene() {
     noteOpen,
     feedbackOpen,
     tourOpen,
+    tvMenuOpen,
+    legalMenuOpen,
     closeTour,
   ]);
 
@@ -1289,7 +2054,9 @@ export default function ConsoleScene() {
       <div className="vignette pointer-events-none absolute inset-0" />
 
       <div className="pc-notice relative max-w-md flex-col items-center gap-3 text-center">
-        <span className="font-pixel text-[10px] text-accent">DESKTOP ONLY</span>
+        <span className="font-pixel text-[10px] text-accent">
+          {t('notice.desktopOnlyTitle')}
+        </span>
         <p className="text-[12px] leading-relaxed text-ink-400">{t('notice.desktopOnly')}</p>
       </div>
 
@@ -1298,73 +2065,83 @@ export default function ConsoleScene() {
         （用户 2026-10-10 要求：外观 / 游戏 / 帮助，组间拉开）。
 
         从上到下：
-          ① 外观 —— 明暗、语言、全屏、简洁
+          ① 外观 —— 明暗、语言、全屏、简洁、**电视机大小**
           ② 游戏 —— 游戏库、联机、自定义按键
-          ③ 帮助与留言 —— 按键说明、留言本
+          ③ 帮助与留言 —— 按键说明、留言本、**隐私与服务条款**
         组内间距是容器的 `gap-2`，组间插一道 `RailDivider`（1px 短线 + 更大的外边距）。
 
         留言本原先**只能**点房间里地板上那本，现在给了它一个正经入口；
         地板上那本**留着**，成了彩蛋 —— 见 `RoomFloorItems` 的注释。
 
+        最下面那颗（盾牌）2026-10-12 加：点开往左弹出隐私政策 / 服务条款两条链接。
+        它是**低频入口**，和「电视机大小」一样收进一颗钮、往左弹（见那颗钮的注释），
+        不占常驻位置 —— 房间的视觉重心是那台电视机，这一列越长越抢戏。
+
         原先是横着摆在右上角，整排压住了机身右上角（说明那块更是直接盖在电视机上）。
         竖过来之后宽度只有原来的一半不到，场景横向又空出来，不再和电视机抢地方。
-        两个分段控件也跟着竖排 —— 见 globals.css 的 `.theme-seg / .locale-seg`。
+        外观组打头那两颗（主题 / 语言）2026-10-12 从两格分段控件收成了单颗钮，
+        各占一行，比原来还窄 —— 见下面各自的注释。
+
+        **移动端（`<html data-mobile='on'>`）**：这一列被 globals.css 改成**横排顶在掌机上方**
+        （竖着贴右沿会压住掌机机身），并且藏掉三颗**只有桌面端才有意义**的钮
+        （全屏 / 简洁模式 / 电视机大小，都带 `rail-desktop` 类）—— 掌机不需要全屏入口，
+        屋子那套「简洁模式」和「尺寸档位」在移动端压根没有对象可调。
+        其余全留着（用户 2026-10-12 选的那几项）。
       */}
       <div
         data-tour="rail"
-        className="stage absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2"
+        className="rail absolute right-6 top-1/2 z-40 flex -translate-y-1/2 flex-col items-center gap-2"
       >
         {/* ==================== 组 ①：外观 ==================== */}
 
         {/*
-          白天在上、夜晚在下（用户要求，2026-10-10 换过）。
-          分段控件是 `flex-direction: column`（见 globals.css 的 `.theme-seg`），
-          所以 DOM 顺序就是上下顺序 —— 高亮由 `.seg-light / .seg-dark` 类决定，
-          和先后无关，换位置不会影响选中态。
-        */}
-        <div className="theme-seg pixel-edge pxw-2 bg-ink-800">
-          <button
-            type="button"
-            className="seg-light"
-            onClick={() => applyTheme('light')}
-            title={t('theme.toLight')}
-            aria-label={t('theme.toLight')}
-          >
-            <SunIcon size={13} />
-          </button>
-          <button
-            type="button"
-            className="seg-dark"
-            onClick={() => applyTheme('dark')}
-            title={t('theme.toDark')}
-            aria-label={t('theme.toDark')}
-          >
-            <MoonIcon size={13} />
-          </button>
-        </div>
+          主题：**一颗钮**，点一下在白天 / 夜晚之间来回切（2026-10-12 用户要求，
+          原本是「白天 / 夜晚」两格常驻的分段控件）。
 
-        <div className="locale-seg pixel-edge pxw-2 bg-ink-800">
-          {LOCALE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={option.value === 'zh' ? 'seg-zh' : 'seg-en'}
-              onClick={() => setLocale(option.value)}
-              title={t(option.value === 'zh' ? 'locale.toZh' : 'locale.toEn')}
-              aria-label={t(option.value === 'zh' ? 'locale.toZh' : 'locale.toEn')}
-              aria-pressed={locale === option.value}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+          露太阳还是月亮**由 CSS 按 `<html data-theme>` 决定**（globals.css 的
+          `.theme-toggle`），React 不参与挑图标 —— 那样首帧会先按默认主题画一颗、
+          挂载后再「啪」地换过来。图标画的是**切过去之后**的那一颗，和 title 同方向。
+
+          注意别把两颗图标写成条件渲染（`theme === 'light' ? … : …`）：那样又回到
+          React 挑图标了，上面那个闪烁的问题会立刻回来。
+        */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+          aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+          className="theme-toggle pixel-edge pxw-2 p-1.5 bg-ink-800 text-ink-300 transition-colors hover:text-accent"
+        >
+          <span className="theme-icon-light">
+            <SunIcon size={13} />
+          </span>
+          <span className="theme-icon-dark">
+            <MoonIcon size={13} />
+          </span>
+        </button>
+
+        {/*
+          语言：同样一颗钮来回切，露出来的是**另一种语言**的短标签
+          （当前中文 → 显示 EN），和主题钮同一个方向。
+          和主题不同，语言本身就在 React 里（`useI18n`，首屏由服务端按 cookie
+          定好），所以这里直接按 `locale` 取值即可，不存在首帧不知道的毛病。
+        */}
+        <button
+          type="button"
+          onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
+          title={locale === 'zh' ? t('locale.toEn') : t('locale.toZh')}
+          aria-label={locale === 'zh' ? t('locale.toEn') : t('locale.toZh')}
+          className="locale-toggle pixel-edge pxw-2 p-1.5 bg-ink-800 text-ink-300 transition-colors hover:text-accent"
+        >
+          {LOCALE_LABEL[locale === 'zh' ? 'en' : 'zh']}
+        </button>
 
         <button
           type="button"
           onClick={toggleFullscreen}
           title={t(fullscreen ? 'fullscreen.exit' : 'fullscreen.enter')}
           aria-label={t(fullscreen ? 'fullscreen.exit' : 'fullscreen.enter')}
-          className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+          className={`rail-desktop pixel-edge pxw-2 p-1.5 transition-colors ${
             fullscreen ? 'pxc-accent bg-accent/20 text-accent' : 'bg-ink-800 text-ink-300 hover:text-accent'
           }`}
         >
@@ -1375,6 +2152,10 @@ export default function ConsoleScene() {
           简洁模式：只留背景墙 / 电视机 / 桌子 / 地面。
           和全屏那颗一样是**有开关状态的按钮**，所以亮着的样式跟它同一套（accent 底）。
           真正藏东西的是 CSS，这里只负责翻 <html data-simple>。
+
+          图标 2026-10-12 从「一台电视机」（MinimalIcon）换成了**扫帚**：
+          原来那台和下面「电视机大小」那颗（也是一台电视，只是尺寸不同）挨着放，
+          两颗钮长得太像。扫帚讲的是这个动作本身 —— 把杂物扫掉。
         */}
         <button
           type="button"
@@ -1382,12 +2163,62 @@ export default function ConsoleScene() {
           title={t(simple ? 'simple.exit' : 'simple.enter')}
           aria-label={t(simple ? 'simple.exit' : 'simple.enter')}
           aria-pressed={simple}
-          className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+          className={`rail-desktop pixel-edge pxw-2 p-1.5 transition-colors ${
             simple ? 'pxc-accent bg-accent/20 text-accent' : 'bg-ink-800 text-ink-300 hover:text-accent'
           }`}
         >
-          <MinimalIcon size={13} />
+          <BroomIcon size={13} />
         </button>
+
+        {/*
+          电视机大小（大 / 中 / 小）。点一下在**钮的左侧**弹出三档，点哪档切哪档，
+          当前那档高亮。2026-10-12 用户要求加在右侧这排里，默认「小」= 原来的尺寸。
+
+          为什么收进一颗钮、而不是像主题 / 语言那样三段常驻：这一列是**竖排**的，
+          三段并排会多占两行；而调尺寸是低频动作，没必要一直露着。
+          弹层往**左**开（`right-full`）—— 这一列本来就贴着屏幕右沿，往右没地方。
+
+          高亮不吃 React：`.tv-size-seg` 里那几条规则按 `<html data-tv>` 命中对应的
+          `.seg-large / .seg-medium / .seg-small`（见 globals.css），属性是唯一真相。
+          这里传 `aria-pressed` 只是给读屏用的。
+
+          尺寸和状态都不在 React 里：尺寸由 globals.css 那组 --tv-* 变量推出来
+          （见 lib/tv-size.ts 顶部注释）。图标 `TvSizeIcon` 是三格阶梯，不再随档位变。
+        */}
+        <div ref={tvMenuRef} className="rail-desktop relative">
+          <button
+            type="button"
+            onClick={() => setTvMenuOpen(v => !v)}
+            title={t('tvSize.open')}
+            aria-label={t('tvSize.open')}
+            aria-expanded={tvMenuOpen}
+            className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+              tvMenuOpen ? 'pxc-accent bg-accent/20 text-accent' : 'bg-ink-800 text-ink-300 hover:text-accent'
+            }`}
+          >
+            <TvSizeIcon size={13} />
+          </button>
+
+          {tvMenuOpen && (
+            <div className="rail-menu tv-size-seg pixel-edge pxw-2 absolute right-full top-1/2 mr-1.5 -translate-y-1/2 bg-ink-800">
+              {TV_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  className={`seg-${size}`}
+                  onClick={() => {
+                    applyTvSize(size);
+                    setTvMenuOpen(false);
+                  }}
+                  aria-pressed={tvSize === size}
+                  aria-label={t('tvSize.pick', { level: t(TV_OPT_KEY[size]) })}
+                >
+                  {t(TV_OPT_KEY[size])}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <RailDivider />
 
@@ -1401,7 +2232,7 @@ export default function ConsoleScene() {
           aria-label={t('games.open')}
           className="pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
         >
-          <LibraryIcon size={13} />
+          <StoreIcon size={13} />
         </button>
 
         {/*
@@ -1486,115 +2317,227 @@ export default function ConsoleScene() {
         >
           <NoteIcon size={13} />
         </button>
-      </div>
 
-      <div
-        className="stage flex flex-col items-center"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          const file = e.dataTransfer.files?.[0];
-          if (file) void loadFile(file);
-        }}
-      >
         {/*
-          吊灯。**排在电视机之前** —— 整盏灯（灯具 + 光晕）都在机身背后：
-          光晕糊在屏幕画面上就毁了；而窗口一矮天花板会贴到机身顶边，灯顶上去时
-          也必须让**机身压住灯**，不能反过来挡着电视机（灯线会跟着窗口高度缩，
-          见 globals.css 的 .lamp-cord）。
+          隐私政策与服务条款。点开在**钮的左侧**弹出两条链接 ——
+          和「电视机大小」同一套弹层写法（`right-full` + 垂直居中 + 点外面 / Esc 收起，
+          收起逻辑两个弹层共用，见上面那个 pointerdown 的 effect）。
+
+          链接**在新标签打开**（`target="_blank"`）：这两页是真正独立的路由，
+          点过去会把房间整页换掉 —— 正在跑的游戏、联机房间、屏幕上那盘卡带全没了。
+          法务页是「看一眼就回来」的东西，不该有这种代价。
+
+          `rel="noopener noreferrer"` 是配 `target="_blank"` 的标准写法：
+          新页面拿不到 `window.opener`，也就改不动这个房间的地址栏。
+
+          点完顺手把弹层收掉（`onClick`）—— 不关的话切回来它还挂着，
+          而 Esc / 点外面那两条路都要用户再动一次手。
         */}
-        <RoomLamp
-          on={lampOn}
-          onToggle={toggleLamp}
-          label={t(lampOn ? 'lamp.turnOff' : 'lamp.turnOn')}
-        />
-
-        {/* 电视机。右侧那个卡带架 2026-10-09 撤掉了（历史挪进游戏库弹窗） */}
-        <div className="relative flex items-end gap-4">
-          {/*
-            墙上的窗户。挂在这一层（= 电视机的盒子）上，窗户就永远贴着机身左上角。
-            排在 RetroTv 之前 → 被机身挡住，只从左侧和上方露出两条。
-
-            窗外是**四季**（靠 `<html data-season>` 切），**点玻璃换下一季** ——
-            `cycleSeason` 只写属性和 localStorage，不经过 React（和吊灯同一套路）。
-          */}
-          <RoomWindow onCycleSeason={cycleSeason} label={t('window.cycle')} />
-
-          {/*
-            墙上的日历。和窗户同一层、同样排在 RetroTv 之前 —— 挂在机身右侧那片空墙上
-            （窗户占了左边）。**纯装饰**，不能点：留言本已经挪到地板上那摊杂物里了。
-          */}
-          <RoomCalendar />
-
-          {/*
-            地板铺在场景内部而不是视口上：这样地板线永远贴着物件的落地线，
-            不会随窗口高度切到家具身上。
-            向下铺 200vh 并让 main 的 overflow 裁掉，避免物件下方又露出墙面。
-
-            墙地交界线按 **DESK_HEIGHT 再往下让**一段（原来是 `-150px`）：
-            电视机摆在桌子上，桌子站在地板上 —— 交界线要落在**桌腿底端**，
-            桌子才不是陷在地里。桌子是 absolute、不占布局，所以这里只能手算这个偏移。
-          */}
-          <div
-            className="floor pointer-events-none absolute -inset-x-[600px] h-[200vh] bg-floor"
-            style={{ top: `calc(100% + ${DESK_HEIGHT}px)` }}
+        <div ref={legalMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setLegalMenuOpen(v => !v)}
+            title={t('legal.open')}
+            aria-label={t('legal.open')}
+            aria-expanded={legalMenuOpen}
+            className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+              legalMenuOpen ? 'pxc-accent bg-accent/20 text-accent' : 'bg-ink-800 text-ink-300 hover:text-accent'
+            }`}
           >
-            <div className="absolute inset-x-0 top-0 h-[2px] bg-ink-800" />
-          </div>
+            <ShieldIcon size={13} />
+          </button>
 
-          {/* 桌子。`top-full` 挂在电视机下沿，腿向下伸到地板上 */}
-          <RoomDesk />
-
-          {/*
-            地板上那摊杂物（红白机 / 手柄 / 黄卡带 / 一本留言本 / 右下角那张纸片）。
-            **必须排在桌子之后** —— 它在桌子前面，压在桌腿上；排前面就会被桌子挡住，
-            像嵌进桌子里。它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），
-            不占布局、也不影响机身。
-
-            这摊里能点的有两处：**留言本**和右下角那张**纸片**（点开「一张纸」，
-            见文件末尾那个弹窗）。
-
-            其中**留言本已经退成彩蛋**：留言本的正经入口挪到了右侧开关栏那颗（同一面板），
-            这里纯粹是「顺手在房间里点到了也会开」的隐藏彩蛋。纸片则是唯一的入口，照旧。
-          */}
-          <RoomFloorItems
-            onOpenNote={() => setNoteOpen(true)}
-            noteLabel={t('note.open')}
-            onOpenFeedback={() => setFeedbackOpen(true)}
-            feedbackLabel={t('feedback.open')}
-          />
-
-          <RetroTv
-            canvasRef={canvasRef}
-            screenRef={screenRef}
-            rom={rom}
-            /*
-              房主报「没在玩」之后流可能还在路上，所以屏幕上放什么由 remotePlaying
-              说了算 —— 光看流有没有到会有一小段「已经弹卡了但还显示旧画面」。
-            */
-            remoteStream={netplayState.remotePlaying ? remoteStream : null}
-            remotePlaying={netplayState.remotePlaying}
-            remotePaused={netplayState.remotePaused}
-            paused={paused}
-            busy={busy}
-            loading={loading}
-            canLoad={saves.length > 0}
-            volume={volume}
-            fileOver={fileOver}
-            onPickFile={() => romInputRef.current?.click()}
-            onDragOver={() => setFileOver(true)}
-            onDragLeave={() => setFileOver(false)}
-            onDropFile={handleDropFile}
-            onTogglePause={() => void togglePause()}
-            onSave={() => void saveState()}
-            onLoad={() => void openLoad()}
-            onReload={() => void reset()}
-            onEject={() => void eject()}
-            onVolume={changeVolume}
-            onExitFullscreen={exitFullscreen}
-          />
+          {legalMenuOpen && (
+            <div className="rail-menu pixel-edge pxw-2 absolute right-full top-1/2 mr-1.5 -translate-y-1/2 bg-ink-800 p-1">
+              {/* `<Link>` 是行内元素，**必须加 `block`** 才能撑满整个可点区域
+                  （和 AdminShell 那列 tab 同一个坑）。 */}
+              <Link
+                href="/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setLegalMenuOpen(false)}
+                className="block whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-300 transition-colors hover:text-accent"
+              >
+                {t('legal.privacy')}
+              </Link>
+              <Link
+                href="/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setLegalMenuOpen(false)}
+                className="block whitespace-nowrap px-2 py-1.5 text-[11px] text-ink-300 transition-colors hover:text-accent"
+              >
+                {t('legal.terms')}
+              </Link>
+            </div>
+          )}
         </div>
       </div>
+
+      {/*
+        房间 / 掌机**二选一** —— 判据是**设备**，不是窗口宽度（见上面 `mobile` 那段）。
+        移动端那台掌机自己就是一台完整的机器（屏幕 + 按键），不需要屋子那套背景；
+        桌面端照旧是那间屋子。两台机器各有一个 canvas，Nostalgist 只认 `canvasRef`
+        指的那一个，所以这里必须二选一、不能靠 CSS 藏。
+      */}
+      {mobile ? (
+        <HandheldConsole
+          canvasRef={canvasRef}
+          screenRef={screenRef}
+          rom={rom}
+          crtOff={crtOff}
+          /* 和 RetroTv 同一套：房主报「没在玩」之后流可能还在路上，由 remotePlaying 说了算 */
+          remoteStream={netplayState.remotePlaying ? remoteStream : null}
+          remotePlaying={netplayState.remotePlaying}
+          remotePaused={netplayState.remotePaused}
+          netplayLive={netplayState.status === 'connected'}
+          /* 房主开着房、还没人进来 —— PWR 灯变黄（口径同 RetroTv） */
+          netplayWaiting={netplayState.status === 'waiting' && netplayState.role === 'host'}
+          paused={paused}
+          busy={busy}
+          loading={loading}
+          canLoad={saves.length > 0}
+          volume={volume}
+          /* 加入者本机没有卡带，面键长几个得看房主那盘（见 HandheldConsole 的 FACE_ROWS） */
+          remoteGameConsole={netplayState.remoteGame?.console ?? null}
+          /* 移动端点屏幕 = 打开在线游戏库（本机拖拽 / 选文件那条路手机上不存在） */
+          onOpenLibrary={() => setLibraryOpen(true)}
+          onButton={handleVirtualButton}
+          onTogglePause={() => void togglePause()}
+          onSave={() => void saveState()}
+          onLoad={() => void openLoad()}
+          onReload={() => void reset()}
+          onEject={() => void eject()}
+          /* 音量：掌机上一条都没留（用户 2026-10-12 要求整块删掉），所以不传 onVolume；
+             传给屏幕的 `volume` 仍在（加入者那条 <video> 靠它定音量） */
+        />
+      ) : (
+        <div
+          className="stage flex flex-col items-center"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (file) void loadFile(file);
+          }}
+        >
+          {/*
+            吊灯。**排在电视机之前** —— 整盏灯（灯具 + 光晕）都在机身背后：
+            光晕糊在屏幕画面上就毁了；而窗口一矮天花板会贴到机身顶边，灯顶上去时
+            也必须让**机身压住灯**，不能反过来挡着电视机（灯线会跟着窗口高度缩，
+            见 globals.css 的 .lamp-cord）。
+          */}
+          <RoomLamp
+            on={lampOn}
+            onToggle={toggleLamp}
+            label={t(lampOn ? 'lamp.turnOff' : 'lamp.turnOn')}
+          />
+  
+          {/* 电视机。右侧那个卡带架 2026-10-09 撤掉了（历史挪进游戏库弹窗） */}
+          <div className="relative flex items-end gap-4">
+            {/*
+              墙上的窗户。挂在这一层（= 电视机的盒子）上，窗户就永远贴着机身左上角。
+              排在 RetroTv 之前 → 被机身挡住，只从左侧和上方露出两条。
+  
+              窗外是**四季**（靠 `<html data-season>` 切），**点玻璃换下一季** ——
+              `cycleSeason` 只写属性和 localStorage，不经过 React（和吊灯同一套路）。
+            */}
+            <RoomWindow onCycleSeason={cycleSeason} label={t('window.cycle')} />
+  
+            {/*
+              墙上的日历。和窗户同一层、同样排在 RetroTv 之前 —— 挂在机身右侧那片空墙上
+              （窗户占了左边）。**纯装饰**，不能点：留言本已经挪到地板上那摊杂物里了。
+            */}
+            <RoomCalendar />
+  
+            {/*
+              地板铺在场景内部而不是视口上：这样地板线永远贴着物件的落地线，
+              不会随窗口高度切到家具身上。
+              向下铺 200vh 并让 main 的 overflow 裁掉，避免物件下方又露出墙面。
+  
+              墙地交界线按 **DESK_HEIGHT 再往下让**一段（原来是 `-150px`）：
+              电视机摆在桌子上，桌子站在地板上 —— 交界线要落在**桌腿底端**，
+              桌子才不是陷在地里。桌子是 absolute、不占布局，所以这里只能手算这个偏移。
+            */}
+            <div
+              className="floor pointer-events-none absolute -inset-x-[600px] h-[200vh] bg-floor"
+              style={{ top: `calc(100% + ${DESK_HEIGHT}px)` }}
+            >
+              <div className="absolute inset-x-0 top-0 h-[2px] bg-ink-800" />
+            </div>
+  
+            {/* 桌子。`top-full` 挂在电视机下沿，腿向下伸到地板上 */}
+            <RoomDesk />
+  
+            {/*
+              地板上那摊杂物（红白机 / 手柄 / 黄卡带 / 一本留言本 / 右下角那张纸片 /
+              一台插着耳机的 MP4）。
+              **必须排在桌子之后** —— 它在桌子前面，压在桌腿上；排前面就会被桌子挡住，
+              像嵌进桌子里。它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），
+              不占布局、也不影响机身。
+  
+              这摊里能点的有三处：**留言本**、右下角那张**纸片**（点开「一张纸」，
+              见文件末尾那个弹窗）、以及那台 **MP4**（播放 / 暂停，音源在下面那个
+              `<audio>` 上）。
+  
+              其中**留言本已经退成彩蛋**：留言本的正经入口挪到了右侧开关栏那颗（同一面板），
+              这里纯粹是「顺手在房间里点到了也会开」的隐藏彩蛋。纸片则是唯一的入口，照旧。
+            */}
+            <RoomFloorItems
+              onOpenNote={() => setNoteOpen(true)}
+              noteLabel={t('note.open')}
+              onOpenFeedback={() => setFeedbackOpen(true)}
+              feedbackLabel={t('feedback.open')}
+              mp4Playing={mp4Playing}
+              onToggleMp4={toggleMp4}
+              /* 标签按状态现选：按钮的名字要说清「点下去会发生什么」，和吊灯那两颗同一个规矩 */
+              mp4Label={t(mp4Playing ? 'mp4.pause' : 'mp4.play')}
+            />
+  
+            <RetroTv
+              canvasRef={canvasRef}
+              screenRef={screenRef}
+              rom={rom}
+              /* 弹出卡带那 0.4 秒的「显像管关机」—— 只在 eject 里点亮，见那边的注释 */
+              crtOff={crtOff}
+              /*
+                房主报「没在玩」之后流可能还在路上，所以屏幕上放什么由 remotePlaying
+                说了算 —— 光看流有没有到会有一小段「已经弹卡了但还显示旧画面」。
+              */
+              remoteStream={netplayState.remotePlaying ? remoteStream : null}
+              remotePlaying={netplayState.remotePlaying}
+              remotePaused={netplayState.remotePaused}
+              /*
+                屏幕左上角那颗「已连接」小灯。两侧都亮 —— 房主同样会忘掉自己还在房间里，
+                而「刚连上」那枚提示只活 4 秒。见 RetroTv 里那个 prop 的注释。
+              */
+              netplayLive={netplayState.status === 'connected'}
+              /*
+                房主开着房、还没人进来 —— 机身 PWR 灯变黄。**只认房主**：加入者那边的
+                'waiting' 只是「正在对上」的一瞬，而房主可能无限期等下去。见 RetroTv 的 prop 注释。
+              */
+              netplayWaiting={netplayState.status === 'waiting' && netplayState.role === 'host'}
+              paused={paused}
+              busy={busy}
+              loading={loading}
+              canLoad={saves.length > 0}
+              volume={volume}
+              fileOver={fileOver}
+              onPickFile={() => romInputRef.current?.click()}
+              onDragOver={() => setFileOver(true)}
+              onDragLeave={() => setFileOver(false)}
+              onDropFile={handleDropFile}
+              onTogglePause={() => void togglePause()}
+              onSave={() => void saveState()}
+              onLoad={() => void openLoad()}
+              onReload={() => void reset()}
+              onEject={() => void eject()}
+              onVolume={changeVolume}
+              onExitFullscreen={exitFullscreen}
+            />
+          </div>
+        </div>
+      )}
 
       {/*
         存档列表。刻意浮在房间上、**不进屏幕** —— 屏幕里跑的是游戏画面，
@@ -1659,9 +2602,15 @@ export default function ConsoleScene() {
         屏幕里跑的是游戏画面，这张面板要写字、还要输入房间码。
       */}
       <NetplayPanel
+        /*
+         * `key` 挂的是预填码：从分享链接确认加入时 `joinPrefill` 一变，面板就重挂载、
+         * 输入框用新码重新初始化。平时它一直是 `''`，面板不会无谓地重建。
+         */
+        key={joinPrefill ?? ''}
         open={netplayOpen}
         state={netplayState}
         busy={netplayBusy}
+        initialCode={joinPrefill ?? ''}
         mode={netplayMode}
         onModeChange={setNetplayMode}
         quality={streamQuality}
@@ -1694,25 +2643,27 @@ export default function ConsoleScene() {
       {/*
         在线游戏库。和上面三块一样浮在房间上、不进屏幕。
         弹窗里两个 tab：「游戏库」是在线列表（选中的那盘由父级记 loadingId，
-        弹窗据此把卡片置灰、并显示下载进度），「历史」是本机载入过的卡带 ——
-        数据直接用父级的 `library`（和卡带历史同一份），面板自己不再去翻一遍 IndexedDB。
+        弹窗据此把卡片置灰、并显示下载进度），「历史」是**从游戏库点开过的那批**——
+        数据直接用父级的 `library`，面板自己不再去翻一遍 IndexedDB。
+        两个 tab 点下去走的是同一条载入路径（`loadRemote`），差别只在历史那条多带一层
+        已存的字符串记录（见 ConsoleScene 里 `loadRemote` 的注释）。
       */}
       {libraryOpen && (
         <GameLibraryPanel
           loadingId={libraryLoadingId}
+          downloadingTitle={romDownload?.title ?? null}
           progress={libraryProgress}
           cartridges={library}
           activeId={activeId}
           onPick={(game) => void loadRemoteGame(game)}
           /*
-            从「历史」里挑一盘本机卡带：**先关面板再载入** —— ROM 就在 IndexedDB 里，
-            没有下载那一段要给用户看进度（远程那盘正好相反，得留着面板显示进度条）。
+            从「历史」里挑一盘 —— 和上面在线库那张卡片走**完全同一条路**：
+            面板先留着显示下载进度和「取消」（历史里只有地址，点下去还得下一遍），
+            `loadRemote` 拿到整包自己会把面板关掉，再把画面交给屏幕里的核心进度条。
           */
-          onPickCartridge={(id) => {
-            setLibraryOpen(false);
-            void loadFromLibrary(id);
-          }}
+          onPickCartridge={(cartridge) => void loadRemote(cartridge)}
           onRemoveCartridge={(id) => void removeFromLibrary(id)}
+          onCancelLoad={cancelRemoteLoad}
           onClose={() => setLibraryOpen(false)}
         />
       )}
@@ -1859,11 +2810,54 @@ export default function ConsoleScene() {
       {feedbackOpen && <FeedbackPanel onClose={() => setFeedbackOpen(false)} />}
 
       {/*
+        分享链接带进来的房间邀请。和操作指引同为 z-[60]，但挂在 DOM 更靠后 ——
+        撞上时它画在上面（从链接进来的新用户正好会赶上「初次访问的指引」）。
+      */}
+      {pendingRoom !== null && (
+        <JoinRoomPrompt code={pendingRoom} onConfirm={acceptInvite} onCancel={dismissInvite} />
+      )}
+
+      {/*
         操作指引。挂在所有弹窗**之后**、层级也最高（z-[60]，其余是 z-50）——
         它要能圈住右侧那排开关（z-40）和整台机身，还要把底下的点击全吃掉。
         初次访问由上面那个 effect 自动打开，之后从「按键说明」里的按钮重看。
+
+        **有待确认的房间邀请时让位**（`!pendingRoom`）：先答「进不进这个房间」，
+        进完再看指引 —— 反过来会变成「一张指引糊在邀请上面」，点都点不着。
+        邀请处理完它会自己补上（`tourOpen` 没被清掉）。
       */}
-      <OnboardingTour open={tourOpen} onClose={closeTour} />
+      <OnboardingTour open={tourOpen && !pendingRoom} onClose={closeTour} />
+
+      {/*
+        联机提示。几秒后自己消失（见上面那个 setTimeout 的 effect）。
+        两种内容：刚连上（ok）/ 对方离开（warn），都由 netplay 的 onState 写进来 ——
+        它认的是「刚连上」和「已连接 → 断开」这两个跳变。
+
+        几个刻意的选择：
+        - **层级压在面板之下**（z-40，面板是 z-50）：它不是面板，只是一句回执，
+          用户在连上的同一瞬间顺手打开了别的弹窗，那一屏该盖住它。
+        - `pointer-events-none`：它飘在房间顶上，绝不能替底下的按钮接走点击。
+        - 绿点 / 琥珀点 + `pxc-ok` / `pxc-warn` 描边，分别和联机面板里那颗「已连接」
+          的绿点、报错那行琥珀色是同一套视觉 —— 说的是同一件事，一眼就能对上。
+        - 居中交给外层容器的 `-translate-x-1/2`，入场动效在内层（`.toast-pop`）——
+          两个 transform 落在一个元素上会互相顶掉，见 globals.css 那段注释。
+        - 房间是桌面端专用的（900px 起），不用考虑窄屏换行。
+      */}
+      {netplayToast && (
+        <div className="pointer-events-none fixed left-1/2 top-6 z-40 -translate-x-1/2">
+          <div
+            role="status"
+            className={`toast-pop pixel-edge ${netplayToast.kind === 'ok' ? 'pxc-ok' : 'pxc-danger'} pxw-3 flex items-center gap-2 bg-ink-800 px-3 py-2`}
+          >
+            <span
+              className={`h-[7px] w-[7px] shrink-0 ${netplayToast.kind === 'ok' ? 'bg-ok' : 'bg-danger'}`}
+            />
+            <span className="text-[12px] whitespace-nowrap text-ink-100">
+              {t(netplayToast.key)}
+            </span>
+          </div>
+        </div>
+      )}
 
       <input
         ref={romInputRef}
@@ -1875,6 +2869,30 @@ export default function ConsoleScene() {
           if (file) void loadFile(file);
           e.target.value = '';
         }}
+      />
+
+      {/*
+        地板上那台 MP4 的音源。放在这儿（和 ROM 的 file input 并排）是因为它
+        **不参与任何布局** —— 挂进房间那棵树里只会让「哪一层在管什么」更难读。
+
+        `src` 是**首选**音源，不是唯一：文件不在时 `toggleMp4` 会把它换成现场摇的
+        8-bit 小段（`lib/chiptune.ts`，每次点都摇一段新的），所以这里是个常量也没关系
+        （React 只在 props 变化时重写属性，不会把改过的 `src` / `loop` 顶回去）。
+        文件要自己放到 `public/audio/i-miss-you.mp3`，见该目录的 README。
+
+        `preload="none"`：别在首屏就去拉一个几 MB 的音频。
+        `loop`：一首歌循环放 —— 这是个彩蛋，不是播放器。
+        （兜底那段不受它管：`toggleMp4` 换音源时会一并把 `loop` 撤掉，放一遍就停。）
+
+        `onEnded`：只对**不循环**的兜底那段有意义 —— 放完了要把播放态收回去，
+        否则屏幕会一直停在「正在播」的样子。真歌带 `loop`，这个事件永远不触发。
+      */}
+      <audio
+        ref={mp4AudioRef}
+        src="/audio/i-miss-you.mp3"
+        loop
+        preload="none"
+        onEnded={() => setMp4Playing(false)}
       />
     </main>
   );

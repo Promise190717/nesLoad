@@ -40,7 +40,8 @@ export function I18nProvider({
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; SameSite=Lax`;
 
     // <html> 由服务端组件渲染，客户端 setState 不会让它重渲染，
-    // 所以这两个属性得手动同步 —— 分段开关的高亮和读屏都靠它们。
+    // 所以这两个属性得手动同步 —— 屏幕里的提示文案按 data-locale 选字号
+    // （见 globals.css 的 .screen-hint-*），读屏和 SEO 看 lang。
     document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
     document.documentElement.dataset.locale = next;
   }, []);

@@ -1,13 +1,19 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TURN_CONFIGURED } from '@/lib/netplay';
+import { ROOM_QUERY_PARAM, TURN_CONFIGURED } from '@/lib/netplay';
 import type { NetplayError, NetplayMode, NetplayState, StreamQuality } from '@/lib/netplay';
 import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
 interface NetplayPanelProps {
   open: boolean;
+  /**
+   * 输入框的初始值 —— 从分享链接确认加入时带进来的房间码。
+   * 只在**挂载时**读一次（走 useState 的初始值）：父级会同时换掉本面板的 `key`，
+   * 所以码一变就是一次重挂载，不需要在这里写「prop 变了同步进 state」的 effect。
+   */
+  initialCode?: string;
   state: NetplayState;
   busy: boolean;
   /** 当前选的链路。`lan` = 只 STUN；`wan` = 额外带 TURN 兜底（仍是直连优先） */
@@ -35,6 +41,7 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
   'room-password': 'netplay.errPassword',
   handshake: 'netplay.errHandshake',
   'host-left': 'netplay.errHostLeft',
+  'room-full': 'netplay.errRoomFull',
   'join-failed': 'netplay.errUnknown',
 };
 
@@ -57,7 +64,7 @@ const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
  *
  * 三个状态各自成屏：
  *   idle      → 创建 / 输入码加入（`error` 有值时在底部补一句原因）
- *   waiting   → 亮出房间码 + 「等待对方」
+ *   waiting   → 亮出房间码 + 状态行（房主：「等待对方」/ 加入者：「正在加入房间」）
  *   connected → 亮出房间码 + 延迟
  *
  * idle 那一屏上有两个选择器，都只在**没进房间**时出现：
@@ -65,8 +72,12 @@ const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
  *   - 出画档位（流畅 / 均衡 / 清晰）—— 换档要重建整条流，玩到一半换会闪一下。
  * 档位那个是给房主用的（编码压在他机器上），理见 lib/netplay.ts 的 `StreamQuality`。
  *
- * 「等待对方」只对**房主**成立 —— 加入者那边房主一走，房间就被销毁、
- * 直接落回 idle 并报 `host-left`（见 lib/netplay.ts 的 onPeerLeave）。
+ * ⚠️ `waiting` 这一档**两种角色的含义不同**，状态行文案必须按 role 分开 ——
+ * 房主是「房间开好了、等对方来」，加入者是「我正在连过去」。给加入者显示
+ * 「等待对方加入」会让他以为自己是房主（明明是他输码投奔别人）。
+ * 另外加入者只要房主一走，房间就被销毁、直接落回 idle 并报 `host-left`
+ * （见 lib/netplay.ts 的 onPeerLeave），所以加入者的 `waiting` 只会出现在
+ * 「刚点完加入、还没握上手」这一段。
  *
  * 加入者这边还多两条只有它才看得到的信息：房主在玩哪盘、以及「连上了但房主还没插卡」。
  * 后者必须有 —— 加入者本机没有卡带，房主不出画面时他的屏幕就是一片雪花，
@@ -74,6 +85,7 @@ const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
  */
 export default function NetplayPanel({
   open,
+  initialCode = '',
   state,
   busy,
   mode,
@@ -86,13 +98,19 @@ export default function NetplayPanel({
   onLeave,
 }: NetplayPanelProps) {
   const { t } = useI18n();
-  const [code, setCode] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [code, setCode] = useState(initialCode);
+  /**
+   * 刚复制了哪一样东西 —— 房间码还是分享链接。
+   *
+   * 两者共用一个计时器而不是各存一个 boolean：同一时刻只可能有一个「刚复制」，
+   * 分开存反而会出现两个按钮同时显示「已复制」的假象。
+   */
+  const [copied, setCopied] = useState<'code' | 'link' | null>(null);
 
   // 复制成功的小提示过一会儿自己收回去
   useEffect(() => {
     if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1600);
+    const timer = setTimeout(() => setCopied(null), 1600);
     return () => clearTimeout(timer);
   }, [copied]);
 
@@ -113,9 +131,30 @@ export default function NetplayPanel({
     if (!state.code) return;
     try {
       await navigator.clipboard.writeText(state.code);
-      setCopied(true);
+      setCopied('code');
     } catch {
       // 剪贴板被拒（非安全上下文 / 用户拒绝）时静默：码就在屏幕上，手抄也行
+    }
+  };
+
+  /**
+   * 分享 = 把**整条链接**复制走，`?room=XXXX`。
+   *
+   * 拼的是 `window.location` 现址（协议 / 域名 / 端口 / 部署路径全带上），
+   * 而不是自己拼一个 origin —— 这样本地 `localhost:3000` 和线上域名都不用分支判断。
+   * 顺手把已有的 hash 抹掉：`#` 后面那段是页面自己的状态，跟邀请无关，
+   * 留着只会让链接更长、还可能把 `?room` 挡在「人眼能看到的部分」之外。
+   */
+  const copyShareLink = async () => {
+    if (!state.code) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set(ROOM_QUERY_PARAM, state.code);
+      url.hash = '';
+      await navigator.clipboard.writeText(url.toString());
+      setCopied('link');
+    } catch {
+      // 同上：剪贴板不可用时静默，码还在屏幕上
     }
   };
 
@@ -263,16 +302,28 @@ export default function NetplayPanel({
             <>
               <div className="flex flex-col items-center gap-1 border-b-2 border-ink-900 pb-4">
                 <span className="text-[10px] text-ink-500">{t('netplay.roomCode')}</span>
-                <div className="flex items-center gap-3">
-                  <span className="font-pixel text-[22px] tracking-[0.3em] text-accent">
-                    {state.code}
-                  </span>
+                <span className="font-pixel text-[22px] tracking-[0.3em] text-accent">
+                  {state.code}
+                </span>
+                {/*
+                  两个按钮挪到码下面单独一行（原先「复制」挤在码右边）：
+                  分享那条的「链接已复制」比「分享」长一截，横排会把房间码顶得左右晃。
+                  竖着排之后两个按钮的宽度变化只影响自己那一行，码一直居中不动。
+                */}
+                <div className="mt-1 flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => void copyCode()}
                     className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[10px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
                   >
-                    {copied ? t('netplay.copied') : t('netplay.copy')}
+                    {copied === 'code' ? t('netplay.copied') : t('netplay.copy')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void copyShareLink()}
+                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[10px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
+                  >
+                    {copied === 'link' ? t('netplay.shareCopied') : t('netplay.share')}
                   </button>
                 </div>
               </div>
@@ -284,7 +335,14 @@ export default function NetplayPanel({
                   }`}
                 />
                 <span className="text-ink-200">
-                  {state.status === 'connected' ? t('netplay.connected') : t('netplay.waiting')}
+                  {state.status === 'connected'
+                    ? t('netplay.connected')
+                    : // `waiting` 对两种角色是两件事：房主是「房间开好了、等对方来」，
+                      // 加入者是「我正在连过去」。所以文案分开 —— 给加入者看
+                      // 「等待对方加入」会让他以为自己成了房主（见 i18n 那两句的注释）。
+                      state.role === 'guest'
+                      ? t('netplay.joining')
+                      : t('netplay.waiting')}
                 </span>
                 {state.status === 'connected' && state.rtt !== null && (
                   <span className="ml-auto font-pixel text-[9px] text-ink-400">
