@@ -317,7 +317,7 @@ body {
 
 /*
  * 简洁模式：整间屋子只留**背景墙 / 电视机 / 桌子 / 地面**，
- * 藏掉**吊灯、窗户、日历、地板杂物**这四块。
+ * 藏掉**吊灯、窗户、墙上那幅挂画、地板杂物**这四块。
  *
  * 开关挂在 `<html data-simple>`（首屏由 layout.tsx 的内联脚本 BOOT_INIT 写入，
  * 和主题 / 吊灯 / 季节同一套路：DOM 属性是唯一真相，React 那份 state 只为了 aria）。
@@ -330,8 +330,9 @@ body {
  */
 :root[data-simple='on'] .room-lamp,
 :root[data-simple='on'] .room-window,
-:root[data-simple='on'] .room-calendar,
-:root[data-simple='on'] .room-floor-items {
+:root[data-simple='on'] .room-painting,
+:root[data-simple='on'] .room-floor-items,
+:root[data-simple='on'] .room-cat {
   display: none;
 }
 
@@ -839,6 +840,53 @@ body {
 }
 .mp4-jump {
   animation: mp4-jump 0.6s steps(1, end) infinite;
+}
+
+/*
+ * 电视机左边那摞书后面那只猫（见 RoomBackdrop.tsx 的 TvCat）—— 逗猫棒那枚彩蛋的演出。
+ *
+ * 两段动画分工，挂在不同层上（transform 会互相覆盖，所以不能写在一个元素上）：
+ *   - `.cat-peek`（最外层）：整颗脑袋从书堆后面**升上来**、停一会儿、再落回去。
+ *     位移量 44px 是量出来的：挡住它的是桌子上那三本书（堆顶比桌面高 30px）和
+ *     桌面那条横板（高 28px）—— 要走满 35px 头顶才沉到书堆顶以下（否则会剩下
+ *     一对耳朵露在外面），而超过 53px 下巴又会从桌面那条板下面钻出来。取中间的 44。
+ *     ⚠️ 写死的值：改猫的尺寸 / 站位（TvCat 的 bottom / h）或改书堆高度都要一起重算。
+ *     时间轴按 2.9s 铺：升起来 0.4（→14%）、停 2.1（14%→86%）、落回去 0.4。
+ *     `both` 是必须的 —— 收尾那一帧要保持到组件卸载，否则最后一刻会闪回上面来。
+ *   - `.cat-sway`（里层）：停住的那 2 秒里脑袋轻轻左右晃一下，不然静止得像张贴纸。
+ *     幅度 ±2px：脸比书堆两边各窄 4px，晃出去也在书后面，不会从边上漏出一角。
+ *
+ * 系统开了「减少动态效果」就把两段都关掉（见文件末尾那段）：`.cat-peek` 一关，
+ * 元素停在**自然位置**（= 探出来的样子），猫就直接出现、到点直接消失，没有位移。
+ */
+@keyframes cat-peek {
+  0% {
+    transform: translateY(44px);
+  }
+  14% {
+    transform: translateY(0);
+  }
+  86% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(44px);
+  }
+}
+.cat-peek {
+  animation: cat-peek 2.9s ease-in-out both;
+}
+
+@keyframes cat-sway {
+  from {
+    transform: translateX(-2px);
+  }
+  to {
+    transform: translateX(2px);
+  }
+}
+.cat-sway {
+  animation: cat-sway 0.9s ease-in-out 0.4s infinite alternate;
 }
 
 /*
@@ -1362,7 +1410,10 @@ body {
   .mp4-jump,
   .link-blink,
   .sky-clouds,
-  .sky-stars > * {
+  .sky-stars > *,
+  /* 猫那两段（见 .cat-peek 的注释）：关掉之后它停在自然位置，照样探得出来 */
+  .cat-peek,
+  .cat-sway {
     animation: none;
   }
 

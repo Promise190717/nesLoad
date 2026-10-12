@@ -64,15 +64,21 @@ import JoinRoomPrompt from './JoinRoomPrompt';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
 import OnboardingTour from './OnboardingTour';
+import PaintingPanel from './PaintingPanel';
 import RetroTv from './RetroTv';
 import {
+  type CatBreed,
+  type PixelPainting,
   DESK_HEIGHT,
-  RoomCalendar,
+  PAINTINGS,
+  RoomPainting,
   RoomDesk,
   RoomFloorItems,
   RoomLamp,
   RoomWall,
   RoomWindow,
+  TvCat,
+  nextCatBreed,
 } from './RoomBackdrop';
 import {
   BroomIcon,
@@ -167,6 +173,15 @@ const NETPLAY_TOAST_MS = 4000;
  * canvas 会立刻从「一条线」弹回整屏，动画的尾巴直接被切掉。多出来的那 20ms 是余量。
  */
 const CRT_OFF_MS = 440;
+
+/**
+ * 书堆后面探出来的那只猫停多久（点了地板上那根逗猫棒之后）。
+ *
+ * **必须 ≥ globals.css 里 `.cat-peek` 那段的时长（2.9s）**：动画自己会把猫滑出来
+ * 再滑回去，这个定时器只负责把组件从 DOM 上摘掉。给早了，最后那截「缩回机身后面」
+ * 会被切掉 —— 猫会当场消失在半路。多出来的 100ms 是余量。
+ */
+const POKE_CAT_MS = 3000;
 
 type Theme = 'dark' | 'light';
 
@@ -737,6 +752,39 @@ export default function ConsoleScene() {
    * 卸载时也要还回去（它不再是模块级缓存了）。
    */
   const mp4UrlRef = useRef<string | null>(null);
+
+  /**
+   * 书堆后面探出来的那只猫（点了地板上那根逗猫棒才出现，见 `TvCat`）。
+   *
+   * 和 MP4 一样，状态就留在 React 里：刷新页面本来就该没有猫，不必落盘。
+   * `null` = 没猫；有值时渲染 `TvCat`，`POKE_CAT_MS` 之后自己收回去。
+   * `seq` 只当 React 的 key 用：**再点一次要换一只、还要把动画从头放一遍** ——
+   * 不给 key 的话同一个组件只会改 props，CSS 动画不会重跑，看起来像「点第二下没反应」。
+   */
+  const [cat, setCat] = useState<{ breed: CatBreed; seq: number } | null>(null);
+  /** 上一只猫的品种（跨轮防重复用，理由见 `nextCatBreed`） */
+  const catBreedRef = useRef<CatBreed | undefined>(undefined);
+  /** 洗牌袋：连着点几次都能看到不同的品种 */
+  const catBagRef = useRef<CatBreed[]>([]);
+  /** 让猫缩回去的那个定时器 */
+  const catTimerRef = useRef<number | null>(null);
+  /** 猫的出场序号，只涨不减 —— 上面那个 key 就是它 */
+  const catSeqRef = useRef(0);
+
+  /**
+   * 墙上挂着的那一幅画（`PAINTINGS` 里的一项）。**刷新随机抽一幅**；`null` = 还没抽出来。
+   *
+   * 为什么不留在 `RoomPainting` 里：**点开大图要看的就是墙上挂着的那一幅**，
+   * 两处各存一份迟早会各说各话。挪上来之后 `RoomPainting` 成了纯展示组件 ——
+   * 和窗户 `RoomWindow`、地板 `RoomFloorItems` 一样，只收 props + 一个 label。
+   *
+   * ⚠️ 抽签**只能放在挂载后的 effect 里，不能写成 `useState` 的初值**：这个组件在
+   * 服务端也要渲一遍，初值会让 Node 和浏览器**各抽一次**、两边对不上就是 hydration
+   * mismatch。所以首帧墙上画框里是一块空画布，挂载后（一帧内）才补上。
+   */
+  const [wallPainting, setWallPainting] = useState<PixelPainting | null>(null);
+  /** 挂画的大图面板开着没有（点画框打开，见 `PaintingPanel`）。里面摆的就是墙上那一幅 */
+  const [paintingOpen, setPaintingOpen] = useState(false);
 
   /**
    * 操作指引开着没有。**初次访问自动打开**（下面那个 effect），之后靠「重看操作指引」
@@ -1576,7 +1624,7 @@ export default function ConsoleScene() {
    * 「读当前值再算下一档」，直接落目标档即可（选择器里三档都是明码的）。
    *
    * 尺寸本身一个字都不用在这里改：它是 globals.css 里一组跟着 `data-tv` 走的 CSS 变量
-   * （屏幕 / 机身 / 底座 / 桌面宽 / 灯线长度）。窗户、日历、桌子、地板都是**锚在机身
+   * （屏幕 / 机身 / 底座 / 桌面宽 / 灯线长度）。窗户、挂画、桌子、地板都是**锚在机身
    * 上**的，跟着走即可 —— 换档只需要动这一处属性。
    *
    * **正在玩的时候换档也不用重插卡带**：核心用 ResizeObserver 盯着 canvas 元素，
@@ -1611,6 +1659,29 @@ export default function ConsoleScene() {
     const current = document.documentElement.dataset.season;
     const next = nextSeason(isSeason(current) ? current : 'winter');
     document.documentElement.dataset.season = next;
+  }, []);
+
+  /**
+   * 点中地板上那根逗猫棒：抽一只猫，让它从桌子左边那摞书后面探出来。
+   *
+   * 已经在演的时候再点一次 = **换一只重演**：`seq` 变 → `TvCat` 整个重挂 →
+   * 两段 CSS 动画从头跑。所以要先把上一个定时器清掉再重新计时，否则第二只猫
+   * 会被第一只那个到点的定时器提前收走。
+   *
+   * 品种在**事件处理函数里**抽、不写进 `setCat` 的更新函数：更新函数在严格模式下
+   * 会被调两次，而洗牌袋是个 ref（有副作用的东西），重放一次就白吃掉两只猫。
+   */
+  const pokeCat = useCallback(() => {
+    const breed = nextCatBreed(catBagRef.current, catBreedRef.current);
+    catBreedRef.current = breed;
+    catSeqRef.current += 1;
+    setCat({ breed, seq: catSeqRef.current });
+
+    if (catTimerRef.current !== null) window.clearTimeout(catTimerRef.current);
+    catTimerRef.current = window.setTimeout(() => {
+      catTimerRef.current = null;
+      setCat(null);
+    }, POKE_CAT_MS);
   }, []);
 
   /**
@@ -1717,6 +1788,9 @@ export default function ConsoleScene() {
       mp4AudioRef.current?.pause();
       if (mp4UrlRef.current) URL.revokeObjectURL(mp4UrlRef.current);
       mp4UrlRef.current = null;
+      // 猫那个定时器同理：卸载后再回调就是往一个已经没了的组件上 setState
+      if (catTimerRef.current !== null) window.clearTimeout(catTimerRef.current);
+      catTimerRef.current = null;
     },
     []
   );
@@ -1734,6 +1808,21 @@ export default function ConsoleScene() {
     setTvSize(isTvSize(tv) ? tv : DEFAULT_TV_SIZE);
     // 移动端那台掌机 / 桌面端那间屋子，二选一（属性由首屏内联脚本写，见 lib/device.ts）
     setMobile(readMobileFlag());
+  }, []);
+
+  /**
+   * 墙上那幅画：挂载后抽一幅。**为什么非得挂载后**（不能写进 state 初值）见
+   * `wallPainting` 那段注释 —— 一句话是「服务端也会渲一遍，两边各抽一次就 mismatch」。
+   *
+   * 抽签再往后推一帧（`setTimeout(…, 0)`）而不是在 effect 里同步 `setState`：
+   * 后者会多出一条 React Compiler 的 `set-state-in-effect` **error**
+   * （基线那几条是按 effect 计的 —— 往已有报错的 effect 里加不涨条数，新开一个会涨）。
+   */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setWallPainting(PAINTINGS[Math.floor(Math.random() * PAINTINGS.length)]);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -1807,6 +1896,7 @@ export default function ConsoleScene() {
       legendOpen ||
       noteOpen ||
       feedbackOpen ||
+      paintingOpen ||
       tourOpen ||
       // 右侧那两个弹层（电视机大小 / 隐私与服务条款）也算「开着的东西」——
       // 它们浮在房间上，Esc 该能收掉它们
@@ -1824,6 +1914,7 @@ export default function ConsoleScene() {
       setLegendOpen(false);
       setNoteOpen(false);
       setFeedbackOpen(false);
+      setPaintingOpen(false);
       setTvMenuOpen(false);
       setLegalMenuOpen(false);
       // 指引自己也挂了一个 Esc（见 OnboardingTour），这里再兜一次。
@@ -1840,6 +1931,7 @@ export default function ConsoleScene() {
     legendOpen,
     noteOpen,
     feedbackOpen,
+    paintingOpen,
     tourOpen,
     tvMenuOpen,
     legalMenuOpen,
@@ -1868,7 +1960,7 @@ export default function ConsoleScene() {
    */
   useEffect(() => {
     if (netplayState.role !== 'guest') return;
-    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || tourOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || paintingOpen || tourOpen) return;
 
     /*
      * 「物理键 → 钮」由**加入者自己的 1P 键位**反查得到。
@@ -1978,7 +2070,7 @@ export default function ConsoleScene() {
        */
       releaseAll();
     };
-  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, tourOpen]);
+  }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen]);
 
   /**
    * 面板关掉之后，把焦点从按钮上摘掉。
@@ -1993,10 +2085,10 @@ export default function ConsoleScene() {
    * 摘掉焦点后事件目标落回 body，核心才会重新读键盘。
    */
   useEffect(() => {
-    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || tourOpen) return;
+    if (saveOpen || netplayOpen || keybindOpen || legendOpen || noteOpen || feedbackOpen || paintingOpen || tourOpen) return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body) active.blur();
-  }, [saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, tourOpen]);
+  }, [saveOpen, netplayOpen, keybindOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen]);
 
   /**
    * 点完按钮就把焦点摘掉。
@@ -2445,10 +2537,20 @@ export default function ConsoleScene() {
             <RoomWindow onCycleSeason={cycleSeason} label={t('window.cycle')} />
   
             {/*
-              墙上的日历。和窗户同一层、同样排在 RetroTv 之前 —— 挂在机身右侧那片空墙上
-              （窗户占了左边）。**纯装饰**，不能点：留言本已经挪到地板上那摊杂物里了。
+              墙上挂的画。和窗户同一层、同样排在 RetroTv 之前 —— 挂在机身右侧那片空墙上
+              （窗户占了左边）。七幅像素画里**刷新时随机抽一幅**，**点画框能看大图**
+              （画面 + 画名 + 作者，见 `PaintingPanel`）—— 这两条都是 2026-10-12 用户当天提的，
+              这里原先挂的是本日历。
+
+              「抽到的是哪一幅」是 ConsoleScene 的状态（`wallPainting`），这里只把那一幅传下去 ——
+              面板要摆出的正是墙上这一幅，这份状态只能有一处。
+              抽签落地之前 `painting` 是 `null`，画框里是一块空画布、按钮也是禁用的。
             */}
-            <RoomCalendar />
+            <RoomPainting
+              painting={wallPainting}
+              onOpen={() => setPaintingOpen(true)}
+              label={t('painting.open')}
+            />
   
             {/*
               地板铺在场景内部而不是视口上：这样地板线永远贴着物件的落地线，
@@ -2466,22 +2568,36 @@ export default function ConsoleScene() {
               <div className="absolute inset-x-0 top-0 h-[2px] bg-ink-800" />
             </div>
   
+            {/*
+              电视机左边那摞书后面那只猫（点了地板上那根逗猫棒才出现）。
+              **必须排在 `RoomDesk` 之前** —— 挡住它下巴的正是桌子上那三本书，
+              排到桌子后面就成了「浮在书上的一张猫脸」。
+              它锚在桌面上方 19px 处（见 `TvCat` 里那段倒推出来的算式），
+              所以和书堆的相对位置不随电视机尺寸档位变。
+
+              `key={cat.seq}`：再点一次逗猫棒时整个重挂，两段 CSS 动画才会从头放。
+              `label` 是品种名，只给读屏用（屏幕上不写名字，认品种靠毛色和花纹）。
+            */}
+            {cat && <TvCat key={cat.seq} breed={cat.breed} label={t(`cat.${cat.breed}`)} />}
+
             {/* 桌子。`top-full` 挂在电视机下沿，腿向下伸到地板上 */}
             <RoomDesk />
   
             {/*
               地板上那摊杂物（红白机 / 手柄 / 黄卡带 / 一本留言本 / 右下角那张纸片 /
-              一台插着耳机的 MP4）。
+              一根逗猫棒 / 一台插着耳机的 MP4）。
               **必须排在桌子之后** —— 它在桌子前面，压在桌腿上；排前面就会被桌子挡住，
               像嵌进桌子里。它自己锚在墙地交界线（`top-full` + DESK_HEIGHT），
               不占布局、也不影响机身。
   
-              这摊里能点的有三处：**留言本**、右下角那张**纸片**（点开「一张纸」，
-              见文件末尾那个弹窗）、以及那台 **MP4**（播放 / 暂停，音源在下面那个
-              `<audio>` 上）。
-  
+              这摊里能点的有四处：**留言本**、右下角那张**纸片**（点开「一张纸」，
+              见文件末尾那个弹窗）、那台 **MP4**（播放 / 暂停，音源在下面那个
+              `<audio>` 上）、和那根**逗猫棒**（点一下，书堆后面探出一个猫头 ——
+              见 `RoomBackdrop` 的 `TvCat`，以及上面那个 `<TvCat>`）。
+
               其中**留言本已经退成彩蛋**：留言本的正经入口挪到了右侧开关栏那颗（同一面板），
-              这里纯粹是「顺手在房间里点到了也会开」的隐藏彩蛋。纸片则是唯一的入口，照旧。
+              这里纯粹是「顺手在房间里点到了也会开」的隐藏彩蛋。纸片则是唯一的入口，照旧；
+              逗猫棒也只有这一处 —— 它点开的那只猫纯粹是闹着玩。
             */}
             <RoomFloorItems
               onOpenNote={() => setNoteOpen(true)}
@@ -2492,8 +2608,11 @@ export default function ConsoleScene() {
               onToggleMp4={toggleMp4}
               /* 标签按状态现选：按钮的名字要说清「点下去会发生什么」，和吊灯那两颗同一个规矩 */
               mp4Label={t(mp4Playing ? 'mp4.pause' : 'mp4.play')}
+              /* 逗猫棒：点一下，桌子左边那摞书后面探出一个猫头（见上面那个 TvCat） */
+              onPokeCat={pokeCat}
+              catWandLabel={t('cat.wand')}
             />
-  
+
             <RetroTv
               canvasRef={canvasRef}
               screenRef={screenRef}
@@ -2798,6 +2917,20 @@ export default function ConsoleScene() {
             </button>
           </div>
         </div>
+      )}
+
+      {/*
+        挂画的大图。点墙上那个画框弹出来 —— 画面就是把同一份笔画数据放大
+        （不另画一张大的），说明牌上摆画名和作者。点背板 / × / Esc 关掉。
+
+        ⚠️ `wallPainting` 那道判据是必须的：抽签落地之前墙上还只是一块空画布，
+        这时点开只会弹出一张空框。
+      */}
+      {paintingOpen && wallPainting && (
+        <PaintingPanel
+          painting={wallPainting}
+          onClose={() => setPaintingOpen(false)}
+        />
       )}
 
       {/*

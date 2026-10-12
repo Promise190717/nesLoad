@@ -440,6 +440,34 @@ const en = {
   'note.close': 'Close',
   'window.cycle': 'Change the season outside',
   /*
+   * 墙上那幅挂画。2026-10-12 先由用户点名「日历改成挂画、刷新随机抽一幅」，当天又加了
+   * 「点开看大图」—— 所以这里既有那颗按钮的名字，也有每一幅的画名和作者。
+   *
+   * ⚠️ **画名和作者只有这一个出处**：墙上就一张画、画面上一个字都不写，
+   * 只有点开之后那张说明牌才把两行摆出来（见 components/PaintingPanel.tsx）。
+   * 键名跟着 `RoomBackdrop.tsx` 的 `PAINTINGS` 里 `titleKey` / `artistKey` 走，改名要一起改。
+   *
+   * ⚠️ 第七幅（`unknown`）是用户当天发的**自家照片**（退潮的滩涂上大人带小孩玩水），
+   * 他指定的说法就是「不知从哪来的不知名画作」—— **别自作主张改成正经画名**，
+   * 作者也照写「佚名」。前六幅才是真的名画。
+   */
+  'painting.open': 'Look closer at the painting',
+  'painting.close': 'Close',
+  'painting.title.sunflowers': 'Sunflowers',
+  'painting.artist.sunflowers': 'Vincent van Gogh',
+  'painting.title.monaLisa': 'Mona Lisa',
+  'painting.artist.monaLisa': 'Leonardo da Vinci',
+  'painting.title.starryNight': 'The Starry Night',
+  'painting.artist.starryNight': 'Vincent van Gogh',
+  'painting.title.scream': 'The Scream',
+  'painting.artist.scream': 'Edvard Munch',
+  'painting.title.pearl': 'Girl with a Pearl Earring',
+  'painting.artist.pearl': 'Johannes Vermeer',
+  'painting.title.wave': 'The Great Wave off Kanagawa',
+  'painting.artist.wave': 'Katsushika Hokusai',
+  'painting.title.unknown': 'A Nameless Painting from Who-Knows-Where',
+  'painting.artist.unknown': 'Anonymous',
+  /*
    * 地板上那台 MP4。整台机器就是一个 <button>（点一下播放 / 暂停），
    * 所以这两条是它的**无障碍名字**，和吊灯那两条同一写法 —— 描述「点下去会发生什么」。
    *
@@ -449,6 +477,26 @@ const en = {
    */
   'mp4.play': 'Play a song on the MP4 player',
   'mp4.pause': 'Pause the MP4 player',
+
+  /*
+   * 地板上的逗猫棒 —— **彩蛋的开关**：点一下，桌子上那摞书后面会探出一个猫头
+   * （见 components/RoomBackdrop.tsx 的 TvCat）。
+   *
+   * ⚠️ 这一条**同时当鼠标悬停那行提示（title）和读屏名字（aria-label）用**，
+   * 所以写的是**叫人做什么动作**（「摇一摇」），而不是干巴巴地报出物件名字。
+   *
+   * 下面七条是**猫的品种名**，只当那只猫的无障碍名字用 ——
+   * 画面上**不写名字**（第几次探出来是哪一品，靠毛色和花纹认），
+   * 所以这里也不需要一个「品种」的展示位。
+   */
+  'cat.wand': 'Shake the cat wand on the floor',
+  'cat.ragdoll': 'A ragdoll peeks out from behind the books',
+  'cat.siamese': 'A Siamese peeks out from behind the books',
+  'cat.tabby': 'A tabby peeks out from behind the books',
+  'cat.orange': 'An orange tabby peeks out from behind the books',
+  'cat.american': 'An American shorthair peeks out from behind the books',
+  'cat.tuxedo': 'A tuxedo cat peeks out from behind the books',
+  'cat.calico': 'A calico peeks out from behind the books',
 
   /*
    * 地上那本留言本（点开是留言列表 + 提交框）。
@@ -761,9 +809,37 @@ const zh: Record<MessageKey, string> = {
   'note.title': '一张纸',
   'note.close': '关闭',
   'window.cycle': '换一换窗外的季节',
+  /* 墙上那幅挂画：点开按钮 + 每幅的画名与作者，见英文表里那一组上面的注释 */
+  'painting.open': '凑近看看这幅画',
+  'painting.close': '关闭',
+  'painting.title.sunflowers': '向日葵',
+  'painting.artist.sunflowers': '文森特·梵高',
+  'painting.title.monaLisa': '蒙娜丽莎',
+  'painting.artist.monaLisa': '列奥纳多·达·芬奇',
+  'painting.title.starryNight': '星月夜',
+  'painting.artist.starryNight': '文森特·梵高',
+  'painting.title.scream': '呐喊',
+  'painting.artist.scream': '爱德华·蒙克',
+  'painting.title.pearl': '戴珍珠耳环的少女',
+  'painting.artist.pearl': '约翰内斯·维米尔',
+  'painting.title.wave': '神奈川冲浪里',
+  'painting.artist.wave': '葛饰北斋',
+  /* 第七幅是用户自己的照片，说法由他指定 —— 别改（见英文表里那条注释） */
+  'painting.title.unknown': '不知从哪来的不知名画作',
+  'painting.artist.unknown': '佚名',
   /* 地板上那台 MP4，见上面英文那份的注释（整台机器是一个按钮，这里只有它的名字） */
   'mp4.play': '在 MP4 上放首歌',
   'mp4.pause': '暂停 MP4',
+
+  /* 逗猫棒（彩蛋的开关）和七只猫的品种名，见英文表里那一组上面的注释 */
+  'cat.wand': '摇一摇逗猫棒',
+  'cat.ragdoll': '书后面探出一只布偶猫',
+  'cat.siamese': '书后面探出一只暹罗猫',
+  'cat.tabby': '书后面探出一只狸花猫',
+  'cat.orange': '书后面探出一只橘猫',
+  'cat.american': '书后面探出一只美短',
+  'cat.tuxedo': '书后面探出一只奶牛猫',
+  'cat.calico': '书后面探出一只三花猫',
 
   'feedback.open': '翻一翻地上那本留言本',
   'feedback.title': '留言本',

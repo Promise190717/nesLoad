@@ -1,47 +1,65 @@
 /*
  * 房间背景：墙 + 电视机后面墙上的一扇窗（窗外是春夏秋冬，每季又分昼夜，点一下换一季）
- * + 右侧墙上的日历
+ * + 右侧墙上挂着的一幅画（七幅像素画里随机抽一幅，见 `RoomPainting`）
  * + 电视机底下那张桌子 + 桌前面地板上摊着的杂物（红白机 / 两只手柄 / 几盘黄卡带
- * / 一本压着笔的留言本） + 顶上那盏吊灯。
+ * / 一本压着笔的留言本 / 一根逗猫棒） + 顶上那盏吊灯
+ * + 点了那根逗猫棒才会从桌上那摞书后面探出来的猫头（`TvCat`）。
  *
  * 几块**故意拆开**，因为它们要插在**不同的层**上：
  *
  *   - `RoomWall` 铺满整个房间，必须渲染在 `main` 里、**暗角（.vignette）之前** ——
  *     暗角是 `absolute inset-0` 且排在 stage 前面，靠 DOM 顺序压在背景上；
  *     墙要是跟着 stage 一起渲染，就会盖到暗角上面，四角那圈压暗全没了。
- *   - `RoomWindow` / `RoomCalendar` / `RoomDesk` / `RoomFloorItems` 挂在**电视机那层
+ *   - `RoomWindow` / `RoomPainting` / `RoomDesk` / `RoomFloorItems` 挂在**电视机那层
  *     relative 容器**上（ConsoleScene 里 `items-end gap-4` 那个 div），并且都排在 RetroTv
- *     **之前** —— 于是窗户贴着机身左上角、日历贴着右上角、桌子从机身下沿往下长，
+ *     **之前** —— 于是窗户贴着机身左上角、挂画贴着右上角、桌子从机身下沿往下长，
  *     都被机身挡住一部分。
  *     `RoomFloorItems` 是唯一往**下**长的（锚在墙地交界线），它得排在 `RoomDesk` **之后**
  *     才能压在桌腿上 —— 那摊东西在桌子前面。
  *   - `RoomLamp` 挂在**电视机外面**那一层（stage 容器），同样排在 RetroTv **之前** ——
  *     整盏灯（灯具 + 光晕）都要落在机身**背后**：光晕糊在屏幕画面上就毁了，
  *     而矮窗口下天花板会贴到机身顶边，灯也必须让机身压住它，**不能反过来挡着电视机**。
+ *   - `TvCat`（逗猫棒点出来的那只猫）挂在电视机那层、排在 **`RoomDesk` 和 RetroTv
+ *     之前** —— 它要从桌子左边那摞书后面探出头，挡住它下巴的正是那摞书
+ *     （`RoomDesk` 里画），排到桌子后面就变成「浮在书上的一张猫脸」了。
  *
- * 除吊灯、窗户玻璃、地上那本留言本、地板右下角那张纸片、以及地板上的 MP4 外都是
- * 纯装饰：一律 `pointer-events-none` + `aria-hidden`，不能吃掉 RetroTv 的拖拽落点。
- * 全屋能点的只有**五处** —— 吊灯（灯罩 + 灯泡是 <button>）、
+ * 除吊灯、窗户玻璃、地上那本留言本、地板右下角那张纸片、地板上的 MP4、
+ * 以及地板上那根逗猫棒外，其余都是纯装饰：
+ * 一律 `pointer-events-none` + `aria-hidden`，不能吃掉 RetroTv 的拖拽落点。
+ * 全屋能点的只有**六处** —— 吊灯（灯罩 + 灯泡是 <button>）、
  * 窗户玻璃（点一下换下一季，见 `RoomWindow`）、地上那本留言本（点开是留言列表）、
- * 那张纸片（点开弹出「一张纸」）、和那台 MP4（点一下播放 / 暂停）——
- * 后三处都在 `RoomFloorItems` 里。
+ * 那张纸片（点开弹出「一张纸」）、那台 MP4（点一下播放 / 暂停）、
+ * 和地板上那根**逗猫棒**（点一下，桌上那摞书后面探出一个猫头，见 `TvCat`）——
+ * 后四处都在 `RoomFloorItems` 里。
  *
  * 其中**留言本已经退成彩蛋**（2026-10-10）：它打开了留言本面板的正经入口是右侧那排
  * 开关里的一颗，地板上这本留着，只是「顺手点到了也会开」的隐藏彩蛋。
  *
  * 配色分两套：墙走 `--wall-*`（globals.css），窗框和桌子走 `wood-*` 令牌，
- * 都跟着主题翻转；桌上的小物、地板杂物、吊灯、日历都是**固定色** ——
+ * 都跟着主题翻转；桌上的小物、地板杂物、吊灯、墙上那幅画都是**固定色** ——
  * 物件是物件，不该跟着室内灯开关变色。
  * **只有窗外那扇窗是特例**：它分春夏秋冬（跟 `data-season`）、每季又分昼夜
  * （跟 `data-theme`）—— 见 `RoomWindow`。但昼夜跟的是**主题**，不是吊灯：
  * 屋里白天手动开灯，窗外也不会变成晚上。
  *
- * 2026-10-10 起，四个「可选的」部件根节点各挂了一个稳定类名 ——
- * `room-lamp` / `room-window` / `room-calendar` / `room-floor-items` ——
+ * 2026-10-10 起，几个「可选的」部件根节点各挂了一个稳定类名 ——
+ * `room-lamp` / `room-window` / `room-painting` / `room-floor-items` / `room-cat` ——
  * 给**简洁模式**用：`<html data-simple="on">` 时这几块整体 `display: none`
  * （见 globals.css）。剩下的是背景墙 / 电视机 / 桌子 / 地面。
  * 类名只做钩子，样式一条都不写在这里 —— 别把它们挪进 Tailwind 的类串里。
  */
+
+/*
+ * ⚠️ 这个文件**一个 hook 都不引**，只借一个类型名。
+ *
+ * 「刷新时随机抽一幅画」的抽签原本来在这里（`useState` + `useEffect`），2026-10-12 加了
+ * 「点开看大图」之后挪去了 ConsoleScene —— 面板要摆出来的必须是**墙上正挂着的那一幅**，
+ * 「抽到的是哪一幅」因此成了 ConsoleScene 的状态，只此一份；这里改成纯收 prop。
+ * **别把 `useState` 引回来**：引回来就等于这里又出现了第二份「抽到哪一幅」，两边会各说各话。
+ *
+ * 整个文件仍由 'use client' 的 ConsoleScene 带进客户端，所以这里用不上 'use client'。
+ */
+import type { MessageKey } from '@/lib/i18n';
 
 /**
  * 墙。铺满房间，压在暗角之下。
@@ -590,57 +608,414 @@ export function RoomWindow({
   );
 }
 
-/** 日历上「有安排的日子」的格子序号（7 列 × 6 行，从 0 数）。纯装饰，随手挑的几个。 */
-const CALENDAR_MARKED = new Set([8, 16, 29]);
+/**
+ * 一笔：`[x, y, 宽, 高, 颜色]`。坐标是**画布格**（整数），不是像素 ——
+ * 真正的像素尺寸由外面那层 `<svg>` 的 viewBox 缩放决定。
+ */
+type PixelStroke = [number, number, number, number, string];
+
+export type PixelPainting = {
+  /** 画布格数（宽 × 高）= 这幅画的纵横比。窗口是见方的，差的那些边由卡纸补上。 */
+  w: number;
+  h: number;
+  /**
+   * 画名 / 作者。**只存 i18n 的键**（`lib/i18n.ts` 的 `painting.*` 那一组），
+   * 由 PaintingPanel 在展示时翻成当前语言的文字 —— 屋里别的文案都走这条路，
+   * 而且画名要跟着语言变（中文用户看到的该是「向日葵」而不是「Sunflowers」）。
+   */
+  titleKey: MessageKey;
+  artistKey: MessageKey;
+  strokes: PixelStroke[];
+  /**
+   * **只给大图用**的一版更细的画面（`public/` 下的静态图，可选）。
+   *
+   * 墙上这七幅都是十几格的粗颗粒 —— 挂在墙上正好，可点开放大之后每一格有二十多像素，
+   * 细节全糊成方块。用户 2026-10-12 单独对第七幅（他自己那张滩涂照片）提了
+   * 「点开查看大图时高清一点」，于是这一幅多备了一张 90×96 的细粒度版本：
+   * **由原照片降采样 + 64 色中位切分量化**得到，仍然是硬边像素（配 `image-rendering: pixelated`
+   * 放大不带插值），只是格子密了六倍，放大后认得出人。
+   *
+   * ⚠️ **倍率就定在 6**（= 15×16 的整倍数）：再密就看不见方块、成了马赛克照片，
+   * 用户 2026-10-12 看到 120×128 那版就说「像素稍微再调低点」——
+   * 比例得是墙上那版的整数倍，放大后每一格的边界才落在整像素上、不会一半亮一半暗。
+   *
+   * ⚠️ 为什么不直接放原照片：屋里所有画都是像素画，独独大图里蹦出一张照片，
+   * 那一瞬间就「不是这个屋子里的东西」了。所以给的仍是**同一张画更细的一版**，风格不破。
+   *
+   * ⚠️ 为什么不把细的那版也写成 `strokes` 数组（和别的画同源）：90×96 按横条拆是几百笔，
+   * 塞进源码既没法读、又白让首屏的包变大。一张 5 KB 的 PNG 等点开时才拉，更划算。
+   * **墙上那幅照旧走 `strokes`**（粗颗粒那版），所以首屏不多一个请求、墙上也不变样。
+   *
+   * 留空 = 大图就放大 `strokes`，和以前一样。新加的几幅不用管这个字段。
+   */
+  detail?: string;
+};
 
 /**
- * 墙上的日历。挂在电视机**右侧**那片空墙上（窗户占了左边，右边一直是空的）。
+ * 挂在墙上的七幅像素画 —— 前六幅是用户 2026-10-12 点名的「梵高的向日葵、蒙娜丽莎等等」，
+ * 第七幅是他当天拿自己的照片（退潮的滩涂上、大人带小孩玩水）定制的。
+ * 再加新的就往这个数组里 push 一个对象，别的地方一个字都不用动。
  *
- * 位置和窗户同一套路：挂在这一层（= 电视机的盒子）上，用负的 `right` 把日历推到
- * 机身右边去，于是不管机身怎么改尺寸、窗口多宽，它都贴着机身右上角 ——
- * 2026-10-12 加尺寸档位之后同理，**这里也不用动**（和窗户一样，锚的是机身的角）。
- * 竖着挂在**比窗户低一档**的地方 —— 和窗户齐平会像第二扇窗，压低一点才像「挂着的纸」。
+ * **一律手工摆整数格**：不画斜线、不做渐变、不写旋转 —— 和屋里别的物件
+ * （吊灯、逗猫棒、窗户）一个规矩，像素风里没有斜边，梯形也是拿方块堆出来的。
+ * 每幅的**第一笔都是铺满整块画布的底色**，所以画布上没有透明的地方会漏出卡纸。
  *
- * 高度刻意停在右侧开关列（`right-6`、上下居中）之上：那排按钮是浮层，
- * 压到它上面就会互相打架。
+ * 纵横比按各自的画来（向日葵横向、蒙娜丽莎 / 星月夜竖向、呐喊横向…），
+ * 不是硬凑成同一个 —— 七幅画挂在墙上本来就该高一幅矮一幅。
+ * 颜色全写死：画是物件，不跟主题 / 室内灯翻。
+ */
+export const PAINTINGS: PixelPainting[] = [
+  {
+    // 梵高《向日葵》：横构图，暖黄墙 + 深色桌面 + 花瓶。
+    w: 16,
+    h: 12,
+    titleKey: 'painting.title.sunflowers',
+    artistKey: 'painting.artist.sunflowers',
+    strokes: [
+      [0, 0, 16, 12, '#e8c95c'], // 底色：暖黄
+      [0, 1, 16, 1, '#f2dd7d'], // 上方那道浅黄
+      [0, 10, 16, 2, '#8a5f2a'], // 桌面
+      [0, 10, 16, 1, '#a3762f'],
+      [3, 5, 1, 3, '#6f7a34'], // 花茎
+      [7, 5, 1, 3, '#6f7a34'],
+      [12, 5, 1, 3, '#6f7a34'],
+      [4, 6, 2, 1, '#7d8b3a'], // 叶
+      [8, 6, 2, 1, '#7d8b3a'],
+      [10, 7, 2, 1, '#7d8b3a'],
+      [6, 6, 4, 1, '#b8873a'], // 瓶口
+      [5, 7, 6, 3, '#a9762c'], // 瓶身
+      [6, 7, 1, 3, '#c99a45'], // 瓶身的高光
+      // 六朵花：4×4 花瓣 + 2×2 花心。上排三朵、中间三朵错开压在上面
+      [1, 0, 4, 4, '#f4dd7a'],
+      [2, 1, 2, 2, '#6b4a1c'],
+      [6, 0, 4, 4, '#f4dd7a'],
+      [7, 1, 2, 2, '#6b4a1c'],
+      [11, 0, 4, 4, '#f4dd7a'],
+      [12, 1, 2, 2, '#6b4a1c'],
+      [3, 2, 4, 4, '#f4dd7a'],
+      [4, 3, 2, 2, '#6b4a1c'],
+      [8, 2, 4, 4, '#f4dd7a'],
+      [9, 3, 2, 2, '#6b4a1c'],
+      [12, 2, 4, 4, '#f4dd7a'],
+      [13, 3, 2, 2, '#6b4a1c'],
+    ],
+  },
+  {
+    // 达·芬奇《蒙娜丽莎》：竖构图。雾蒙蒙的背景、长发、交叠的双手。
+    w: 13,
+    h: 16,
+    titleKey: 'painting.title.monaLisa',
+    artistKey: 'painting.artist.monaLisa',
+    strokes: [
+      [0, 0, 13, 8, '#6f7d5c'], // 远处的天
+      [0, 8, 13, 8, '#4b3f28'], // 地面 / 远山
+      [3, 2, 7, 8, '#2b2116'], // 头发（背后那一圈）
+      [6, 9, 2, 2, '#d9bb96'], // 脖子
+      [3, 10, 8, 1, '#2a2620'], // 肩线
+      [2, 11, 9, 5, '#2a2620'], // 衣袍
+      [6, 12, 1, 3, '#3a352c'], // 衣褶
+      [3, 9, 1, 4, '#2b2116'], // 垂到肩上的长发（压在衣袍之上）
+      [9, 9, 1, 4, '#2b2116'],
+      [4, 4, 5, 4, '#e2c49e'], // 脸
+      [5, 5, 1, 1, '#3a2a1c'], // 眼
+      [7, 5, 1, 1, '#3a2a1c'],
+      [6, 7, 1, 1, '#a8625a'], // 嘴
+      [5, 13, 4, 2, '#e2c49e'], // 交叠的双手
+    ],
+  },
+  {
+    // 梵高《星月夜》：竖构图。三层夜空 + 一个漩涡 + 三颗星 + 一弯月，
+    // 底下是山、村子（几扇亮着的窗）和左边那棵直插天际的柏树。
+    w: 14,
+    h: 16,
+    titleKey: 'painting.title.starryNight',
+    artistKey: 'painting.artist.starryNight',
+    strokes: [
+      [0, 0, 14, 16, '#1c2b62'], // 底色
+      [0, 0, 14, 5, '#233579'], // 夜空三层，一层比一层亮
+      [0, 5, 14, 5, '#2c4193'],
+      [0, 10, 14, 2, '#3a4fa0'],
+      [5, 3, 4, 1, '#7e9ae0'], // 中间那个漩涡（围成一圈）
+      [9, 4, 1, 3, '#7e9ae0'],
+      [6, 7, 3, 1, '#7e9ae0'],
+      [4, 5, 1, 3, '#7e9ae0'],
+      [2, 2, 3, 1, '#f2e08a'], // 星：十字
+      [3, 1, 1, 3, '#f2e08a'],
+      [6, 1, 3, 1, '#f2e08a'],
+      [7, 0, 1, 3, '#f2e08a'],
+      [10, 6, 3, 1, '#f2e08a'],
+      [11, 5, 1, 3, '#f2e08a'],
+      [11, 2, 3, 4, '#f6e79b'], // 月：整块再挖掉右边一块，剩下一个 C
+      [12, 3, 2, 2, '#233579'],
+      [0, 12, 14, 4, '#2e3b4e'], // 山
+      [2, 12, 4, 1, '#3d4d64'],
+      [9, 13, 4, 1, '#3d4d64'],
+      [3, 13, 8, 3, '#2a2b35'], // 村子
+      [4, 14, 1, 1, '#e8c45c'], // 亮着的窗
+      [6, 14, 1, 1, '#e8c45c'],
+      [8, 14, 1, 1, '#e8c45c'],
+      [10, 14, 1, 1, '#e8c45c'],
+      [1, 4, 1, 3, '#22301c'], // 柏树（左边那根火苗）
+      [0, 7, 3, 9, '#22301c'],
+      [1, 7, 1, 7, '#2f4426'],
+    ],
+  },
+  {
+    // 蒙克《呐喊》：横构图。火烧云三层、峡湾、桥栏杆和桥面，
+    // 中间那个捂着耳朵的人（嘴是那一声喊），远处还有两个散步的人。
+    w: 16,
+    h: 13,
+    titleKey: 'painting.title.scream',
+    artistKey: 'painting.artist.scream',
+    strokes: [
+      [0, 0, 16, 3, '#ef9a44'], // 火烧云
+      [0, 1, 16, 1, '#f7c46e'],
+      [0, 3, 16, 2, '#e0642f'],
+      [0, 5, 16, 2, '#bf4526'],
+      [0, 7, 16, 3, '#2f4f70'], // 峡湾
+      [0, 8, 7, 2, '#26425e'],
+      [9, 7, 7, 3, '#3a5f84'],
+      [0, 9, 16, 1, '#3b3629'], // 栏杆
+      [0, 10, 16, 3, '#7a6440'], // 桥面
+      [0, 10, 16, 1, '#8f7750'],
+      [3, 9, 1, 2, '#1e1e26'], // 远处那两个散步的人
+      [5, 9, 1, 2, '#1e1e26'],
+      [8, 8, 4, 4, '#2b2a33'], // 人：黑斗篷
+      [9, 5, 3, 3, '#d8b090'], // 脸（顶上一行留白才是额头，不然整张脸只剩眼和嘴）
+      [9, 6, 1, 1, '#2b2a33'], // 眼
+      [11, 6, 1, 1, '#2b2a33'],
+      [10, 7, 1, 1, '#4a1f1f'], // 张着的嘴
+    ],
+  },
+  {
+    // 维米尔《戴珍珠耳环的少女》：接近方形。深背景 + 蓝头巾 + 那块黄布，
+    // 左耳那颗 1 格的白珍珠是整幅画唯一的高光点。
+    w: 14,
+    h: 13,
+    titleKey: 'painting.title.pearl',
+    artistKey: 'painting.artist.pearl',
+    strokes: [
+      [0, 0, 14, 13, '#1c1a1e'], // 深背景
+      [3, 0, 9, 3, '#3a6ec8'], // 头巾
+      [9, 3, 3, 4, '#2a55a0'], // 头巾垂下来那截
+      [4, 3, 6, 1, '#3a6ec8'], // 额前那圈
+      [4, 4, 6, 6, '#f0d0a8'], // 脸
+      [4, 4, 1, 6, '#d0a878'], // 脸的暗面
+      [5, 5, 1, 1, '#2a2018'], // 眼
+      [8, 5, 1, 1, '#2a2018'],
+      [6, 6, 1, 2, '#d0a878'], // 鼻
+      [5, 8, 3, 1, '#c0605a'], // 唇
+      [6, 10, 3, 1, '#e8c9a0'], // 脖子
+      [4, 11, 7, 1, '#e8e4d8'], // 白领
+      [1, 12, 12, 1, '#26262c'], // 衣服
+      [10, 8, 4, 5, '#d8b040'], // 肩上那块黄布
+      [10, 9, 2, 2, '#e8c95c'],
+      [3, 8, 1, 1, '#f6f4ec'], // 珍珠耳环
+    ],
+  },
+  {
+    // 葛饰北斋《神奈川冲浪里》：竖构图。左上那个白浪尖、卷下来的爪、
+    // 浪后面那点富士山，底下一片深海里三条船。
+    w: 14,
+    h: 16,
+    titleKey: 'painting.title.wave',
+    artistKey: 'painting.artist.wave',
+    strokes: [
+      [0, 0, 14, 16, '#ece0c4'], // 天空
+      [0, 3, 14, 5, '#2a5b8f'], // 浪头
+      [0, 8, 14, 4, '#3a72a8'], // 浪下面那片中间色的海（不放的话富士山周围会漏出一圈天空色）
+      [0, 8, 5, 5, '#2a5b8f'], // 浪从左往下卷
+      [5, 8, 2, 2, '#2a5b8f'],
+      [0, 2, 8, 2, '#f4f2e8'], // 浪尖的白沫
+      [4, 1, 2, 1, '#f4f2e8'], // 溅起来的碎沫
+      [7, 4, 2, 1, '#f4f2e8'],
+      [9, 5, 1, 1, '#f4f2e8'],
+      [8, 8, 2, 1, '#f4f2ea'], // 富士山：一级级宽下来的雪顶
+      [7, 9, 4, 1, '#f0eee6'],
+      [6, 10, 6, 1, '#eeece0'],
+      [5, 11, 8, 1, '#eceada'],
+      [8, 8, 2, 1, '#ffffff'], // 雪
+      [7, 9, 2, 1, '#ffffff'],
+      [0, 12, 14, 4, '#1c3f6b'], // 近处的深海
+      [0, 12, 14, 1, '#2c5f92'],
+      [2, 13, 4, 1, '#c8a060'], // 三条船
+      [7, 13, 4, 1, '#c8a060'],
+      [10, 14, 4, 1, '#c8a060'],
+    ],
+  },
+  {
+    // 用户 2026-10-12 拿照片定制的一幅：退潮后的滩涂上，一位大人（右）和一个小女孩（左）
+    // 蹲在水洼边玩水。竖构图、15×16 —— 和照片一样站着看。
+    //
+    // 这幅的看点**全在光影**，不在人：太阳几乎在头顶，两个人往下各投出一大块**深褐色的影子**
+    // （大人那块拖到脚底，女孩那块甩在左手边），两人中间那片湿沙被晒得发白。
+    // 所以底色是「湿沙」而不是「沙滩」—— 黄褐色偏灰，影子用暖褐不用黑，
+    // 不然和《呐喊》的黑斗篷重复了。
+    w: 15,
+    h: 16,
+    titleKey: 'painting.title.unknown',
+    artistKey: 'painting.artist.unknown',
+    // 点开看大图时换成这张更细的（由用户那张原照片量化而来）—— 见 PixelPainting.detail 的注释
+    detail: '/paintings/beach.png',
+    strokes: [
+      [0, 0, 15, 16, '#b0a07f'], // 底色：退潮后的湿沙
+      [0, 0, 15, 3, '#c7bc9f'], // 远处那片浅浅的水
+      [2, 1, 5, 1, '#d2c8ab'], // 水面上两道波纹
+      [9, 0, 4, 1, '#bfb499'],
+      [0, 2, 2, 1, '#8a7a5e'], // 水上漂着的一小块杂物
+      [0, 3, 15, 1, '#dad0b2'], // 水与沙交界那条被晒亮的线
+      [0, 12, 15, 4, '#a5906e'], // 近处的沙沉一档，画面才有前后
+      [1, 13, 12, 2, '#b3a181'], // 近景沙上一块反光
+      [3, 15, 9, 1, '#b8a684'], // 最底边那道还没干的水光
+      // 影子先铺，人物再压上去
+      [0, 8, 3, 4, '#5f5341'], // 女孩甩在左手边那道影子
+      [0, 12, 4, 2, '#6d5f4a'], // 影子往左下拖出去、渐淡
+      [7, 10, 8, 5, '#574c3b'], // 大人身下那一大块影子（一直铺到画面右边）
+      [7, 10, 2, 4, '#6a5c47'], // 影子左缘淡一点，不然像块石头
+      [9, 11, 4, 1, '#4c4232'], // 影子最深处
+      [2, 14, 2, 1, '#94815f'], // 沙上的脚印
+      [11, 14, 2, 1, '#94815f'],
+      // 两人中间那片被晒得发白的水面 —— 照片里最亮的地方
+      [5, 4, 6, 2, '#e8dcb6'],
+      [8, 6, 2, 1, '#dbcea6'],
+      // 大人（右）：白衬衫、深色短裤，头发扎起来，探身把手伸进水里
+      [10, 4, 3, 2, '#e0c0a0'], // 脸
+      [11, 3, 3, 1, '#241d18'], // 头顶的黑发
+      [12, 4, 2, 2, '#241d18'], // 脑后扎起的那一束
+      [13, 3, 1, 1, '#3a322a'], // 发束的高光
+      [9, 6, 5, 3, '#f5f3ed'], // 白衬衫
+      [11, 6, 1, 3, '#e3dfd4'], // 衣褶
+      [8, 7, 2, 2, '#f0dcc6'], // 探下去的手臂
+      [8, 9, 1, 1, '#e0c0a0'], // 手
+      [9, 9, 4, 2, '#3a3630'], // 深色短裤（紧挨着衬衫下摆，中间不留缝）
+      [9, 11, 3, 1, '#e8caa8'], // 蹲着的腿
+      [10, 12, 1, 1, '#c8a882'], // 踩在沙上的脚
+      // 女孩（左）：白衣花边领、头上别着白夹子，蹲着往水里伸手
+      [4, 5, 4, 1, '#2a211b'], // 头顶的黑发
+      [6, 5, 1, 1, '#f6f4ec'], // 别在头发上的白夹子
+      [5, 6, 3, 2, '#e8c8a4'], // 脸（侧着，朝右边的大人）
+      [4, 6, 1, 2, '#2a211b'], // 脑后的头发
+      [5, 7, 1, 1, '#2a211b'], // 眼
+      [3, 8, 5, 1, '#e9bcc4'], // 花边领
+      [3, 9, 5, 3, '#f3f0e8'], // 白裙
+      [6, 9, 1, 3, '#e0dad0'], // 裙褶
+      [7, 8, 1, 2, '#eed9c0'], // 伸出去的手臂
+      [4, 12, 2, 1, '#e6c8a8'], // 从裙子底下露出来的脚
+    ],
+  },
+];
+
+/** 挂绳的台阶（钉子往左下四格、往右下四格）。像素风不画斜线，用阶梯凑出「V」字。 */
+const PAINTING_WIRE: readonly [number, number][] = [
+  [40, 5],
+  [30, 8],
+  [20, 11],
+  [10, 14],
+  [50, 5],
+  [60, 8],
+  [70, 11],
+  [80, 14],
+];
+
+/**
+ * 墙上的挂画。原来是本**日历**，2026-10-12 用户要求换成挂画：
+ * 「加载或者刷新页面时随机出现梵高的向日葵、蒙娜丽莎等等像素画」。七幅，刷新抽一幅；
+ * 当天又加了「点一下看大图」—— 点画框弹出 `PaintingPanel`，摆出画名和作者。
  *
- * **纯装饰**（`aria-hidden` + `pointer-events-none`）：日历没有能点的地方 ——
- * 留言本已经挪到地上了（见 `RoomFloorItems`）。`pointer-events-none` 还有个用处：
- * 拖进来的 ROM 能穿过去落到 `.stage` 的落点上。
+ * **这是个纯展示组件**：抽到哪一幅、面板开没开，全是 ConsoleScene 的事。
+ * 「随机抽一幅」最初在这里（`useState` + `useEffect`），挪走的原因见文件头那段注释 ——
+ * 面板必须摆出**墙上正挂着的那一幅**，这份状态只能有一处。
+ *
+ * 位置沿用日历那一套：挂在这一层（= 电视机的盒子）上、用负的 `right` 推到机身右边，
+ * 于是不管机身怎么改尺寸、窗口多宽，它都贴着机身右上角 —— 加尺寸档位之后也不用动。
+ * 整幅 100×112，比日历（98 宽）略高一点点；右侧开关列是**上下居中**的浮层，
+ * 离得还远，压不到（这是当年日历「高度刻意压住」的那条约束，现在松了也仍然守着）。
+ *
+ * 里面全画在一张 `<svg>` 里（钉子 / 挂绳 / 画框 / 卡纸 / 画面）：
+ * 整数坐标 + `crispEdges`，缩到 100px 宽也不会糊出半像素边。
+ *
+ * ⚠️ 画布窗口是**固定见方**的 74×74，每幅画自己按 `preserveAspectRatio` 在里面等比留边 ——
+ * 于是「换画」只换像素、**不动尺寸**，不会顶得整个房间跳一下。
+ * （如果让窗口跟着每幅画的纵横比走，竖构图那几幅会把整块撑高、底下全跟着挪。）
+ *
+ * 点击热区**只盖画框那一块**（`top-[16px]` 往下）：机身恰好 100px 宽，所以盒子就是
+ * 100×112，px 值和 viewBox 的格数一一对应。钉子那一条仍旧 `pointer-events-none`，
+ * 拖进来的 ROM 从那儿照样落到 `.stage` 上；**画框本身会吃掉拖放**（拖到画上松手不再载入）——
+ * 这是「能点」必然的代价，和窗户玻璃、地上那几件可点的小东西一个样。
+ *
+ * ⚠️ 外层的 `aria-hidden` 撤掉了 —— 里面有个真按钮了。画面本身没什么可读的，
+ * 名字交给那颗按钮的 `label`（「凑近看看这幅画」），画名与作者等点开之后由面板报。
  *
  * 窄窗口（接近 900px 断点）时右侧只剩几十像素墙，它会和窗户一样被 main 的
  * overflow 切掉一截。这是既有的取舍，不为它单独做自适应。
  */
-export function RoomCalendar() {
+export function RoomPainting({
+  painting,
+  onOpen,
+  label,
+}: {
+  /** 墙上挂着的那一幅。`null` = 抽签还没落地（首帧 / 服务端那一帧），画框里是块空画布 */
+  painting: PixelPainting | null;
+  /** 点画框 —— 由 ConsoleScene 打开大图面板 */
+  onOpen: () => void;
+  /** 画框按钮的 title / aria-label，走 i18n 的 `painting.open` */
+  label: string;
+}) {
   return (
-    <div
-      aria-hidden
-      className="room-calendar pointer-events-none absolute right-[-150px] top-[10px] w-[98px] bg-[#f4f1e8] pixel-edge pxw-2 pxc-500"
-    >
-      {/* 线圈装订：纸上方一排小环 */}
-      <span className="absolute inset-x-[12px] top-[-5px] flex justify-between">
-        {Array.from({ length: 7 }, (_, i) => (
-          <span key={i} className="h-[6px] w-[4px] bg-[#8e8e9c]" />
+    <div className="room-painting pointer-events-none absolute right-[-150px] top-[10px] w-[100px]">
+      {/* 画本身是装饰：可读的名字在那颗按钮的 label 上，这里别让读屏再去念一遍「图形」 */}
+      <svg
+        aria-hidden
+        viewBox="0 0 100 112"
+        className="block h-auto w-full"
+        shapeRendering="crispEdges"
+      >
+        <rect x="48" y="0" width="4" height="5" fill="#4a4038" />
+        {PAINTING_WIRE.map(([x, y]) => (
+          <rect key={`${x}-${y}`} x={x} y={y} width={10} height={3} fill="#7a6a52" />
         ))}
-      </span>
 
-      {/* 月份条：左边一块「月份」、右边一小块「年份」，都只是色块不是字 */}
-      <div className="relative h-[20px] bg-[#c0392b]">
-        <span className="absolute left-[10px] top-[7px] h-[6px] w-[34px] bg-[#f4f1e8]" />
-        <span className="absolute right-[10px] top-[7px] h-[6px] w-[14px] bg-[#e8a3a3]" />
-      </div>
+        {/* 画框：外沿 + 里面那圈更暗的卡槽，左边再提亮一条 —— 光从左上来，框才有厚度 */}
+        <rect x="0" y="16" width="100" height="96" fill="#3a2f26" />
+        <rect x="3" y="19" width="94" height="90" fill="#241d17" />
+        <rect x="0" y="16" width="10" height="96" fill="#463a2e" />
 
-      {/* 日期格：7 列 × 6 行，尺寸写死（10×9 + 2 的缝）好让整块都是整数像素 */}
-      <div className="grid grid-cols-7 gap-[2px] p-[8px]">
-        {Array.from({ length: 42 }, (_, i) => (
-          <span
-            key={i}
-            className={`h-[9px] w-[10px] ${
-              CALENDAR_MARKED.has(i) ? 'bg-[#c0392b]' : 'bg-[#dcd7c8]'
-            }`}
-          />
-        ))}
-      </div>
+        {/* 卡纸 */}
+        <rect x="10" y="26" width="80" height="76" fill="#f4f1e8" />
+
+        {/* 画面窗口：74×74 见方。底色先铺上，画还没抽出来时就是一块空画布 */}
+        <rect x="13" y="29" width="74" height="74" fill="#e6dfcb" />
+
+        {painting && (
+          <svg
+            x="13"
+            y="29"
+            width="74"
+            height="74"
+            viewBox={`0 0 ${painting.w} ${painting.h}`}
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {painting.strokes.map(([x, y, w, h, fill], i) => (
+              <rect key={i} x={x} y={y} width={w} height={h} fill={fill} />
+            ))}
+          </svg>
+        )}
+      </svg>
+
+      {/*
+        画框上盖一层可点的热区。和窗户同一套路：外层 `pointer-events-none`，
+        只有这一层接事件。`disabled` 兜住「画还没抽出来」那一帧 —— 这时点开只会是空画布。
+        悬停 / 键盘聚焦时浮一圈 accent 描边（和地上那根逗猫棒同一手法），平时不画框，
+        免得墙上那张画多出一圈本不存在的边。
+      */}
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={!painting}
+        aria-label={label}
+        title={label}
+        className="pixel-edge pxw-2 pxc-accent pointer-events-auto absolute bottom-0 left-0 right-0 top-[16px] cursor-pointer opacity-0 transition-opacity hover:opacity-100 focus-visible:opacity-100"
+      />
     </div>
   );
 }
@@ -778,6 +1153,8 @@ export function RoomFloorItems({
   mp4Playing,
   onToggleMp4,
   mp4Label,
+  onPokeCat,
+  catWandLabel,
 }: {
   /** 点中那张纸片 —— 由 ConsoleScene 把「一张纸」弹出来 */
   onOpenNote: () => void;
@@ -793,6 +1170,10 @@ export function RoomFloorItems({
   onToggleMp4: () => void;
   /** MP4 的 title / aria-label，走 i18n 的 `mp4.play` / `mp4.pause`（由父级按状态选） */
   mp4Label: string;
+  /** 点中那根逗猫棒 —— 由 ConsoleScene 让桌上那摞书后面探出一个猫头（见 `TvCat`） */
+  onPokeCat: () => void;
+  /** 逗猫棒的 title / aria-label，走 i18n 的 `cat.wand` */
+  catWandLabel: string;
 }) {
   return (
     <div
@@ -975,6 +1356,70 @@ export function RoomFloorItems({
         <span aria-hidden className="absolute left-[57px] top-[11px] h-[4px] w-[13px] bg-[#e3e9f2]" />
         {/* 笔夹：笔帽上沿的一条细线 */}
         <span aria-hidden className="absolute left-[60px] top-[9px] h-[2px] w-[9px] bg-[#c3cad6]" />
+      </button>
+
+      {/*
+        逗猫棒。摆在**右手柄和那张纸片之间**那条缝里（地板坐标 796..854）：
+        左边 748..792 是右手柄、右边 854 起是 MP4 那根耳机线（`.mp4-cord-anchor`，
+        线头那两只耳机塞子落在 858 附近），正好夹出一段几十像素的空地。
+        横向**不跟桌子走**，和左右两件一样是手调的死坐标 —— 中间这段地板
+        本来就不随 `--desk-w` 变。
+
+        纵向和其他地板物件一个规矩：**骑在墙地交界线上**（`top-[-8px]`）——
+        地板在窗口里露出的高度只有 `(100vh - 机身高)/2 - DESK_HEIGHT`
+        （1080 屏约 98px、900 窗口只剩 8px），整件压到线以下的话矮窗口里一个像素都不剩。
+        22px 高的杆子骑在线上 = 杆躺在地板上、羽毛那头微微翘起来。
+
+        它是**这枚彩蛋的开关**：点一下，桌上那摞书后面探出一个猫头（见 `TvCat`）。
+        所以它是真控件、`pointer-events-auto` 把容器的 none 顶回来，排在 `aria-hidden`
+        那层之外 —— 和留言本、纸片、MP4 同级。
+
+        平时**不画框**（地板杂物本来就该是一摊东西），只在悬停 / 键盘聚焦时浮出
+        一圈 accent 描边把「这个能点」说明白；悬停时整根再抬 2px。
+        杆 / 绳 / 羽毛 / 铃铛全拿矩形拼：像素风不画斜边、不 rotate（和本子上那支笔、
+        吊灯那个梯形同一个道理）。viewBox 和盒子同尺寸（58×22），所以 1 格 = 1px。
+        颜色全写死：它是物件，不跟主题翻。
+      */}
+      <button
+        type="button"
+        onClick={onPokeCat}
+        aria-label={catWandLabel}
+        title={catWandLabel}
+        className="group pointer-events-auto absolute left-[796px] top-[-8px] h-[22px] w-[58px] cursor-pointer"
+      >
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -inset-[4px] hidden pixel-edge pxw-2 pxc-accent group-hover:block group-focus-visible:block"
+        />
+        <svg
+          aria-hidden
+          className="relative block h-full w-full transition-transform duration-150 group-hover:-translate-y-[2px]"
+          viewBox="0 0 58 22"
+          preserveAspectRatio="none"
+          shapeRendering="crispEdges"
+        >
+          {/* 握把（深色那截） */}
+          <rect x="1" y="16" width="6" height="4" fill="#3a2c22" />
+          {/* 杆：两段，右段抬高一格 —— 斜着躺在地上 */}
+          <rect x="7" y="15" width="9" height="4" fill="#8a6a4a" />
+          <rect x="16" y="14" width="9" height="4" fill="#8a6a4a" />
+          {/* 杆上沿的受光边 */}
+          <rect x="7" y="15" width="9" height="1" fill="#a8825c" />
+          <rect x="16" y="14" width="9" height="1" fill="#a8825c" />
+          {/* 绳：从杆梢甩上去，一级一级接（斜线也走阶梯） */}
+          <rect x="25" y="12" width="2" height="3" fill="#cfc9b8" />
+          <rect x="27" y="9" width="2" height="4" fill="#cfc9b8" />
+          <rect x="29" y="7" width="2" height="3" fill="#cfc9b8" />
+          {/* 羽毛：主体 + 上下缘各一条亮边 + 中间一道高光，最左边接一小截羽轴 */}
+          <rect x="31" y="5" width="17" height="9" fill="#e0577c" />
+          <rect x="34" y="3" width="11" height="2" fill="#f08aa8" />
+          <rect x="34" y="14" width="11" height="2" fill="#f08aa8" />
+          <rect x="36" y="6" width="7" height="5" fill="#f5a8c0" />
+          <rect x="29" y="9" width="3" height="2" fill="#b8a98c" />
+          {/* 小铃铛（挂绳上，羽毛下面那点空地） */}
+          <rect x="30" y="17" width="5" height="4" fill="#e2b93d" />
+          <rect x="30" y="20" width="5" height="1" fill="#b8912a" />
+        </svg>
       </button>
 
       {/*
@@ -1215,3 +1660,293 @@ export function RoomLamp({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ *
+ * 桌上那摞书后面那只猫：点了地板上那根逗猫棒才会出来的彩蛋
+ * ------------------------------------------------------------------ */
+
+/** 猫的品种。这个数组就是「一轮」里各品种出现的候选池，见 `nextCatBreed`。 */
+export const CAT_BREEDS = [
+  'ragdoll',
+  'siamese',
+  'tabby',
+  'orange',
+  'american',
+  'tuxedo',
+  'calico',
+] as const;
+
+export type CatBreed = (typeof CAT_BREEDS)[number];
+
+/**
+ * 抽下一只猫 —— 从**洗牌袋**里拿，而不是每次独立随机。
+ *
+ * 独立随机会连着两次抽到同一只（7 只里大概每 7 次就撞一回），而这枚彩蛋的卖点
+ * 恰恰是「每次都不一样」—— 连着两次同一个品种，看起来就像坏了或者根本没换。
+ * 所以改成：把七个品种洗一遍，挨个发；发完了再洗下一轮。
+ * `last` 是**上一只**（跨轮用）：新的一轮里第一个正好是它的话，和第二个换个位 ——
+ * 光靠洗牌挡不住「上一轮最后一个 = 这一轮第一个」。
+ *
+ * `bag` 由调用方持有（是它的状态，不是这里的全局变量）：本函数只负责
+ * 「袋子空了就补货」，方便在组件里用 ref 存着。
+ */
+export function nextCatBreed(bag: CatBreed[], last?: CatBreed): CatBreed {
+  if (bag.length === 0) {
+    const refill: CatBreed[] = [...CAT_BREEDS];
+    for (let i = refill.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [refill[i], refill[j]] = [refill[j], refill[i]];
+    }
+    if (last && refill.length > 1 && refill[0] === last) {
+      [refill[0], refill[1]] = [refill[1], refill[0]];
+    }
+    bag.push(...refill);
+  }
+  return bag.shift() as CatBreed;
+}
+
+/**
+ * 猫的花色。**颜色一律写死**（和地板杂物、吊灯、桌上的小物一个规矩）——
+ * 猫是物件，不跟主题翻。
+ */
+interface CatCoat {
+  /** 头 / 脸的主色 */
+  fur: string;
+  /** 深色：脸罩、额纹、头顶的斑 */
+  dark: string;
+  /** 嘴套（鼻子两侧那两块） */
+  light: string;
+  /** 耳窝 */
+  earIn: string;
+  /** 虹膜 */
+  eye: string;
+  /** 胡须 */
+  whisker: string;
+  /** 耳朵外侧。不给就是 `fur`；**重点色**（布偶 / 暹罗）给 `dark` */
+  ear?: string;
+  /** 花色：脸罩 / 额纹 / 头顶色斑 / 纯色 */
+  markings: 'mask' | 'stripes' | 'cap' | 'plain';
+  /** 只在 `cap` 上用：第二块色斑（三花那只的橘块） */
+  blotch?: string;
+}
+
+/**
+ * 七只猫。认品种靠**三样**：毛色、花纹、耳朵深浅 ——
+ *   · 布偶 / 暹罗：奶白身子 + 深色耳朵脸罩 + 蓝眼睛（两只的差别在罩子有多深）
+ *   · 狸花 / 橘猫 / 美短：额头三道竖纹 —— 虎斑的标志
+ *   · 奶牛 / 三花：头顶一块色斑、下半张脸留白（三花多一块橘）
+ */
+const CAT_COATS: Record<CatBreed, CatCoat> = {
+  ragdoll: {
+    fur: '#f2ece1',
+    dark: '#6a5647',
+    light: '#fbf7f1',
+    earIn: '#dfa8a8',
+    eye: '#5aa8dc',
+    whisker: '#9a8a78',
+    ear: '#6a5647',
+    markings: 'mask',
+  },
+  siamese: {
+    fur: '#ecdcbd',
+    dark: '#40332c',
+    light: '#f6ecd8',
+    earIn: '#6b5548',
+    eye: '#4a9ed4',
+    whisker: '#8a7a68',
+    ear: '#40332c',
+    markings: 'mask',
+  },
+  tabby: {
+    fur: '#a8844f',
+    dark: '#6b4e2b',
+    light: '#e6d6b4',
+    earIn: '#c98a8a',
+    eye: '#9cc24e',
+    whisker: '#e6d6b4',
+    markings: 'stripes',
+  },
+  orange: {
+    fur: '#e29240',
+    dark: '#b8641f',
+    light: '#f6dcae',
+    earIn: '#d98a86',
+    eye: '#8fbf4a',
+    whisker: '#f6dcae',
+    markings: 'stripes',
+  },
+  american: {
+    fur: '#bac0c8',
+    dark: '#6f7681',
+    light: '#e6eaf0',
+    earIn: '#c99a9a',
+    eye: '#7ec850',
+    whisker: '#e6eaf0',
+    markings: 'stripes',
+  },
+  tuxedo: {
+    fur: '#f3f1eb',
+    dark: '#2b2b33',
+    light: '#ffffff',
+    earIn: '#d98a8a',
+    eye: '#e8b83c',
+    whisker: '#9a9aa6',
+    markings: 'cap',
+  },
+  calico: {
+    fur: '#f5f2ea',
+    dark: '#3a3a42',
+    light: '#ffffff',
+    earIn: '#e09a9a',
+    eye: '#e8b83c',
+    whisker: '#9a9aa6',
+    markings: 'cap',
+    blotch: '#e08a3c',
+  },
+};
+
+/**
+ * 一个猫头（像素画）。viewBox 62×44，一格 1px。
+ *
+ * 整张脸**左右对称**（对称轴在 x=32）：耳朵、眼睛、鼻子、嘴、两把胡须都成对儿，
+ * 因为这只猫是从书堆后面**往上**探头的 —— 被挡住的是下半张脸（见 `TvCat`），
+ * 横向是全须全尾露在外面的。中间这个数字 32 和 `TvCat` 里那个 `left: -128`
+ * 是一对儿：脸宽 48（x8..56），盒子 62 宽，所以「让脸和书堆顶那本书对齐」
+ * = 盒子左边落在机身左缘往左 128 处。
+ *
+ * 画法沿用屋里其它像素件的规矩：只用矩形、不 rotate、不画斜边 ——
+ * 耳朵是三层递减的矩形堆出来的三角，头是四行阶梯堆出来的圆
+ * （和吊灯那个「四层横条拼梯形」、本子上那支「错位横条拼斜笔」同一个道理）。
+ */
+function CatHead({ coat }: { coat: CatCoat }) {
+  const earOuter = coat.ear ?? coat.fur;
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 62 44"
+      className="block h-[44px] w-[62px]"
+      shapeRendering="crispEdges"
+    >
+      {/* 耳朵（外）：各三层，越往下越宽 */}
+      <rect x="16" y="2" width="6" height="3" fill={earOuter} />
+      <rect x="13" y="5" width="10" height="4" fill={earOuter} />
+      <rect x="11" y="9" width="13" height="4" fill={earOuter} />
+      <rect x="42" y="2" width="6" height="3" fill={earOuter} />
+      <rect x="41" y="5" width="10" height="4" fill={earOuter} />
+      <rect x="40" y="9" width="13" height="4" fill={earOuter} />
+
+      {/* 耳窝 */}
+      <rect x="17" y="5" width="4" height="3" fill={coat.earIn} />
+      <rect x="15" y="8" width="7" height="3" fill={coat.earIn} />
+      <rect x="43" y="5" width="4" height="3" fill={coat.earIn} />
+      <rect x="42" y="8" width="7" height="3" fill={coat.earIn} />
+
+      {/* 头：四行阶梯（下宽上窄），头盖骨把耳朵根部盖住 */}
+      <rect x="14" y="12" width="36" height="5" fill={coat.fur} />
+      <rect x="10" y="17" width="44" height="8" fill={coat.fur} />
+      <rect x="8" y="25" width="48" height="12" fill={coat.fur} />
+      <rect x="11" y="37" width="42" height="5" fill={coat.fur} />
+
+      {/* 花色。一律画在「头」之后、「眼睛」之前 */}
+      {coat.markings === 'mask' && (
+        <>
+          <rect x="20" y="20" width="24" height="5" fill={coat.dark} />
+          <rect x="16" y="25" width="32" height="10" fill={coat.dark} />
+          <rect x="20" y="35" width="24" height="4" fill={coat.dark} />
+        </>
+      )}
+      {coat.markings === 'stripes' && (
+        <>
+          <rect x="25" y="12" width="3" height="8" fill={coat.dark} />
+          <rect x="30" y="12" width="4" height="10" fill={coat.dark} />
+          <rect x="36" y="12" width="3" height="8" fill={coat.dark} />
+        </>
+      )}
+      {coat.markings === 'cap' && (
+        <>
+          <rect x="14" y="12" width={coat.blotch ? 18 : 36} height="5" fill={coat.dark} />
+          <rect x="10" y="17" width={coat.blotch ? 12 : 44} height="5" fill={coat.dark} />
+          {coat.blotch && <rect x="32" y="12" width="18" height="5" fill={coat.blotch} />}
+          {coat.blotch && <rect x="42" y="17" width="12" height="5" fill={coat.blotch} />}
+        </>
+      )}
+
+      {/* 嘴套：鼻子两侧那两块浅色 */}
+      <rect x="25" y="29" width="6" height="6" fill={coat.light} />
+      <rect x="33" y="29" width="6" height="6" fill={coat.light} />
+
+      {/* 眼睛。眼框统一近黑 —— 七种毛色下都读得出来 */}
+      <rect x="21" y="21" width="9" height="8" fill="#241f1c" />
+      <rect x="22" y="22" width="7" height="6" fill={coat.eye} />
+      <rect x="24" y="22" width="2" height="6" fill="#241f1c" />
+      <rect x="22" y="22" width="1" height="1" fill="#ffffff" />
+      <rect x="34" y="21" width="9" height="8" fill="#241f1c" />
+      <rect x="35" y="22" width="7" height="6" fill={coat.eye} />
+      <rect x="38" y="22" width="2" height="6" fill="#241f1c" />
+      <rect x="41" y="22" width="1" height="1" fill="#ffffff" />
+
+      {/* 鼻子 + 嘴（粉鼻头是猫的通用色，不跟毛色走） */}
+      <rect x="29" y="29" width="6" height="3" fill="#e08a9a" />
+      <rect x="30" y="32" width="4" height="2" fill="#c4707e" />
+      <rect x="31" y="34" width="2" height="3" fill="#4a3f38" />
+      <rect x="28" y="36" width="3" height="1" fill="#4a3f38" />
+      <rect x="33" y="36" width="3" height="1" fill="#4a3f38" />
+
+      {/* 胡须：左右各三根，往脸两侧甩出去一格 */}
+      <rect x="46" y="24" width="13" height="1" fill={coat.whisker} />
+      <rect x="47" y="28" width="12" height="1" fill={coat.whisker} />
+      <rect x="46" y="32" width="13" height="1" fill={coat.whisker} />
+      <rect x="5" y="24" width="13" height="1" fill={coat.whisker} />
+      <rect x="5" y="28" width="12" height="1" fill={coat.whisker} />
+      <rect x="5" y="32" width="13" height="1" fill={coat.whisker} />
+    </svg>
+  );
+}
+
+/**
+ * 从桌子**左边那三本书后面**探出来的猫头。点地板上那根逗猫棒才出现，
+ * 2.9 秒后自己缩回去（时间轴在 globals.css 的 `.cat-peek` 里，和那边是一份约定）。
+ *
+ * 摆位（`left-[-128px]` / `bottom-[23px]` / 62×44）—— 这几个数全是从**那摞书**
+ * 的几何倒推出来的，改书或改猫都要一起重算：
+ *   · 书是 `bottom-full left-[20px] w-[56px]` 挂在桌面上的三本（各 10px 高），
+ *     堆顶比桌面高 **30px**；三本**左对齐、越上面越窄**（56 / 52 / 48），
+ *     所以紧贴堆顶那本是 48 宽 —— 猫头要藏就得藏进这一本的宽度里。
+ *   · 猫头的**脸**在 SVG 里正好是 x8..56（宽 48 = 最上面那本书）→ 盒子往左挪
+ *     128，这 48 格就和那本书左右对齐；`bottom: 23` 让头最下面 5px 落到堆顶
+ *     （30px）之下 —— 于是**下巴被最上面那本书挡住**，露出来的是耳朵、眼睛、
+ *     鼻子、嘴和两把胡须，正是「扒着书往外看」那张脸。
+ *     ⚠️ 这两个值是配套的：下巴藏进去的那几行只有 42px 宽（x11..53），才有左右
+ *     各 3px 余量给 `.cat-sway` 那 ±2px 的晃动。把 `bottom` 调小（藏得更多）
+ *     挡的就是 48 宽那几行了 —— 一晃就会从书边上漏出一角。
+ *   · 纵向锚 `bottom` 而横向锚 `left`：书堆是**挂在桌面上的**（桌面又挂在电视机
+ *     下沿），所以这一堆相对「容器底边」的位置是死的，不随电视机尺寸档位变。
+ *
+ * ⚠️ **必须排在 `RoomDesk` 之前**（见 ConsoleScene）：挡住下巴的正是桌子那摞书，
+ * 排到桌子后面就成了「浮在书上的一张猫脸」。当然也要排在 RetroTv 之前。
+ *
+ * ⚠️ 它探出的地方在**机身左侧 100 多像素**，而窗口窄到 900px（断点）时
+ * 场景两侧的余量只剩 ~56px —— 那摞书本身就会被 main 的 overflow 切掉，
+ * 猫自然也跟着看不见。想看全这只猫，窗口得开到 **1050px** 以上
+ * （和右上角那幅挂画同一个门槛，见 RoomPainting 那段注释）。
+ *
+ * 演出靠两段 CSS 动画（`.cat-peek` 纵向升起 / 落下 + 里层 `.cat-sway` 左右晃脑袋）；
+ * 本组件只在「该出现的那 2.9 秒」里挂在 DOM 上，卸载由 ConsoleScene 的定时器管。
+ * 系统开了「减少动态效果」时两段动画都关掉，它就直接出现 / 直接消失（见 globals.css）。
+ *
+ * `role="img"` + 品种名：猫本身是画出来的、挑不出文字，但品种可以告诉读屏用户。
+ */
+export function TvCat({ breed, label }: { breed: CatBreed; label: string }) {
+  return (
+    <div
+      role="img"
+      aria-label={label}
+      className="room-cat cat-peek pointer-events-none absolute bottom-[23px] left-[-128px] h-[44px] w-[62px]"
+    >
+      <div className="cat-sway">
+        <CatHead coat={CAT_COATS[breed]} />
+      </div>
+    </div>
+  );
+}
+

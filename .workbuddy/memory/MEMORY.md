@@ -76,6 +76,41 @@ JSON-LD）· `app/robots.ts` + `app/sitemap.ts`（**必须 `force-dynamic`**）�
   **别再往 ConsoleScene 的 keydown effect 里加操作类快捷键**（i18n 的 `legend.shortcut` 已删，别补回来）。
 - 暂停提示在屏幕里：`PAUSED` + `PRESS RESUME ON THE PANEL`，**不能**写「按 P」。
 
+## 彩蛋：地上的逗猫棒 → 书堆后面的猫（2026-10-12）
+
+- 开关是地板上那根**逗猫棒**（`RoomFloorItems` 里，地板坐标 `left-[796px]`）；点了之后
+  `TvCat` 从**桌子上那摞书后面**探出头，2.9s 后缩回去（`.cat-peek` / `.cat-sway`，见 globals.css）。
+  七种花色走**洗牌袋**（`nextCatBreed`）而不是独立随机 —— 卖点就是「每次都不一样」。
+- ⚠️ `TvCat` 的 `left-[-128px]` / `bottom-[23px]` 是从**书堆几何**倒推的（堆顶比桌面高 30px、
+  贴顶那本 48 宽，脸的 48 格正好和它对齐）；**改书堆或改猫要一起重算**，且 DOM 上
+  **必须排在 `RoomDesk` 之前**（书要挡住下巴，否则成了「浮在书上的一张猫脸」）。
+- ⚠️ 它探出的位置在机身左侧 100 多像素：窗口 < ~1050px 会被 main 的 overflow 切掉
+  （和挂画 / 窗户同一个门槛，属已知取舍）。
+
+## 墙上的挂画（2026-10-12 由日历改来，同日加了「点开看大图」）
+
+- 七幅像素画在 `RoomBackdrop.tsx` 的 `PAINTINGS`（`[x,y,w,h,颜色]` 整数格）；每幅带
+  `titleKey` / `artistKey`，**画名与作者只在 `lib/i18n.ts` 的 `painting.*` 里出现**。
+  第七幅是用户自己的照片（滩涂玩水），说法由他指定：**「不知从哪来的不知名画作 / 佚名」，别改**。
+- ⚠️ **「抽到哪一幅」现在是 ConsoleScene 的状态（`wallPainting`），不在 `RoomPainting` 里**：
+  点开的大图面板要摆出**墙上正挂着的那一幅**，两处各存一份会各说各话。`RoomPainting`
+  因此是纯展示组件（收 `painting` / `onOpen` / `label`），**别再往它里面引 hook**。
+  抽签那条 effect 必须在挂载后（SSR 也会渲一遍）+ `setTimeout(…, 0)`（避开
+  React Compiler 的 `set-state-in-effect` error）。
+- 大图面板 `components/PaintingPanel.tsx`：画面直接放大同一份 strokes（`viewBox` + `crispEdges`），
+  高度卡 `50vh`、宽度吃满，`preserveAspectRatio` 默认 meet 所以**不变形**、多余的地方是卡纸。
+  背板用**固定暗色**（`ink-950` 会随主题翻，浅色主题下会糊成白雾）。
+- 大图可以另配一张更细的位图：`PixelPainting.detail`（`public/` 下路径，可选）——
+  第七幅填了 `/paintings/beach.png`（**90×96** = 墙上 15×16 的整 6 倍，由他那张原照片降采样
+  + 64 色量化，5.5 KB）。⚠️ **别往 120×128 以上调**：他看过那版说「像素稍微再调低点」。
+  ⚠️ 三件事：① `<img>` **必须带 `[image-rendering:pixelated]`**（否则被插值糊掉）；
+  ② 尺寸同 SVG 那套 `h-auto max-h-[50vh] w-full object-contain`（少了 `object-contain` 会被
+  max-h 压扁）；③ **墙上那幅仍是 `strokes` 的粗颗粒版**，只有大图换 —— 首屏不多一个请求。
+  ⚠️ 原照片**不在仓库里**（在 WorkBuddy 附件缓存 `~/.workbuddy/blobs/`），要重做只能重新量化，
+  生成脚本是一次性的、验完已删。
+- ⚠️ 画框那 100×96 的热区**会吃掉这一块的拖拽落点**（钉子那一条仍透过去）；新增面板要把
+  `paintingOpen` 加进 Esc 那条 effect、`guest 转发输入` 与 `blur 焦点` 两处 guard 及其 deps。
+
 ## 联机（1 对 1，不支持三人）
 
 - wire 上**只传钮名**（`ButtonMessage {b,d}`）。**加入者按的是 1P 那组键**（他在游戏里是 2P）；
