@@ -54,8 +54,15 @@ const SCREEN_BLACK = '#050506';
 
 /** 顶沿那条散热缝：六个小方块，和机身上画的是同一组。 */
 const VENT_SLITS = [0, 1, 2, 3, 4, 5];
-/** 屏幕里的机型标签 */
-const TAGS = ['NES', 'SNES / SFC', 'ARCADE'];
+/**
+ * 屏幕里的机型标签。
+ *
+ * ⚠️ 2026-10-13 加 GBA 之后**变成四个**了（原先三个：NES / SNES / SFC / ARCADE）。
+ * 这排标签是横向 flex、不换行，宽度会随标签数涨 —— 加 GBA 是本次改动的
+ * **视觉风险点**，上线前必须眼过一眼分享图（`/opengraph-image`）确认没被裁掉或挤出机身。
+ * 真要挤，就把标签换成更短的写法（`SFC` 而不是 `SNES / SFC`）或缩 padding。
+ */
+const TAGS = ['NES', 'SNES / SFC', 'GBA', 'ARCADE'];
 
 export function renderOgImage(): ImageResponse {
   return new ImageResponse(

@@ -146,11 +146,15 @@ function aboutZh(site: string, origin: string): string[] {
   return [
     `- 名称：${site}（英文名 ${SITE_NAME.en}）`,
     `- 地址：${origin}`,
-    '- 是什么：一个免费的在线复古游戏厅。NES、SFC（超级任天堂）和街机游戏直接跑在浏览器里，',
+    '- 是什么：一个免费的在线复古游戏厅。NES、SFC（超级任天堂）、GBA 和街机游戏直接跑在浏览器里，',
     '  内核是编译成 WebAssembly 的 RetroArch，**全部在本机运行**，不向服务器上传任何文件。',
     '- 怎么用：从站内「在线游戏库」挑一盘，或把自己的 ROM 文件拖到页面上的像素电视机上。',
     '- 收费：完全免费，无需注册、无需登录。',
-    '- 语言：简体中文 / English。**同一个地址**按访问者语言切换，没有 /zh、/en 这类分语言路径。',
+    '- 语言：简体中文 / English，**按路径区分**。英文是默认语言、不占前缀（`/`、`/games`），',
+    '  中文在 `/zh` 下（`/zh`、`/zh/games`）。同一个页面两种语言各有一个地址，两者互指 hreflang。',
+    '  **带前缀的地址就是那个语言**（`/zh/games` 一定是中文，对谁都一样）。只有访问无前缀地址时，',
+    '  才会按用户**主动设置过**的语言（cookie）决定要不要转到 `/zh`；没设置过就直接渲染英文，',
+    '  **不自动跳转**（浏览器语言只在页面上弹一句询问，由用户自己选）。',
     '- 不提供什么：本站**不托管、也不提供任何游戏 ROM 的下载**，站内不存放受版权保护的游戏文件；',
     '  「在线游戏库」只是一份指向外部资源的索引。',
   ];
@@ -174,8 +178,8 @@ export function buildLlmsTxt(origin: string): string {
 
   return `# ${site} / ${SITE_NAME.en}
 
-> 在浏览器里玩复古游戏：NES、SFC（超级任天堂）和街机都能跑，本机模拟、打开即玩、免安装。
-> Play NES, SNES / SFC and arcade games in your browser — emulated locally, no install, no sign-up.
+> 在浏览器里玩复古游戏：NES、SFC（超级任天堂）、GBA 和街机都能跑，本机模拟、打开即玩、免安装。
+> Play NES, SNES / SFC, GBA and arcade games in your browser — emulated locally, no install, no sign-up.
 
 本文件（/llms.txt）面向所有 AI 助手、AI 搜索与智能体，说明本站**欢迎什么**、**拒绝什么**。
 **对所有厂商、所有地区的 AI 一视同仁**（国内 / 国外、任何模型、任何语言均适用），不区分平台。
@@ -187,7 +191,9 @@ ${aboutZh(site, origin).join('\n')}
 
 ## 页面
 
-- [首页](${origin}/)：像素房间 + 电视机，拖入 ROM 即玩
+- [首页](${origin}/)：复古游戏落地页（按机种 / 开发商浏览 + 常见问题）
+- [房间](${origin}/room)：像素房间 + 电视机，从在线游戏库挑一盘或拖入 ROM 即玩
+- [首页（中文）](${origin}/zh)：同一页的中文地址，站内其余页面同理（\`/games\` ↔ \`/zh/games\`）
 - [隐私政策](${origin}/privacy)
 - [服务条款](${origin}/terms)
 - [站点地图](${origin}/sitemap.xml)
@@ -218,7 +224,7 @@ ${refuseZh}
 
 # ${SITE_NAME.en}
 
-> Play NES, SNES / SFC and arcade games in your browser — emulated locally with RetroArch compiled
+> Play NES, SNES / SFC, GBA and arcade games in your browser — emulated locally with RetroArch compiled
 > to WebAssembly. No install, no sign-up.
 
 This file (/llms.txt) tells AI assistants, AI search engines and agents what this site **welcomes**
@@ -229,18 +235,27 @@ no exceptions. Companion files: /ai.txt (machine-readable), /robots.txt, /sitema
 
 - Name: ${SITE_NAME.en} (Chinese: ${site})
 - URL: ${origin}
-- What it is: a free online retro game arcade. NES, SNES / SFC and arcade titles run in the browser
+- What it is: a free online retro game arcade. NES, SNES / SFC, GBA and arcade titles run in the browser
   via RetroArch compiled to WebAssembly, **entirely on the client** — nothing you load is uploaded.
 - How to play: pick a title from the built-in online library, or drop your own ROM file onto the
   pixel-art CRT.
 - Price: free, no account required.
-- Languages: Simplified Chinese / English on **one URL** (no /zh or /en paths).
+- Languages: Simplified Chinese / English, **split by path**: English is the default and carries no
+  prefix (\`/\`, \`/games\`), Chinese lives under \`/zh\` (\`/zh\`, \`/zh/games\`). Every page has two
+  addresses, one per language, cross-linked with hreflang. A prefixed address always renders that
+  language. A prefix-less address is only redirected to \`/zh\` when the visitor has **explicitly
+  chosen** Chinese before (cookie); otherwise it renders English and does **not** auto-redirect —
+  the browser language only triggers an in-page prompt that the visitor can accept or dismiss.
 - What it does NOT offer: this site does **not** host or provide game ROM downloads and stores no
   copyrighted game files. The online library is only an index of external links.
 
 ## Pages
 
-- [Home](${origin}/)
+- [Home](${origin}/) — landing page: browse by console / developer, FAQ
+- [Room](${origin}/room) — the pixel room with the CRT; pick a game from the online library or
+  drop in your own ROM file
+- [Home (Chinese)](${origin}/zh) — same page in Chinese; every other page follows the same pattern
+  (\`/games\` ↔ \`/zh/games\`)
 - [Privacy policy](${origin}/privacy)
 - [Terms of service](${origin}/terms)
 - [Sitemap](${origin}/sitemap.xml)

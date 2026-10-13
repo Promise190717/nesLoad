@@ -12,13 +12,13 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { insertGame, listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
+import { findGameDuplicate, insertGame, listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'arcade'];
+const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 /**
  * 失败响应统一格式：`error` 是稳定的机器码，`detail` 是给人看的说明。
@@ -94,6 +94,8 @@ export async function POST(request: Request) {
   const image = asFile(form.get('image'));
   const rom = asFile(form.get('rom'));
   const consoleType = optionalText(form.get('console_type')) as ConsoleType | null;
+  // 语言要在判重（同名 + 同语言才算重复）与写库两处用，先取出来，别取两遍
+  const language = optionalText(form.get('language'));
 
   if (!title) return fail('title-required', '请填写游戏名');
   if (!image) return fail('image-required', '请选择封面图片');
@@ -113,6 +115,21 @@ export async function POST(request: Request) {
   const romKey = `roms/${id}-${safeName(rom.name || 'rom')}`;
 
   try {
+    /*
+     * 判重必须在**上传之前**：重复就直接拒，别白白把封面和 ROM 传上 R2 ——
+     * 传完再拒会留下一对没人认领的对象（D1 里没有任何一行指向它们）。
+     *
+     * 判据是**同名 + 同语言**（见 lib/server/games.ts 的 findGameDuplicate）：
+     * 同一款游戏的日版 / 美版 / 中文版是几条合法记录，只按名字拦会全挡在门外。
+     * 比较放在服务端做：列表是分页的，前端手里只有当前页，在浏览器里比名字一定会漏。
+     */
+    const duplicate = await findGameDuplicate(title, language);
+    if (duplicate) {
+      // 顺带把命中的那条语言说出来 —— 「同名但语言不同」是放行的，用户得看得见差在哪
+      const langText = duplicate.language ? `语言：${duplicate.language}` : '语言未标注';
+      return fail('duplicate-title', `已存在同名同语言的游戏：「${duplicate.title}」（${langText}）`);
+    }
+
     await uploadObject(imageKey, new Uint8Array(await image.arrayBuffer()), image.type || 'application/octet-stream');
     // ROM 一律按二进制流上传，别让 R2 自作主张改 Content-Type
     await uploadObject(romKey, new Uint8Array(await rom.arrayBuffer()), 'application/octet-stream');
@@ -120,13 +137,17 @@ export async function POST(request: Request) {
     const game = await insertGame({
       id,
       title,
+      // 英文字段（可空）：英文站取它、空了回退中文（见 lib/server/games.ts）
+      titleEn: optionalText(form.get('title_en')),
       imageUrl: publicUrl(imageKey),
       romKey,
       // 存**原始文件名**：FBNeo 是拿 zip 文件名认驱动的，改名会让街机起不来
       romName: rom.name,
       consoleType,
-      language: optionalText(form.get('language')),
+      // 上面已经取好（判重也用它），别再解析一遍
+      language,
       series: optionalText(form.get('series')),
+      seriesEn: optionalText(form.get('series_en')),
       year,
       /*
        * 开发商：表单里是一个下拉框，传上来的是 **developers.id**（不是名字）。
@@ -135,6 +156,7 @@ export async function POST(request: Request) {
        */
       developerId: optionalText(form.get('developer_id')),
       description: optionalText(form.get('description')),
+      descriptionEn: optionalText(form.get('description_en')),
     });
 
     return NextResponse.json({ ok: true, game });

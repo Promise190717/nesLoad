@@ -5,7 +5,7 @@
  * ROM 由 /api/games/[id]/rom 代理下发，避免把存储结构暴露出去。
  *
  * 参数：`offset`（跳过几条）、`limit`（本页条数，默认 15）、`q`（可选关键词）、
- * `console`（可选机种，`nes` / `snes` / `arcade`）。
+ * `console`（可选机种，`nes` / `snes` / `gba` / `arcade`）。
  *
  * 过滤与分页**都在服务端**：前台早先是把整库一次拉回来、在浏览器里 filter + slice，
  * 2026-10-12 改成按页取数（「不要一次全部加载」）。一旦按页取数，本地 filter 就只能
@@ -25,7 +25,7 @@ export const runtime = 'nodejs';
 // 走 D1 实时读，别让构建期把它静态化了（构建时并没有数据库凭据）
 export const dynamic = 'force-dynamic';
 
-const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'arcade'];
+const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 /** 不传 limit 时的每页条数，和前台 GameLibraryPanel 的 `PAGE_SIZE` 对齐。 */
 const DEFAULT_LIMIT = 15;

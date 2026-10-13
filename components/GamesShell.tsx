@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { SITE_NAME, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import { SITE_NAME, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import BackLink from './BackLink';
+import TopBar from './TopBar';
 
 /**
  * 游戏列表 / 详情 / 下载三页共用的**外壳**（页头、返回链接、页脚）。
@@ -27,8 +28,10 @@ export default function GamesShell({
   title,
   intro,
   back,
-  backToAllHref = '/games',
+  backToAllHref,
   showAllGamesLink = true,
+  showTopBar = true,
+  showHomeLink = false,
   children,
 }: {
   locale: Locale;
@@ -40,7 +43,13 @@ export default function GamesShell({
   title: string;
   /** 标题下面那句说明。列表页放「共 N 款」，详情页放机种 / 年份那一行摘要 */
   intro?: string;
-  /** 左上角返回。列表页回房间，游戏详情 / 开发商详情页回上一页（history），下载页回详情页 */
+  /**
+   * 左上角返回。
+   *
+   * `history` = 走浏览器回退，文案一律 `common.back`（「返回」）：**游戏列表 / 详情 /
+   * 下载 / 开发商列表 / 开发商详情**（2026-10-13 开发商列表页也并了进来）。
+   * `link` = 真跳到一个写死的地址，文案用具体名字：**三个 404 页**。
+   */
   back: { href: string; label: MessageKey; mode?: 'link' | 'history' };
   /**
    * 「全部游戏」那颗**页脚**链接的落点，默认 `/games` 本体。
@@ -49,46 +58,109 @@ export default function GamesShell({
   backToAllHref?: string;
   /** 页脚那一行是否出现「全部游戏」。列表页自己就是，不必自指 */
   showAllGamesLink?: boolean;
+  /**
+   * 顶部那行**顶栏**（语言 / 账号 / 游戏库，2026-10-13 加）出不出现，默认出。
+   *
+   * ⚠️ **三个 404 页要显式传 `false`**（`app/not-found.tsx`、
+   * `app/[locale]/games/[id]/not-found.tsx`、`app/[locale]/developers/[id]/not-found.tsx`）
+   * —— 用户明确要求 404 不带顶栏：这一页的活是「给一个确定去处」，
+   * 铺一排入口只会把人留在原地。加新调用方时先想清楚它是不是 404。
+   */
+  showTopBar?: boolean;
+  /**
+   * 左上角那一行**右边**要不要多一颗「首页」（`common.home` → `/`），默认不要。
+   *
+   * ⚠️ **只有三个 404 页传 `true`**（2026-10-13 用户要求）：那几页刻意不挂顶栏
+   * （见 `showTopBar`），于是整页只有「回房间」一个去处 —— 迷路的人该有一条回首页的路。
+   * 别的内容页**不要传**：它们的顶栏里已经有一颗「首页」了，再来一颗就是重复。
+   */
+  showHomeLink?: boolean;
   children: ReactNode;
 }) {
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>
     translate(locale, key, vars);
 
+  /*
+   * 页脚那几个落点都得**现算**：语言是路径的一部分，写死 `/games` 会把中文用户
+   * 从页脚送回英文房。
+   *
+   * 2026-10-13 拆首页之后这里多了一层：`room` 是那间屋子（`/room` —— 2026-10-13
+   * 之前它就是 `/`），`home` 才是落地页（`/`）。页脚两个都要有：一颗「首页」回落地页、
+   * 一颗「回到房间」进屋，这是两件事。
+   *
+   * ⚠️ `backToAllHref` 的默认值**不能写在参数解构里** —— 解构默认值在函数体之前
+   * 求值，那一刻拿不到 `locale`。所以 `??` 只能挪到这儿。
+   */
+  const home = localePath(locale, '/');
+  const room = localePath(locale, '/room');
+  const allGames = backToAllHref ?? localePath(locale, '/games');
+
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-12">
+    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-5xl">
+        {/*
+          顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库，**和房间右上角那一行同一个口径**。
+          它自己占一行、靠右；下面那颗返回链接紧跟着，所以这里给它一个下边距
+          （不这么写的话返回会贴到顶栏上，看着像一行里的两块）。
+        */}
+        {showTopBar && (
+          <div className="mb-6">
+            <TopBar />
+          </div>
+        )}
+
         {/*
           返回链接**不用 target="_blank"**：这里是内容页，点回去就是页面之间正常跳转，
           当前标签页往前走一步最自然（房间那侧才是新标签 —— 从房间点过来时，
           正在跑的游戏不该被顶掉，见 ConsoleScene 右上角那行链接的注释）。
 
           两种「返回」由 `back.mode` 区分：
-          - `link`（默认）：真跳转到 `back.href`。列表页回房间、下载页回详情页都用它。
-          - `history`：走**浏览器回退**（`BackLink`）—— 游戏详情页左上那条「← 全部游戏」与
-            开发商详情页左上那颗「返回」用它，于是从 `/games?q=…&page=…` 或 `/developers`
-            点进来的人，返回的是**来时的那个地址**，而不是裸列表页
-            （2026-10-12 用户要求「简单的 back 就行」）。
-            `href` 在 history 模式里仍是兜底 / 爬虫 / 中键新标签的落点，通常就是对应列表页。
-        */}
-        {back.mode === 'history' ? (
-          <BackLink
-            href={back.href}
-            className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
-          >
-            <span aria-hidden="true">←</span>
-            <span>{t(back.label)}</span>
-          </BackLink>
-        ) : (
-          <Link
-            href={back.href}
-            className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
-          >
-            <span aria-hidden="true">←</span>
-            <span>{t(back.label)}</span>
-          </Link>
-        )}
+          - `history`：走**浏览器回退**（`BackLink`）—— 游戏列表页、游戏详情页、下载页、
+            开发商列表页、开发商详情页左上那颗都用它。于是从房间那颗「游戏列表」、从
+            `/games?q=…&page=…`、或从 `/developers` 点进来的人，返回的是**来时的那个地址**，
+            而不是一个写死的落点（2026-10-12 用户要求「简单的 back 就行」，
+            2026-10-13 两个列表页也并了进来）。`href` 在 history 模式里仍是兜底 / 爬虫 /
+            中键新标签的落点，通常是「这一页的家」（列表页 → `/room` 那间屋子，详情页 → 列表页）。
+          - `link`（默认）：真跳转到 `back.href`。**三个 404 页**用它 —— 404 给一个确定
+            去处比回退稳妥（来路本身可能就是个坏地址）。
 
-        <header className="mt-8 border-b border-ink-800 pb-6">
+          ⚠️ 文案上，**`history` 那几处一律用 `common.back`（「返回」）**（2026-10-13 用户
+            要求统一）—— 既然行为是回退，就不能写「全部游戏」「回到房间」那种承诺落点的话。
+            而 `link` 模式落点是**写死的固定地址**，那里才继续用 `backToGames` /
+            `backToDevelopers` / `backHome` 这类具体名字。`back.label` 由调用方传。
+        */}
+        {/*
+          左上角那一行：**返回**在左，可选的**首页**在右（`showHomeLink`，见 props 注释）。
+          用 `justify-between` 而不是 `gap`：不传 `showHomeLink` 时只有一个孩子，
+          它照样贴左 —— 别的内容页版式一个字都不变。
+        */}
+        <div className="flex items-center justify-between gap-4">
+          {back.mode === 'history' ? (
+            <BackLink
+              href={back.href}
+              className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+            >
+              <span aria-hidden="true">←</span>
+              <span>{t(back.label)}</span>
+            </BackLink>
+          ) : (
+            <Link
+              href={back.href}
+              className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+            >
+              <span aria-hidden="true">←</span>
+              <span>{t(back.label)}</span>
+            </Link>
+          )}
+
+          {showHomeLink && (
+            <Link href={home} className="text-[11px] text-ink-400 transition-colors hover:text-accent">
+              {t('common.home')}
+            </Link>
+          )}
+        </div>
+
+        <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
           <span className="font-pixel text-[10px] tracking-wider text-accent">{label}</span>
           <h1 className="mt-3 text-[22px] leading-snug font-semibold text-ink-100">{title}</h1>
           {intro && <p className="mt-2 text-[13px] leading-6 text-ink-400">{intro}</p>}
@@ -103,11 +175,14 @@ export default function GamesShell({
         */}
         <footer className="mt-12 border-t border-ink-800 pt-6">
           <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
-            <Link href="/" className="text-ink-400 transition-colors hover:text-accent">
+            <Link href={home} className="text-ink-400 transition-colors hover:text-accent">
+              {t('common.home')}
+            </Link>
+            <Link href={room} className="text-ink-400 transition-colors hover:text-accent">
               {t('gamesPage.backHome')}
             </Link>
             {showAllGamesLink && (
-              <Link href={backToAllHref} className="text-ink-400 transition-colors hover:text-accent">
+              <Link href={allGames} className="text-ink-400 transition-colors hover:text-accent">
                 {t('gamesPage.backToGames')}
               </Link>
             )}
@@ -116,13 +191,22 @@ export default function GamesShell({
               那边是「和移动端那颗盾牌钮互补、任意时刻恰好一个入口」的窄平衡，动它容易碰坏；
               而内容页之间的互相发现本来就靠这个页脚（爬虫也是顺着它走的）。
             */}
-            <Link href="/developers" className="text-ink-400 transition-colors hover:text-accent">
+            <Link
+              href={localePath(locale, '/developers')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
               {t('developersPage.backToDevelopers')}
             </Link>
-            <Link href="/privacy" className="text-ink-400 transition-colors hover:text-accent">
+            <Link
+              href={localePath(locale, '/privacy')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
               {t('legal.privacy')}
             </Link>
-            <Link href="/terms" className="text-ink-400 transition-colors hover:text-accent">
+            <Link
+              href={localePath(locale, '/terms')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
               {t('legal.terms')}
             </Link>
           </nav>

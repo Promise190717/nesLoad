@@ -11,8 +11,9 @@ import { SITE_NAME, translate } from '@/lib/i18n';
  * ---------------------------------------------------------------------------
  * 几个刻意的取舍
  *
- * **`name` / `short_name` 只有英文，不跟语言走。** 本站的界面语言由 cookie 决定，
- * 但 manifest 是**一个静态文件**：浏览器在安装时抓一次、之后长期缓存，切语言也不会重抓。
+ * **`name` / `short_name` 只有英文，不跟语言走。** 界面语言 2026-10-13 起分在路径上
+ * （英文无前缀、中文 `/zh`），但 manifest 仍然是**一个静态文件**：
+ * 浏览器在安装时抓一次、之后长期缓存，切语言也不会重抓。
  * 想让它跟语言走就得把 manifest 变成动态路由（读 cookie），而「浏览器抓 manifest 时
  * 到底带不带 cookie」在各家实现里并不一致 —— 换来的收益（主屏图标下面那几个字）
  * 完全撑不起这个不确定性。选英文是因为 PWA 的安装界面、系统应用列表本来就是英文语境，
@@ -45,8 +46,14 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: SITE_NAME.en,
     description: translate('en', 'meta.description', { site: SITE_NAME.en }),
     lang: 'en',
+    /*
+     * `start_url` 写**无前缀**的 `/` 而不是 `/zh`：装上之后从哪儿进来，由 middleware
+     * 现判 —— **只有用户主动设置过语言（cookie）才会被送去 `/zh`**，没设置过就是英文
+     * （然后客户端弹一句问，见 components/LocalePrompt.tsx）。
+     * 写死任何一种语言都会把另一半用户锁在错的那份上。
+     */
     start_url: '/',
-    /* scope 是 `/` 而不是默认值：/privacy 和 /terms 也在应用里，不该跳出去用浏览器打开 */
+    /* scope 是 `/` 而不是默认值：/zh、/privacy、/terms 都在应用里，不该跳出去用浏览器打开 */
     scope: '/',
     display: 'standalone',
     background_color: '#08080a',

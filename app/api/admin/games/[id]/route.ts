@@ -12,13 +12,13 @@
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { deleteGame, getGameRow, updateGame, type GamePatch } from '@/lib/server/games';
+import { deleteGame, findGameDuplicate, getGameRow, updateGame, type GamePatch } from '@/lib/server/games';
 import { deleteObject, keyFromPublicUrl } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'arcade'];
+const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 function fail(error: string, detail: string, status = 400) {
   return NextResponse.json({ error, detail }, { status });
@@ -44,6 +44,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const title = optionalText(body.title);
   const consoleType = optionalText(body.consoleType) as ConsoleType | null;
+  // 语言要在判重（同名 + 同语言）与写库两处用，先取出来，别取两遍
+  const language = optionalText(body.language);
 
   if (!title) return fail('title-required', '请填写游戏名');
   if (!consoleType || !CONSOLE_TYPES.includes(consoleType)) {
@@ -57,18 +59,36 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const patch: GamePatch = {
     title,
+    // 英文字段（可空），见 lib/server/games.ts
+    titleEn: optionalText(body.titleEn),
     consoleType,
-    language: optionalText(body.language),
+    // 上面已经取好（判重也用它），别再解析一遍
+    language,
     series: optionalText(body.series),
+    seriesEn: optionalText(body.seriesEn),
     year,
     // 开发商下拉框给的是 developers.id，名字由数据层反查（见 lib/server/games.ts）
     developerId: optionalText(body.developerId),
     description: optionalText(body.description),
+    descriptionEn: optionalText(body.descriptionEn),
   };
 
   try {
     const row = await getGameRow(id);
     if (!row) return fail('not-found', '找不到这个游戏', 404);
+
+    /*
+     * 判重（同名 + 同语言）—— 和「添加」用同一把尺子。
+     * 修改这边不判的话，「添加」那道闸门等于白设：加一条 A/中文，
+     * 再把另一条改成 A/中文就绕过去了。
+     *
+     * 第三个参数把**自己**排除掉：不排的话，改个年份都会撞上自己的名字。
+     */
+    const duplicate = await findGameDuplicate(title, language, id);
+    if (duplicate) {
+      const langText = duplicate.language ? `语言：${duplicate.language}` : '语言未标注';
+      return fail('duplicate-title', `已存在同名同语言的游戏：「${duplicate.title}」（${langText}）`);
+    }
 
     await updateGame(id, patch);
     return NextResponse.json({ ok: true, game: { ...patch, id } });

@@ -11,16 +11,18 @@
  * 所以规矩是：**加一节、改一节，两份都要动** —— 页面上的目录是逐节渲染的，
  * 漏译不会报错，只会让另一种语言少一段。
  *
- * ⚠️ **写给人看，不写给工程师看**（用户 2026-10-12 明确要求：「技术架构不要说得那么详细，
- * 什么 cookie 名称 D1 数据库那种」）。所以**不写**：
- *   · 我们自己那点实现细节 —— cookie 叫什么名字、用 localStorage 还是 IndexedDB、
- *     数据库和对象存储是什么产品、服务器上跑的是什么；
+ * ⚠️ **内容是法务陈述，不是博客**（用户 2026-10-13 要求删掉口语化表述）。所以**不写**：
+ *   · 和读者利益无关的口气话 —— 「我们也尽量少碰你的信息」「这些内容不会上传，我们看不到，
+ *     也收不到」「和任何网站一样」这类。只留事实：「仅保存在浏览器中，不会上传至服务器」；
+ *   · 与普通用户无关的实现细节 —— 「登录后台时会另外收到一个会话 cookie」整句删掉
+ *     （后台只有管理员能进）；cookie 叫什么名字、用 localStorage 还是 IndexedDB、
+ *     数据库和对象存储是什么产品、服务器上跑的是什么，一律不写；
  *   · 第三方资源的具体域名 / 协议名 —— `fonts.googleapis.com`、`broker.emqx.io`、
  *     STUN、MQTT 这类。第三方**服务商的名字**（Google Fonts / jsDelivr / Cloudflare）
  *     要留 —— 那是隐私政策必须披露的「数据接收方」，去掉反而不合规；
  *     联机那条也留着，因为「对方能看到你的 IP」是用户真正需要知道的事。
  * 判断标准：**这句话对读者的决定有没有用**。「你的浏览器会保存这些内容」有用，
- * 「这些内容存在 localStorage 里」没用。
+ * 「这些内容存在 localStorage 里」没用，「我们尽量少碰」是废话。
  *
  * ⚠️ **内容必须与本站实际行为一致**，别照抄别的站的模板：
  * 本站没有账号系统、没有广告、没有接第三方统计（GA 之类），也没有服务端记录
@@ -67,7 +69,7 @@ export interface LegalDoc {
   sections: LegalSection[];
 }
 
-const PRIVACY_UPDATED = '2026-10-12';
+const PRIVACY_UPDATED = '2026-10-13';
 const TERMS_UPDATED = '2026-10-12';
 
 function privacy(locale: Locale): LegalDoc {
@@ -77,99 +79,98 @@ function privacy(locale: Locale): LegalDoc {
     return {
       label: 'PRIVACY POLICY',
       title: '隐私政策',
-      summary: `${site}如何处理与你有关的信息：保存在浏览器里的内容、cookie、留言本，以及页面会加载的第三方服务。`,
+      summary: `${site}对个人信息的处理方式：浏览器本地保存的内容、cookie、留言本，以及页面加载的第三方服务。`,
       updated: PRIVACY_UPDATED,
-      intro: `你在${site}玩游戏时，这里会（以及不会）如何处理你的信息。`,
+      intro: `${site}在运行过程中对个人信息的收集与使用。`,
       sections: [
         {
           heading: '1. 概述',
           body: [
-            `${site}（下称「本站」）是一个在浏览器里运行复古游戏的免费站点。这里没有账号、不需要登录、不用填邮箱就能玩，我们也尽量少碰你的信息。`,
+            `${site}（下称「本站」）是一个在浏览器中运行复古游戏的免费站点，无账号体系，无需登录或填写邮箱即可使用。`,
             '使用本站即表示你已阅读并理解本政策。',
           ],
         },
         {
-          heading: '2. 我们接触到的信息',
-          body: ['**只保存在你浏览器里的** —— 这些内容不会上传，我们看不到，也收不到：'],
+          heading: '2. 保存在浏览器本地的信息',
+          body: ['以下内容仅保存在你的浏览器中，不会上传至服务器：'],
           bullets: [
-            '界面偏好：主题、吊灯、简洁模式、电视机大小，以及你自己改过的按键。',
-            '存档、你自己拖进来的街机 BIOS 文件，以及从游戏库载入过的记录。',
-            '清除浏览器数据（或使用无痕窗口）就能删掉它们，删掉之后无法恢复。',
+            '界面偏好：主题、吊灯、简洁模式、电视机大小，以及自定义按键。',
+            '存档、你导入的街机 BIOS 文件，以及游戏库的载入记录。',
+            '清除浏览器数据（或使用无痕窗口）即可删除，删除后无法恢复。',
           ],
         },
         {
-          heading: '3. 你主动发给我们的',
+          heading: '3. 你主动提交的信息',
           body: [
-            '留言本：你写的内容会连同提交时间一起发到我们的服务器，并且**对所有人公开可见**。请不要在留言本里写个人信息。',
-            '邮件：如果你给我们发邮件，我们会看到你的邮箱地址和邮件内容，只用于回复你。',
+            '留言本：你提交的内容及提交时间会发送至本站服务器，且**对所有人公开可见**。请勿在留言本中填写个人信息。',
+            '邮件：你通过邮件联系本站时，我们会收到你的邮箱地址与邮件内容，仅用于回复。',
           ],
         },
         {
-          heading: '4. 服务器可能记录的信息',
+          heading: '4. 服务器日志',
           body: [
-            '和任何网站一样，承载本站的服务器（以及前面的防护服务）在处理请求时可能自动记录访问信息，例如 IP 地址和访问时间。这些记录由托管服务商按其自身政策处理；我们只在排查故障或阻止滥用时查看。',
+            '与一般网站相同，服务器（及前置的防护服务）在处理请求时可能自动记录访问信息，例如 IP 地址和访问时间。此类日志由托管服务商按其政策处理；本站仅在排查故障或阻止滥用时查看。',
           ],
         },
         {
           heading: '5. Cookie 与浏览器存储',
           body: [
-            '本站只用一个 cookie 记住你选择的界面语言。它不是跟踪 cookie，也没有第三方读取它。',
-            '登录后台时会另外收到一个会话 cookie（仅限管理员，与普通访客无关）。',
-            '本站**不使用任何广告 cookie，也没有接入第三方统计分析工具**。',
+            '本站使用一个 cookie 记录你选择的界面语言，它不是跟踪 cookie，也不对第三方开放。',
+            '本站**不使用任何广告 cookie，也未接入第三方统计分析工具**。',
           ],
         },
         {
-          heading: '6. 我们如何使用这些信息',
+          heading: '6. 信息的使用方式',
           bullets: [
-            '让界面保持你上次选择的样子（语言、主题、尺寸、按键）。',
+            '保持界面为你上次选择的状态（语言、主题、尺寸、按键）。',
             '显示并保存你提交的留言。',
-            '排查故障、阻止滥用、维持服务基本可用。',
+            '排查故障、阻止滥用、维持服务可用。',
           ],
         },
         {
           heading: '7. 第三方服务',
           body: [
-            '本站不向第三方出售或出租任何信息。但页面在运行时需要从第三方加载资源，这些请求由你的浏览器**直接**发出，对方因此能看到你的 IP 地址：',
+            '本站不向第三方出售或出租任何信息。页面在运行时需要从第三方加载资源，这些请求由你的浏览器**直接**发出，对方因此能够看到你的 IP 地址：',
           ],
           bullets: [
             'Google Fonts —— 页面使用的像素字体。',
             'jsDelivr —— NES / SFC 的模拟器内核文件。',
-            'Cloudflare —— 本站的托管与存储，游戏文件和留言都存在这里。',
-            '联机功能：使用「联机」时，你的浏览器会通过公共中继服务器与对方建立点对点连接。**这意味着对方能看到你的 IP 地址，你也能看到对方的** —— 这是点对点直连的固有特性，请只和你信任的人联机。',
-            '我们无法控制上述第三方的隐私做法，建议阅读它们各自的隐私政策。',
+            'Cloudflare —— 本站的托管与存储服务。',
+            '联机功能：使用「联机」时，你的浏览器会通过公共中继服务器与对方建立点对点连接。**这意味着对方能看到你的 IP 地址，你也能看到对方的** —— 这是点对点直连的固有特性，请只和信任的人联机。',
+            '本站无法控制上述第三方的隐私做法，建议阅读它们各自的隐私政策。',
           ],
         },
         {
           heading: '8. 数据安全',
           body: [
-            '我们对服务器上的数据采取合理的技术保护措施。但请注意：互联网上没有任何一种传输或存储方式是绝对安全的，我们不能承诺「绝对安全」。',
-            '留言本按设计就是公开的，请不要在其中提交任何敏感信息。',
+            '我们就服务器上的数据采取合理的技术保护措施。但请注意：互联网上没有任何一种传输或存储方式是绝对安全的，本站无法承诺「绝对安全」。',
+            '留言本按设计即公开，请勿在其中提交任何敏感信息。',
           ],
         },
         {
           heading: '9. 你的选择与权利',
           bullets: [
-            '清除浏览器数据即可删掉上面那些只存在本机的内容（偏好、按键、存档、BIOS、历史记录）。',
-            '删除留言：如果你希望删除自己提交的留言，请用下面的邮箱联系我们，说明留言内容与大致时间。',
-            '拦截第三方服务：用浏览器扩展或网络设置挡掉上面那几家，可以进一步减少对外请求，代价是字体、内核下载和联机功能可能受影响。',
+            '清除浏览器数据即可删除仅存于本机的内容（偏好、按键、存档、BIOS、历史记录）。',
+            '删除留言：如需删除自己提交的留言，请通过下方邮箱联系我们，并说明留言内容与大致时间。',
+            '拦截第三方服务：通过浏览器扩展或网络设置屏蔽上述服务商，可减少对外请求，代价是字体、内核下载和联机功能可能受影响。',
           ],
         },
         {
           heading: '10. 儿童隐私',
           body: [
-            '本站不面向 13 岁以下的儿童，也不会主动收集儿童的个人信息。如果你认为有儿童向我们提交了个人信息，请联系我们删除。',
+            '本站不面向 13 岁以下的儿童，也不会主动收集儿童的个人信息。如你认为有儿童向本站提交了个人信息，请联系我们删除。',
           ],
         },
         {
           heading: '11. 第三方链接',
           body: [
-            '本站可能包含指向第三方网站的链接。我们不对这些站点的内容或其隐私做法负责。',
+            '本站可能包含指向第三方网站的链接，本站不对这些站点的内容或其隐私做法负责。',
           ],
         },
         {
           heading: '12. 本政策的变更',
           body: [
-            '本政策可能随服务的变化而更新，更新后我们会改动本页顶部的「最后更新」日期。继续使用本站即视为接受更新后的版本。',
+            '本政策可能随服务的变化而更新，更新后会改动本页顶部的「最后更新」日期。继续使用本站即视为接受更新后的版本。',
           ],
         },
         {
@@ -183,35 +184,35 @@ function privacy(locale: Locale): LegalDoc {
   return {
     label: 'PRIVACY POLICY',
     title: 'Privacy Policy',
-    summary: `How ${site} handles the little information it touches: what stays in your browser, cookies, the guestbook, and the third-party services the page loads.`,
+    summary: `How ${site} handles personal information: what stays in your browser, cookies, the guestbook, and the third-party services the page loads.`,
     updated: PRIVACY_UPDATED,
-    intro: `What ${site} does — and does not do — with information while you play.`,
+    intro: `How ${site} collects and uses personal information while you play.`,
     sections: [
       {
         heading: '1. Overview',
         body: [
-          `${site} ("the Service") is a free retro game room that runs in your browser. There are no accounts, no sign-in and no email needed to play, and we try to touch as little of your information as possible.`,
+          `${site} ("the Service") is a free retro game room that runs in your browser. There are no accounts, and no sign-in or email is needed to play.`,
           'By using the Service you acknowledge this policy.',
         ],
       },
       {
-        heading: '2. Information we touch',
-        body: ['**Kept in your own browser** — none of this is uploaded; we cannot see it or receive it:'],
+        heading: '2. Information stored in your browser',
+        body: ['The following is kept only in your browser and is not uploaded to our servers:'],
         bullets: [
           'Preferences: theme, lamp, simple mode, TV size, and any key bindings you changed.',
-          'Save states, an arcade BIOS file you dropped in, and the list of games you opened from the library.',
+          'Save states, an arcade BIOS file you imported, and the list of games you opened from the library.',
           'Clearing your browser data (or using a private window) deletes them for good.',
         ],
       },
       {
-        heading: '3. Information you choose to send us',
+        heading: '3. Information you choose to submit',
         body: [
           'Guestbook: what you write is sent to our server together with the time you posted it, and it is **publicly visible to everyone**. Please do not put personal information in it.',
-          'Email: if you email us, we see your address and your message, and use them only to reply.',
+          'Email: if you email us, we receive your address and your message, and use them only to reply.',
         ],
       },
       {
-        heading: '4. Information the server may log',
+        heading: '4. Server logs',
         body: [
           'As with any website, the servers that deliver this one (and any protection service in front of them) may automatically log access information such as IP address and request time. That logging is handled by the hosting provider under its own policy; we look at it only to diagnose faults or stop abuse.',
         ],
@@ -219,8 +220,7 @@ function privacy(locale: Locale): LegalDoc {
       {
         heading: '5. Cookies and browser storage',
         body: [
-          'We use a single cookie to remember the interface language you picked. It is not a tracking cookie, and no third party reads it.',
-          'Signing in to the admin area sets a separate session cookie (administrators only — irrelevant to visitors).',
+          'We use one cookie to remember the interface language you picked. It is not a tracking cookie, and it is not shared with third parties.',
           'We run **no advertising cookies and no third-party analytics**.',
         ],
       },
@@ -240,7 +240,7 @@ function privacy(locale: Locale): LegalDoc {
         bullets: [
           'Google Fonts — the pixel typeface the page uses.',
           'jsDelivr — the NES / SNES emulator core files.',
-          'Cloudflare — hosting and storage; game files and guestbook messages live here.',
+          'Cloudflare — hosting and storage for the Service.',
           'Netplay: using "Netplay" connects your browser to a public relay server to set up a peer-to-peer connection with the other player. **This means they can see your IP address, and you can see theirs** — it is inherent to a direct connection between two players. Only play with people you trust.',
           'We do not control those third parties’ privacy practices; please read their own policies.',
         ],
@@ -248,7 +248,7 @@ function privacy(locale: Locale): LegalDoc {
       {
         heading: '8. Data security',
         body: [
-          'We apply reasonable technical measures to protect what is on our servers. But note that no method of transmission or storage over the internet is completely secure, and we cannot promise "absolute security".',
+          'We apply reasonable technical measures to protect the data on our servers. But note that no method of transmission or storage over the internet is completely secure, and we cannot promise "absolute security".',
           'The guestbook is public by design — please do not post anything sensitive there.',
         ],
       },

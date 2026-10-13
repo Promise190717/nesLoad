@@ -11,15 +11,20 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import AdminLoading from './AdminLoading';
 import { useI18n } from './I18nProvider';
 
 /** `/api/admin/developers` 返回的条目。 */
 interface AdminDeveloper {
   id: string;
   name: string;
+  /** 英文名（可空）。2026-10-13 加，英文站取它、空了回退 `name`。 */
+  nameEn: string | null;
   imageUrl: string | null;
   summary: string | null;
+  summaryEn: string | null;
   description: string | null;
+  descriptionEn: string | null;
   foundedYear: number | null;
   website: string | null;
   createdAt: number;
@@ -80,12 +85,14 @@ async function readError(res: Response, fallback: string): Promise<string> {
  * 所以这里新建一个、那边立刻就能选到 —— 两个 tab 之间靠这一张表串起来。
  */
 export default function AdminDevelopers() {
-  const { t } = useI18n();
+  const { t, href: localeHref } = useI18n();
   const router = useRouter();
 
   const [list, setList] = useState<AdminDeveloper[]>([]);
   const [total, setTotal] = useState(0);
   const [listLoaded, setListLoaded] = useState(false);
+  /** 当前是否有一条列表请求在飞：翻页 / 搜索 / 增删改后的重拉都点亮加载行。 */
+  const [listPending, setListPending] = useState(true);
   const [searchDraft, setSearchDraft] = useState('');
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
@@ -101,8 +108,12 @@ export default function AdminDevelopers() {
 
   // 表单字段：新建与编辑共用一套
   const [name, setName] = useState('');
+  /* 英文字段（2026-10-13 加）：选填，英文站取 `_en`、空了回退中文 */
+  const [nameEn, setNameEn] = useState('');
   const [summary, setSummary] = useState('');
+  const [summaryEn, setSummaryEn] = useState('');
   const [description, setDescription] = useState('');
+  const [descriptionEn, setDescriptionEn] = useState('');
   const [foundedYear, setFoundedYear] = useState('');
   const [website, setWebsite] = useState('');
   const [image, setImage] = useState<File | null>(null);
@@ -118,6 +129,16 @@ export default function AdminDevelopers() {
   useEffect(() => {
     const requestId = ++listRequestId.current;
     const { offset } = listQuery;
+
+    /*
+     * 先点亮「载入中」。effect 体内同步 setState 会被 react-hooks/set-state-in-effect
+     * 拦下，所以放微任务里（执行序仍先于 fetch 响应，不会漏帧）；
+     * 同样受 requestId 把守：请求被换掉时，旧请求不许点亮新一轮。
+     */
+    void Promise.resolve().then(() => {
+      if (listRequestId.current !== requestId) return;
+      setListPending(true);
+    });
 
     fetchDevelopers(offset, keyword)
       .then((data) => {
@@ -135,6 +156,7 @@ export default function AdminDevelopers() {
       .finally(() => {
         if (listRequestId.current !== requestId) return;
         setListLoaded(true);
+        setListPending(false);
       });
   }, [listQuery, keyword, listVersion]);
 
@@ -161,8 +183,11 @@ export default function AdminDevelopers() {
 
   const resetForm = () => {
     setName('');
+    setNameEn('');
     setSummary('');
+    setSummaryEn('');
     setDescription('');
+    setDescriptionEn('');
     setFoundedYear('');
     setWebsite('');
     setImage(null);
@@ -180,8 +205,11 @@ export default function AdminDevelopers() {
   const openEdit = (developer: AdminDeveloper) => {
     setEditingId(developer.id);
     setName(developer.name);
+    setNameEn(developer.nameEn ?? '');
     setSummary(developer.summary ?? '');
+    setSummaryEn(developer.summaryEn ?? '');
     setDescription(developer.description ?? '');
+    setDescriptionEn(developer.descriptionEn ?? '');
     setFoundedYear(developer.foundedYear === null ? '' : String(developer.foundedYear));
     setWebsite(developer.website ?? '');
     setImage(null);
@@ -226,8 +254,11 @@ export default function AdminDevelopers() {
     // 改 / 增都是 multipart（换厂标要带文件），所以两边共用同一份 FormData 拼法
     const form = new FormData();
     form.set('name', trimmedName);
+    form.set('name_en', nameEn.trim());
     form.set('summary', summary.trim());
+    form.set('summary_en', summaryEn.trim());
     form.set('description', description.trim());
+    form.set('description_en', descriptionEn.trim());
     form.set('founded_year', foundedText);
     form.set('website', website.trim());
     if (image) form.set('image', image);
@@ -318,6 +349,9 @@ export default function AdminDevelopers() {
           </p>
         )}
 
+        {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
+        {listPending && <AdminLoading label={t('feedback.loading')} />}
+
         {listLoaded && total === 0 && !keyword && (
           <p className="text-[11px] text-ink-500">{t('admin.developers.empty')}</p>
         )}
@@ -356,7 +390,7 @@ export default function AdminDevelopers() {
                 </span>
 
                 <Link
-                  href={`/developers/${developer.id}`}
+                  href={localeHref(`/developers/${developer.id}`)}
                   target="_blank"
                   rel="noreferrer"
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-accent"
@@ -427,6 +461,16 @@ export default function AdminDevelopers() {
                 />
               </label>
 
+              {/* 英文字段（2026-10-13 加），紧挨中文那栏 —— 见 AdminGames 里同一段注释 */}
+              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+                {t('admin.developers.field.nameEn')}
+                <input
+                  value={nameEn}
+                  onChange={(e) => setNameEn(e.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
               <label className={LABEL_CLASS}>
                 {t('admin.developers.field.founded')}
                 <input
@@ -480,10 +524,29 @@ export default function AdminDevelopers() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
+                {t('admin.developers.field.summaryEn')}
+                <input
+                  value={summaryEn}
+                  onChange={(e) => setSummaryEn(e.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
+              <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {t('admin.developers.field.description')}
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  rows={4}
+                  className={`${FIELD_CLASS} resize-y`}
+                />
+              </label>
+
+              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+                {t('admin.developers.field.descriptionEn')}
+                <textarea
+                  value={descriptionEn}
+                  onChange={(e) => setDescriptionEn(e.target.value)}
                   rows={4}
                   className={`${FIELD_CLASS} resize-y`}
                 />

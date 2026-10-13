@@ -36,6 +36,20 @@ const CARD_MIN_H = 210;
 /** 压暗遮罩。浓度和别处那几块面板的背板对齐（`bg-ink-950/70`）。 */
 const DIM = 'rgba(0, 0, 0, 0.74)';
 
+/**
+ * 指引「开了 / 关了」在 `window` 上派发的事件名，由 ConsoleScene 派发。
+ *
+ * **给谁用**：别的**首次访问提示**要跟它排队。目前只有语言提示弹窗
+ * （`components/LocalePrompt.tsx`）—— 它挂在根布局里（每个页面都在），
+ * 而指引只在房间那一页弹，两者都想占第一眼，撞一起就是两个对话框叠着；
+ * 更要命的是指引那层暗幕会把弹窗压暗、还点不动。
+ *
+ * **为什么用事件而不是共享 state**：它们不在同一棵子树里（弹窗在根布局、
+ * 指引在 ConsoleScene 内部），事件是唯一不把两棵树绑在一起的通道。
+ */
+export const TOUR_OPEN_EVENT = 'nesload:tour-open';
+export const TOUR_DONE_EVENT = 'nesload:tour-done';
+
 interface Rect {
   left: number;
   top: number;

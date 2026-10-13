@@ -63,7 +63,7 @@ function originFromEnv(): string | null {
  * 三级兜底：环境变量 → 请求头 → localhost。
  *
  * **为什么肯从请求头猜**：本项目没有固定的部署域名约束，也不做 `output: 'export'`
- * （layout 里读 cookie / Accept-Language 就已经是动态渲染了）。从请求头取，
+ * （语言分了路径、layout 又要读 cookie，本来就是动态渲染了）。从请求头取，
  * 用户把站部到任何域名上都能立刻拿到正确的 canonical 与 sitemap 地址，零配置。
  *
  * **风险与顺序**：Host 头是客户端可控的，所以显式配置（SITE_URL）永远排在前面 ——

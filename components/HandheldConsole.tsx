@@ -67,6 +67,12 @@ const FACE_ROWS: Record<ConsoleType, ([string, ButtonName] | null)[][]> = {
     [['Y', 'y'], null, ['A', 'a']],
     [null, ['B', 'b'], null],
   ],
+  // GBA：面键只有 B / A（B 左 A 右，和 GBA 机身一致），
+  // 肩键 L / R 单独摆一行 —— 机身顶部那两颗，掌机上只能和面键并列呈现
+  gba: [
+    [['B', 'b'], ['A', 'a']],
+    [['L', 'l'], ['R', 'r']],
+  ],
   // 街机六键：上排 A B C、下排 X Y Z
   arcade: [
     [['A', 'b'], ['B', 'a'], ['C', 'y']],
@@ -233,17 +239,24 @@ export default function HandheldConsole({
       <div className="flex flex-1 flex-col bg-ink-700 pixel-edge pxw-6 pxc-500">
         {/*
           顶沿。桌面那台电视机这里是一条散热缝 + 版本铭牌；掌机上收成一行：
-          左边机名、右边 PWR 灯 —— 灯和电视机上那颗是同一个意思（房主等人黄、没画面暗、
-          暂停 accent、单人绿、联机蓝），位置也都在屏幕正上方。
+          **左边 PWR 灯**（2026-10-13 起；再早是左边机名、右边灯）——
+          灯和电视机上那颗是同一个意思（房主等人黄、没画面暗、暂停 accent、单人绿、
+          联机蓝），只是位置挪到了顶沿左端。
 
-          2026-10-12 后半段用户要求「去除左上角的 nesload」：机名那块 `<span>` 整块删了，
-          现在这条顶沿只剩右边那颗 PWR 灯（`ml-auto` 本来就把它推到最右）。
+          ⚠️ **为什么从右边挪到左边**（2026-10-13 用户要求）：菜单钮在移动端也挪到了
+          页面右上角，而它是一颗 `position: fixed` 的浮钮，压住的正是这条顶沿的右端 ——
+          灯留在右边就会被钮盖住。灯和钮一个占左、一个占右，互不挡。
+          两处的改动是一件事，**改一边要看另一边**（菜单钮那边见 globals.css 的
+          `.menu-btn` 与 ConsoleScene 那颗钮的注释）。
+
+          2026-10-12 后半段用户要求「去除左上角的 nesload」：机名那块 `<span>` 整块删了。
           ⚠️ 别再补回机名 —— 站名要出现的地方走 `lib/i18n.ts` 的 `SITE_NAME`，
           而且用户明确说这儿不要。
         */}
         <div className="relative flex h-[26px] items-center border-b-2 border-ink-800 bg-ink-850 px-4">
           <span className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-ink-950/45" />
-          <span className="relative ml-auto flex items-center gap-2">
+          {/* `mr-auto` 把灯顶到最左；右边空着留给页面右上角那颗菜单钮 */}
+          <span className="relative mr-auto flex items-center gap-2">
             <span className={`h-2.5 w-2.5 ${pwrClass}`} />
             <span className="font-pixel text-[8px] text-ink-500">PWR</span>
           </span>
@@ -292,8 +305,8 @@ export default function HandheldConsole({
           手机上更没有键盘。所以 disabled 只在没卡带 / 载入中时成立。
 
           宽度**跟着屏幕走**（`mx-auto` + `w-[var(--tv-screen-w)]`）：五颗钮正好压在内圈
-          那条描边之内、和屏幕左右对齐。那个变量桌面端也有定义（720 起），但这一排
-          只在掌机上渲染，所以不会串到电视机上去。
+          那条描边之内、和屏幕左右对齐。那个变量桌面端也有定义（值随窗口和档位变），
+          但这一排只在掌机上渲染，所以不会串到电视机上去。
         */}
         <div className="mx-auto grid w-[var(--tv-screen-w)] grid-cols-5 gap-1 px-1.5">
           <PanelBtn onClick={onTogglePause} disabled={!rom || busy}>

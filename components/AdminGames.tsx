@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
@@ -14,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
 import { unwrapRom } from '@/lib/unwrap';
+import AdminLoading from './AdminLoading';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
@@ -21,18 +23,23 @@ import { useI18n } from './I18nProvider';
 interface AdminGame {
   id: string;
   title: string;
+  /** 英文名（可空）。2026-10-13 加，英文站取它、空了回退 `title`。 */
+  titleEn: string | null;
   imageUrl: string;
   consoleType: ConsoleType;
   language: string | null;
   series: string | null;
+  seriesEn: string | null;
   year: number | null;
   developer: string | null;
+  developerEn: string | null;
   /**
    * 开发商外键（2026-10-12 加）。表单里那个下拉框选的就是它 —— 名字由服务端反查，
    * 所以这里编辑时只认 id；`developer` 那列文字只在列表上显示用。
    */
   developerId: string | null;
   description: string | null;
+  descriptionEn: string | null;
   createdAt: number;
 }
 
@@ -54,7 +61,7 @@ interface GamePage {
 
 type Notice = { tone: 'ok' | 'error'; text: string };
 
-const CONSOLE_OPTIONS: readonly ConsoleType[] = ['nes', 'snes', 'arcade'];
+const CONSOLE_OPTIONS: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 /** 列表每页条数。 */
 const PAGE_SIZE = 10;
@@ -64,6 +71,15 @@ const LANGUAGE_OPTIONS: readonly { value: string; label: string }[] = [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
 ];
+
+/**
+ * 新增游戏时「语言」下拉的默认值。
+ *
+ * 站内库以英文 ROM 为主（后台列表里绝大多条都是 `en`），默认空着等于每加一条都要手动选一次。
+ * ⚠️ **只作新增的默认值**：打开编辑时仍按记录原值填（空就是空）——
+ * 否则编辑一条没标语言的老记录、只改个年份保存，语言会被悄悄写成 `en`。
+ */
+const DEFAULT_LANGUAGE = 'en';
 
 const LANGUAGE_LABEL: Record<string, string> = { zh: '中文', en: 'English' };
 
@@ -117,6 +133,31 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 /**
+ * 从一次拖拽里抠出「图片地址」。
+ *
+ * 从资源管理器拖文件时有 `files`，走不到这里；**从网页里拖一张图**过来时
+ * DataTransfer 里只有文本，而且各家浏览器写法不一，于是按可靠度依次试：
+ * `text/uri-list`（标准）→ `text/html` 里的 `<img src>` → 纯文本里的裸链接。
+ *
+ * ⚠️ `getData` 只在 drop 事件里读得到（事件结束数据就没了），别挪到异步里。
+ */
+function imageUrlFromDrop(data: DataTransfer): string | null {
+  const fromList = data
+    .getData('text/uri-list')
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith('#'));
+  if (fromList) return fromList;
+
+  const html = data.getData('text/html');
+  const src = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  if (src) return src[1];
+
+  const text = data.getData('text/plain').trim();
+  return /^https?:\/\//i.test(text) ? text : null;
+}
+
+/**
  * 后台 · 游戏列表 tab：列表（**服务端分页** + 搜索）+ 添加 / 编辑弹窗 + 删除。
  * 鉴权由各接口自查（见 lib/server/admin-guard.ts），这里只负责界面与调接口。
  *
@@ -139,6 +180,8 @@ export default function AdminGames() {
   const [games, setGames] = useState<AdminGame[]>([]);
   const [total, setTotal] = useState(0);
   const [listLoaded, setListLoaded] = useState(false);
+  /** 当前是否有一条列表请求在飞：翻页 / 搜索 / 增删改后的重拉都点亮加载行。 */
+  const [listPending, setListPending] = useState(true);
   const [searchDraft, setSearchDraft] = useState('');
   // 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来，避免边打字边过滤
   const [keyword, setKeyword] = useState('');
@@ -158,9 +201,15 @@ export default function AdminGames() {
 
   // 表单字段：新增与编辑共用一套
   const [title, setTitle] = useState('');
+  /*
+   * 英文字段（2026-10-13 加）。库里文案字段成对出现（无后缀 = 中文，`_en` = 英文），
+   * 英文站取 `_en`、空了回退中文 —— 所以这几栏都是**选填**。
+   */
+  const [titleEn, setTitleEn] = useState('');
   const [consoleType, setConsoleType] = useState<ConsoleType>('nes');
-  const [language, setLanguage] = useState('');
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
   const [series, setSeries] = useState('');
+  const [seriesEn, setSeriesEn] = useState('');
   const [year, setYear] = useState('');
   /*
    * 开发商：从 2026-10-12 起是**下拉框**（值 = developers.id），不再手填文字。
@@ -180,10 +229,25 @@ export default function AdminGames() {
    * 可空：老记录补列之后都是 NULL，留空就存 NULL（后台所有选填字段同一套写法）。
    */
   const [description, setDescription] = useState('');
+  const [descriptionEn, setDescriptionEn] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [rom, setRom] = useState<File | null>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const romRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * 「从链接自动填充」（2026-10-13 加）：粘贴一个游戏页链接 → 抓元数据预填表单。
+   * **只填文本字段**，封面与 ROM 仍然要手动选文件 —— 那个接口只读网页文本、
+   * 不碰 ROM（见 app/api/admin/scrape-game/route.ts）。
+   */
+  const [scrapeUrl, setScrapeUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
+  /** 单独一条提示：它贴着上面那个输入框，和表单底部那条 `modalNotice` 不是一回事。 */
+  const [scrapeNotice, setScrapeNotice] = useState<Notice | null>(null);
+
+  /** 拖拽悬停高亮：封面与游戏文件各一个。 */
+  const [imageDrag, setImageDrag] = useState(false);
+  const [romDrag, setRomDrag] = useState(false);
 
   const isEditing = editingId !== null;
 
@@ -209,6 +273,16 @@ export default function AdminGames() {
     const requestId = ++listRequestId.current;
     const { offset } = listQuery;
 
+    /*
+     * 先点亮「载入中」。effect 体内同步 setState 会被 react-hooks/set-state-in-effect
+     * 拦下，所以放微任务里（执行序仍先于 fetch 响应，不会漏帧）；
+     * 同样受 requestId 把守：请求被换掉时，旧请求不许点亮新一轮。
+     */
+    void Promise.resolve().then(() => {
+      if (listRequestId.current !== requestId) return;
+      setListPending(true);
+    });
+
     fetchGames(offset, keyword)
       .then((data) => {
         if (listRequestId.current !== requestId) return;
@@ -225,6 +299,7 @@ export default function AdminGames() {
       .finally(() => {
         if (listRequestId.current !== requestId) return;
         setListLoaded(true);
+        setListPending(false);
       });
   }, [listQuery, keyword, listVersion]);
 
@@ -279,15 +354,20 @@ export default function AdminGames() {
 
   const resetForm = () => {
     setTitle('');
+    setTitleEn('');
     setConsoleType('nes');
-    setLanguage('');
+    setLanguage(DEFAULT_LANGUAGE);
     setSeries('');
+    setSeriesEn('');
     setYear('');
     setDeveloperId('');
     setUnlinkedDeveloper('');
     setDescription('');
+    setDescriptionEn('');
     setImage(null);
     setRom(null);
+    setScrapeUrl('');
+    setScrapeNotice(null);
     if (imageRef.current) imageRef.current.value = '';
     if (romRef.current) romRef.current.value = '';
   };
@@ -302,14 +382,17 @@ export default function AdminGames() {
   const openEdit = (game: AdminGame) => {
     setEditingId(game.id);
     setTitle(game.title);
+    setTitleEn(game.titleEn ?? '');
     setConsoleType(game.consoleType);
     setLanguage(game.language ?? '');
     setSeries(game.series ?? '');
+    setSeriesEn(game.seriesEn ?? '');
     setYear(game.year === null ? '' : String(game.year));
     // 老记录（迁移前上传、或开发商那列是自由文本的）可能没有 id，那就退成「未指定」
     setDeveloperId(game.developerId ?? '');
     setUnlinkedDeveloper(game.developerId ? '' : game.developer ?? '');
     setDescription(game.description ?? '');
+    setDescriptionEn(game.descriptionEn ?? '');
     setImage(null);
     setRom(null);
     setModalNotice(null);
@@ -327,23 +410,138 @@ export default function AdminGames() {
     if (e.target === e.currentTarget) closeModal();
   };
 
-  /** 选 ROM 时顺手认机种并预填 —— 用户仍可手动改。 */
-  const onRomChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
+  /**
+   * 选中 / 拖入一个 ROM 之后的统一处理：存下来，并顺手认机种预填（用户仍可手动改）。
+   *
+   * 先拆一层压缩包再认机种：有些 ROM 是**压缩包伪装成 ROM 扩展名**（`.smc` / `.nes`
+   * 里其实是 zip），直接 `detectConsole` 会把它们一律判成街机 —— 预填错之后，
+   * 游戏库里那条「机种筛选」也跟着错（用户按 SNES 筛，这盘却不出现）。规则见 `lib/unwrap.ts`。
+   * 这里只是**预填**；真正载入时 `loadRom` 会自己再拆一次。
+   */
+  const applyRomFile = async (file: File) => {
     setRom(file);
-    if (!file) return;
-    /*
-     * 先拆一层压缩包再认机种。
-     *
-     * 有些 ROM 是**压缩包伪装成 ROM 扩展名**（`.smc` / `.nes` 里其实是 zip），
-     * 直接 `detectConsole` 会把它们一律判成街机 —— 预填错之后，游戏库里那条
-     * 「机种筛选」也跟着错（用户按 SNES 筛，这盘却不出现）。规则见 `lib/unwrap.ts`。
-     *
-     * 只是**预填**，用户仍可手动改；真正载入时 `loadRom` 会自己再拆一次。
-     */
     const unwrapped = await unwrapRom(file);
     const detected = await detectConsole(unwrapped?.file ?? file);
     if (detected) setConsoleType(detected);
+  };
+
+  /** 选 ROM（点选文件）时走这里。 */
+  const onRomChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) {
+      setRom(null);
+      return;
+    }
+    await applyRomFile(file);
+  };
+
+  /**
+   * 封面拖拽落点。两种来源：
+   *   · 从资源管理器拖文件 —— `dataTransfer.files` 里就有 File，直接用；
+   *   · 从**网页**里拖一张图 —— 只有 URL，得让服务端把字节取回来
+   *     （浏览器直接 fetch 那个跨域地址会被 CORS 挡下，见 /api/admin/fetch-image）。
+   */
+  const onImageDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setImageDrag(false);
+    if (busy) return;
+
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) {
+      setImage(dropped);
+      return;
+    }
+
+    const url = imageUrlFromDrop(e.dataTransfer);
+    if (!url) {
+      setModalNotice({ tone: 'error', text: t('admin.drop.imageFailed') });
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/fetch-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) throw new Error(await readError(res, t('admin.drop.imageFailed')));
+      const blob = await res.blob();
+      const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'cover');
+      setImage(new File([blob], name, { type: blob.type || 'image/png' }));
+    } catch (error) {
+      setModalNotice({
+        tone: 'error',
+        text: error instanceof Error ? error.message : t('admin.drop.imageFailed'),
+      });
+    }
+  };
+
+  /** 游戏文件拖拽落点：只认真的文件（ROM 不是网页上能拖的东西）。 */
+  const onRomDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setRomDrag(false);
+    if (busy) return;
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) await applyRomFile(dropped);
+  };
+
+  /**
+   * 从链接抓元数据填进表单。**只填文本字段**，封面 / ROM 照旧手动选文件。
+   *
+   * 开发商那一栏特殊：下拉框认的是 `developers.id`，而接口回的是**名字**，
+   * 所以在这里拿名字去选项里匹配一次；匹配不上就提示去开发商库建一个，不硬塞。
+   */
+  const autofill = async () => {
+    const url = scrapeUrl.trim();
+    if (!url || scraping) return;
+
+    setScraping(true);
+    setScrapeNotice(null);
+    try {
+      const res = await fetch('/api/admin/scrape-game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (!res.ok) throw new Error(await readError(res, t('admin.scrape.failed')));
+
+      const data = (await res.json()) as {
+        title?: string | null;
+        titleEn?: string | null;
+        consoleType?: ConsoleType | null;
+        year?: number | null;
+        developer?: string | null;
+        series?: string | null;
+        seriesEn?: string | null;
+        description?: string | null;
+        descriptionEn?: string | null;
+      };
+
+      if (data.title) setTitle(data.title);
+      if (data.titleEn) setTitleEn(data.titleEn);
+      if (data.consoleType) setConsoleType(data.consoleType);
+      if (data.year) setYear(String(data.year));
+      if (data.series) setSeries(data.series);
+      if (data.seriesEn) setSeriesEn(data.seriesEn);
+      if (data.description) setDescription(data.description);
+      if (data.descriptionEn) setDescriptionEn(data.descriptionEn);
+
+      // 开发商：名字 → id
+      let text = t('admin.scrape.ok');
+      if (data.developer) {
+        const match = developerOptions.find((option) => option.name === data.developer);
+        if (match) setDeveloperId(match.id);
+        else text = t('admin.scrape.developerMissing', { name: data.developer });
+      }
+      setScrapeNotice({ tone: 'ok', text });
+    } catch (error) {
+      setScrapeNotice({
+        tone: 'error',
+        text: error instanceof Error ? error.message : t('admin.scrape.failed'),
+      });
+    } finally {
+      setScraping(false);
+    }
   };
 
   /** 新增 / 编辑共用一个提交入口，靠 isEditing 分流。 */
@@ -379,25 +577,31 @@ export default function AdminGames() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title: trimmedTitle,
+            titleEn: titleEn.trim() || null,
             consoleType,
             language: language || null,
             series: series.trim() || null,
+            seriesEn: seriesEn.trim() || null,
             year: parsedYear,
             // 下拉框给的是 developers.id；名字由服务端反查后写进 developer 那列
             developerId: developerId || null,
             description: description.trim() || null,
+            descriptionEn: descriptionEn.trim() || null,
           }),
         });
         if (!res.ok) throw new Error(await readError(res, t('admin.request.failed')));
       } else {
         const form = new FormData();
         form.set('title', trimmedTitle);
+        form.set('title_en', titleEn.trim());
         form.set('console_type', consoleType);
         form.set('language', language);
         form.set('series', series.trim());
+        form.set('series_en', seriesEn.trim());
         form.set('year', yearText);
         form.set('developer_id', developerId);
         form.set('description', description.trim());
+        form.set('description_en', descriptionEn.trim());
         form.set('image', image as File);
         form.set('rom', rom as File);
 
@@ -488,6 +692,9 @@ export default function AdminGames() {
           </p>
         )}
 
+        {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
+        {listPending && <AdminLoading label={t('feedback.loading')} />}
+
         {listLoaded && total === 0 && !keyword && (
           <p className="text-[11px] text-ink-500">{t('admin.list.empty')}</p>
         )}
@@ -572,24 +779,89 @@ export default function AdminGames() {
       </section>
 
       {modalOpen && (
+        /*
+         * 整个遮罩也吃掉拖拽事件：拖歪了（没落在封面 / 游戏文件那两个落点上）时，
+         * 别让浏览器直接打开那个文件、把当前页面顶掉。
+         */
         <div
           onMouseDown={onBackdrop}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => e.preventDefault()}
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950/80 p-6"
         >
-          <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[620px] p-4">
+          {/*
+            限高 + 内部滚动（2026-10-13）：字段多了之后，小屏幕下弹窗会顶出视口，
+            底部的「上传 / 取消」就够不着了。让面板自己限高并滚动 ——
+            遮罩那层的 `items-center` 才能真的把整块居中（否则 flex 居中会把顶部切掉）。
+          */}
+          <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 max-h-[85vh] w-full max-w-[620px] overflow-y-auto p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
               {isEditing ? t('admin.edit.title') : t('admin.upload.title')}
             </h2>
+
+            {/*
+              从链接自动填充：只在**新增**时出现 —— 编辑时封面 / ROM 都锁着，
+              这条也帮不上忙（接口只回元数据）。输入框与按钮**不进主表单**，
+              否则在里面按回车会直接把游戏提交了。
+            */}
+            {!isEditing && (
+              <div className="mb-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={scrapeUrl}
+                    onChange={(e) => setScrapeUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void autofill();
+                      }
+                    }}
+                    placeholder={t('admin.scrape.placeholder')}
+                    className={`${FIELD_CLASS} min-w-0 flex-1`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void autofill()}
+                    disabled={scraping}
+                    className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[11px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {scraping ? t('admin.scrape.loading') : t('admin.scrape.button')}
+                  </button>
+                </div>
+                {scrapeNotice && (
+                  <p
+                    className={`mt-1 text-[10px] ${
+                      scrapeNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
+                    }`}
+                  >
+                    {scrapeNotice.text}
+                  </p>
+                )}
+              </div>
+            )}
 
             <form
               onSubmit={(e) => void submit(e)}
               className="grid grid-cols-1 gap-3 sm:grid-cols-2"
             >
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              {/*
+                中英两栏**并排一行**（2026-10-13 用户要求「游戏名中英合并成一行」）——
+                填的时候一眼能对上；下面那行小字统一说明「留空回退中文」这条规则。
+              */}
+              <label className={LABEL_CLASS}>
                 {t('admin.field.title')}
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
+              <label className={LABEL_CLASS}>
+                {t('admin.field.titleEn')}
+                <input
+                  value={titleEn}
+                  onChange={(e) => setTitleEn(e.target.value)}
                   className={FIELD_CLASS}
                 />
               </label>
@@ -635,23 +907,15 @@ export default function AdminGames() {
                 </select>
               </label>
 
-              <label className={LABEL_CLASS}>
-                {t('admin.field.series')}
-                <input
-                  value={series}
-                  onChange={(e) => setSeries(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </label>
-
               {/*
                 开发商：**下拉框**（2026-10-12 用户要求「添加游戏时发行商改成下拉形式」）。
                 选项来自开发商库（`/api/admin/developers/options`），选中值就是
                 `developers.id` —— 服务端拿到 id 再反查名字写进 `games.developer`，
                 所以「点开发商看他名下所有游戏」这条链是稳的（名字改了也断不了）。
                 下面那行小字指路：选项里没有想要的，就去开发商库新建一个。
+                （2026-10-13 起与「语言」并排一行。）
               */}
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {t('admin.field.developer')}
                 <select
                   value={developerId}
@@ -681,6 +945,29 @@ export default function AdminGames() {
                 )}
               </label>
 
+              <label className={LABEL_CLASS}>
+                {t('admin.field.series')}
+                <input
+                  value={series}
+                  onChange={(e) => setSeries(e.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
+              <label className={LABEL_CLASS}>
+                {t('admin.field.seriesEn')}
+                <input
+                  value={seriesEn}
+                  onChange={(e) => setSeriesEn(e.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+
+              {/* 英文字段的统一说明，横跨整行，压在几组中英并排字段的下面 */}
+              <p className={`${LABEL_CLASS} text-ink-600 sm:col-span-2`}>
+                {t('admin.i18n.hint')}
+              </p>
+
               {/* 说明：本表唯一一个多行字段，`resize-y` 让它可以往下拉高一点写长句 */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {t('admin.field.description')}
@@ -693,6 +980,16 @@ export default function AdminGames() {
                 />
               </label>
 
+              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+                {t('admin.field.descriptionEn')}
+                <textarea
+                  value={descriptionEn}
+                  onChange={(e) => setDescriptionEn(e.target.value)}
+                  rows={3}
+                  className={`${FIELD_CLASS} resize-y`}
+                />
+              </label>
+
               {isEditing ? (
                 <p className="text-[10px] text-ink-500 sm:col-span-2">
                   {t('admin.files.locked')}
@@ -701,24 +998,58 @@ export default function AdminGames() {
                 <>
                   <label className={LABEL_CLASS}>
                     {t('admin.field.image')}
-                    <input
-                      ref={imageRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => setImage(e.target.files?.[0] ?? null)}
-                      className={FIELD_CLASS}
-                    />
+                    {/*
+                      整块都是落点：从资源管理器拖文件、或从网页里拖一张图过来。
+                      高亮挂在包裹层上 —— 挂在 input 上没意义（它本身不是落点）。
+                    */}
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setImageDrag(true);
+                      }}
+                      onDragLeave={() => setImageDrag(false)}
+                      onDrop={(e) => void onImageDrop(e)}
+                      className={`flex flex-col gap-1 p-1 transition-colors ${
+                        imageDrag ? 'bg-accent/15' : ''
+                      }`}
+                    >
+                      <input
+                        ref={imageRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
+                        className={FIELD_CLASS}
+                      />
+                      <span className="text-[10px] text-ink-600">{t('admin.drop.image')}</span>
+                      {image && (
+                        <span className="truncate text-[10px] text-ink-400">{image.name}</span>
+                      )}
+                    </div>
                   </label>
 
                   <label className={LABEL_CLASS}>
                     {t('admin.field.rom')}
-                    <input
-                      ref={romRef}
-                      type="file"
-                      accept=".nes,.fds,.unf,.unif,.sfc,.smc,.swc,.fig,.bs,.zip"
-                      onChange={(e) => void onRomChange(e)}
-                      className={FIELD_CLASS}
-                    />
+                    <div
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setRomDrag(true);
+                      }}
+                      onDragLeave={() => setRomDrag(false)}
+                      onDrop={(e) => void onRomDrop(e)}
+                      className={`flex flex-col gap-1 p-1 transition-colors ${
+                        romDrag ? 'bg-accent/15' : ''
+                      }`}
+                    >
+                      <input
+                        ref={romRef}
+                        type="file"
+                        accept=".nes,.fds,.unf,.unif,.sfc,.smc,.swc,.fig,.bs,.gba,.agb,.zip"
+                        onChange={(e) => void onRomChange(e)}
+                        className={FIELD_CLASS}
+                      />
+                      <span className="text-[10px] text-ink-600">{t('admin.drop.rom')}</span>
+                      {rom && <span className="truncate text-[10px] text-ink-400">{rom.name}</span>}
+                    </div>
                   </label>
                 </>
               )}

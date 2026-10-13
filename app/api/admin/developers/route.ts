@@ -118,9 +118,13 @@ export async function POST(request: Request) {
     const developer = await insertDeveloper({
       id,
       name,
+      // 英文字段（可空）：英文站取它、空了回退中文（见 lib/server/developers.ts）
+      nameEn: optionalText(form.get('name_en')),
       imageUrl,
       summary: optionalText(form.get('summary')),
+      summaryEn: optionalText(form.get('summary_en')),
       description: optionalText(form.get('description')),
+      descriptionEn: optionalText(form.get('description_en')),
       foundedYear,
       website: normalizeWebsite(form.get('website')),
     });

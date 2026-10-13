@@ -3,13 +3,30 @@ import type { ConsoleType } from '@/lib/emulator';
 export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   nes: 'NES',
   snes: 'SFC',
+  gba: 'GBA',
   arcade: 'ARC',
 };
+
+/**
+ * 全部机种，**按界面上的展示顺序**（NES → SFC → GBA → 街机）。
+ *
+ * 2026-10-13 加：首页那个「按机种浏览」区块和 `/games` 的机种筛选条都要一个
+ * 「有哪几个机种、按什么顺序排」的列表，两处各写一份迟早会漂。
+ *
+ * 放在这里而不是 `lib/emulator.ts`：那个文件顶层就跑 `installAudioTap()`，
+ * 而这一份要被**服务端组件**（首页 / 列表页）import —— 从这儿取零风险，
+ * 何况 `CONSOLE_LABEL` 本来就在这儿、两处都从 `ConsoleType` 派生。
+ *
+ * ⚠️ **加机种要同步这里**（`Record<ConsoleType, …>` 那两处会编译报错提醒你，
+ *    这个数组不会 —— 漏了它的后果是「新机种在首页和筛选条上不出现」）。
+ */
+export const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 /** 端头色块：一眼区分机种，同时不破坏整体灰阶 */
 const CONSOLE_TINT: Record<ConsoleType, string> = {
   nes: '#e8b339',
   snes: '#6fa8c9',
+  gba: '#8f7bd6',
   arcade: '#c96f6f',
 };
 

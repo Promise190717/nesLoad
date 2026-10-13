@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
-import { SITE_NAME, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import { SITE_NAME, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import { SUPPORT_EMAIL, legalDoc, otherLegalKind, type LegalKind } from '@/lib/legal';
+import TopBar from './TopBar';
 
 /**
  * 隐私政策 / 服务条款两页的**同一个壳**。
@@ -37,23 +38,37 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
     day: 'numeric',
   }).format(new Date(doc.updated));
 
+  /*
+   * 页脚与左上角那几个落点都要带语言前缀，不然中文页点一下就掉回英文。
+   *
+   * 2026-10-13 起它指的是**那间屋子**（`/room`，原来就是 `/`）—— 这一页左上角那颗和
+   * 页脚那颗都是 `legal.back`（「返回游戏屋」），落点得跟着屋子走，所以变量名从
+   * `home` 改成了 `room`。首页（`/`）是另一件事，这一页不需要它。
+   */
+  const room = localePath(locale, '/room');
+
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-12">
+    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-3xl">
+        {/* 顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库。版式同 GamesShell，给它一个下边距 */}
+        <div className="mb-6">
+          <TopBar />
+        </div>
+
         {/*
           左上角回房间。**不用 target="_blank"**：这里是文档页，点回去就是回到游戏，
           当前标签页往前走一步最自然（房间那侧才是新标签 —— 从房间点过来时，
           正在跑的游戏不该被顶掉，见 ConsoleScene 那颗钮的注释）。
         */}
         <Link
-          href="/"
+          href={room}
           className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
         >
           <span aria-hidden="true">←</span>
           <span>{t('legal.back')}</span>
         </Link>
 
-        <header className="mt-8 border-b border-ink-800 pb-6">
+        <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
           <span className="font-pixel text-[10px] tracking-wider text-accent">{doc.label}</span>
           <h1 className="mt-3 text-[22px] leading-snug font-semibold text-ink-100">{doc.title}</h1>
           <p className="mt-2 text-[13px] leading-6 text-ink-400">{doc.intro}</p>
@@ -89,10 +104,13 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
         <footer className="mt-12 border-t border-ink-800 pt-6">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
             {/* 两页互链：读完隐私政策顺手就能翻到条款 */}
-            <Link href={`/${other}`} className="text-ink-400 transition-colors hover:text-accent">
+            <Link
+              href={localePath(locale, `/${other}`)}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
               {t(other === 'privacy' ? 'legal.privacy' : 'legal.terms')}
             </Link>
-            <Link href="/" className="text-ink-400 transition-colors hover:text-accent">
+            <Link href={room} className="text-ink-400 transition-colors hover:text-accent">
               {t('legal.back')}
             </Link>
             {/*
@@ -102,7 +120,10 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
               光靠那一行，`/games` 在爬虫眼里可能一条内链都没有。
               法务两页本身在 sitemap 里，于是这里就成了一条「总会被爬到」的入口。
             */}
-            <Link href="/games" className="text-ink-400 transition-colors hover:text-accent">
+            <Link
+              href={localePath(locale, '/games')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
               {t('topLinks.games')}
             </Link>
           </div>

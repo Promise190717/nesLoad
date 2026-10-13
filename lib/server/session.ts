@@ -81,6 +81,15 @@ export async function verifySession(
 
   try {
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(body))) as SessionPayload;
+    /*
+     * ⚠️ **显式拒绝带 scope 的令牌**（2026-10-13 加）。
+     *
+     * 前台用户令牌（lib/server/app-session.ts）的 payload 里有一个 `scope: 'user'` 字段，
+     * 而这张表里没有。能不能走到这儿其实已经被**密钥前缀**（那边用 `user:${SECRET}`）
+     * 挡在外面了 —— 但那是一道隐式的锁：万一将来有人把前缀去掉、或者把两套密钥
+     * 配成同一个，「前台令牌能进后台」就会立刻成立。这里明写一句，把它变成显式的。
+     */
+    if ('scope' in payload) return null;
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null;
     return payload;
   } catch {

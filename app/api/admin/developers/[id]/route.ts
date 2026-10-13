@@ -99,9 +99,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     await updateDeveloper(id, {
       name,
+      // 英文字段（可空），见 lib/server/developers.ts
+      nameEn: optionalText(form.get('name_en')),
       imageUrl,
       summary: optionalText(form.get('summary')),
+      summaryEn: optionalText(form.get('summary_en')),
       description: optionalText(form.get('description')),
+      descriptionEn: optionalText(form.get('description_en')),
       foundedYear,
       website: normalizeWebsite(form.get('website')),
     });
@@ -113,7 +117,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       await Promise.allSettled([deleteObject(oldKey)]);
     }
 
-    return NextResponse.json({ ok: true, developer: { id, name, imageUrl } });
+    return NextResponse.json({
+      ok: true,
+      developer: { id, name, nameEn: optionalText(form.get('name_en')), imageUrl },
+    });
   } catch (error) {
     console.error('[admin] 修改开发商失败', error);
     return fail('update-failed', friendly(error), 500);

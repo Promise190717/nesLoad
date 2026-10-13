@@ -8,17 +8,32 @@
  * ⚠️ **本文件不许 import `./games.ts`**（单向依赖：games → developers）。
  * 需要「某个开发商下面有几款游戏」时直接写一条 COUNT 查询，别绕回来调
  * `listGamesPage` —— 那会形成循环依赖，而且为了一个数字把整页数据拉一遍也不划算。
+ *
+ * ## 双语（2026-10-13 加）
+ *
+ * `name` / `summary` / `description` 各有一份 `_en`（后缀 = 英文，无后缀 = 中文原文）。
+ * ⚠️ 和 games 一样，`Developer` **两种语言都带**，选哪份由 `localizeDeveloper` 做 ——
+ *    取值下放到渲染时，别在数据层按语言裁剪（理由见 games.ts 文件头那段）。
+ *    列表读取也走缓存，缓存键同样不含语言。
  */
 
+import { unstable_cache } from 'next/cache';
 import { query } from './d1';
+import type { Locale } from '@/lib/i18n';
 
 /** DB 行（snake_case）。 */
 export interface DeveloperRow {
   id: string;
   name: string;
+  /** 名字英文（可空）。空 = 英文站回退 `name`。2026-10-13 加。 */
+  name_en: string | null;
   image_url: string | null;
   summary: string | null;
+  /** 简介英文（可空）。2026-10-13 加。 */
+  summary_en: string | null;
   description: string | null;
+  /** 介绍英文（可空）。2026-10-13 加。 */
+  description_en: string | null;
   founded_year: number | null;
   website: string | null;
   created_at: number;
@@ -28,11 +43,15 @@ export interface DeveloperRow {
 export interface Developer {
   id: string;
   name: string;
+  /** 空 = 英文站回退 `name` */
+  nameEn: string | null;
   imageUrl: string | null;
   /** 简介：一句话，列表卡片上用 */
   summary: string | null;
+  summaryEn: string | null;
   /** 介绍：整段，开发商详情页正文用 */
   description: string | null;
+  descriptionEn: string | null;
   foundedYear: number | null;
   website: string | null;
   createdAt: number;
@@ -41,6 +60,32 @@ export interface Developer {
    * 省得前台为「共 N 款」再打一次接口。
    */
   gameCount: number;
+}
+
+/** `localizeDeveloper` 的产物：三条文案字段各选定一份语言。 */
+export interface LocalizedDeveloperText {
+  name: string;
+  summary: string | null;
+  description: string | null;
+}
+
+/**
+ * 按语言取一条开发商的文案。**英文站空值回退中文**（和 games 的 `localizeGame` 同一规则）。
+ * 纯函数，不碰数据库。
+ */
+export function localizeDeveloper(developer: Developer, locale: Locale): LocalizedDeveloperText {
+  if (locale !== 'zh') {
+    return {
+      name: developer.nameEn || developer.name,
+      summary: developer.summaryEn || developer.summary,
+      description: developer.descriptionEn || developer.description,
+    };
+  }
+  return {
+    name: developer.name,
+    summary: developer.summary,
+    description: developer.description,
+  };
 }
 
 /** 每页条数的上限。和 games 那边同一个量级，顺手把「一次全捞」的口子堵死。 */
@@ -56,9 +101,12 @@ function toDeveloper(row: DeveloperRow & { game_count?: number }): Developer {
   return {
     id: row.id,
     name: row.name,
+    nameEn: row.name_en,
     imageUrl: row.image_url,
     summary: row.summary,
+    summaryEn: row.summary_en,
     description: row.description,
+    descriptionEn: row.description_en,
     foundedYear: row.founded_year,
     website: row.website,
     createdAt: row.created_at,
@@ -72,6 +120,15 @@ export interface DeveloperPageQuery {
 }
 
 /**
+ * 搜索条件。⚠️ 2026-10-13 起**中英两份都搜**（同 games 的 SEARCH_CONDITION 那条理由：
+ * 搜索在服务端按页做，语言不该进缓存键；两边都搜对用户是纯收益）。
+ *
+ * 和 games 那边不同，这里**没有把绑定值写死成 ?1**（统一用 `?1` / `?1`），
+ * 所以调用方仍需保证关键词是第 1 个绑定参数 —— 见 listDevelopers。
+ */
+const SEARCH_CONDITION = '(name LIKE ?1 OR summary LIKE ?1 OR name_en LIKE ?1 OR summary_en LIKE ?1)';
+
+/**
  * 分页读取开发商列表，顺带给出每个名下的游戏数。
  *
  * 排序键和 games 那边同一个理由用两个：`created_at` 是毫秒时间戳，批量导入时
@@ -79,6 +136,9 @@ export interface DeveloperPageQuery {
  * 各出现一次，另一条谁也见不着」。拿 `id` 兜底。
  *
  * 越界同样**夹回最后一页**并把夹过的 offset 返回，调用方以返回值为准（和 listGamesPage 一套）。
+ *
+ * ⚠️ **公开列表页请用 `listDevelopersCached`**（带 24 小时缓存，见下）；本函数保持无缓存，
+ *    留给后台那几条「必须立刻看到刚改的数据」的路径。
  */
 export async function listDevelopers(
   offset: number,
@@ -86,7 +146,7 @@ export async function listDevelopers(
   { keyword = '' }: DeveloperPageQuery = {}
 ): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
   const needle = keyword.trim();
-  const where = needle ? 'WHERE name LIKE ?1 OR summary LIKE ?1' : '';
+  const where = needle ? `WHERE ${SEARCH_CONDITION}` : '';
   const params = needle ? [`%${needle}%`] : [];
 
   const total = Number(
@@ -118,6 +178,91 @@ export async function listDevelopers(
 
   return { developers: rows.map(toDeveloper), total, offset: safeOffset, limit };
 }
+
+/**
+ * 开发商列表页（`/developers`）那份缓存的时长（秒）= 24 小时（2026-10-13 用户要求）。
+ *
+ * 和 `TOP_DEVELOPERS_REVALIDATE_SECONDS` **数值相同，但刻意各留一个常量** —— 两者服务的
+ * 是两个页面（这里是列表页那个货架，那里是首页的招牌），将来谁想快一点 / 慢一点时，
+ * 不必牵动另一个；名字也各自说清自己管哪儿。
+ */
+export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400;
+
+/**
+ * 带缓存的列表读取 —— **只给 `/developers` 列表页用**，别处的调用方继续用 `listDevelopers`。
+ *
+ * 后台那几条路径（`/api/admin/developers` 的列表、增删改之后的复核）**必须**走未缓存的那份：
+ * 刚改完的名字、刚建好的开发商，后台一刷新就该看到 —— 那是 bug 不是缓存。所以缓存是
+ * **页面这一侧的策略**，不下沉进 `listDevelopers`（和 `listGamesPageCached` 同一条规矩）。
+ *
+ * 参数刻意都是**扁平的基本类型**（offset / limit / keyword），而不是收一个 `DeveloperPageQuery`
+ * 对象：`unstable_cache` 把入参当作缓存键的一部分，扁平参数拼出来的键稳定可读，
+ * 传对象则依赖属性的序列化顺序，将来加个字段可能悄悄改变键、把缓存打散。
+ *
+ * 缓存键里**没有语言这一维** —— 这是有意的，也正是 `Developer` 把中英两份都带出来的原因
+ * （见文件头那段）：中英文访客共用同一份缓存，用哪份由页面调 `localizeDeveloper` 决定。
+ */
+export const listDevelopersCached = unstable_cache(
+  async (offset: number, limit: number, keyword: string) =>
+    listDevelopers(offset, limit, { keyword }),
+  // v2：2026-10-13 给 developers 表批量补了厂标（image_url），旧键里缓存的还是
+  // 全 null 的快照 —— 不换键的话列表页要等 24 小时才露图。下次批量改库再照此升 v3。
+  ['developers:list', 'v2'],
+  { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
+);
+
+/**
+ * 首页那个「按开发商浏览」区块的 TTL（秒）= 24 小时。
+ *
+ * 和 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 是**同一个数、同一个理由**：
+ * 首页是招牌不是货架 —— 它给爬虫和过路访客看，内容变得很慢，晚一天更新没有代价，
+ * 而每个访客都重查一遍有代价。（`/games` 那边是 30 分钟，那是另一个页面的事。）
+ *
+ * **刻意各写一份而不是互相 import**：本文件不许 import `./games.ts`（见文件头那条单向依赖），
+ * 所以两边改 TTL 时要一起改 —— 数值漂了不会报错，只会让首页两个区块的更新节奏悄悄分家。
+ */
+export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 86400;
+
+/**
+ * 「游戏最多的前 N 家开发商」—— 首页那个开发商区块用。
+ *
+ * 为什么不是复用 `listDevelopers`：那个按 `created_at DESC` 排（列表页要「最新登记的
+ * 在最前」），而首页想说的是「库里的主力厂商是谁」—— 那是**按游戏数**排，
+ * 排序键不同就是两个不同的查询，硬塞成一个只会让两边的注释都说不清。
+ *
+ * `WHERE EXISTS (…)` 把「一款游戏都没有」的开发商滤掉：它们在这个区块里只会是
+ * 一张写着 `0` 的卡片，占着位置却不指向任何内容。
+ * （**不能用 `WHERE game_count > 0`** —— SQLite 的 WHERE 里看不见 SELECT 的别名，
+ * 得把那条子查询原样再写一遍。）
+ *
+ * 并列时用名字兜底排序：游戏数相同的厂商在两次查询之间顺序必须稳定，
+ * 否则「同一个开发商今天在第二张卡、明天在第三张」，看着像内容在乱跳。
+ */
+export async function listTopDevelopers(limit: number): Promise<Developer[]> {
+  const rows = await query<DeveloperRow & { game_count: number }>(
+    `SELECT developers.*, ${GAME_COUNT} FROM developers
+      WHERE EXISTS (SELECT 1 FROM games g WHERE g.developer_id = developers.id)
+      ORDER BY game_count DESC, developers.name COLLATE NOCASE ASC LIMIT ?`,
+    [limit]
+  );
+  return rows.map(toDeveloper);
+}
+
+/**
+ * `listTopDevelopers` 的缓存版 —— **只给首页用**。
+ *
+ * ⚠️ 开发商列表页（`/developers`）**不用它** —— 那一页按 `created_at` 排（要「最新登记的
+ *    在最前」），和这里「按游戏数排」是两个查询；它自己有 `listDevelopersCached`
+ *    （同样是 24 小时，键前缀 `developers:list`，和这里的 `developers:top` 各存各的）。
+ *    首页是另一回事 —— 它是一个由 D1 拼出来的落地页，每个访客都重查一遍没必要。
+ *    缓存留在「页面这一侧」，和 games 那边同一条规矩。
+ */
+export const listTopDevelopersCached = unstable_cache(
+  async (limit: number) => listTopDevelopers(limit),
+  // v2：同 listDevelopersCached —— 2026-10-13 批量补厂标后旧键里的快照没有 image_url。
+  ['developers:top', 'v2'],
+  { revalidate: TOP_DEVELOPERS_REVALIDATE_SECONDS }
+);
 
 /**
  * 全部的 id + name，按名字排序 —— 给后台「添加游戏」那个开发商下拉框用。
@@ -181,9 +326,12 @@ export interface NewDeveloper {
   /** 由调用方生成：上传厂标前要先拿它拼 R2 对象 key，所以 id 不能在插入时才产生。 */
   id: string;
   name: string;
+  nameEn: string | null;
   imageUrl: string | null;
   summary: string | null;
+  summaryEn: string | null;
   description: string | null;
+  descriptionEn: string | null;
   foundedYear: number | null;
   website: string | null;
 }
@@ -192,14 +340,18 @@ export async function insertDeveloper(input: NewDeveloper): Promise<Developer> {
   const createdAt = Date.now();
   await query(
     `INSERT INTO developers
-       (id, name, image_url, summary, description, founded_year, website, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, name, name_en, image_url, summary, summary_en, description, description_en,
+        founded_year, website, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.id,
       input.name,
+      input.nameEn,
       input.imageUrl,
       input.summary,
+      input.summaryEn,
       input.description,
+      input.descriptionEn,
       input.foundedYear,
       input.website,
       createdAt,
@@ -210,9 +362,12 @@ export async function insertDeveloper(input: NewDeveloper): Promise<Developer> {
   return {
     id: input.id,
     name: input.name,
+    nameEn: input.nameEn,
     imageUrl: input.imageUrl,
     summary: input.summary,
+    summaryEn: input.summaryEn,
     description: input.description,
+    descriptionEn: input.descriptionEn,
     foundedYear: input.foundedYear,
     website: input.website,
     createdAt,
@@ -222,10 +377,13 @@ export async function insertDeveloper(input: NewDeveloper): Promise<Developer> {
 
 export interface DeveloperPatch {
   name: string;
+  nameEn: string | null;
   /** 已经解析好的最终地址（没换图就是原来那张），不是上传上来的 File */
   imageUrl: string | null;
   summary: string | null;
+  summaryEn: string | null;
   description: string | null;
+  descriptionEn: string | null;
   foundedYear: number | null;
   website: string | null;
 }
@@ -238,6 +396,9 @@ export interface DeveloperPatch {
  * 不跟着改的话，开发商页上写着新名字、游戏卡片上还是旧名字 —— 用户点进去
  * 会觉得「这游戏怎么不在他名下」。
  *
+ * ⚠️ 2026-10-13 起**两份名字都级联**（`developer` 与 `developer_en`）—— 只改中文的话，
+ *    英文站上那批游戏的卡片会停在旧英文名。
+ *
  * 只按 `developer_id = ?` 去改，**不动**那些只填了文字、没接上 id 的行：
  * 那种行是不是指同一个公司，我们无从判断，宁可少改也不能误伤。
  */
@@ -246,21 +407,29 @@ export async function updateDeveloper(id: string, patch: DeveloperPatch): Promis
 
   await query(
     `UPDATE developers
-        SET name = ?, image_url = ?, summary = ?, description = ?, founded_year = ?, website = ?
+        SET name = ?, name_en = ?, image_url = ?, summary = ?, summary_en = ?,
+            description = ?, description_en = ?, founded_year = ?, website = ?
       WHERE id = ?`,
     [
       patch.name,
+      patch.nameEn,
       patch.imageUrl,
       patch.summary,
+      patch.summaryEn,
       patch.description,
+      patch.descriptionEn,
       patch.foundedYear,
       patch.website,
       id,
     ]
   );
 
-  if (before && before.name !== patch.name) {
-    await query('UPDATE games SET developer = ? WHERE developer_id = ?', [patch.name, id]);
+  if (before && (before.name !== patch.name || before.name_en !== patch.nameEn)) {
+    await query('UPDATE games SET developer = ?, developer_en = ? WHERE developer_id = ?', [
+      patch.name,
+      patch.nameEn,
+      id,
+    ]);
   }
 }
 

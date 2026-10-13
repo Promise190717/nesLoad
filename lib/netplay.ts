@@ -127,7 +127,7 @@ export type NetplayMode = 'lan' | 'wan';
  */
 export type StreamQuality = 'smooth' | 'balanced' | 'sharp';
 
-/** 默认档。压分辨率但不砍帧率 —— 对客人来说是**无损**的（理由见 `QUALITY_SPEC`）。 */
+/** 默认档。压分辨率但不砍帧率 —— 对客人来说**基本无损**（大屏上中 / 大档会略糊一点，见 `QUALITY_SPEC`）。 */
 export const DEFAULT_STREAM_QUALITY: StreamQuality = 'balanced';
 
 /**
@@ -138,12 +138,17 @@ export const DEFAULT_STREAM_QUALITY: StreamQuality = 'balanced';
  * 所以真正撑不住的机器要救就得砍它。默认档不砍（60fps 的机器砍到 30 会看得出来）。
  *
  * `maxHeight` 是**编码画面高度上限**，按客人那边真能显示的尺寸给。
- * `.screen` 是 720×540（见 RetroTv），而画布的后备存储会被核心按 devicePixelRatio
- * 抬到 720×dpr —— 125% 缩放就是 900×675。**多出来那 36% 的像素客人根本显示不出来**
- * （`<video>` 撑满那块 720×540 的屏幕），却要原样编一遍、传一遍。
- * 所以默认档按 720 这条线等比往下压，画质对客人无损、编码量少三成以上。
+ * `.screen` 的显示尺寸跟着窗口和档位走（见 globals.css 顶部「档位是占比」）：
+ * 1080 高的窗口上小 / 中 / 大分别是 549 / 641 / 733 高；而画布的后备存储还会被核心按
+ * devicePixelRatio 再抬一档（125% 缩放再 ×1.25）—— 多出来的像素客人根本显示不出来
+ * （`<video>` 撑满那块屏幕），却要原样编一遍、传一遍。
+ * 所以默认档按 540 这条线往下压：**对原来的小档（540 高）是无损的**，
+ * 大屏上切到中 / 大档时会略糊一点 —— 这是刻意拿画质换带宽的取舍（房主主线程省下的
+ * 每一分开销都直接换成帧数，见上面那段）。要让大屏上的客人也看到满分辨率，
+ * 把这一档的 `maxHeight` 提到 720 或 0 即可，代价是编码量和带宽跟着涨；
+ * `smooth` 那档是留给弱机的，别动。
  * 选「清晰」时不压（`maxHeight: 0`）—— 留给客人把屏幕全屏铺到 1080p 显示器上的情况
- * （全屏时 `<video>` 是铺满视口的，那时候 720 就真的不够了）。
+ * （全屏时 `<video>` 是铺满视口的，那时候 540 就真的不够了）。
  *
  * `maxBitrate` 是**上限不是目标**：真实码率仍由带宽估计决定，这里只防止局域网里
  * 一头冲到没人需要的量级上 —— 码率越高编码器就越忙。
@@ -267,16 +272,17 @@ export interface RemoteGame {
 /**
  * 把会话消息里的 `c` 字段还原成机种。
  *
- * 必须**逐个认**，不能像原先那样只分 snes / 其余一律 nes：机种现在有三个
- * （nes / snes / arcade），而移动端掌机的面键是**按机种长**的（NES 两颗、SFC 四颗、
- * 街机六颗 —— 见 HandheldConsole 的 FACE_ROWS）。街机被误判成 nes 的话，
- * 加入者手上只有两颗面键，拳皇那种六键游戏直接没法玩。
+ * 必须**逐个认**，不能像原先那样只分 snes / 其余一律 nes：机种现在有四个
+ * （nes / snes / gba / arcade），而移动端掌机的面键是**按机种长**的（NES 两颗、
+ * SFC 四颗、GBA 四颗含肩键、街机六颗 —— 见 HandheldConsole 的 FACE_ROWS）。
+ * 街机被误判成 nes 的话，加入者手上只有两颗面键，拳皇那种六键游戏直接没法玩；
+ * GBA 被误判成 nes 则少掉 L / R 两颗肩键。
  *
  * 认不出（老版本客户端不发 `c`、或者发了脏值）一律落到 `nes`：它是**按钮最少**的那套，
  * 少给一颗最多是不方便，多给一颗会让人以为按了没反应。
  */
 function readConsole(raw: unknown): ConsoleType {
-  return raw === 'snes' || raw === 'arcade' ? raw : 'nes';
+  return raw === 'snes' || raw === 'gba' || raw === 'arcade' ? raw : 'nes';
 }
 
 export interface NetplayState {

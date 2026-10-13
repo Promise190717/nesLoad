@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, DragEvent, RefObject } from 'react';
+import type { ButtonHTMLAttributes, DragEvent, ReactNode, RefObject } from 'react';
 import packageJson from '@/package.json';
 import { VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
 import ConsoleScreen, { deriveScreenState } from './ConsoleScreen';
@@ -7,13 +7,19 @@ import { useI18n } from './I18nProvider';
 /*
  * 机身尺寸。
  *
- * 屏幕是 720×540（NES 画面的 4:3），**尺寸写在屏幕那个 div 的 class 上**
+ * 屏幕是 4:3（NES 画面的比例），**尺寸写在屏幕那个 div 的 class 上**
  * （`h-[var(--tv-screen-h)] w-[var(--tv-screen-w)]`，见下面那段注释 —— 别删、
- * 别改成让 canvas 撑，也别改成内联 style）。机身宽度 = 屏幕 + 内圈左右外边距 10×2。
+ * 别改成让 canvas 撑，也别改成内联 style）。机身宽度 = 屏幕 + 内圈左右外边距 10×2，
+ * 2026-10-13 起**钉死**在机身那个 div 上（`w-[var(--tv-w)]`，见那段注释）——
+ * 不能再让它靠内容撑：前面板那一排固定尺寸的控件比屏幕宽时会把机身撑宽，
+ * 而屏幕在机身里是左对齐的，右边就空出一条（用户报的「小档右侧大片空白」）。
  *
  * ⚠️ 2026-10-12 起这些数字**不再是常量**：屏幕 / 机身 / 底座 / 桌面的尺寸都由
- * `<html data-tv>` 那组 CSS 变量给（三档：小 / 中 / 大，默认「小」= 原来的 720×540）。
- * 变量写在 globals.css，档位的类型和循环顺序在 lib/tv-size.ts。
+ * `<html data-tv>` 那组 CSS 变量给（三档：小 / 中 / 大）。
+ * ⚠️ 2026-10-13 起三档也**不再是写死的 px**（原来是 720 / 840 / 960）：现在先按窗口
+ * 算出「屋子最多塞得下多大的屏幕」，三档各取它的 80% / 90% / 100% —— 所以同一档在
+ * 不同窗口上量出来不一样，大屏上「大」能到一千多像素。算法在 globals.css 顶部
+ * 「档位是占比」那段，档位的类型和循环顺序在 lib/tv-size.ts。
  * 顶沿、内圈外边距、像素描边、前面板、底座**高**这些刻意不随档位变
  * （理由见 globals.css 那段注释），所以下面这些是「不随档位动的那一套」：
  *
@@ -25,23 +31,32 @@ import { useI18n } from './I18nProvider';
  *
  * 场景原先 = 屏幕 766 那版 + 间距 16 + 卡带架 220 ≈ 1002，加 main 的 px-6 是 1050px，
  * 断点 1100px。卡带架 2026-10-09 撤掉、屏幕外边距同期从 15 收到 10 之后只剩
- * 740 + px-6 = **788px**，断点仍是 **900px**（当初按 814 定的，余量还在，不用动）。
- * **那个 900px 不随尺寸档位走**（媒体查询读不到 data-tv）：中 / 大档在 900~1000px
- * 宽的窗口里会被 main 的 overflow 从两侧切掉一点 —— 机身是居中的，所以左右对称地切。
- * 这是已知取舍，不为它加自适应。
- * 改这里要同步 globals.css 的断点与上方那段注释，以及 i18n.ts 的 notice.desktopOnly。
+ * 740 + px-6 = **788px**（那是 1080p 窗口上「小档」的量法，别的窗口上会不一样）。
  *
- * ⚠️ globals.css / i18n.ts / README 里写的「机身 766 / 屏幕外边距 15」是屏幕还自己带
+ * ⚠️ 2026-10-13 起**那个 900px 断点不再管尺寸**了：窄窗口原先会整页换成一块
+ * 「请用桌面端」的提示（`notice.desktopOnly`，已删），现在改成**整条尺寸链跟着窗口收**
+ * —— `--tv-screen-w` = 「屋子塞得下的最大屏幕」× 档位占比，房子小到装得下为止。
+ * 所以「900px 以下会把机身切掉」这个老问题没有了：任何宽度下它都自动缩到合适。
+ * 尺寸链在 globals.css 顶部，那一段「窗口收窄 / 变矮」里写了算法。
+ * ⚠️ 但屏幕**有个下限**（`--tv-screen-min`，2026-10-13 补，理由见 globals.css）：
+ * 触底之后就不再跟着窗口缩了，屋子会被 main 的 overflow-hidden 裁掉一点 —— 这是
+ * 「机身永远 = 屏幕 + 20」的代价，也保证前面板那排钮不会被压到读不出来。
+ *
+ * ⚠️ globals.css / README 里写的「机身 766 / 屏幕外边距 15」是屏幕还自己带
  * 15px 外边距时的数字，2026-10-10 起实际是 **740 / 10** —— 那几处文案没跟着改。
  */
 
 /**
- * 「小档」（默认档）的机身宽度 = 屏幕 720 + 内圈左右外边距 10×2 = 740。
+ * 旧的「小档」（默认档）机身宽度 = 屏幕 720 + 内圈左右外边距 10×2 = 740。
  *
  * 2026-10-12 起机身宽度跟着尺寸档位变，**真正的出处是 globals.css 的 `--tv-w`**
  * （= `--tv-screen-w` + 20px），这个常量只是「小档那个值」的一份副本 ——
  * 组件里**没有**写死 width（宽度是尺寸那套自己撑出来的），它也不被任何地方引用，
  * 留着是给「改屏幕尺寸 / 那两道外边距」时留个对照物。
+ *
+ * ⚠️ 2026-10-13 起 740 **不再对应任何真实窗口**：小档 = 屋子塞得下的最大屏幕 × 75%，
+ * 1080 高的窗口上算出来是屏幕 733 / 机身 753。这个常量本身仍然只是「对照物」，
+ * 没有任何地方读它 —— 留着是因为下面那几行「740 / 10」的旧文案还拿它当尺子。
  */
 export const TV_WIDTH = 740;
 
@@ -228,8 +243,20 @@ export default function RetroTv({
       }}
       onDrop={onDropFile}
     >
+      {/*
+        ⚠️ 机身宽度**钉死在 `--tv-w`**（= 屏幕 + 内圈左右外边距 10×2），别删这个
+        `w-[var(--tv-w)]`、也别改成让内容撑宽。
+
+        原来这里没有宽度类，靠内容撑：屏幕是固定宽的，面板那一排固定尺寸的控件加起来
+        也差不多宽，两者谁大听谁的。屏幕缩到比面板窄时（2026-10-13 改成按窗口算尺寸之后，
+        小档在偏矮的窗口上就是这样），机身就被**面板**撑住、比屏幕宽 —— 机身是块级、
+        屏幕在它里面是**左对齐**的，于是屏幕右边空出一条。用户报的「小档游戏区域没填满
+        电视机、右侧大片空白」就是这条。
+        钉死之后机身永远 = 屏幕 + 20；面板要宽于机身时改成自己压（见下面那排钮的注释）。
+        桌面 / 底座 / 墙上那两件（窗户、画）都挂在这一层的盒子上，所以它们跟着一起对齐。
+      */}
       <div
-        className={`relative bg-ink-700 pixel-edge pxw-6 ${hot ? 'pxc-accent' : 'pxc-500'}`}
+        className={`relative w-[var(--tv-w)] bg-ink-700 pixel-edge pxw-6 ${hot ? 'pxc-accent' : 'pxc-500'}`}
       >
         {/*
           机身顶沿：一条凹进去的散热缝。
@@ -294,8 +321,18 @@ export default function RetroTv({
           4 个格子分掉整条面板，每个按钮宽到 110px，太大也太散；中间试过 64px，
           2026-10-10 添了「重载」凑成 5 个，整排一下又变宽，索性统一收到 52px。
           不用 `px-*` 让文字自己撑宽度是因为中英文字数不一样（`Pause` vs `暂停`），
-          那样几个按钮会宽窄不齐。面板是定宽机身（屏幕 720 + 边距）里的一行，
-          不存在窄屏挤压，所以写死尺寸是安全的。
+          那样几个按钮会宽窄不齐。
+
+          ⚠️ 2026-10-13：那排格子从 `52px` 改成 `minmax(0,52px)` —— **52 现在是上限，
+          不是下限**。原来的理由是「面板是定宽机身（屏幕 720 + 边距）里的一行，不存在
+          窄屏挤压，所以写死尺寸是安全的」，那个前提当天就塌了：电视机尺寸改成按窗口算
+          之后，小档在偏矮的窗口上屏幕只有 500 出头，机身跟着变窄，而这一排固定宽度加起来
+          要 ~520px —— 它会把机身**撑宽**（机身是块级、屏幕在它里面左对齐 ⇒ 屏幕右边空出
+          一条，就是用户报的「小档游戏区域没填满电视机、右侧大片空白」；窗口越矮越明显，
+          因为屏幕连高一起缩、机身却被这排钮钉着不动，机身就成了「长条形」）。
+          现在机身写死 `w-[var(--tv-w)]`（见下面那段），这一排改成**可以被压**：
+          PWR / VOL 那两块仍然 `shrink-0`，压缩全落在五颗钮上（最窄 ~37px 还能读）；
+          再往下那一段由 globals.css 的 `--tv-screen-min` 兜住。
 
           顺序把「重载」放在「弹出」前面：重载是留在卡带上的操作，弹出是把它撤下来，
           撤下来那个永远排最后。重载＝重启核心（游戏从头开始），原先只有快捷键（R）、
@@ -360,20 +397,26 @@ export default function RetroTv({
             </div>
           </div>
 
-          <div className="ml-auto grid grid-cols-[repeat(5,52px)] gap-1.5">
-            <PanelBtn onClick={onTogglePause} disabled={!rom || busy}>
+          {/* 列宽是 `minmax(0,52px)`：52 是**上限**，机身被钉窄时可以往下压 —— 理由见上面那段 */}
+          <div className="ml-auto grid grid-cols-[repeat(5,minmax(0,52px))] gap-1.5">
+            <PanelBtn onClick={onTogglePause} disabled={!rom || busy} active={paused} aria-pressed={paused}>
+              {paused ? <PlayGlyph /> : <PauseGlyph />}
               {paused ? t('panel.resume') : t('panel.pause')}
             </PanelBtn>
             <PanelBtn onClick={onSave} disabled={!rom || busy}>
+              <SaveGlyph />
               {t('panel.save')}
             </PanelBtn>
             <PanelBtn onClick={onLoad} disabled={!rom || busy || !canLoad}>
+              <LoadGlyph />
               {t('panel.load')}
             </PanelBtn>
             <PanelBtn onClick={onReload} disabled={!rom || busy}>
+              <RefreshGlyph />
               {t('panel.reset')}
             </PanelBtn>
             <PanelBtn onClick={onEject} disabled={!rom || busy} danger>
+              <EjectGlyph />
               {t('panel.eject')}
             </PanelBtn>
           </div>
@@ -381,8 +424,9 @@ export default function RetroTv({
       </div>
 
       {/*
-        底座。宽跟尺寸档位（`--tv-base-w`：450 / 520 / 600），高固定 18 ——
-        高跟着放大的话底座会变成一堵墙，而它在机身最下面，本来只是给机身一个落脚点。
+        底座。宽跟尺寸档位（`--tv-base-w` = 屏幕 × 5/8，屏幕又由窗口和档位算出来），
+        高固定 18 —— 高跟着放大的话底座会变成一堵墙，而它在机身最下面，本来只是给机身
+        一个落脚点。
       */}
       <div className="mx-auto mt-[3px] h-[18px] w-[var(--tv-base-w)] bg-ink-700 pixel-edge pxw-4 pxc-500" />
 
@@ -413,28 +457,149 @@ export function VolBtn({
   );
 }
 
+/* ================================================================== *
+ * 前面板功能键（暂停 / 存档 / 读档 / 重载 / 弹出）
+ * ================================================================== */
+
+/**
+ * 功能键上的小图标（10px 像素块，currentColor）。
+ *
+ * 一排**老录像机 / 卡带座**式的功能符号：暂停两道杠、继续三角、存档软盘、
+ * 读档「从盘里读出」（托盘 + 上箭头）、重载旋转箭头 ↻、弹出三角 + 底杠。
+ * 全部 `shapeRendering="crispEdges"` 硬边渲染，跟满屋子的像素边一个脾气；
+ * `fill` 走 currentColor —— hover 变 accent / 弹出那颗变 danger 时图标跟着走，
+ * 不用再维护一份彩色版本。
+ */
+function PanelGlyph({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 10 10"
+      width={10}
+      height={10}
+      shapeRendering="crispEdges"
+      fill="currentColor"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function PauseGlyph() {
+  return (
+    <PanelGlyph>
+      <rect x="2" y="1" width="2" height="8" />
+      <rect x="6" y="1" width="2" height="8" />
+    </PanelGlyph>
+  );
+}
+
+function PlayGlyph() {
+  return (
+    <PanelGlyph>
+      <path d="M2 1 L9 5 L2 9 Z" />
+    </PanelGlyph>
+  );
+}
+
+/** 软盘：右上切角 + evenodd 挖出快门孔和标签孔（孔里透出钮底色）。 */
+function SaveGlyph() {
+  return (
+    <PanelGlyph>
+      <path
+        fillRule="evenodd"
+        d="M1 1 H7 L9 3 V9 H1 Z M4 1 H7 V3 H4 Z M3 6 H7 V9 H3 Z"
+      />
+    </PanelGlyph>
+  );
+}
+
+/** 读档：托盘 + 上箭头 —— 数据「从盘里读出来」。 */
+function LoadGlyph() {
+  return (
+    <PanelGlyph>
+      <path d="M5 0 L8 3 H6 V5 H4 V3 H2 Z" />
+      <path d="M1 6 H2 V8 H8 V6 H9 V9 H1 Z" />
+    </PanelGlyph>
+  );
+}
+
+/**
+ * 重载 = 旋转箭头 ↻：3/4 圆环（顺时针留出右上缺口）+ 指向右的箭头。
+ *
+ * 圆环是 1px 描边的 8×8 像素圆，缺口开在右上 —— 顺时针转到那里「甩出」箭头，
+ * 箭头接着圆环右侧往下走，读起来就是「转回去重来」。10px 里画不了平滑圆弧，
+ * 靠 crispEdges 把这条折线圆糊成像素圆，和其它几枚符号同一脾气。
+ */
+function RefreshGlyph() {
+  return (
+    <PanelGlyph>
+      {/* 圆环（右上留缺口）：上弧 → 左侧 → 下弧 → 右侧 */}
+      <rect x="3" y="1" width="2" height="1" />
+      <rect x="2" y="2" width="1" height="1" />
+      <rect x="1" y="3" width="1" height="4" />
+      <rect x="2" y="7" width="1" height="1" />
+      <rect x="3" y="8" width="4" height="1" />
+      <rect x="7" y="7" width="1" height="1" />
+      <rect x="8" y="3" width="1" height="4" />
+      {/* 缺口里的连接短杠 + 顺时针的箭头（指向右） */}
+      <rect x="5" y="1" width="2" height="1" />
+      <path d="M7 0 L10 2 L7 4 Z" />
+    </PanelGlyph>
+  );
+}
+
+/** 弹出：上三角 + 底杠，卡带座上那个标准的 ⏏。 */
+function EjectGlyph() {
+  return (
+    <PanelGlyph>
+      <path d="M5 1 L9 5 H1 Z" />
+      <rect x="1" y="7" width="8" height="2" />
+    </PanelGlyph>
+  );
+}
+
 /**
  * 前面板上那排功能钮（暂停 / 存档 / 读档 / 重载 / 弹出）。
+ *
+ * 2026-10-13 重画（用户要求「好看点」）：
+ *   · 立体键帽 —— 一圈 2px 描边 + 按下整体下沉（`.panel-key`，
+ *     globals.css；⚠️ 描边全在这条 box-shadow 里，**别再叠 pixel-edge**，
+ *     两个类都设 box-shadow 会互相顶掉。原先是描边 + 底部键唇，
+ *     2026-10-13 用户嫌那道底部投影发白，已去掉 —— 别加回来）。
+ *   · 每颗键前面一枚 10px 像素功能符（上面那组 Glyph），文字仍是 10px 中文。
+ *   · 「暂停中」那颗亮 accent（`.panel-key-on` 描边换 accent），一眼看出
+ *     现在是暂停态而不是没按下去 —— 和右侧那列开关钮（accent 底）同一个语义。
+ *   · 「弹出」默认文字就带一档 danger（danger/70），hover 才全红 ——
+ *     危险动作不靠 hover 才看得出来。
  *
  * 尺寸走「窄 + 矮」：宽度由父级格子的写死列宽（52px）定，高度只由这里的
  * `py-1 text-[10px]` 撑出来。2026-10-10 从 `py-1.5 text-[11px]` 收下来过 ——
  * 用户要求这一排整体小一点，5 个钮一起占的宽度/高度都跟着降。
  * 字号不能再往下了：10px 的中文「弹出 / 重载」已经贴着实心笔画，再小就糊。
+ * ⚠️ 图标 + 文字同排，`whitespace-nowrap` 挡住中文在格子被压窄时折行。
  */
 function PanelBtn({
   danger = false,
+  active = false,
   className = '',
+  children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean; active?: boolean }) {
   return (
     <button
       type="button"
-      className={`pixel-edge pxw-2 bg-ink-600 py-1 text-[10px] text-ink-100 transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
-        danger
-          ? 'pxc-500 enabled:hover:bg-ink-500 enabled:hover:text-danger'
-          : 'pxc-500 enabled:hover:bg-ink-500 enabled:hover:text-accent'
+      className={`panel-key flex items-center justify-center gap-1 whitespace-nowrap bg-ink-600 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+        active
+          ? 'panel-key-on bg-accent/15 text-accent'
+          : danger
+            ? 'text-danger/70 enabled:hover:bg-ink-500 enabled:hover:text-danger'
+            : 'text-ink-100 enabled:hover:bg-ink-500 enabled:hover:text-accent'
       } ${className}`}
       {...props}
-    />
+    >
+      {children}
+    </button>
   );
 }

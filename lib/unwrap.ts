@@ -49,6 +49,8 @@ const ROM_EXTENSIONS = new Set([
   'swc',
   'fig',
   'bs',
+  // GBA（2026-10-13 加）
+  'gba',
 ]);
 
 /**

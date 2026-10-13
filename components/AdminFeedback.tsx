@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatTime } from '@/lib/i18n';
+import AdminLoading from './AdminLoading';
 import { useI18n } from './I18nProvider';
 
 /** `/api/admin/feedback` 返回的条目。 */
@@ -127,7 +128,7 @@ export default function AdminFeedback() {
         )}
       </div>
 
-      {state === 'loading' && <p className="text-[11px] text-ink-500">{t('feedback.loading')}</p>}
+      {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
       {state === 'error' && <p className="text-[11px] text-danger">{t('admin.feedback.failed')}</p>}
       {state === 'ready' && items.length === 0 && (
         <p className="text-[11px] text-ink-500">{t('admin.feedback.empty')}</p>

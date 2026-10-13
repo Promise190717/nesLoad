@@ -1,14 +1,25 @@
 /**
- * 极简 i18n：不引第三方库，也不做按语言分路由。
+ * 极简 i18n：不引第三方库，但**做按语言分路由**（2026-10-13 起）。
  *
- * 语言解析顺序（服务端与客户端共用同一套逻辑，因此首屏渲染结果与水合结果必然一致）：
- *   1. cookie —— 用户手动切换过语言
- *   2. Accept-Language —— 浏览器设置（等价于 navigator.languages）
- *   3. 英文 —— 一条都没匹配上时的兜底
+ * 语言是**路径说了算**：
+ *   · 英文 —— 默认语言，**不占前缀**（`/`、`/games`、`/games/<id>`）；
+ *   · 中文 —— 占 `/zh`（`/zh`、`/zh/games`、`/zh/games/<id>`）。
+ * 所以同一个页面有两个地址，各自是一种语言，`hreflang` 互指。
  *
- * 为什么由服务端读 Accept-Language 而不是客户端读 navigator.language：
- * 客户端读只能在挂载后 setState，中文用户会先看到一帧英文再翻成中文。
- * 主题那边靠内联脚本躲掉了闪烁，文案没法用同样的办法，所以从请求头拿。
+ * 前台页面都住在 `app/[locale]/` 下（语言是路由参数 `params.locale`），
+ * 而**前缀的搬运全在 middleware**（见 middleware.ts）：无前缀会被内部 rewrite 成
+ * `/en/...`，`/zh/...` 原样放行，两边都往请求头塞一个语言戳（根布局在 `[locale]`
+ * 段外面，只能靠那个头拿语言）。
+ *
+ * 语言只有两个来源：
+ *   · **路径** —— 带前缀就是那个语言，对谁都一样（`/zh/games` 一定是中文）；
+ *   · **cookie** —— 用户主动设置过。它只在「访问无前缀地址」时决定要不要送去 `/zh`。
+ *
+ * ⚠️ **浏览器语言（Accept-Language / navigator.language）不再是任何语言的来源**
+ * （2026-10-13 用户要求：「没主动设置过，访问哪个就是哪个，不要跳转」）。
+ * 它只在客户端弹窗里用一次 —— 问用户要不要切（`components/LocalePrompt.tsx`）。
+ * 唯一例外是**后台**：它没有语言前缀，路径里读不出语言，所以 middleware 的守卫分支
+ * 仍按 cookie → Accept-Language 兜底（只写请求头，不引起跳转）。
  *
  * 这里只放「常驻在界面上的文案」。屏幕里没有任何提示语，所以载入失败、存档结果
  * 这类一次性反馈没有对应条目 —— 它们的表现是画面本身（雪花 / 游戏画面）和
@@ -17,8 +28,57 @@
 
 export type Locale = 'zh' | 'en';
 
-/** 兜底语言：任何语言标签都匹配不上时用它。 */
+/** 全部受支持的语言。遍历前缀 / 生成 hreflang 都从这儿走，加语言只改这一处。 */
+export const LOCALES: readonly Locale[] = ['en', 'zh'];
+
+/** 兜底语言：任何语言标签都匹配不上时用它。也是**唯一不占前缀**的那个。 */
 export const DEFAULT_LOCALE: Locale = 'en';
+
+/**
+ * 语言选择器的选项。
+ *
+ * **文字各用本语言写**（中文 / English）—— 语言选择器的惯例：万一用户看不懂
+ * 当前界面语言，也得能认出自己要选哪个。
+ *
+ * ⚠️ 和房间那颗旧钮的短标签（`中` / `EN`）**刻意不同**：那颗钮显示的是**要切去的**
+ *    那种语言、只占一颗钮的宽度，越短越好；下拉显示的是**当前**语言、且是一份列表，
+ *    说全名比省地方重要。
+ *
+ * 放在 `lib/i18n.ts` 而不是某个组件里：2026-10-13 起**两处**在用 ——
+ * 房间右上角那行（`ConsoleScene`）和内容页顶栏（`components/LocaleSwitcher.tsx`）。
+ * 各写一份的话，加第三种语言时只会改到其中一处。
+ */
+export const LOCALE_OPTIONS: readonly { value: Locale; label: string }[] = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' },
+];
+
+/**
+ * 各语言的 URL 前缀。**默认语言刻意是空串** —— 英文页不该多一层 `/en`，
+ * 那样老地址（`/games`）会全部变成 301，分享出去的链接也跟着变。
+ */
+export const LOCALE_PREFIX: Record<Locale, string> = {
+  en: '',
+  zh: '/zh',
+};
+
+/**
+ * 英文前缀的**显式写法**。它不是合法地址：`/en/games` 与 `/games` 是同一页，
+ * 留着就是重复内容，middleware 会 301 掉它（`hreflang` 里也只能出现一种）。
+ * 单独列出来是因为它是**用户会手输**的形态（从别的站抄过来、或者猜出来的）。
+ */
+export const EN_PREFIX = '/en';
+
+/**
+ * middleware 往请求头里塞的「本次请求该用哪种语言」。
+ *
+ * 页面（`lib/server/locale.ts`）靠它定语言，不再自己解析 cookie —— 路径已经
+ * 把语言定死了，再让页面自己猜一遍只会猜出不一致的结果。
+ *
+ * 前缀 `x-nesload-` 是自留地：middleware 见到它就知道「这条请求已经过一遍手了」，
+ * 用它防 rewrite 之后再次执行时的死循环（见 middleware.ts）。
+ */
+export const LOCALE_HEADER = 'x-nesload-locale';
 
 /**
  * cookie 名刻意用下划线：RFC 6265 的 token 不允许 `:`，
@@ -59,10 +119,10 @@ const en = {
    * SEO 文案（<title> / description / og:* / JSON-LD）。
    *
    * 为什么单独列一组、而不是散在界面文案里：这几条**不进界面**，只给爬虫和社交
-   * 卡片看；但它们和界面文案一样**跟着语言走** —— 本站的语言由 cookie 决定，
-   * 没有 /en /zh 这种分语言 URL，所以 meta 只能按当前请求的语言渲染。
+   * 卡片看；但它们和界面文案一样**跟着语言走** —— 2026-10-13 起语言分了路径
+   * （英文无前缀、中文 `/zh`），所以 meta 按**当前地址**那一份渲染，不再看 cookie。
    *
-   * 定位（用户 2026-10-10 明确）：主推「在线玩复古游戏」，NES / SFC / 街机都算，
+   * 定位（用户 2026-10-10 明确）：主推「在线玩复古游戏」，NES / SFC / GBA / 街机都算，
    * 有在线游戏库，也支持用自己的 ROM 文件。三条卖点按这个优先级排：
    * 玩什么（复古游戏）> 怎么玩（在线游戏库 / 拖自己的 ROM）> 免安装。
    */
@@ -71,25 +131,124 @@ const en = {
    * 整个标题压在 60 字符上下 —— 再长 Google 就截断了。
    * `{site}` 由调用方替换成 SITE_NAME[locale]，别在这里手写站名。
    */
-  'meta.title': '{site} — Play Retro Games in Your Browser: NES, SNES & Arcade',
+  'meta.title':
+    '{site} — Play Retro Games in Your Browser: NES, SNES, GBA & Arcade',
   /*
    * description：长度按 **155 字符上下** 写（桌面端 Google 大约只显示这么多），
    * 前半句必须能独立成立 —— 后半句被截掉也不能读不通。
    */
   'meta.description':
-    'Play NES, SNES / SFC and arcade games right in your browser. Pick a title from the online library, or drop your own ROM file onto the pixel-art CRT.',
+    'Play NES, SNES / SFC, Game Boy Advance and arcade games right in your browser. Pick a title from the online library, or load your own ROM file.',
   /*
    * keywords：Google 早在 2009 年就不看了，这里留着是给 Bing / Yandex / 站内搜索
    * 之类还有一点权重的地方 —— 属于「写了没坏处、别指望它」的一条。
    */
   'meta.keywords':
-    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
+    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
   /*
    * 这里**没有** og:image 的 alt —— 不是漏了。
    * alt 由 app/opengraph-image.tsx 按文件约定导出，而那个导出必须是**静态值**，
    * 拿不到当前请求的语言，所以只能是一句写死的英文（见 lib/og-image.tsx 的 OG_ALT）。
    * 写一个 `{site}` 版本放在这里也没人会读，属于dead code，干脆不留。
    */
+
+  /*
+   * 房间页（`/room`）自己的 meta（2026-10-13 加）。
+   *
+   * 2026-10-13 之前 `/` 就是那间屋子，它靠根布局那份 `meta.title` / `meta.description`
+   * 当自己的标题说明；现在 `/` 换成了落地页（`app/[locale]/page.tsx`），屋子挪到 `/room`
+   * —— 它得有自己的标题、说明和 canonical，否则在搜索引擎眼里就是首页的重复内容。
+   *
+   * 措辞和根布局那两条**刻意接近但不相同**：那份讲的是「这个站是什么」（首页的活），
+   * 这份讲的是「这间屋子能干什么」（电视机、拖 ROM、免安装），职责不同不是抄漏。
+   *
+   * ⚠️ **标题里不写 `{site}`**：根布局的 `title.template` 会给子页面补上「· 站名」，
+   *    再写一遍就变成「游戏小屋 — … · 游戏小屋」。（`meta.title` 是例外 —— 它是
+   *    `title.default`，不经过 template，所以那一份自己带着站名。）
+   */
+  'seo.room.title': 'Pixel Room — Play Retro Games in Your Browser',
+  'seo.room.description':
+    'Step into the pixel room: NES, SNES / SFC, GBA and arcade games run on the CRT. Pick a title from the online library, or drop your own ROM file onto the screen.',
+
+  /*
+   * 登录页（`/login`，2026-10-13 加）。
+   *
+   * 2026-10-13 之前前台**没有登录页** —— 登录是屋里那颗账号钮弹出来的浮层
+   * （`components/UserPanel.tsx`）。内容页顶栏（`components/TopBar.tsx`）那颗「登录」
+   * 需要一个能落地的地址（顶栏是普通页面，弹不了屋里的浮层），所以补了这一页。
+   *
+   * ⚠️ **这一页是 `noindex, follow`**（见 `app/[locale]/login/page.tsx`）：它是一张
+   *    表单，没有可索引的正文，收录进去只会是「一页和首页抢同一个词的空壳」。
+   *    `follow` 留着 —— 页脚的链接照旧能被顺着爬走。
+   *
+   * 标题里不写 `{site}`（根布局的 `title.template` 会补，见上面 `seo.room` 那条注释）。
+   */
+  'seo.login.title': 'Sign in',
+  'seo.login.description':
+    'Sign in to your account to keep save states, game history and favorites in sync across devices.',
+
+  /*
+   * 首页落地页（2026-10-13 加）—— `app/[locale]/page.tsx`。
+   *
+   * 这一页是**内容页**：Hero + 按机种浏览 + 最新收录 + 按开发商浏览 + FAQ。
+   * 每个区块都要给爬虫一段能索引的正文 —— 原来那一页整页只有 canvas 和 CSS 画的屋子，
+   * 唯一可读的文字是 sr-only 那三句（见下面 `seo.heading` 那组，现在归 `/room` 用）。
+   *
+   * ⚠️ **首页自己不写 metadata**（不导出 `generateMetadata`）：`/` 的标题 / 说明 / canonical
+   *    正是根布局那三样（`meta.title` / `meta.description` / `alternatesFor(locale, '/')`），
+   *    再写一份只是把同一句话写两遍。子页面（`/room`、`/games`…）才各写各的。
+   */
+  'home.hero.title': 'Play classic retro games in your browser',
+  'home.hero.lead':
+    '{site} has NES, SNES / SFC, GBA and arcade games you can play right here. You can also use your own ROM files.',
+  /* 首屏两颗钮：左边进屋子（真的开玩），右边进列表（先挑一挑） */
+  'home.hero.play': 'Enter the room',
+  'home.hero.browse': 'Browse all games',
+  /* 「两颗钮」与「搜索框」之间的分隔词，单独一行（参考站也是这个结构） */
+  'home.hero.or': 'OR',
+  'home.search.label': 'Search the game library',
+  'home.search.placeholder': 'Search title / developer / series',
+  'home.search.submit': 'Search',
+  'home.consoles.title': 'Browse by console',
+  'home.consoles.lead': 'NES, SNES / SFC, GBA and arcade — pick one to see its games.',
+  'home.consoles.count': '{count} games',
+  'home.consoles.all': 'See every game',
+  'home.latest.title': 'Latest additions',
+  'home.latest.lead': 'The newest games on the site.',
+  'home.latest.viewAll': 'All games',
+  'home.developers.title': 'Browse by developer',
+  'home.developers.lead': 'These studios have the most games here.',
+  'home.developers.viewAll': 'All developers',
+  /* 库空了才会用到（正常情况下首页三个区块都有东西可列） */
+  'home.empty':
+    'The library is empty right now — open the room and drop a ROM onto the CRT to start playing.',
+  /*
+   * 折叠问答（`<details>`，零 JS）。六条都只讲**真的实现了**的事，不写没做的卖点 ——
+   * 第 4 条的答案对应移动端那台掌机（只能从在线库载入），别写成「手机上也能拖 ROM」；
+   * 第 6 条讲联机，2026-10-13 用户明确要求**就写一句招呼**（「快喊上小伙伴，开个房间一起对战吧」），
+   * 不展开「谁开房 / 怎么连」这些技术细节。⚠️ 代价：「公网那一档要站点配了 TURN 才放行」
+   * 这件事只剩**联机面板里的提示**兜着（没配时那里显示 `netplay.wanDev`）——
+   * 那条提示别删，否则「跨网络连不上」就没人告知了。
+   */
+  'home.faq.title': 'Frequently asked questions',
+  'home.faq.q1': 'Is it free?',
+  'home.faq.a1':
+    'Completely free — every game is open to play. Signing in adds cloud saves for your play history and save files.',
+  'home.faq.q2': 'Do I need to install anything?',
+  'home.faq.a2':
+    'No — just click a game and play it right in your browser.',
+  'home.faq.q3': 'Can I play my own ROM files?',
+  'home.faq.a3':
+    'Yes. Drop your own ROM in and it plays — nothing is uploaded.',
+  'home.faq.q4': 'Does it work on phones and tablets?',
+  'home.faq.a4':
+    'Yes. On a phone the room becomes a handheld, playing games from the library.',
+  'home.faq.q5': 'Can I download the ROM files?',
+  'home.faq.a5':
+    'Yes — every game page has a download button. Only download ROM files you are legally allowed to use.',
+  'home.faq.q6': 'Can I play with a friend?',
+  'home.faq.a6':
+    'Of course! Grab a friend and start a room for a match.',
 
   /*
    * 首屏那段**看不见的正文**（ConsoleScene 里用 sr-only 渲染）。
@@ -108,7 +267,7 @@ const en = {
    */
   'seo.heading': 'Play retro games in your browser',
   'seo.intro':
-    '{site} is an online retro game room. NES, SNES / SFC and arcade titles run right here in the browser — emulated on your own machine, with RetroArch compiled to WebAssembly.',
+    '{site} is an online retro game room. NES, SNES / SFC, GBA and arcade titles run right here in the browser — emulated on your own machine, with RetroArch compiled to WebAssembly.',
   'seo.howTo':
     'Pick a game from the online library, or drop your own ROM file onto the television. Nothing to install.',
 
@@ -121,12 +280,12 @@ const en = {
    * 要能被直接搜到 —— 所以描述里都要带「能玩、能下载、免安装」这几个词。
    *
    * 详情页 / 下载页的两条带占位符：`{title}` 是游戏名、`{console}` 是机种
-   * （NES / SFC / ARC，丝印那三个英文词，不进文案表）。
+   * （NES / SFC / GBA / ARC，丝印那四个英文词，不进文案表）。
    * 列表页那条带 `{count}` —— 条数是现从库里读的，写死会在增减游戏后变成假话。
    */
-  'seo.games.title': 'All games — Play NES, SNES & Arcade Online',
+  'seo.games.title': 'All games — Play NES, SNES, GBA & Arcade Online',
   'seo.games.description':
-    '{count} retro games in the online library, all playable in your browser: NES, SNES / SFC and arcade. Open a title for details, play it instantly, or download the ROM file.',
+    '{count} retro games in the online library, all playable in your browser: NES, SNES / SFC, GBA and arcade. Open a title for details, play it instantly, or download the ROM file.',
   /*
    * 搜索结果的标题与说明。**这两条不会进索引**（列表页有 `q` 时是 noindex, follow，
    * 见 app/games/page.tsx 的注释）—— 它们服务的是**人**：标签页上写着搜了什么，
@@ -135,6 +294,18 @@ const en = {
   'seo.games.search.title': 'Search results for “{keyword}”',
   'seo.games.search.description':
     '{count} games in the online library match “{keyword}”. Play them in your browser or download the ROM file.',
+  /*
+   * 机种筛选（`/games?console=<机种>`，2026-10-13 加）。
+   *
+   * `{console}` 是 `CONSOLE_LABEL` 那四个丝印词（NES / SFC / GBA / ARC）—— 和首页
+   * 「按机种浏览」那几张卡片用的是同一份，别在这里另写一套机种名（两套迟早对不上）。
+   *
+   * 这一页**可以收录**（和 `?q=` 的搜索页不同，见上面那两条的注释）：机种是有限的四个，
+   * 每个都是一份真实分类，而不是「同一份列表的无限多个子集」。
+   */
+  'seo.games.console.title': '{console} games — Play Online in Your Browser',
+  'seo.games.console.description':
+    '{count} {console} games in the online library, all playable in your browser or downloadable as ROM files.',
   'seo.game.title': '{title} — Play {console} Online',
   'seo.game.description':
     'Play {title} ({console}) right in the browser — free, nothing to install. The ROM file is available for download too.',
@@ -145,22 +316,12 @@ const en = {
    * 开发商两页（2026-10-12 加的）。`developers` 是列表页、`developer` 是单页，
    * 和 games / game 同一套命名。`{count}` 同样是现读的条数。
    */
-  'seo.developers.title': 'Game developers — Play their NES, SNES & Arcade games',
+  'seo.developers.title': 'Game developers — Play their NES, SNES, GBA & Arcade games',
   'seo.developers.description':
     '{count} developers behind the games in the online library. Open one to see every title we have from that studio.',
   'seo.developer.title': '{name} — Games from this developer',
   'seo.developer.description':
     'Every {name} game in the online library ({count}), playable in your browser or downloadable as a ROM file.',
-
-  /*
-   * 窄窗口下顶在房间前面那块提示。**标题和正文分开两个键** ——
-   * 标题走 font-pixel（一行短标签），正文走系统字体 12px（一句要读的话）。
-   * 标题原先硬编码成 'DESKTOP ONLY'，2026-10-12 收进文案表：它下面那句正文本来就是
-   * 翻译过的，中英混着摆看着像漏翻（中文同样靠字体回退显示，见 screen.* 那段注释）。
-   */
-  'notice.desktopOnlyTitle': 'DESKTOP ONLY',
-  'notice.desktopOnly':
-    'This room is desktop-only. Widen your browser window to at least 900px.',
 
   'theme.toDark': 'Switch to night mode',
   'theme.toLight': 'Switch to day mode',
@@ -185,6 +346,23 @@ const en = {
   'tvSize.pick': 'Set the TV size to {level}',
   'locale.toZh': '切换到中文',
   'locale.toEn': 'Switch to English',
+  /*
+   * 语言下拉（`ConsoleScene` 右上角那一行第一位那颗 `<select>`）的**读屏名字**。
+   * 下拉和旁边那几条文字链接不同 —— 光有当前值（「中文」/「English」）不算标签，
+   * 读屏念出来得先知道这是个什么控件。
+   */
+  'locale.label': 'Language',
+  /*
+   * 语言提示弹窗（`components/LocalePrompt.tsx`）—— 浏览器语言与页面语言不符、
+   * 且用户从没主动设置过语言时，在客户端问一句「要不要切」。
+   *
+   * 文案用**当前页面的语言**写：弹窗是页面的一部分，夹一段外语会更突兀。
+   * 只有那颗切换钮写的是**目标语言自己的说法**（沿用上面 `locale.to*` 的规矩，
+   * 让目标语言的读者能直接认出来）。
+   */
+  'localePrompt.title': 'This page is in English',
+  'localePrompt.body': 'Your browser prefers another language. Switch?',
+  'localePrompt.keep': 'Stay in English',
   'fullscreen.enter': 'Fullscreen the game screen',
   'fullscreen.exit': 'Exit fullscreen',
 
@@ -203,7 +381,8 @@ const en = {
    * 同一个路子，那排本来就是系统字体）。英文那几句的**大写和字面一个字都没动**，
    * 所以 en 用户看到的还是原来那几句。
    *
-   * 中文刻意压到最短：屏幕就 720×540，字越大越糊；10px 是这套界面上中文的下限
+   * 中文刻意压到最短：屏幕本身就不大（1080 高的窗口上最小一档 733×550，矮窗口更小），
+   * 字越大越糊；10px 是这套界面上中文的下限
    * （再小笔画就黏在一起了，见 RetroTv 里那几处的字号注释）。
    * 全大写是**英文那一侧的排版风格**，中文不跟（汉字没有大小写）。
    */
@@ -242,6 +421,18 @@ const en = {
   'saves.title': 'Load state',
   'saves.load': 'Load',
   'saves.close': 'Close',
+  /*
+   * 存档列表里两组的分组标题（2026-10-13 加了云端那组）。
+   * 「本地 / 云端」是**技术事实**，不是营销词 —— 用户看到两组一样的列表会本能地问
+   * 「这俩啥区别」，这两个词就是最省话的回答：一组在这台机器上，一组跟着账号走。
+   */
+  'saves.groupLocal': 'This device',
+  'saves.groupCloud': 'Cloud (account)',
+  'saves.deleteCloud': 'Delete this cloud save',
+  /* 面板刚弹出来、列表还在路上时的那一行（openLoad 先开面板再取数） */
+  'saves.loading': 'Loading…',
+  /* 本机 + 云端一条都没有 */
+  'saves.empty': 'No saves yet',
 
   /* 卡带架 2026-10-09 撤掉，历史改在游戏库弹窗里（见 games.tabHistory）。 */
   'library.removeLabel': 'Remove {name}',
@@ -386,9 +577,11 @@ const en = {
    * 自定义按键面板。同样浮在房间上、不进屏幕。
    * 钮名走街机叫法（A B C X Y Z），由 `KeyBindingsPanel` 的 BUTTON_LABELS 直接给出
    * —— 它们是手柄上的丝印、不进文案表。只有「开始 / 投币」是词，跟着语言走。
+   * ⚠️ 按钮 tooltip（`keybind.open`）=「按键设置」，和面板标题（`keybind.title`）**故意不同名**：
+   * 按钮是「入口」，面板标题说的是里面干的活。别顺手统一成一个词。
    */
   'keybind.title': 'Key bindings',
-  'keybind.open': 'Customize keys',
+  'keybind.open': 'Key settings',
   'keybind.close': 'Close',
   'keybind.p1': 'Player 1',
   'keybind.p2': 'Player 2',
@@ -444,6 +637,255 @@ const en = {
   'games.tabHistory': 'History',
   'games.historyEmpty': 'Nothing opened from the library yet',
   'games.historyLoad': '{name}\nClick to load again',
+  /*
+   * 收藏（2026-10-13 加，云端，需要登录）。
+   *
+   * `favorite` / `unfavorite` 带 `{name}`：星标按钮小得放不下文字，所以它是
+   * **aria-label** —— 读屏要靠它才知道点下去会发生什么（「收藏「超级马里奥」」
+   * 比一个孤零零的「收藏」有用）。
+   *
+   * `favoritesSignIn` 那一句要**说清去哪儿登**（右上角那颗人像钮），
+   * 只写「请先登录」用户不知道往哪儿点。
+   */
+  'games.tabFavorites': 'Favorites',
+  'games.favorite': 'Add {name} to favorites',
+  'games.unfavorite': 'Remove {name} from favorites',
+  'games.favoritesEmpty': 'No favorites yet — tap the star on any cover.',
+  /*
+   * 收藏 tab 未登录时那句提示。`{link}` 是**可点的那两个字**（点开登录弹窗），
+   * 句子拆成前后两截，由 GameLibraryPanel 把中间塞成一颗 <button>。
+   *
+   * 为什么不整句做成一个按钮：那样用户不知道**点哪儿**是登录 ——
+   * 「点这里」和「登录」指的必须是同一件事，所以只有「登录 / Sign in」那两个字是链接。
+   */
+  'games.favoritesSignInBefore': 'Sign in to keep favorites — ',
+  'games.favoritesSignInLink': 'Sign in',
+  'games.favoritesSignInAfter': ' right here, or use the account button at the top right.',
+
+  /*
+   * 用户面板（2026-10-13 加）：注册 / 登录 / 退出 + 云端三件套的说明。
+   *
+   * ⚠️ 这套账号和**后台管理员**是两回事（两张表、两只 cookie）。文案里不许有任何
+   * 暗示两者相通的写法 —— 用户看到这里的东西，不该联想到 /admin 那套。
+   *
+   * ⚠️ 这里原先有一条 `user.benefits`（「注册之后有三样东西会跟着你走…」），
+   * 2026-10-13 用户要求**删掉**，见 `components/AuthForm.tsx` 那处注释 —— 那条**还是死的**。
+   * 同日更晚用户又点名把 `login.lead` 那句好处**加回表单里**（屋里浮层也要看到），
+   * 于是有了 `user.formLead`（上面）—— 两条别混，`benefits` 别借尸还魂。
+   * 别因为「不说好处没人注册」又把 `benefits` 加回表单下面。
+   */
+  'user.title': 'Account',
+  'user.close': 'Close',
+  /*
+   * 右侧那排账号钮的 title / aria-label。两个键而不是一个：
+   * 登录之后把用户名带进去，鼠标悬上去就能确认「我现在登的是哪个号」——
+   * 而那颗钮上只有个图标，没有别的地方能显示这个信息。
+   */
+  'user.open': 'Account — sign in or register',
+  'user.openSignedIn': 'Account: {name}',
+  'user.tabLogin': 'Sign in',
+  'user.tabRegister': 'Create account',
+  'user.username': 'Username',
+  'user.password': 'Password',
+  /*
+   * 两条规则提示 —— 现在**当 placeholder 用**（2026-10-13 用户要求「提示放在 input 里面」），
+   * 注册模式下填进两个输入框的 `placeholder`，不再画在框下面。所以这里写得越短越好：
+   * 太长会被输入框宽度截断（`AuthForm` 那个卡片 `max-w-md`）。
+   * ⚠️ 登录模式**不设 placeholder**（登录的人不需要知道规则）—— 见 AuthForm 里那两个 input。
+   */
+  'user.usernameHint': '3–20 characters: letters, digits, _ - .',
+  'user.passwordHint': 'At least 6 characters, no spaces.',
+  'user.signIn': 'Sign in',
+  'user.signUp': 'Create account',
+  'user.signingIn': 'Signing in…',
+  'user.signingUp': 'Creating…',
+  'user.signOut': 'Sign out',
+  'user.signedInAs': 'Signed in as {name}.',
+  'user.cloudHint':
+    'Your game history, save states and favorites are stored in your account — open any game from the online library and they sync automatically.',
+  /*
+   * 表单里那句「登录了能干什么」（2026-10-13 用户要求加回表单 —— 用的是 login.lead 的措辞）。
+   * 和 `login.lead` 的区别：这句是**纯好处**，不带「还没有账号？去注册」（表单自己就有
+   * 登录 / 注册切换，不用再指路）。`/login` 页头已经说过同一句，那边传 `hideCloudLead`
+   * 不渲染 —— 见 `AuthForm` 的 prop。
+   */
+  'user.formLead':
+    'Sign in and your save states, game history and favorites are kept in the cloud — play anytime, anywhere!',
+  /*
+   * 表单下面那句法律声明（2026-10-13 加，用户要求「表单下方增加…」）。
+   *
+   * **拆成四段**（Login / Register / Middle / After），中间夹两个**真链接** ——
+   * 链接文字借 `legal.terms` / `legal.privacy`（那两条本来就是两页的标题，
+   * 见上面 legal 那段的注释），所以中英语序的差异由这几段自己扛，不用为这句话另起键。
+   *
+   * 开头**分登录 / 注册两种**（2026-10-13 用户要求）：这张表两个模式共用，
+   * 切到注册还写「登录即表示…」读起来不对。
+   *
+   * ⚠️ **值首尾的空格是有意义的**（英文要靠它把链接和正文分开），别顺手 trim 掉。
+   */
+  'user.consentLogin': 'By signing in you agree to our ',
+  'user.consentRegister': 'By creating an account you agree to our ',
+  'user.consentMiddle': ' and ',
+  'user.consentAfter': '.',
+
+  'user.error.failed': 'Something went wrong — try again.',
+  'user.error.missingCredentials': 'Enter a username and password.',
+  'user.error.usernameInvalid': 'Username may only contain letters, digits, _ - and .',
+  'user.error.usernameTooShort': 'Username is too short (at least 3 characters).',
+  'user.error.usernameTooLong': 'Username is too long (at most 20 characters).',
+  'user.error.usernameTaken': 'That username is taken — pick another.',
+  'user.error.passwordInvalid': 'Enter a password.',
+  'user.error.passwordTooShort': 'Password is too short (at least 6 characters).',
+  'user.error.passwordTooLong': 'Password is too long (at most 72 characters).',
+  /* 口令里有空白字符。注册 + 改密码都会回这个码；登录不会（见 lib/server/app-users.ts） */
+  'user.error.passwordHasSpace': 'Password cannot contain spaces.',
+  'user.error.invalidCredentials': 'Wrong username or password.',
+  'user.error.banned': 'This account has been suspended.',
+  /*
+   * 人机验证（Cloudflare Turnstile，2026-10-13 加）。
+   * `captchaRequired` = 没解出验证码就点了提交（挂件还在加载 / 被扩展拦掉时也会看到）；
+   * `captchaFailed` = 解出来了但服务端不认 —— token 一次性，最常见的原因是上一轮已经用掉了。
+   * 两句都只说「怎么办」，不解释 token 是什么（用户不关心，也解释不清）。
+   */
+  'user.error.captchaRequired': 'Please complete the human verification first.',
+  'user.error.captchaFailed': 'Human verification failed — please try again.',
+
+  /*
+   * 独立登录页（`/login`）标题下面那句说明（2026-10-13 加）。
+   *
+   * 页面的 `<h1>` **借 `user.title`**（屋里那个账号浮层的标题）—— 同一个东西在站里
+   * 只该有一个名字，这里不再为「账号」另起一个键。
+   *
+   * 这一句要说两件事：① 登录之后多了什么（这间屋子本来不需要账号，
+   * 不说清好处没人会注册）；② 这一页同时管注册（表单里那颗分段钮），别让人以为走错了地方
+   * —— 所以结尾点名「去注册 / Create one」。
+   *
+   * ⚠️ 2026-10-13 用户连着改了三处词：
+   *   · 结尾从「同一个表单切到『注册』就行」压成**三个字「去注册」**
+   *     （别把「同一个表单」那层解释加回来）；
+   *   · 原先表单下面还有一条 `user.benefits`（「三样东西会跟着你走」）**整条删了**
+   *     —— 见 `components/AuthForm.tsx` 那处注释；
+   *   · 前半句从「存档…都挂在你的账号上，换台设备也还在」换成**「存到云端 / in the cloud」
+   *     + 随时随地即刻开玩**（用户给的措辞）。云存档确实是这么工作的，不是空话。
+   */
+  'login.lead':
+    'Sign in and your save states, game history and favorites are kept in the cloud — play anytime, anywhere. No account yet? Create one.',
+
+  /*
+   * 个人中心（`/account`，2026-10-13 加）。三个 tab：收藏 / 存档 / 资料。
+   *
+   * 「资料」那一组（`account.error.*`）**刻意和 `user.error.*` 分开** ——
+   * 前者是注册 / 登录那套（用户名重复、口令太短…），后者是登录之后改自己资料那套
+   * （旧口令不对、头像太大…）。两批错误码的来源和上下文都不同，混在一起
+   * 会让「什么情况下会看到哪句」变得说不清。
+   *
+   * ⚠️ 这一页**没有「历史」tab**（理由见 AccountCenter 文件头）：历史没有可管理的
+   *    东西，清空入口在房间那个游戏库面板里已经有了。
+   */
+  'account.title': 'Your account',
+  'account.loading': 'Loading…',
+  'account.failed': 'Something went wrong — try again.',
+  /* 页头注册时间那行。`{time}` 是格式化好的时间戳 */
+  'account.since': 'Member since {time}',
+  /*
+   * VIP 标识（个人中心页头，2026-10-13 加）。**两种徽章都要有** —— 非 VIP 那颗是灰的，
+   * 让「不是会员」成为一个明确的说法，而不是「好像忘了显示什么」。
+   * `vipUntil` / `vipExpired` 由 `vipExpiresAt` 现判：`> now` 走前者，否则后者
+   * （过期了原样给出时间，比只写「已过期」有用）。
+   */
+  'account.vipBadge': 'VIP',
+  'account.nonVipBadge': 'Standard',
+  'account.vipUntil': 'VIP until {time}',
+  'account.vipExpired': 'VIP expired {time}',
+  'account.tabFavorites': 'Favorites',
+  'account.tabHistory': 'History',
+  'account.tabSaves': 'Save states',
+  'account.tabProfile': 'Profile',
+  'account.tabPassword': 'Password',
+  /*
+   * 收藏 / 历史 / 存档列表的骨架屏文案。和 `account.loading`（页头那行「Loading…」）分开：
+   * 页头那行是纯文字占位，这几处是**列表骨架**，语义上是「正在取列表」。
+   * 给读屏用 `role="status"`，视觉上配 `.loading-dots` 那颗跳动的方点。
+   */
+  'account.favoritesLoading': 'Loading favorites…',
+  'account.historyLoading': 'Loading history…',
+  'account.savesLoading': 'Loading save states…',
+
+  'account.favoritesEmpty':
+    'No favorites yet — open the game library in the room and tap the star on a cover.',
+  /* 卡片左上那颗星。`{name}` = 游戏名（读屏和 tooltip 都用它） */
+  'account.unfavorite': 'Remove {name} from favorites',
+
+  /* ---- 历史 ---- */
+  'account.historyEmpty': 'No play history yet — games you open from the online library show up here.',
+  'account.historyCount': '{count} games played recently',
+  'account.historyDeleted': 'Removed from history.',
+  'account.clearHistory': 'Clear all',
+  'account.confirmClearHistory': 'Really clear all?',
+  'account.historyCleared': 'History cleared.',
+  /*
+   * 上限说明：和本地 lib/library.ts 的 MAX_CARTRIDGES 同口径（最近 N 款，不是全量流水）。
+   * **不写死数字** —— 那个数改了这里就会说谎（同 account.savesHint 的理由）。
+   */
+  'account.historyHint':
+    'History keeps your {max} most recently played games — playing an older one again moves it back to the top.',
+
+  'account.savesEmpty': 'No cloud save states yet.',
+  'account.savesCount': '{count} save states in total',
+  /*
+   * 每款游戏的上限说明。`{max}` 从 lib/saves.ts 的 MAX_SAVES 传进来（本地云端一致），
+   * **不要在文案里写死 5** —— 那个数改了这里就会说谎。
+   */
+  'account.savesHint':
+    'Up to {max} save states are kept per game — the oldest one is dropped when you save again. Same limit locally and in the cloud.',
+  'account.saveDeleted': 'Save state deleted.',
+  'account.clearSaves': 'Clear all',
+  'account.confirmClearSaves': 'Really clear all?',
+  'account.savesCleared': 'Cleared {count} save state(s).',
+  'account.delete': 'Delete',
+  'account.confirmDelete': 'Really delete?',
+
+  /* ---- 资料 ---- */
+  'account.avatar': 'Avatar',
+  'account.chooseImage': 'Choose image',
+  'account.clearAvatar': 'Remove avatar',
+  'account.uploading': 'Uploading…',
+  'account.avatarSaved': 'Avatar updated.',
+  'account.avatarCleared': 'Avatar removed.',
+  'account.avatarHint': 'PNG, JPEG, WebP or GIF, up to 2 MB.',
+  'account.gender': 'Gender',
+  /*
+   * 性别三档：未知 / 男 / 女。`account.genderNone` 是**默认态**（库里存 NULL）。
+   * ⚠️ 原先还有一档 `account.genderOther`（「其他」），2026-10-13 取消 ——
+   *    它和「未知」在界面上是一回事。键也一并删了，别再加回来。
+   */
+  'account.genderNone': 'Not specified',
+  'account.genderMale': 'Male',
+  'account.genderFemale': 'Female',
+  'account.genderSaved': 'Saved.',
+  'account.genderHint': 'Optional — shown to nobody but you.',
+  'account.passwordTabHint': 'You stay signed in on this device afterwards — no need to log in again.',
+  'account.password': 'Password',
+  'account.oldPassword': 'Current password',
+  'account.newPassword': 'New password',
+  'account.confirmPassword': 'Repeat new password',
+  'account.savePassword': 'Change password',
+  'account.saving': 'Saving…',
+  'account.passwordSaved': 'Password changed.',
+  'account.passwordHint':
+    'You stay signed in on this device after changing it. Other signed-in devices keep working until their session expires.',
+
+  'account.error.missingOld': 'Enter your current password.',
+  'account.error.wrongPassword': 'Current password is wrong.',
+  'account.error.passwordTooShort': 'New password is too short (at least 6 characters).',
+  'account.error.passwordTooLong': 'New password is too long (at most 72 characters).',
+  /* 新口令里有空白字符（同 `user.error.passwordHasSpace`，但这一页说的是「新密码」） */
+  'account.error.passwordHasSpace': 'New password cannot contain spaces.',
+  'account.error.mismatch': 'The two new passwords do not match.',
+  'account.error.avatarMissing': 'Pick an image first.',
+  'account.error.avatarTooLarge': 'That image is too large (2 MB max).',
+  'account.error.avatarType': 'Unsupported format — use PNG, JPEG, WebP or GIF.',
+
   /*
    * 在线库列表上那排筛选：机种 + 搜索。两者都只在**已经拉回来的那份列表**上过滤
    * （客户端过滤，不再打接口）。「全部」那一档和 NES / SFC / ARC 并排，
@@ -563,14 +1005,15 @@ const en = {
 
   /*
    * 隐私政策 / 服务条款（2026-10-12 加）。**正文不在这张表里**，在 lib/legal.ts ——
-   * 那两页是长文档、结构化存储，理由见那边的顶部注释。这里只有**房间界面**要用的几个词：
-   * 右侧竖排那颗钮的名字，以及它左边弹层里的两条链接。
+   * 那两页是长文档、结构化存储，理由见那边的顶部注释。这里只有**房间界面**要用的几个词。
    *
-   * `legal.open` 是那颗钮的 title / aria（描述它点开什么）；
-   * `legal.privacy` / `legal.terms` 既是弹层里那两条链接的文字，也是两页自己的标题
-   * （和留言本那颗钮借 `feedback.title` 同一个路子：它就是最准的说法，没必要另起一个键）。
+   * `legal.privacy` / `legal.terms` 既是页面上那两条链接的文字（桌面端在右上角那一行，
+   * 小屏在菜单抽屉里），也是两页自己的标题 —— 和留言本那颗钮借 `feedback.title`
+   * 同一个路子：它就是最准的说法，没必要另起一个键。
+   *
+   * ⚠️ 这里原来还有一条 `legal.open`（右侧那颗盾牌钮的 title / aria）。那颗钮
+   * 2026-10-13 并进了小屏抽屉，键跟着删了 —— 别按「少了一条」又补回来。
    */
-  'legal.open': 'Privacy & Terms',
   'legal.privacy': 'Privacy Policy',
   'legal.terms': 'Terms of Service',
   /* 两页顶部那行「最后更新」。日期由页面按语言格式化后传进来 */
@@ -594,7 +1037,7 @@ const en = {
   'tour.replay': 'Show the tour again',
   'tour.screen.title': 'Start with a game',
   'tour.screen.body':
-    'Drag a .nes / .sfc / arcade .zip file onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
+    'Drag a .nes / .sfc / .gba file (or an arcade .zip) onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
   'tour.rail.title': 'The switch rail',
   'tour.rail.body':
     'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Library (online games and this machine’s history), Netplay, Key bindings. Help: Controls help, and the Guestbook.',
@@ -609,10 +1052,11 @@ const en = {
   'admin.login.error': 'Wrong username or password',
   'admin.login.failed': 'Sign-in failed — try again',
   'admin.logout': 'Sign out',
-  /* 后台左侧那几个 tab —— 游戏列表 / 开发商库 / 留言本，2026-10-12 起是三条 */
+  /* 后台左侧那几个 tab —— 游戏列表 / 开发商库 / 留言本 / 用户，2026-10-13 起是四条 */
   'admin.nav.games': 'Games',
   'admin.nav.developers': 'Developers',
   'admin.nav.feedback': 'Guestbook',
+  'admin.nav.users': 'Users',
   'admin.upload.title': 'Add a game',
   'admin.field.title': 'Title',
   'admin.field.image': 'Cover image',
@@ -624,11 +1068,38 @@ const en = {
   'admin.field.developer': 'Developer',
   /* 说明 / 简介（2026-10-12 加的字段）。多行，可留空；前台只在游戏库卡片的悬停提示里露 */
   'admin.field.description': 'Description',
+  /*
+   * 英文字段（2026-10-13 加）。库里文案字段成对出现：无后缀 = 中文，`_en` = 英文
+   * （见 db/schema.sql 顶部那段）。这几栏**只在后台出现**，前台没有文案键 ——
+   * 表单标签统一在中文名后面缀 `(EN)`，两种语言下都这么显示：
+   * 中文管理员一眼知道往哪填英文，英文管理员看到的中文名旁边也是同一个后缀。
+   */
+  'admin.field.titleEn': 'Title (EN)',
+  'admin.field.seriesEn': 'Series (EN)',
+  'admin.field.descriptionEn': 'Description (EN)',
+  'admin.i18n.hint': 'Optional. Shown on the English site; left empty, the Chinese text is used.',
   'admin.description.placeholder': 'Optional. Shows up as a hover hint on the library card.',
   'admin.upload.submit': 'Upload',
   'admin.upload.submitting': 'Uploading…',
   'admin.upload.ok': 'Uploaded.',
   'admin.upload.required': 'Title, cover image and ROM file are required.',
+  /*
+   * 「从链接自动填充」（2026-10-13 加）：给个游戏页链接，抓回元数据预填表单。
+   * **只抓元数据、不碰 ROM**，实现见 app/api/admin/scrape-game/route.ts。
+   */
+  'admin.scrape.placeholder': 'Paste a game page link to auto-fill',
+  'admin.scrape.button': 'Auto-fill',
+  'admin.scrape.loading': 'Reading…',
+  'admin.scrape.ok': 'Filled from the page.',
+  'admin.scrape.failed': 'Could not read that page.',
+  'admin.scrape.developerMissing': 'Developer “{name}” is not in the library yet.',
+  /*
+   * 拖拽提示（2026-10-13 加）：封面 / 游戏文件两个选择框都接受从资源管理器拖文件；
+   * 封面**额外**接受从网页里拖一张图过来（那条路走 /api/admin/fetch-image 取字节）。
+   */
+  'admin.drop.image': 'Drag an image here, or pick a file — you can also drag one in from a web page.',
+  'admin.drop.rom': 'Drag a ROM file here, or pick one.',
+  'admin.drop.imageFailed': 'Could not get that image.',
   'admin.upload.failed': 'Upload failed.',
   'admin.list.title': 'Uploaded games',
   'admin.list.empty': 'Nothing uploaded yet.',
@@ -683,6 +1154,10 @@ const en = {
   'admin.developers.field.website': 'Website',
   'admin.developers.field.summary': 'Summary',
   'admin.developers.field.description': 'About',
+  /* 英文字段（2026-10-13 加），见上面 admin.field.titleEn 那段说明 */
+  'admin.developers.field.nameEn': 'Name (EN)',
+  'admin.developers.field.summaryEn': 'Summary (EN)',
+  'admin.developers.field.descriptionEn': 'About (EN)',
 
   /* 留言本（房间地板上那本）。后台只管「解决没有」——正文不给改，理由见那条接口的注释。 */
   'admin.feedback.title': 'Guestbook',
@@ -693,6 +1168,47 @@ const en = {
   'admin.feedback.markResolved': 'Mark resolved',
   'admin.feedback.markUnresolved': 'Mark open',
   'admin.feedback.failed': 'Request failed.',
+
+  /*
+   * 用户管理（2026-10-13 加）。
+   *
+   * ⚠️ 这里说的是**前台注册用户**，不是后台管理员 —— `admin.users.hint` 那一句
+   * 就是为了别让人在这里找自己的管理员账号。
+   *
+   * `stats` 用三个占位符挤成一串（`H 3 · S 5 · F 2`）：那一行本来就窄，
+   * 三个数各配一段文字会把每行撑到两行高。缩写放在文案里而不是拼在组件里，
+   * 这样换语言时能整句重写（中文那份就是「历史 3 · 存档 5 · 收藏 2」）。
+   */
+  'admin.users.title': 'Users',
+  'admin.users.hint':
+    'Registered site users — these are not the admin accounts (admins are created with scripts/create-user.mjs and have no UI here).',
+  'admin.users.empty': 'No registered users yet.',
+  'admin.users.failed': 'Request failed.',
+  'admin.users.ban': 'Ban',
+  'admin.users.unban': 'Unban',
+  'admin.users.delete': 'Delete',
+  'admin.users.confirmDelete': 'Confirm delete',
+  'admin.users.banned': 'Banned {name}.',
+  'admin.users.unbanned': 'Unbanned {name}.',
+  'admin.users.deleted': 'Deleted {name} and all their data.',
+  'admin.users.statusBanned': 'Banned',
+  'admin.users.stats': 'H {history} · S {saves} · F {favorites}',
+  'admin.users.registered': 'Joined {time}',
+  'admin.users.lastLogin': 'Last seen {time}',
+  'admin.users.neverLoggedIn': 'Never signed in',
+  /*
+   * VIP（2026-10-13 加）。到期时间是毫秒时间戳，界面上只给到分钟（datetime-local）。
+   * 「vipUntil」里的 {time} 由 formatTime 现格式化 —— 别在这里写死格式。
+   */
+  'admin.users.vipBadge': 'VIP',
+  'admin.users.vipUntil': 'VIP until {time}',
+  'admin.users.vipSetup': 'Set VIP',
+  'admin.users.vipExpiresLabel': 'VIP expires at',
+  'admin.users.vipSave': 'Save',
+  'admin.users.vipClear': 'Revoke VIP',
+  'admin.users.vipClose': 'Close',
+  'admin.users.vipSaved': 'VIP updated for {name}.',
+  'admin.users.vipCleared': 'VIP revoked for {name}.',
 
   /*
    * 游戏列表 / 详情 / 下载三页的**界面文案**（2026-10-12）。
@@ -707,10 +1223,54 @@ const en = {
   'topLinks.label': 'Site pages',
   'topLinks.games': 'Game list',
 
+  /*
+   * 小屏右上角那颗「菜单」钮（2026-10-13 加）。
+   *
+   * 窗口放不下那一行 / 那一列时（宽 < 900，或高 < 950），桌面那批入口整批收进它点开的
+   * 右侧抽屉，页面上只剩这一颗钮 —— 所以它的名字得说清「点开会看到什么」，
+   * 而不是借用某个条目的名字。抽屉开着时同一个位置变成 `menu.close`（点一下收起）。
+   */
+  'menu.open': 'Open menu',
+  'menu.close': 'Close menu',
+  /*
+   * 抽屉里「主题」那一行的文案。**刻意不用 `theme.toDark` / `toLight`**：
+   * 那两条说的是「按下去切到哪」（是给 tooltip / aria 用的），而这一行是一条**目录项**
+   * ——它说明「这一行管什么」。而且跟着主题翻的那两条会让文案也随 `<html data-theme>` 变，
+   * 那又是 React 挑文案，首帧闪烁的老问题会回来。
+   */
+  'menu.theme': 'Theme',
+  /*
+   * 抽屉里「简洁模式」那一行的文案（2026-10-13 加，用户要求就写「简洁模式」四个字）。
+   * 和 `menu.theme` 同一个道理：它是一条**目录项**，说明「这一行管什么」，
+   * 不是动作描述 —— 所以**不用** `simple.enter` / `simple.exit`
+   * （那两条说的是「按下去会切到哪」，留给 tooltip / aria）。
+   */
+  'menu.simple': 'Simple mode',
+
+  /* 「离开房间」确认：房间那条「游戏列表」在房间里有活时先弹这层（见 ConsoleScene 的 leaveOpen） */
+  'leave.title': 'Leave this page?',
+  'leave.bodyGame': 'The running game will be interrupted — progress is not saved.',
+  'leave.bodyNetplay': 'You will leave the netplay room, and your partner will be disconnected.',
+  'leave.stay': 'Stay',
+  'leave.confirm': 'Leave',
+
   'gamesPage.heading': 'All games',
   'gamesPage.intro':
-    '{count} games in the online library — NES, SNES / SFC and arcade. Click a cover for details, or start playing straight away.',
+    '{count} games in the online library — NES, SNES / SFC, GBA and arcade. Click a cover for details, or start playing straight away.',
   'gamesPage.empty': 'The library is empty right now.',
+  /*
+   * 机种筛选（`?console=<机种>`，2026-10-13 加）。
+   *
+   * `introConsole` 顶上 `intro`：筛了机种之后「共 N 款」说的是**这一档**的条数，
+   * 再念一遍「NES、SFC、GBA 和街机」那串就自相矛盾了。
+   * `filterAll` 是筛选条上那颗「全部」，`filterLabel` 是那条 `<nav>` 的读屏名字。
+   */
+  'gamesPage.introConsole':
+    '{count} {console} games in the library. Click a cover for details, or start playing straight away.',
+  'gamesPage.filterLabel': 'Filter by console',
+  'gamesPage.filterAll': 'All',
+  /* 筛了机种、而这一档一款都没有时的空态（和 `empty` / `searchEmpty` 是三种不同的空） */
+  'gamesPage.consoleEmpty': 'No {console} games in the library yet.',
   /*
    * 列表页的搜索框（2026-10-12 加）。刻意**和房间弹窗那组 `games.search*` 各写一份** ——
    * 那组是弹窗里的（客户端过滤一份已拉回来的列表），这组是**服务端搜索**（关键词进 URL
@@ -730,18 +1290,65 @@ const en = {
   'gamesPage.next': 'Next',
   'gamesPage.backHome': 'Back to the room',
   'gamesPage.backToGames': 'All games',
-  'gamesPage.backToGame': 'Back to the game',
+  /*
+   * 内容页左上角那条返回链接的**通用文案**（2026-10-13 起）。
+   *
+   * ⚠️ 为什么单独一个键、而不是复用 `backToGames`：
+   *    那条说的是「回**哪儿**」（全部游戏），而左上角那颗钮**实际做的是浏览器回退**
+   *    （`BackLink`，`mode: 'history'`）—— 用户可能是从 `/games?q=…&page=3` 或
+   *    `/developers` 点进来的，回的是**来时的那个地址**，根本不是这条链接的 `href`。
+   *    既然行为是「返回」，文案就该说「返回」，写「全部游戏」是在
+   *    **承诺一个它不一定兑现的落点**（2026-10-13 用户要求统一改的）。
+   *
+   * 用它的地方（都是 `mode: 'history'`）：
+   *   游戏详情页、下载页、开发商详情页 —— 三处左上角那颗。
+   *
+   * ⚠️ 同一天**删掉了两条**曾被它们各自使用的旧键（别再加回来）：
+   *    `gamesPage.backToGame`（下载页原来写「返回游戏详情」）、
+   *    `developersPage.back`（开发商页原来写「返回」）。
+   *  `backToGames` / `backToDevelopers` 这两个**留着** —— **页脚**那几条是真链接，
+   *  落点就是固定的列表页，那里写「全部游戏 / 全部开发商」才准确。
+   *  404 页左上角也仍用它们（那页的行为是硬跳列表，不是回退）。
+   */
+  'common.back': 'Back',
+  /*
+   * 页脚那颗「首页」（2026-10-13 加，和 `backHome` 并排放在内容页页脚里）。
+   *
+   * `backHome` 说的是「回到房间」（`/room`，屋子里那台电视机），这一颗回的是**落地页**
+   * （`/`）—— 2026-10-13 之后那是两个不同的地址、两件不同的事，所以是两个键。
+   */
+  'common.home': 'Home',
   'gamesPage.play': 'Play now',
   'gamesPage.download': 'Download ROM',
   /* 详情页「分享游戏」：点一下复制这一页的规范地址（见 components/ShareGameButton.tsx） */
   'gamesPage.share': 'Share this game',
   'gamesPage.shareCopied': 'Link copied',
   'gamesPage.shareFailed': 'Copy failed',
+  /*
+   * 详情页那颗收藏按钮（2026-10-13 加，挨着「开始游戏」）。见 components/FavoriteButton.tsx。
+   *
+   * ⚠️ 和游戏库里那颗**星标**用词不同：星标只画一个 ★ 图标（没有文字位），
+   *    这里是一颗有文字的按钮，所以得说清「点了会发生什么」。
+   *    `{name}` = 游戏名，只用在 aria-label / title 上。
+   */
+  'gamesPage.favorite': 'Add to favorites',
+  'gamesPage.unfavorite': 'Remove from favorites',
+  /* 未登录时点它：先提示，再让用户自己去房间右上角登录（这一页没有登录入口） */
+  'gamesPage.favoriteSignIn': 'Sign in to save favorites — tap the account button in the room.',
+  /* 请求失败的回滚提示（乐观更新翻回去之后说一句） */
+  'gamesPage.favoriteFailed': 'Could not update favorites — try again.',
   'gamesPage.field.console': 'Console',
   'gamesPage.field.year': 'Year',
   'gamesPage.field.developer': 'Developer',
   'gamesPage.field.series': 'Series',
   'gamesPage.field.language': 'Language',
+  /*
+   * 全站 404（app/not-found.tsx）。和下面那条 `gamesPage.notFoundTitle` 分开命名：
+   * 那条讲的是「这个游戏从库里没了」，这条讲的是「这个地址本来就不存在」。
+   */
+  'notFound.title': 'Page not found',
+  'notFound.description':
+    'That address does not exist on {site}. Check the link, or head back to the room.',
   'gamesPage.notFoundTitle': 'Game not found',
   'gamesPage.notFound': 'This game is not in the library (any more).',
   /* 详情页正文：`fallbackDescription` 只在后台没填「说明」时顶上 */
@@ -760,11 +1367,13 @@ const en = {
   'developersPage.gamesHeading': 'Games from {name}',
   'developersPage.gamesEmpty': 'There is no game from this developer in the library yet.',
   'developersPage.field.founded': 'Founded',
-  /* 详情页左上那颗返回。走**浏览器回退**（`GamesShell` 的 `back.mode: 'history'`，
-     和游戏详情页同一条规矩）：用户多半是从 `/developers` 列表或某款游戏点进来的，
-     回上一页比写死回 `/developers` 准。`href` 只是兜底 / 爬虫 / 中键新标签的落点。
-     页脚与面包屑里那条「全部开发商」仍是 `backToDevelopers`，别跟着改。 */
-  'developersPage.back': 'Back',
+  /*
+   * ⚠️ 原先这里有一条 `developersPage.back`（左上那颗返回），2026-10-13 **已删除** ——
+   *    它和游戏详情页、下载页左上角那条说的是同一件事（都是浏览器回退），
+   *    已统一到上面的 `common.back`。别再单独加回来。
+   *
+   * 页脚与面包屑里那条「全部开发商」是 `backToDevelopers`（真链接），**留着**。
+   */
   'developersPage.backToDevelopers': 'All developers',
   'developersPage.notFoundTitle': 'Developer not found',
   'developersPage.notFound': 'This developer is not in the library (any more).',
@@ -777,7 +1386,7 @@ const en = {
   /* 兜底那条「没有反应？直接下载」2026-10-12 按用户要求去掉了（它绕开 6 秒缓冲），
      所以 `download.manual` / `download.manualLink` 两条文案跟着删了。 */
   'download.rights': 'Only download ROM files you are legally allowed to use.',
-  /* 首页那条 `?id=` 深链：从详情页点「开始游戏」过来，但库里已经没有这条了 */
+  /* 房间页那条 `?id=` 深链（`/room?id=`）：从详情页点「开始游戏」过来，但库里已经没有这条了 */
   'deepLink.notFound': 'That game could not be found — it may have been removed.',
   /*
    * 深链载入中那颗**独立弹窗**（ConsoleScene 的 `deepLinkGame`）：标题栏、进度条
@@ -792,24 +1401,78 @@ const en = {
 export type MessageKey = keyof typeof en;
 
 const zh: Record<MessageKey, string> = {
-  'meta.title': '{site} — 在浏览器里在线玩复古游戏：NES / SFC / 街机',
+  'meta.title': '{site} — 在浏览器里在线玩复古游戏：NES / SFC / GBA / 街机',
   'meta.description':
-    '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）和街机都能跑。从在线游戏库挑一盘，或把自己的 ROM 文件拖到像素风电视机上，打开即玩、免安装。',
+    '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）、GBA（Game Boy Advance）和街机都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
   'meta.keywords':
-    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+  /* 房间页（`/room`）自己的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
+  'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
+  'seo.room.description':
+    '走进像素小屋：NES、SFC（超级任天堂）、GBA 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
+
+  /* 登录页（`/login`），见上面英文那份的注释 */
+  'seo.login.title': '登录',
+  'seo.login.description': '登录账号，在多台设备之间同步存档、游戏历史和收藏。',
+
+  /* 首页落地页，见上面英文那份的注释 */
+  'home.hero.title': '在浏览器里在线玩经典复古游戏',
+  'home.hero.lead':
+    '{site}上能直接玩 NES、SFC（超级任天堂）、GBA 和街机的游戏。也可以用自己电脑里的 ROM。',
+  'home.hero.play': '进入小屋',
+  'home.hero.browse': '浏览全部游戏',
+  'home.hero.or': '或',
+  'home.search.label': '搜索游戏库',
+  'home.search.placeholder': '搜索标题 / 开发者 / 系列',
+  'home.search.submit': '搜索',
+  'home.consoles.title': '按机种浏览',
+  'home.consoles.lead': 'NES、SFC、GBA、街机 —— 点一个看它有哪些游戏。',
+  'home.consoles.count': '{count} 款游戏',
+  'home.consoles.all': '查看全部游戏',
+  'home.latest.title': '最新收录',
+  'home.latest.lead': '最近新上的几款。',
+  'home.latest.viewAll': '全部游戏',
+  'home.developers.title': '按开发商浏览',
+  'home.developers.lead': '这几家开发商在库里的游戏最多。',
+  'home.developers.viewAll': '全部开发商',
+  'home.empty': '游戏库现在还是空的 —— 进小屋把 ROM 拖到电视上就能开玩。',
+  /* 折叠问答六条，见上面英文那份的注释（只写真的实现了的事） */
+  'home.faq.title': '常见问题',
+  'home.faq.q1': '免费吗？',
+  'home.faq.a1':
+    '完全免费，任何游戏都可以随便玩。登录之后可以云端保存游戏记录和存档。',
+  'home.faq.q2': '要装什么东西吗？',
+  'home.faq.a2':
+    '不用，点击游戏即可在网页在线玩。',
+  'home.faq.q3': '能用自己的 ROM 吗？',
+  'home.faq.a3':
+    '可以。把自己电脑里的 ROM 拖进去就能玩，不会上传。',
+  'home.faq.q4': '手机上能玩吗？',
+  'home.faq.a4':
+    '可以。手机上小屋会变成一台掌机，玩库里的游戏。',
+  'home.faq.q5': '能下载 ROM 吗？',
+  'home.faq.a5': '能，每个游戏页上都有下载按钮。请只下载你有权使用的 ROM 文件。',
+  'home.faq.q6': '能和朋友一起玩吗？',
+  'home.faq.a6':
+    '当然！快喊上小伙伴，开个房间一起联机对战吧。',
+
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':
-    '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）和街机游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
+    '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）、GBA 和街机游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
   'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
 
   /* 游戏列表 / 详情 / 下载三页的 SEO 文案，见上面英文那份的注释 */
-  'seo.games.title': '全部游戏 —— 在线玩 NES / SFC / 街机',
+  'seo.games.title': '全部游戏 —— 在线玩 NES / SFC / GBA / 街机',
   'seo.games.description':
-    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：NES、SFC（超级任天堂）和街机。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
+    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：NES、SFC（超级任天堂）、GBA 和街机。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
   /* 搜索结果两条，见上面英文那份的注释（人不索引、只给人看） */
   'seo.games.search.title': '「{keyword}」的搜索结果',
   'seo.games.search.description':
     '在线游戏库里匹配「{keyword}」的游戏共 {count} 款。可以直接在浏览器里玩，也可以下载 ROM 文件。',
+  /* 机种筛选，见上面英文那份的注释（`{console}` 是 NES / SFC / GBA / ARC 那四个丝印词） */
+  'seo.games.console.title': '{console} 游戏 —— 在线玩',
+  'seo.games.console.description':
+    '在线游戏库里的 {count} 款 {console} 游戏，全部可以直接在浏览器里玩，也可以下载 ROM 文件。',
   'seo.game.title': '{title} —— 在线玩 {console} 游戏',
   'seo.game.description':
     '直接在浏览器里玩《{title}》（{console}）—— 免费、免安装，也可以下载 ROM 文件。',
@@ -817,15 +1480,12 @@ const zh: Record<MessageKey, string> = {
   'seo.gameDownload.description':
     '一键下载《{title}》（{console}）的 ROM 文件，无需注册。也可以直接在浏览器里玩。',
   /* 开发商两页，见上面英文那份的注释 */
-  'seo.developers.title': '游戏开发商 —— 在线玩他们做的 NES / SFC / 街机游戏',
+  'seo.developers.title': '游戏开发商 —— 在线玩他们做的 NES / SFC / GBA / 街机游戏',
   'seo.developers.description':
     '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
   'seo.developer.title': '{name} —— 这家开发商的游戏',
   'seo.developer.description':
     '{name} 在在线游戏库里的全部游戏（{count} 款），可以直接在浏览器里玩，也可以下载 ROM 文件。',
-
-  'notice.desktopOnlyTitle': '仅限桌面端',
-  'notice.desktopOnly': '这个房间只在桌面端开放，请把浏览器窗口拉宽到 900px 以上。',
 
   'theme.toDark': '切换到夜晚模式',
   'theme.toLight': '切换到白天模式',
@@ -841,6 +1501,12 @@ const zh: Record<MessageKey, string> = {
   'tvSize.pick': '把电视机大小设为「{level}」',
   'locale.toZh': '切换到中文',
   'locale.toEn': '切换到英文',
+  /* 语言下拉的读屏名字，见上面英文那份的注释 */
+  'locale.label': '语言',
+  /* 语言提示弹窗，见上面英文那份的注释（文案跟当前页面语言，钮跟目标语言） */
+  'localePrompt.title': '当前页面是中文',
+  'localePrompt.body': '你的浏览器更习惯另一种语言，要切过去吗？',
+  'localePrompt.keep': '保持中文',
   'fullscreen.enter': '游戏画面全屏',
   'fullscreen.exit': '退出全屏',
 
@@ -874,6 +1540,12 @@ const zh: Record<MessageKey, string> = {
   'saves.title': '读档',
   'saves.load': '加载',
   'saves.close': '关闭',
+  /* 两组的分组标题。见上面英文表里的说明：说的是「存哪儿」这个事实 */
+  'saves.groupLocal': '本机',
+  'saves.groupCloud': '云端（账号）',
+  'saves.deleteCloud': '删除这份云端存档',
+  'saves.loading': '读取中…',
+  'saves.empty': '还没有存档',
 
   'library.removeLabel': '移除 {name}',
 
@@ -950,8 +1622,9 @@ const zh: Record<MessageKey, string> = {
   'netplay.errRoomFull': '房间已满，本游戏只支持 1 对 1。',
   'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
 
+  // 按钮 tooltip 叫「按键设置」，面板标题仍叫「自定义按键」—— 刻意不同名（理由见英文侧注释）
   'keybind.title': '自定义按键',
-  'keybind.open': '自定义按键',
+  'keybind.open': '按键设置',
   'keybind.close': '关闭',
   'keybind.p1': '玩家 1',
   'keybind.p2': '玩家 2',
@@ -986,6 +1659,150 @@ const zh: Record<MessageKey, string> = {
   'games.tabHistory': '历史',
   'games.historyEmpty': '还没有从游戏库载入过游戏',
   'games.historyLoad': '{name}\n点击重新载入',
+  /* 收藏，见英文表里那一段的说明 */
+  'games.tabFavorites': '收藏',
+  'games.favorite': '收藏「{name}」',
+  'games.unfavorite': '取消收藏「{name}」',
+  'games.favoritesEmpty': '还没有收藏 —— 点封面左上角那颗星就能收藏。',
+  /* 收藏 tab 未登录那两句。`{link}` 那两个字是可点开登录弹窗的按钮，见英文表的说明 */
+  'games.favoritesSignInBefore': '登录后可以把喜欢的游戏收进收藏 —— 点这里',
+  'games.favoritesSignInLink': '登录',
+  'games.favoritesSignInAfter': '，或在右上角点那颗账号钮。',
+
+  /* 用户面板，见英文表里那一段的说明 */
+  'user.title': '账号',
+  'user.close': '关闭',
+  /* 账号钮的悬停文案。登录后带上用户名 —— 那颗钮上只有图标，没别处能看出登的是谁 */
+  'user.open': '账号 —— 登录 / 注册',
+  'user.openSignedIn': '账号：{name}',
+  'user.tabLogin': '登录',
+  'user.tabRegister': '注册',
+  'user.username': '用户名',
+  'user.password': '密码',
+  /* 规则提示当 placeholder 用，见英文表里那一段的说明（登录模式不设 placeholder） */
+  'user.usernameHint': '3–20 个字符：字母、数字、_ - .',
+  'user.passwordHint': '至少 6 位，不能有空格。',
+  'user.signIn': '登录',
+  'user.signUp': '注册',
+  'user.signingIn': '登录中…',
+  'user.signingUp': '注册中…',
+  'user.signOut': '退出登录',
+  'user.signedInAs': '已登录：{name}',
+  'user.cloudHint':
+    '你的游戏历史、存档和收藏都存在账号里 —— 从在线游戏库打开任何一款，都会自动同步。',
+  /* 表单里那句「登录了能干什么」，见英文表里那一段的说明 */
+  'user.formLead': '登录之后，存档、游戏历史和收藏都存到云端，随时随地即刻开玩！',
+  /* 表单下面那句法律声明，见英文表里那一段的说明（拆四段：夹两个链接 + 分登录 / 注册） */
+  'user.consentLogin': '登录即表示您同意我们的',
+  'user.consentRegister': '注册即表示您同意我们的',
+  'user.consentMiddle': '和',
+  'user.consentAfter': '。',
+
+  'user.error.failed': '出错了，请重试。',
+  'user.error.missingCredentials': '请填写用户名和密码。',
+  'user.error.usernameInvalid': '用户名只能用字母、数字和 _ - .',
+  'user.error.usernameTooShort': '用户名太短了（至少 3 个字符）。',
+  'user.error.usernameTooLong': '用户名太长了（最多 20 个字符）。',
+  'user.error.usernameTaken': '这个用户名已经被占用了，换一个。',
+  'user.error.passwordInvalid': '请填写密码。',
+  'user.error.passwordTooShort': '密码太短了（至少 6 位）。',
+  'user.error.passwordTooLong': '密码太长了（最多 72 位）。',
+  /* 口令里有空白字符。注册 + 改密码都会回这个码；登录不会（见 lib/server/app-users.ts） */
+  'user.error.passwordHasSpace': '密码不能包含空格。',
+  'user.error.invalidCredentials': '用户名或密码不对。',
+  'user.error.banned': '这个账号已被封禁。',
+  /* 人机验证，见英文表里那一段的说明 */
+  'user.error.captchaRequired': '请先完成人机验证。',
+  'user.error.captchaFailed': '人机验证没通过，请重试。',
+
+  /* 登录页（`/login`）标题下面那句说明，见英文表里那一段的说明 */
+  'login.lead':
+    '登录之后，存档、游戏历史和收藏都存到云端，随时随地即刻开玩！还没有账号？去注册。',
+
+  /* 个人中心，见英文表里那一段的说明。注意 `account.error.*` 和 `user.error.*` 是两套 */
+  'account.title': '个人中心',
+  'account.loading': '载入中…',
+  'account.failed': '出错了，请重试。',
+  'account.since': '注册于 {time}',
+  /* VIP 标识，见英文表里那一段的说明 */
+  'account.vipBadge': 'VIP',
+  'account.nonVipBadge': '普通用户',
+  'account.vipUntil': '会员有效期至 {time}',
+  'account.vipExpired': '会员已于 {time} 过期',
+  'account.tabFavorites': '收藏',
+  'account.tabHistory': '历史',
+  'account.tabSaves': '存档',
+  'account.tabProfile': '资料',
+  'account.tabPassword': '密码',
+  /* 列表骨架屏，见英文表里的说明 */
+  'account.favoritesLoading': '正在取收藏…',
+  'account.historyLoading': '正在取历史…',
+  'account.savesLoading': '正在取存档…',
+
+  'account.favoritesEmpty': '还没有收藏 —— 在房间的游戏库里点封面左上角那颗星就能收藏。',
+  'account.unfavorite': '取消收藏「{name}」',
+
+  /* ---- 历史 ---- */
+  'account.historyEmpty': '还没有游玩记录 —— 从在线游戏库点开过的游戏会出现在这里。',
+  'account.historyCount': '最近玩过 {count} 款',
+  'account.historyDeleted': '已从历史中移除。',
+  'account.clearHistory': '全部清空',
+  'account.confirmClearHistory': '确认清空？',
+  'account.historyCleared': '历史已清空。',
+  'account.historyHint': '历史保留最近玩过的 {max} 款，重玩较早的一款会把它顶回最前面。',
+
+  'account.savesEmpty': '还没有云端存档。',
+  'account.savesCount': '共 {count} 份存档',
+  'account.savesHint':
+    '每款游戏最多保留 {max} 份存档，再存会顶掉最早的那份。本机和云端的上限一致。',
+  'account.saveDeleted': '存档已删除。',
+  'account.clearSaves': '全部清空',
+  'account.confirmClearSaves': '确认清空？',
+  'account.savesCleared': '已清空 {count} 份存档。',
+  'account.delete': '删除',
+  'account.confirmDelete': '确认删除？',
+
+  /* ---- 资料 ---- */
+  'account.avatar': '头像',
+  'account.chooseImage': '选择图片',
+  'account.clearAvatar': '移除头像',
+  'account.uploading': '上传中…',
+  'account.avatarSaved': '头像已更新。',
+  'account.avatarCleared': '头像已移除。',
+  'account.avatarHint': 'PNG / JPEG / WebP / GIF，不超过 2 MB。',
+  'account.gender': '性别',
+  /* 三档：未知（默认，库里存 NULL）/ 男 / 女。原先那档「其他」已删，见英文表说明 */
+  'account.genderNone': '未知',
+  'account.genderMale': '男',
+  'account.genderFemale': '女',
+  'account.genderSaved': '已保存。',
+  'account.genderHint': '选填 —— 只有你自己看得到。',
+  /*
+   * 「密码」那个独立 tab 下的说明。和资料 tab 里性别 / 头像分开之后，
+   * 这一页只讲一件事，所以 hint 也可以更聚焦。
+   */
+  'account.passwordTabHint': '改完之后这台设备仍然登着，不用重新登录。',
+  'account.password': '密码',
+  'account.oldPassword': '当前密码',
+  'account.newPassword': '新密码',
+  'account.confirmPassword': '重复新密码',
+  'account.savePassword': '修改密码',
+  'account.saving': '保存中…',
+  'account.passwordSaved': '密码已修改。',
+  'account.passwordHint':
+    '改完之后这台设备仍然登着。别的设备要等它自己的登录态过期才会失效。',
+
+  'account.error.missingOld': '请填写当前密码。',
+  'account.error.wrongPassword': '当前密码不对。',
+  'account.error.passwordTooShort': '新密码太短了（至少 6 位）。',
+  'account.error.passwordTooLong': '新密码太长了（最多 72 位）。',
+  /* 新口令里有空白字符（同 `user.error.passwordHasSpace`，但这一页说的是「新密码」） */
+  'account.error.passwordHasSpace': '新密码不能包含空格。',
+  'account.error.mismatch': '两次输入的新密码不一样。',
+  'account.error.avatarMissing': '请先选一张图片。',
+  'account.error.avatarTooLarge': '这张图太大了（最多 2 MB）。',
+  'account.error.avatarType': '不支持的格式 —— 请用 PNG / JPEG / WebP / GIF。',
+
   'games.filterAll': '全部',
   'games.searchPlaceholder': '搜索标题 / 开发者 / 系列',
   'games.search': '搜索',
@@ -1053,7 +1870,6 @@ const zh: Record<MessageKey, string> = {
   'feedback.unresolved': '未解决',
 
   /* 隐私政策 / 服务条款，正文在 lib/legal.ts（见英文表里那一组上面的注释） */
-  'legal.open': '隐私与服务条款',
   'legal.privacy': '隐私政策',
   'legal.terms': '服务条款',
   'legal.updated': '最后更新 {date}',
@@ -1068,7 +1884,7 @@ const zh: Record<MessageKey, string> = {
   'tour.replay': '重看操作指引',
   'tour.screen.title': '先来一盘游戏',
   'tour.screen.body':
-    '把 .nes / .sfc / 街机 .zip 文件拖到电视机上就能玩，也可以直接点屏幕挑文件。',
+    '把 .nes / .sfc / .gba 文件（或街机 .zip）拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
   'tour.rail.body':
     '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：游戏库（在线库 + 本机历史）、联机、自定义按键。帮助：按键说明、留言本。',
@@ -1085,6 +1901,7 @@ const zh: Record<MessageKey, string> = {
   'admin.nav.games': '游戏列表',
   'admin.nav.developers': '开发商',
   'admin.nav.feedback': '留言本',
+  'admin.nav.users': '用户',
   'admin.upload.title': '添加游戏',
   'admin.field.title': '游戏名',
   'admin.field.image': '封面图片',
@@ -1096,11 +1913,27 @@ const zh: Record<MessageKey, string> = {
   'admin.field.developer': '开发商',
   /* 说明 / 简介，见上面英文那份的注释 */
   'admin.field.description': '说明',
+  /* 英文字段，见上面英文那份的注释 */
+  'admin.field.titleEn': '游戏名 (EN)',
+  'admin.field.seriesEn': '系列 (EN)',
+  'admin.field.descriptionEn': '说明 (EN)',
+  'admin.i18n.hint': '选填。英文站显示这一份；留空则回退到中文。',
   'admin.description.placeholder': '选填。鼠标停在游戏库那张卡片上时会显示这行字。',
   'admin.upload.submit': '上传',
   'admin.upload.submitting': '上传中…',
   'admin.upload.ok': '已上传。',
   'admin.upload.required': '游戏名、封面图片、游戏文件为必传项。',
+  /* 「从链接自动填充」，见上面英文那份的注释 */
+  'admin.scrape.placeholder': '粘贴游戏页链接，自动填充',
+  'admin.scrape.button': '自动填充',
+  'admin.scrape.loading': '读取中…',
+  'admin.scrape.ok': '已从页面填充。',
+  'admin.scrape.failed': '读取该页面失败。',
+  'admin.scrape.developerMissing': '开发商「{name}」还不在库里 —— 先去建一个再选上。',
+  /* 拖拽提示，见上面英文那份的注释 */
+  'admin.drop.image': '把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。',
+  'admin.drop.rom': '把游戏文件拖到这里，或点选文件。',
+  'admin.drop.imageFailed': '取不到那张图片。',
   'admin.upload.failed': '上传失败。',
   'admin.list.title': '已上传的游戏',
   'admin.list.empty': '还没有上传任何游戏。',
@@ -1148,6 +1981,10 @@ const zh: Record<MessageKey, string> = {
   'admin.developers.field.website': '官网',
   'admin.developers.field.summary': '简介',
   'admin.developers.field.description': '介绍',
+  /* 英文字段，见上面英文那份的注释 */
+  'admin.developers.field.nameEn': '名字 (EN)',
+  'admin.developers.field.summaryEn': '简介 (EN)',
+  'admin.developers.field.descriptionEn': '介绍 (EN)',
 
   'admin.feedback.title': '留言本',
   'admin.feedback.empty': '还没有留言。',
@@ -1158,14 +1995,63 @@ const zh: Record<MessageKey, string> = {
   'admin.feedback.markUnresolved': '标记未解决',
   'admin.feedback.failed': '请求失败。',
 
+  /* 用户管理，见上面英文那份的注释（⚠️ 这是前台注册用户，不是后台管理员） */
+  'admin.users.title': '用户',
+  'admin.users.hint':
+    '这里是前台注册用户，不是后台管理员账号（管理员用 scripts/create-user.mjs 手工建，没有界面）。',
+  'admin.users.empty': '还没有注册用户。',
+  'admin.users.failed': '请求失败。',
+  'admin.users.ban': '封禁',
+  'admin.users.unban': '解封',
+  'admin.users.delete': '删除',
+  'admin.users.confirmDelete': '确认删除',
+  'admin.users.banned': '已封禁 {name}。',
+  'admin.users.unbanned': '已解封 {name}。',
+  'admin.users.deleted': '已删除 {name} 及其全部数据。',
+  'admin.users.statusBanned': '已封禁',
+  'admin.users.stats': '历史 {history} · 存档 {saves} · 收藏 {favorites}',
+  'admin.users.registered': '注册于 {time}',
+  'admin.users.lastLogin': '最近登录 {time}',
+  'admin.users.neverLoggedIn': '从未登录',
+  /* VIP，见英文表里那一段的说明 */
+  'admin.users.vipBadge': 'VIP',
+  'admin.users.vipUntil': 'VIP · 有效期至 {time}',
+  'admin.users.vipSetup': '设置 VIP',
+  'admin.users.vipExpiresLabel': '会员有效期至',
+  'admin.users.vipSave': '保存',
+  'admin.users.vipClear': '取消会员',
+  'admin.users.vipClose': '收起',
+  'admin.users.vipSaved': '已更新 {name} 的会员。',
+  'admin.users.vipCleared': '已取消 {name} 的会员。',
+
   /* 游戏列表 / 详情 / 下载三页的界面文案，见上面英文那份的注释 */
   'topLinks.label': '站点页面',
   'topLinks.games': '游戏列表',
 
+  /* 小屏右上角那颗「菜单」钮，说明见上面英文那份 */
+  'menu.open': '打开菜单',
+  'menu.close': '关闭菜单',
+  /* 抽屉里「主题」那一行的文案，说明见上面英文那份 */
+  'menu.theme': '主题',
+  /* 抽屉里「简洁模式」那一行的文案，说明见上面英文那份 */
+  'menu.simple': '简洁模式',
+
+  // 「离开房间」确认：房间那条「游戏列表」在房间里有活时先弹这层（见 ConsoleScene 的 leaveOpen）
+  'leave.title': '确定要离开吗？',
+  'leave.bodyGame': '正在运行的游戏会中断，进度不会保存。',
+  'leave.bodyNetplay': '会退出当前联机房间，对面会掉线。',
+  'leave.stay': '留下',
+  'leave.confirm': '离开',
+
   'gamesPage.heading': '全部游戏',
   'gamesPage.intro':
-    '在线游戏库共 {count} 款：NES、SFC（超级任天堂）和街机。点封面看详情，也可以直接开玩。',
+    '在线游戏库共 {count} 款：NES、SFC（超级任天堂）、GBA 和街机。点封面看详情，也可以直接开玩。',
   'gamesPage.empty': '游戏库现在还是空的。',
+  /* 机种筛选三条，见上面英文那份的注释 */
+  'gamesPage.introConsole': '游戏库里共 {count} 款 {console} 游戏。点封面看详情，也可以直接开玩。',
+  'gamesPage.filterLabel': '按机种筛选',
+  'gamesPage.filterAll': '全部',
+  'gamesPage.consoleEmpty': '库里还没有 {console} 游戏。',
   /* 列表页的搜索框，见上面英文那份的注释（和房间弹窗那组 `games.search*` 各写一份） */
   'gamesPage.searchLabel': '搜索游戏库',
   'gamesPage.searchPlaceholder': '搜索标题 / 开发者 / 系列',
@@ -1177,17 +2063,27 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.next': '下一页',
   'gamesPage.backHome': '回到房间',
   'gamesPage.backToGames': '全部游戏',
-  'gamesPage.backToGame': '返回游戏详情',
+  /* `gamesPage.backToGame` 已删除，统一到 `common.back`，见英文表里那一段的说明 */
+  'common.back': '返回',
+  /* 页脚那颗「首页」，见上面英文那份的注释 */
+  'common.home': '首页',
   'gamesPage.play': '开始游戏',
   'gamesPage.download': '下载 ROM',
   'gamesPage.share': '分享游戏',
   'gamesPage.shareCopied': '已复制',
   'gamesPage.shareFailed': '复制失败',
+  /* 收藏按钮，见英文表里那一段的说明 */
+  'gamesPage.favorite': '收藏',
+  'gamesPage.unfavorite': '已收藏',
+  'gamesPage.favoriteSignIn': '登录后才能收藏 —— 点房间里右上角那颗账号钮登录。',
+  'gamesPage.favoriteFailed': '收藏没能更新，请重试。',
   'gamesPage.field.console': '类型',
   'gamesPage.field.year': '年份',
   'gamesPage.field.developer': '开发商',
   'gamesPage.field.series': '系列',
   'gamesPage.field.language': '语言',
+  'notFound.title': '这个页面不存在',
+  'notFound.description': '这个地址在 {site} 上不存在。检查一下链接，或者回房间里看看。',
   'gamesPage.notFoundTitle': '找不到这个游戏',
   'gamesPage.notFound': '这个游戏不在游戏库里（可能已经被移除）。',
   'gamesPage.fallbackDescription': '《{title}》是一款 {console} 游戏。',
@@ -1201,8 +2097,7 @@ const zh: Record<MessageKey, string> = {
   'developersPage.gamesHeading': '{name} 的游戏',
   'developersPage.gamesEmpty': '库里还没有这家公司的游戏。',
   'developersPage.field.founded': '成立年份',
-  /* 见英文表里同一条上面的说明：详情页左上那颗，浏览器回退 */
-  'developersPage.back': '返回',
+  /* `developersPage.back` 已删除，统一到 `common.back`，见英文表里那一段的说明 */
   'developersPage.backToDevelopers': '全部开发商',
   'developersPage.notFoundTitle': '找不到这个开发商',
   'developersPage.notFound': '这个开发商已经不在库里了。',
@@ -1228,6 +2123,125 @@ export type Translate = (key: MessageKey, vars?: Record<string, string | number>
 
 export function isLocale(value: unknown): value is Locale {
   return value === 'zh' || value === 'en';
+}
+
+/**
+ * 给站内地址加上语言前缀 —— **所有站内 `<Link>` 都要过这一道**。
+ *
+ *   localePath('zh', '/games')        → '/zh/games'
+ *   localePath('zh', '/')             → '/zh'
+ *   localePath('zh', '/?id=3')        → '/zh?id=3'   ← 不是 '/zh/?id=3'
+ *   localePath('en', '/games')        → '/games'     ← 默认语言不加前缀
+ *   localePath('zh', 'https://x.com') → 'https://x.com'  ← 外链原样放行
+ *
+ * 为什么 `/` 带 query 要特殊处理：`/zh/?id=3` 不是 `/zh` 的规范形式，
+ * Next 会先 308 到 `/zh?id=3`，白白多一跳。
+ *
+ * ⚠️ 2026-10-13 拆首页之前，最常走这条分支的就是「在房间里打开某款游戏」那条深链
+ *    （那时它是挂在 `/` 上的 `/?id=<游戏>`）。现在屋子挪到了 `/room`、深链成了
+ *    `/room?id=`，走的是下面那条普通分支。**这个 `/?` 分支仍然留着** —— `/` 是首页，
+ *    它照样可能带 query，留着是零成本的正确写法。
+ *
+ * 外链那一条不是洁癖：漏掉它，`href="https://github.com/..."` 会变成
+ * `https://github.com/...` 被当成相对路径，直接拼成 `/zh/https://...`。
+ * 判据用「协议头」而不是「以 http 开头」，`mailto:` / `tel:` / `data:` 一并覆盖。
+ */
+export function localePath(locale: Locale, path: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('//')) return path;
+
+  const prefix = LOCALE_PREFIX[locale];
+  if (!prefix) return path;
+
+  if (path === '' || path === '/') return prefix;
+  if (path.startsWith('/?')) return prefix + path.slice(1);
+  return prefix + (path.startsWith('/') ? path : `/${path}`);
+}
+
+/**
+ * 从 pathname 里剥出语言前缀。`localePath()` 的反函数。
+ *
+ *   '/zh/games' → { locale: 'zh', path: '/games' }
+ *   '/zh'       → { locale: 'zh', path: '/' }
+ *   '/games'    → { locale: 'en', path: '/games' }   ← 无前缀即默认语言
+ *   '/en/games' → { locale: 'en', path: '/games' }   ← 见下面那条 ⚠️
+ *
+ * ⚠️ **只认 pathname，不吃 query**（`usePathname()` 返回的也不含 query）。
+ * 传进来带 `?` 的字符串会得到错误结果，别那么用。
+ *
+ * ⚠️ **显式英文前缀 `/en/...` 也要剥**。正常流量里地址栏看不到它（middleware 会
+ * 301 掉），但 middleware 的**内部 rewrite** 会让 `usePathname()` 报出
+ * `/en/games` 这种路由内部路径。不剥的话语言判断仍然对（`/en` 也是英文），
+ * 但 `I18nProvider` 算「当前页面的另一种语言地址」会得到 `/zh/en/games` ——
+ * 一个只在切换钮上出现、平时看不出来的坏链接。
+ *
+ * 无前缀一律判成 `DEFAULT_LOCALE`：这是「英文占空」的另一面。
+ * 后台（`/admin/...`）也落在这条分支上 —— 它本来就不过语言前缀那套，
+ * 语言由 cookie 决定，见 components/I18nProvider.tsx 里的说明。
+ */
+export function splitLocalePath(pathname: string): { locale: Locale; path: string } {
+  /* 英文前缀单独处理：它在 LOCALE_PREFIX 里是空串，那个循环会直接跳过它 */
+  if (pathname === EN_PREFIX) return { locale: 'en', path: '/' };
+  if (pathname.startsWith(`${EN_PREFIX}/`)) {
+    return { locale: 'en', path: pathname.slice(EN_PREFIX.length) };
+  }
+
+  for (const locale of LOCALES) {
+    const prefix = LOCALE_PREFIX[locale];
+    if (!prefix) continue;
+    if (pathname === prefix) return { locale, path: '/' };
+    if (pathname.startsWith(`${prefix}/`)) return { locale, path: pathname.slice(prefix.length) };
+  }
+  return { locale: DEFAULT_LOCALE, path: pathname };
+}
+
+/**
+ * `<html lang>` 的值（也是 JSON-LD 的 `inLanguage`、`hreflang` 的键）。
+ *
+ * 集中在一处是因为它散得到处都是：根布局的 `<html>`、JSON-LD 两个节点、
+ * 每个页面的 `alternates.languages`。各写各的迟早漂成 `zh` / `zh-CN` / `zh-Hans`
+ * 三种，而 `hreflang` 的值**必须逐字一致**才算同一组标注。
+ */
+export function htmlLang(locale: Locale): 'zh-CN' | 'en' {
+  return locale === 'zh' ? 'zh-CN' : 'en';
+}
+
+/**
+ * `og:locale` 的值。**和 `htmlLang` 不是一个体系**：Open Graph 用的是
+ * `zh_CN` 这种下划线写法，hreflang / `<html lang>` 用的是 `zh-CN` 连字符写法。
+ * 看着像同一个东西，写混了爬虫不报错、只是那半边标注失效 —— 所以各留一个函数。
+ */
+export function ogLocale(locale: Locale): 'zh_CN' | 'en_US' {
+  return locale === 'zh' ? 'zh_CN' : 'en_US';
+}
+
+/** 另一种语言。语言切换、`og:locale:alternate` 都要用。 */
+export function otherLocale(locale: Locale): Locale {
+  return locale === 'zh' ? 'en' : 'zh';
+}
+
+/**
+ * 一个页面的 `alternates` 三件套：canonical + 两条 hreflang + `x-default`。
+ *
+ * 入参是**不带前缀的路径**（`/games`、`/games/<id>`），前缀在这里加。
+ * 这样调用点不必自己拼，也就不会出现「canonical 加了前缀、hreflang 忘了加」
+ * 这种一半对一半的标注 —— 那种错 Google 会直接判成 hreflang 无效。
+ *
+ * `x-default` 指英文：它是无前缀的那个地址，也是**没表态的访客**该看到的版本
+ * （middleware 只在检测到中文偏好时才把人送去 `/zh`）。
+ *
+ * ⚠️ Next 的 `alternates` 是**整体覆盖**而不是深合并：子页面写了自己的 `alternates`，
+ * 父级那份就整个作废。所以每个 `generateMetadata` 都要写全 —— 少写一页，
+ * 那页的 canonical 就会指向父级的（首页）。
+ */
+export function alternatesFor(locale: Locale, path: string) {
+  return {
+    canonical: localePath(locale, path),
+    languages: {
+      [htmlLang('en')]: localePath('en', path),
+      [htmlLang('zh')]: localePath('zh', path),
+      'x-default': localePath('en', path),
+    },
+  };
 }
 
 /**

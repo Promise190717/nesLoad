@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { cardDelayMs } from '@/lib/card-stagger';
-import type { Game } from '@/lib/server/games';
+import { localePath, type Locale } from '@/lib/i18n';
+import { localizeGame, type Game } from '@/lib/server/games';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 
 /**
@@ -15,12 +16,19 @@ import { CONSOLE_LABEL } from './CartridgeSprite';
  * 没有任何交互 —— 那两颗真正需要交互的按钮（下载 / 分享）在详情页，各自带 'use client'。
  *
  * ⚠️ 爬虫拿到的是**同样的 HTML**（动画纯 CSS，不影响正文与链接），所以动效可以放心加。
+ *
+ * ⚠️ `locale` 是**必填**的：卡片上的标题 / 开发商要按当前语言取一份
+ *    （`localizeGame`，英文站空值回退中文，见 lib/server/games.ts）。
+ *    这个组件是服务端组件，语言从页面传进来，没有别的来源。
  */
 export default function GameCardGrid({
   games,
+  locale,
   showDeveloper = true,
 }: {
   games: readonly Game[];
+  /** 当前语言。卡片文案按它取一份 —— 见文件头那条 ⚠️。 */
+  locale: Locale;
   /**
    * 卡片下面那行要不要带上开发商名。
    * 开发商详情页里满屏都是同一个开发商，再报一遍是噪音 ⇒ 那边传 false。
@@ -30,6 +38,8 @@ export default function GameCardGrid({
   return (
     <ul className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       {games.map((game, index) => {
+        /* 卡片的文案（标题 / 开发商）按当前语言取一份 —— 见文件头那条 ⚠️ */
+        const text = localizeGame(game, locale);
         /*
          * 卡片下面那行：年份 · 开发商 · 机种。
          * 把机种放在**文字里**而不是封面角标上：角标是给「已经知道自己在看什么」的人认的，
@@ -37,7 +47,7 @@ export default function GameCardGrid({
          */
         const meta = [
           game.year,
-          showDeveloper ? game.developer : null,
+          showDeveloper ? text.developer : null,
           CONSOLE_LABEL[game.consoleType],
         ]
           .filter(Boolean)
@@ -61,7 +71,7 @@ export default function GameCardGrid({
             style={{ animationDelay: `${cardDelayMs(index)}ms` }}
           >
             <Link
-              href={`/games/${game.id}`}
+              href={localePath(locale, `/games/${game.id}`)}
               className="pixel-edge pxw-2 pxc-700 block h-full bg-ink-900 transition-colors hover:bg-ink-800"
             >
               <span className="relative block aspect-[3/4] w-full overflow-hidden bg-ink-950">
@@ -80,7 +90,7 @@ export default function GameCardGrid({
                 />
               </span>
               <span className="mt-2 block">
-                <span className="block truncate text-[12px] text-ink-100">{game.title}</span>
+                <span className="block truncate text-[12px] text-ink-100">{text.title}</span>
                 <span className="mt-0.5 block truncate text-[10px] text-ink-500">{meta}</span>
               </span>
             </Link>

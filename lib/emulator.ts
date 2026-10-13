@@ -20,7 +20,7 @@ import { unwrapRom } from './unwrap';
  */
 installAudioTap();
 
-export type ConsoleType = 'nes' | 'snes' | 'arcade';
+export type ConsoleType = 'nes' | 'snes' | 'gba' | 'arcade';
 
 export interface LoadedRom {
   name: string;
@@ -54,10 +54,29 @@ export class UnsupportedRomError extends Error {
  *
  * ⚠️ 两个核心的 romset 都是**版本锁死**的：zip 里的文件必须和核心期望的版本对得上，
  * 对不上就直接不加载（表现和「格式不支持」一样是静默的）。这不是这个项目能绕开的。
+ *
+ * GBA 用 `mgba`：和街机一样**走本站 `public/cores/`**（见 `coreSource`）。
+ *
+ * ⚠️ 更正（2026-10-13）：这里原先写的是「Nostalgist 自带的 CDN 清单里没有 mgba」——
+ * **不成立**。Nostalgist 的核心解析根本没有清单，它只是把核心名拼进
+ * `${coreRepo}@${coreVersion}/retroarch/<core>_libretro.zip`（见 nostalgist.js 的
+ * `extractCore`），而 `mgba_libretro.zip` 在那个仓库里**是有的**（实测 200、1.15 MB，
+ * 解出来就是 `mgba_libretro.js` + `.wasm`）；`coreInfoMap` 里也收录了 `mgba`
+ * （corename `mGBA`、`savestate: true`，所以存档能用）。
+ *
+ * 真正走本地的理由和街机**是同一条**：jsdelivr 在国内经常连不上或被限速
+ * （完整因果见下面 `LOCAL_CORE_DIR`）。核心文件同样取自
+ * `arianrhodsandlot/retroarch-emscripten-build@v1.22.2` 构建
+ * （`retroarch/mgba_libretro.zip`）。
+ *
+ * ⚠️ 这个文件当时**漏放了**（`public/cores/` 里只有 fbneo / fbalpha2012_cps1），
+ * 表现是 GBA 一拖进去 `Nostalgist.launch` 就抛错 —— 因为 `/cores/mgba_libretro.js`
+ * 是 404，Next 把 404 页面当核心 js 喂给了核心加载器。加新核心时记得两边一起放。
  */
 const CORE_MAP: Record<ConsoleType, string> = {
   nes: 'fceumm',
   snes: 'snes9x',
+  gba: 'mgba',
   arcade: 'fbneo',
 };
 
@@ -68,11 +87,12 @@ const CORE_MAP: Record<ConsoleType, string> = {
  * width/height 属性（RetroTv 用这两个常量）。
  *
  * ⚠️ **屏幕的显示尺寸已经不在这里了**（2026-10-12 加电视机尺寸档位之后）：
- * 那是 globals.css 里的 `--tv-screen-w / -h`，按 `<html data-tv>` 取小 / 中 / 大
- * 三档，**小档正好等于这两个数**。所以这里只是「启动时给核心的一个基准」，
- * 换档不用动它 —— 核心用 ResizeObserver 盯着 canvas 元素，CSS 尺寸一变就按
+ * 那是 globals.css 里的 `--tv-screen-w / -h`，按窗口算出「屋子塞得下的最大屏幕」再乘
+ * 档位占比（小 / 中 / 大 = 80% / 90% / 100%，2026-10-13 起）。所以这两个数
+ * **不对应任何一档的显示尺寸**，只是「启动时给核心的一个基准」，换档、拉窗口都不用动它
+ * —— 核心用 ResizeObserver 盯着 canvas 元素，CSS 尺寸一变就按
  * `contentRect × devicePixelRatio` 重设后备存储（见 public/cores/*.js），
- * 所以「基准 720×540、实际显示 880×660」这种组合也是对的。
+ * 所以「基准 720×540、实际显示 1200×900」这种组合也是对的。
  *
  * 注意它只是**基准**：核心起来之后会按 `devicePixelRatio` 把后备存储改成
  * 720×dpr（125% 缩放 = 900×675）来保证清晰度，那是核心的事，屏幕的显示尺寸由
@@ -109,6 +129,7 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
   swc: 'snes',
   fig: 'snes',
   bs: 'snes',
+  gba: 'gba',
   zip: 'arcade',
 };
 
@@ -188,6 +209,23 @@ function looksLikeSnes(bytes: Uint8Array, size: number): boolean {
   return false;
 }
 
+/**
+ * GBA ROM 的固定长度（含镜像）都 ≥ 192 KiB，且**必须在 0xB2 处是 `0x96`**
+ * —— 这是任天堂的「固定值」，写死在 ROM 头里，是 GBA 最可靠的指纹。
+ *
+ * 为什么还要卡一个**大小下限**：单凭 0xB2 一个字节太弱（256 分之一会误判）。
+ * 真实 GBA 卡带最小 4 MB 位（512 KiB），但为了兼容精简的 dump 放宽到 192 KiB
+ * —— 再小的「GBA ROM」几乎都是别的东西改了扩展名。
+ *
+ * ⚠️ 这个判断要**放在 SNES 之前**：GBA ROM 大小常是 2 的幂（8 MB 等），
+ * 满足 `size % 0x8000 === 0`，虽然 SNES 还要额外过 checksum 才会命中，
+ * 但先认 GBA 更稳妥 —— 免得将来有人放宽 SNES 判定时踩这条。
+ */
+function looksLikeGba(bytes: Uint8Array, size: number): boolean {
+  if (size < 0x30000) return false;
+  return bytes[0xb2] === 0x96;
+}
+
 export function consoleFromExtension(fileName: string): ConsoleType | null {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   return EXTENSION_MAP[ext] ?? null;
@@ -219,6 +257,9 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
   if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) {
     return 'arcade';
   }
+
+  // GBA 在 SNES 之前：见 looksLikeGba 的注释（大小可能撞上 SNES 那条取模）
+  if (looksLikeGba(head, file.size)) return 'gba';
 
   if (looksLikeSnes(head, file.size)) return 'snes';
 
@@ -502,24 +543,29 @@ export class EmulatorController {
     }
 
     /*
-     * 街机核心走本站静态文件（`public/cores/`）；NES / SFC 不传这两个 resolve，
-     * 保持走 Nostalgist 的 CDN —— 只改出问题的街机，不动正在正常工作的那两条路。
+     * 街机（fbneo / fbalpha2012_cps1）和 GBA（mgba）的核心都走本站静态文件
+     * （`public/cores/`）；NES / SFC 不传这两个 resolve，保持走 Nostalgist 的 CDN
+     * —— 那两条路一直正常，不动它们。
+     *
+     * GBA 为什么也走本地：和街机**同一条理由** —— jsdelivr 在国内不可靠
+     * （见上面 `LOCAL_CORE_DIR`）。**不是**因为 CDN 上没有 mgba，那个包是有的，
+     * 详见 `CORE_MAP` 上方那段更正。
      *
      * 参数类型写 `unknown` 是刻意的：Nostalgist 把这两个回调的参数声明成
      * `NostalgistCoreDict | string`（那个类型没导出，我们引不到），而它实际传进来的
      * **永远是核心名字符串** —— `updateCore()` 里是 `resolver(core, options)`，
-     * `core` 就是我们传的 `'fbneo'` / `'fbalpha2012_cps1'`。手写成 `string` 会踩逆变检查
-     * （`NostalgistCoreDict` 不能赋给 `string`）编译不过；改成让上下文推断，
+     * `core` 就是我们传的 `'fbneo'` / `'fbalpha2012_cps1'` / `'mgba'`。手写成 `string`
+     * 会踩逆变检查（`NostalgistCoreDict` 不能赋给 `string`）编译不过；改成让上下文推断，
      * 模板串里又会出现对象类型、同样报错。`unknown` 两头都绕开。
      */
-    const coreSource =
-      consoleType === 'arcade'
-        ? {
-            resolveCoreJs: (name: unknown) => `${LOCAL_CORE_DIR}/${String(name)}_libretro.js`,
-            resolveCoreWasm: (name: unknown) =>
-              `${LOCAL_CORE_DIR}/${String(name)}_libretro.wasm`,
-          }
-        : {};
+    const useLocalCore = consoleType === 'arcade' || consoleType === 'gba';
+    const coreSource = useLocalCore
+      ? {
+          resolveCoreJs: (name: unknown) => `${LOCAL_CORE_DIR}/${String(name)}_libretro.js`,
+          resolveCoreWasm: (name: unknown) =>
+            `${LOCAL_CORE_DIR}/${String(name)}_libretro.wasm`,
+        }
+      : {};
 
     /*
      * 只在下核心包那段时间挂上观测，launch 一结束就摘掉 ——

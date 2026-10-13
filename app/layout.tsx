@@ -1,7 +1,18 @@
 import type { Metadata, Viewport } from 'next';
 import { I18nProvider } from '@/components/I18nProvider';
+import LocalePrompt from '@/components/LocalePrompt';
 import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
-import { SITE_NAME, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import {
+  SITE_NAME,
+  alternatesFor,
+  htmlLang,
+  localePath,
+  ogLocale,
+  otherLocale,
+  translate,
+  type Locale,
+  type MessageKey,
+} from '@/lib/i18n';
 import { readLocale } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
 import './globals.css';
@@ -11,9 +22,16 @@ import './globals.css';
  *
  * 几个刻意的取舍，别照着「惯例清单」把它改回去：
  *
- * - **不写 `alternates.languages`（hreflang）**。本站没有 `/en` `/zh` 这种分语言 URL，
- *   语言靠 cookie 决定，所有语言共用同一个地址。给同一个 URL 挂多个 hreflang 是
- *   无效标注（Google 会当成自我重复），只留一条 canonical。
+ * - **`alternates` 要写全（canonical + hreflang）**。2026-10-13 起语言分了路径
+ *   （英文无前缀、中文 `/zh`），同一个页面有了两个地址 —— 这正是 hreflang 的用武之地：
+ *   `en` / `zh-CN` 互指，`x-default` 指英文。反过来，**现在不写 hreflang 才是错的**：
+ *   两份内容同源却互不声明，会被当成重复内容（这跟 2026-10-13 之前「共用一个 URL、
+ *   写了反而自我重复」的判断正好相反，别再照老注释改回去）。
+ *
+ *   ⚠️ 这一份是**首页**的 —— 根布局在 `[locale]` 段外面，拿不到路由参数，
+ *      不知道当前是哪个页面。子页面各自在自己的 `generateMetadata` 里写。
+ *      Next 的 `alternates` 是**整体覆盖**不是深合并，漏写一页，那页的 canonical
+ *      就会顶着首页的地址。收口在 `lib/i18n.ts` 的 `alternatesFor()`。
  * - **`title.default` + `template` 都要**。default 是首页自己的标题（首页不该吃模板），
  *   template 给将来的子页面用（`/admin` 那几页会带上站名后缀）。
  * - **`robots` 显式写全**，包括 googleBot 的三个 max-*：不写的话图片预览会被压成缩略图，
@@ -49,7 +67,7 @@ export async function generateMetadata(): Promise<Metadata> {
     publisher: site,
     /* 归到「游戏」这一类，帮搜索引擎把站放进正确的目录里 */
     category: 'games',
-    alternates: { canonical: '/' },
+    alternates: alternatesFor(locale, '/'),
     /*
      * 别把机身上的版本号（BETA v0.1.0）、存档时间戳之类自动识别成电话 / 地址
      * 并加上链接 —— iOS Safari 尤其爱干这事，点在像素风的界面上会非常出戏。
@@ -77,11 +95,17 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     openGraph: {
       type: 'website',
-      url: '/',
+      /*
+       * `url` 也按语言分路径 —— 中文首页的 og:url 该是 `/zh`，跟 canonical 一致。
+       * `locale` / `alternateLocale` 用 `ogLocale()`（下划线那套，`zh_CN`），
+       * 跟 `htmlLang()`（连字符 `zh-CN`）不是一个体系，别混。
+       */
+      url: localePath(locale, '/'),
       siteName: site,
       title: t('meta.title'),
       description: t('meta.description'),
-      locale: locale === 'zh' ? 'zh_CN' : 'en_US',
+      locale: ogLocale(locale),
+      alternateLocale: ogLocale(otherLocale(locale)),
     },
     /*
      * `summary_large_image` 才会横着铺开那张 1200×630 的图。
@@ -187,7 +211,7 @@ const BOOT_INIT = `(function(){try{var t=localStorage.getItem('nesload:theme');i
  * 何况将来 description 可能会带上用户可控的内容。
  */
 function buildJsonLd(origin: string, locale: Locale, name: string, description: string) {
-  const language = locale === 'zh' ? 'zh-CN' : 'en';
+  const language = htmlLang(locale);
 
   return {
     '@context': 'https://schema.org',
@@ -230,11 +254,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   );
 
   return (
-    <html
-      lang={locale === 'zh' ? 'zh-CN' : 'en'}
-      data-locale={locale}
-      suppressHydrationWarning
-    >
+    <html lang={htmlLang(locale)} data-locale={locale} suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -268,7 +288,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
-        <I18nProvider initialLocale={locale}>{children}</I18nProvider>
+        <I18nProvider initialLocale={locale}>
+          {children}
+          {/*
+            「要不要换成你的语言」提示。**必须在 Provider 里面** —— 它要读当前语言、
+            要拿到另一种语言的地址。挂在根布局而不是房间里，是因为内容页（/games 等）
+            同样需要：从搜索点进来的人也可能是个中文用户。
+            它自己不渲染任何东西，除非「没设置过语言 且 浏览器语言 ≠ 页面语言」。
+          */}
+          <LocalePrompt />
+        </I18nProvider>
         {/*
           PWA 的 Service Worker 注册（清单在 app/manifest.ts，策略在 public/sw.js）。
           它不渲染任何东西，也不依赖 i18n 上下文，所以摆在 Provider 外面 ——

@@ -3,7 +3,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
 import type { ConsoleType } from '@/lib/emulator';
-import { formatTime, type MessageKey } from '@/lib/i18n';
+import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
+import { localizeGame, type LocalizedGameText } from '@/lib/server/games';
 import type { Cartridge } from '@/lib/library';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
@@ -11,23 +12,111 @@ import { useI18n } from './I18nProvider';
 /**
  * `/api/games` 返回的条目（字段与 lib/server/games.ts 的 Game 对齐）。
  * 这里刻意只留展示 + 载入需要的字段：真实 ROM 地址不在响应里。
+ *
+ * ⚠️ 中英两份文案**都在**（`title` + `titleEn` 那种）—— 房间里的语言是运行时切的，
+ *    不是每次请求都重取数据，所以两份都得拿到手上，由 `localizeGame` 现挑一份。
  */
 export interface LibraryGame {
   id: string;
   title: string;
+  /** 英文名（可空）。空 = 英文站回退 `title`。2026-10-13 加。 */
+  titleEn: string | null;
   imageUrl: string;
   romName: string;
   consoleType: ConsoleType;
   language: string | null;
   series: string | null;
+  seriesEn: string | null;
   year: number | null;
   developer: string | null;
+  developerEn: string | null;
   /** 说明 / 简介（可空，后台那个「说明」字段）。卡片太小放不下正文，只当悬停提示用。 */
   description: string | null;
+  descriptionEn: string | null;
   createdAt: number;
 }
 
 type LoadState = 'loading' | 'ready' | 'error';
+
+/**
+ * `/api/user/favorites` 返回的条目（字段与 lib/server/user-data.ts 的 `UserFavoriteItem` 对齐）。
+ *
+ * 和 `LibraryGame` 是两份形状：收藏那份多一个 `favoritedAt`（收藏时间，列表按它倒序），
+ * 但结构上就是「游戏的字段 + 一个时间戳」。所以要转一次 —— 见下面的 `favoriteToGame`。
+ */
+interface UserFavoriteItem {
+  id: string;
+  title: string;
+  titleEn: string | null;
+  imageUrl: string;
+  romName: string;
+  consoleType: ConsoleType;
+  language: string | null;
+  series: string | null;
+  seriesEn: string | null;
+  year: number | null;
+  developer: string | null;
+  developerEn: string | null;
+  description: string | null;
+  descriptionEn: string | null;
+  favoritedAt: number;
+}
+
+/**
+ * 收藏条目 → 卡片要的 `LibraryGame`。
+ *
+ * 转的理由：收藏 tab 里那些卡片点下去走的是**和在线库完全同一条路**（`onPick(game)`，
+ * 父级 `loadRemoteGame`）—— 那边收的就是 `LibraryGame`。为了少转这一次而给 `onPick`
+ * 加一个联合类型，会让 ConsoleScene 那边多一层分支，划不来。
+ *
+ * `createdAt` 补 0：它只在详情页那些地方被用到，卡片上不显示。
+ * 而**收藏时间单独留着**（下面列表里那行小字用它），所以不能直接丢掉。
+ */
+function favoriteToGame(item: UserFavoriteItem): LibraryGame & { favoritedAt: number } {
+  return {
+    id: item.id,
+    title: item.title,
+    titleEn: item.titleEn,
+    imageUrl: item.imageUrl,
+    romName: item.romName,
+    consoleType: item.consoleType,
+    language: item.language,
+    series: item.series,
+    seriesEn: item.seriesEn,
+    year: item.year,
+    developer: item.developer,
+    developerEn: item.developerEn,
+    description: item.description,
+    descriptionEn: item.descriptionEn,
+    createdAt: 0,
+    favoritedAt: item.favoritedAt,
+  };
+}
+
+/**
+ * 按语言取一条游戏在本面板里要显示的那几样文字。
+ *
+ * 为什么不直接用 `lib/server/games.ts` 的 `localizeGame`：那个收的是服务端那份 `Game`
+ * （字段一模一样，但 `Game` 是「服务端结构」的语义）。这里拿到的是接口 JSON 的形状
+ * （`LibraryGame`），两者字段虽然对齐，跨层直接喂进去容易在将来某一侧加字段时悄悄错开。
+ * 所以这里做一次显式的字段搬运 —— 出错时是类型错误，而不是渲染出一个空标题。
+ */
+export function localizeLibraryGame(game: LibraryGame, locale: Locale): LocalizedGameText {
+  if (locale !== 'zh') {
+    return {
+      title: game.titleEn || game.title,
+      series: game.seriesEn || game.series,
+      developer: game.developerEn || game.developer,
+      description: game.descriptionEn || game.description,
+    };
+  }
+  return {
+    title: game.title,
+    series: game.series,
+    developer: game.developer,
+    description: game.description,
+  };
+}
 
 /**
  * 封面右侧那个**语言角标**（排在机种角标下面）。
@@ -46,14 +135,20 @@ function languageTag(value: string | null): { text: string; pixel: boolean } | n
 }
 
 /**
- * 两个 tab：在线库（R2 + D1 上传的那批）和本机历史（**从游戏库点开过的那批**）。
+ * 三个 tab：在线库（R2 + D1 上传的那批）、本机历史（**从游戏库点开过的那批**）、
+ * 收藏（云端，需要登录）。
  * 默认落在「游戏库」——弹窗的主要用途还是去挑一盘没玩过的。
+ *
+ * ⚠️ 「收藏」那个 tab **没登录时也会显示**，点进去是一句「登录后才能收藏」——
+ * 而不是把整个 tab 藏掉。理由：藏掉的话，没登录的用户根本不知道有收藏这回事，
+ * 而收藏恰恰是「值得注册」的第一理由。少一个 tab 换不来任何好处。
  */
-type Tab = 'library' | 'history';
+type Tab = 'library' | 'history' | 'favorites';
 
 const TABS: { value: Tab; label: MessageKey }[] = [
   { value: 'library', label: 'games.tabLibrary' },
   { value: 'history', label: 'games.tabHistory' },
+  { value: 'favorites', label: 'games.tabFavorites' },
 ];
 
 /**
@@ -62,7 +157,7 @@ const TABS: { value: Tab; label: MessageKey }[] = [
  */
 type ConsoleFilter = ConsoleType | 'all';
 
-const CONSOLE_FILTERS: readonly ConsoleFilter[] = ['all', 'nes', 'snes', 'arcade'];
+const CONSOLE_FILTERS: readonly ConsoleFilter[] = ['all', 'nes', 'snes', 'gba', 'arcade'];
 
 /**
  * 在线库列表每页条数。
@@ -223,6 +318,26 @@ interface GameLibraryPanelProps {
   onPickCartridge: (cartridge: Cartridge) => void;
   /** 从「历史」里移除一条 */
   onRemoveCartridge: (id: string) => void;
+  /**
+   * 收藏（云端，需要登录）。
+   *
+   * `favoriteIds` 是**完整集合**（不是当前页那几条）—— 星标要在任何一页、任何时候
+   * 都画得对，而列表是服务端分页的，每页只知道 15 条。
+   *
+   * 未登录时父级传 `null`：那时星标一律不亮、点它也不发请求（面板会提示去登录）。
+   * 用 `null` 而不是空数组，是为了把「没登录」和「登录了但一个都没收藏」分开 ——
+   * 后者是一位真实用户的正常状态，不该被当成未登录。
+   */
+  favoriteIds: string[] | null;
+  /** 加 / 取消收藏。父级负责打接口、更新 `favoriteIds`。 */
+  onToggleFavorite: (game: LibraryGame) => void;
+  /**
+   * 点「收藏」tab 里那句提示上的「登录」两个字。
+   *
+   * 父级拿到就把账号面板打开（顺带**把本面板关掉** —— 两个模态叠在一起，
+   * 上面那个一关，下面这个还留着的观感很怪）。
+   */
+  onSignIn: () => void;
   onClose: () => void;
 }
 
@@ -246,6 +361,9 @@ export default function GameLibraryPanel({
   onPickCartridge,
   onRemoveCartridge,
   onCancelLoad,
+  favoriteIds,
+  onToggleFavorite,
+  onSignIn,
   onClose,
 }: GameLibraryPanelProps) {
   const { t, locale } = useI18n();
@@ -338,6 +456,62 @@ export default function GameLibraryPanel({
     setPage(next);
     listRef.current?.scrollTo({ top: 0 });
   };
+
+  /* ---------------- 收藏（云端） ---------------- */
+
+  /**
+   * 收藏集合的 O(1) 判据。
+   *
+   * 父级给的是数组（接口返回的形状），但卡片要一个个查，每张卡都 `includes()` 一遍
+   * 就是 O(页大小 × 收藏数)。这里转成 Set 一次。
+   *
+   * `favoriteIds === null`（未登录）时给一个空 Set —— 星标一律不亮。
+   */
+  const favoriteSet = new Set(favoriteIds ?? []);
+  const signedIn = favoriteIds !== null;
+
+  /**
+   * 「收藏」tab 的完整列表。**自己拉，不由父级持有**。
+   *
+   * 为什么和 `library`（历史，父级给）不一样：历史是父级本来就持有的 state
+   * （每次载入完都要刷新它、屏幕上还有别处用它），而收藏列表只在切到那个 tab 时才要 ——
+   * 让父级为一个可能永远不被打开的 tab 长期持有一份数据不划算。
+   *
+   * 惰性拉取：`favorites` 为 null 表示还没拉过，切到那个 tab 的 effect 去拉。
+   */
+  const [favorites, setFavorites] = useState<(LibraryGame & { favoritedAt: number })[] | null>(null);
+  const [favoritesState, setFavoritesState] = useState<LoadState>('loading');
+  const favoritesRequestId = useRef(0);
+
+  /*
+   * 切到「收藏」tab 时拉一次。
+   *
+   * **依赖里带 `favoriteIds`**：在别处收藏 / 取消之后再切回来，列表要是新的 ——
+   * 否则会看到「星标变了但这张卡片还在这里」的错位。父级每次改收藏都会换一个新的
+   * 数组引用，所以这个 effect 会跟着重跑。
+   *
+   * 未登录（`favoriteIds === null`）直接不发请求 —— 那个 tab 里画的是一句去登录，
+   * 打了也是 401。
+   */
+  useEffect(() => {
+    if (tab !== 'favorites' || !signedIn) return;
+
+    const requestId = ++favoritesRequestId.current;
+    fetch('/api/user/favorites')
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json() as Promise<{ items: UserFavoriteItem[] }>;
+      })
+      .then((data) => {
+        if (favoritesRequestId.current !== requestId) return;
+        setFavorites(data.items.map(favoriteToGame));
+        setFavoritesState('ready');
+      })
+      .catch(() => {
+        if (favoritesRequestId.current !== requestId) return;
+        setFavoritesState('error');
+      });
+  }, [tab, signedIn, favoriteIds]);
 
   /*
    * 每次翻页 / 换机种 / 提交搜索都重新拉**当前这一页**（服务端分页，不再一次全捞）。
@@ -606,7 +780,9 @@ export default function GameLibraryPanel({
                 >
                   {games.map((game, index) => {
                     const busy = loadingId === game.id;
-                    const meta = [game.year, game.developer].filter(Boolean).join(' · ');
+                    /* 卡片上的标题 / 元数据按当前界面语言取一份 —— 房间里的语言是运行时切的 */
+                    const text = localizeLibraryGame(game, locale);
+                    const meta = [game.year, text.developer].filter(Boolean).join(' · ');
                     const tag = languageTag(game.language);
                     return (
                       /*
@@ -625,17 +801,24 @@ export default function GameLibraryPanel({
                         }}
                       >
                         {/*
+                          `relative` 这一层是**为了星标**：它得和卡片按钮平级
+                          （`<button>` 里不能套 `<button>`），又要绝对定位在卡片左上角。
+                          原本 `relative` 挂在内层那个封面 div 上，现在提一层上来 ——
+                          封面里那几个角标（机种 / 语言 / 进度条）仍然相对封面定位，
+                          位置一点没变。
+
                           悬停提示：有说明就把说明换行接在标题后面（原生 tooltip 的 `\n`
                           在 Chrome / Firefox 里就是换行）。为什么不做成卡片上的第二行 ——
                           卡片是一行五个的小格子，说明是整句中文，塞进去要么把卡片撑高、
                           要么只剩半截，而且只有填了说明的那几张会变高。
                         */}
+                        <div className="relative">
                         <button
                           type="button"
                           disabled={loadingId !== null}
                           onClick={() => onPick(game)}
                           title={
-                            game.description ? `${game.title}\n${game.description}` : game.title
+                            text.description ? `${text.title}\n${text.description}` : text.title
                           }
                           className={`pixel-edge pxw-2 pxc-700 block w-full bg-ink-850 text-left transition-colors enabled:hover:bg-ink-700 disabled:cursor-not-allowed ${
                             // 正在下的那张不置灰：进度条要看得清。其余卡片才跟着变暗
@@ -688,20 +871,187 @@ export default function GameLibraryPanel({
                             )}
                           </div>
                           <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
-                            <span className="truncate text-[11px] text-ink-100">{game.title}</span>
+                            <span className="truncate text-[11px] text-ink-100">{text.title}</span>
                             {/* 元数据行**始终显示 meta**：不能用「正在载入…」把它换掉 ——
                                 文字换来换去会让卡片高度/内容跳动，进度全部交给封面里那条进度条 */}
                             <span className="truncate text-[10px] text-ink-500">{meta}</span>
                           </div>
                         </button>
+
+                        {/*
+                          星标。**贴左上角**，压在卡片按钮上方（`z-10`）。
+
+                          ⚠️ 它是**卡片按钮的兄弟**、不是子节点 —— `<button>` 里套 `<button>`
+                          是非法 HTML：React 会警告，浏览器也会把内层那个踢出去、位置全乱。
+                          所以上面多套了一层 `relative` 的壳。
+
+                          点它必须 `stopPropagation`：不然会连带触发卡片那下
+                          「载入这一款」—— 用户想收藏，结果游戏开始下了，
+                          这是最坏的一种误操作。
+
+                          未登录（`favoriteIds === null`）时**照样显示**（暗的）：
+                          藏起来的话用户根本不知道有这个功能。点它由父级弹一句「去登录」。
+                        */}
+                        <button
+                          type="button"
+                          aria-label={t(
+                            favoriteSet.has(game.id) ? 'games.unfavorite' : 'games.favorite',
+                            { name: text.title }
+                          )}
+                          aria-pressed={favoriteSet.has(game.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleFavorite(game);
+                          }}
+                          className={`absolute left-0 top-0 z-10 flex h-[20px] w-[20px] items-center justify-center leading-none transition-colors ${
+                            favoriteSet.has(game.id)
+                              ? 'bg-ink-950/85 text-accent'
+                              : signedIn
+                                ? 'bg-ink-950/70 text-ink-300 hover:bg-ink-950/85 hover:text-accent'
+                                : 'bg-ink-950/50 text-ink-500'
+                          }`}
+                        >
+                          {/*
+                            ★ / ☆（U+2605 / U+2606）**不在 Press Start 2P 的字模里**，
+                            所以这一颗星不走 `font-pixel` —— 让系统字体去画。
+                            和「纸上那句祝福」是同一个取舍：单个非 ASCII 字形落回系统字体，
+                            比换成 `*` 这样的 ASCII 替身看得懂。
+                          */}
+                          <span className="text-[11px]">
+                            {favoriteSet.has(game.id) ? '★' : '☆'}
+                          </span>
+                        </button>
+                        </div>
                       </li>
                     );
                   })}
                 </ul>
               )}
             </>
-          ) : cartridges.length === 0 ? (
-            <p className="text-[12px] text-ink-400">{t('games.historyEmpty')}</p>
+          ) : tab === 'favorites' ? (
+            /*
+              收藏 tab。三种状态：没登录 / 加载中 / 有数据（或空）。
+              没登录那条**必须说清楚怎么才能用** —— 只写「请登录」用户不知道去哪儿登。
+
+              「登录」那两个字是**按钮**（点开账号面板），不是装饰文本 —— 用户读到这句
+              的第一反应就是「那我点哪儿登」，把入口直接摆在这儿比让他自己去找右上角那颗钮强。
+              句子拆成「前 / 链接 / 后」三段拼起来，是为了让这个可点的词落在任意语言里
+              都对的位置上（中文是「点这里·登录·，或在右上角…」，英文是「…— ·Sign in· right here, …」）。
+            */
+            !signedIn ? (
+              <p className="text-[12px] leading-relaxed text-ink-400">
+                {t('games.favoritesSignInBefore')}
+                <button
+                  type="button"
+                  onClick={onSignIn}
+                  className="text-accent underline-offset-2 transition-colors hover:underline"
+                >
+                  {t('games.favoritesSignInLink')}
+                </button>
+                {t('games.favoritesSignInAfter')}
+              </p>
+            ) : favoritesState === 'loading' ? (
+              <p className="text-[12px] text-ink-400">{t('games.loading')}</p>
+            ) : favoritesState === 'error' ? (
+              <p className="text-[12px] text-danger">{t('games.failed')}</p>
+            ) : !favorites || favorites.length === 0 ? (
+              <p className="text-[12px] text-ink-400">{t('games.favoritesEmpty')}</p>
+            ) : (
+              /*
+                收藏用**和在线库一样的网格**（不是历史那种行）：收藏本质就是「我挑出来的
+                那几款」，用户看它的方式和看游戏库一样 —— 认封面。历史是「刚玩过什么」，
+                时间和名字更重要，所以那份用行。两处刻意不同。
+              */
+              <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
+                {favorites.map((game, index) => {
+                  const busy = loadingId === game.id;
+                  /* 同在线库：按当前界面语言取一份标题 */
+                  const text = localizeLibraryGame(game, locale);
+                  const tag = languageTag(game.language);
+                  return (
+                    <li
+                      key={game.id}
+                      className="card-in"
+                      style={{ animationDelay: `${cardDelayMs(index)}ms` }}
+                    >
+                      <div className="relative">
+                        <button
+                          type="button"
+                          disabled={loadingId !== null}
+                          onClick={() => onPick(game)}
+                          title={
+                            text.description ? `${text.title}\n${text.description}` : text.title
+                          }
+                          className={`pixel-edge pxw-2 pxc-700 block w-full bg-ink-850 text-left transition-colors enabled:hover:bg-ink-700 disabled:cursor-not-allowed ${
+                            busy ? '' : 'disabled:opacity-50'
+                          }`}
+                        >
+                          <div className="relative aspect-[3/4] w-full overflow-hidden bg-ink-900">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={game.imageUrl}
+                              alt=""
+                              loading="lazy"
+                              className="h-full w-full object-cover"
+                            />
+                            <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
+                              <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
+                                {CONSOLE_LABEL[game.consoleType]}
+                              </span>
+                              {tag && (
+                                <span
+                                  className={`bg-ink-950/85 px-1 py-0.5 text-accent ${
+                                    tag.pixel ? 'font-pixel text-[8px]' : 'text-[9px]'
+                                  }`}
+                                >
+                                  {tag.text}
+                                </span>
+                              )}
+                            </div>
+                            {busy && (
+                              <div className="absolute inset-x-0 bottom-0 h-[6px] overflow-hidden bg-ink-950/80">
+                                {progress === null ? (
+                                  <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
+                                ) : (
+                                  <span
+                                    className="absolute inset-y-0 left-0 bg-accent"
+                                    style={{ width: `${Math.round(progress * 100)}%` }}
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
+                            <span className="truncate text-[11px] text-ink-100">{text.title}</span>
+                            {/*
+                              收藏 tab 这一行的第二格放**收藏时间**而不是 `meta`：
+                              这个列表是按收藏时间排的（服务端 ORDER BY created_at DESC），
+                              用户在这里想看的也是「什么时候收的」。想认机种看右上角角标。
+                            */}
+                            <span className="truncate text-[10px] text-ink-500">
+                              {formatTime(game.favoritedAt, locale)}
+                            </span>
+                          </div>
+                        </button>
+                        {/* 这里星标先是「取消收藏」的入口 —— 已经在收藏里，所以画实心 */}
+                        <button
+                          type="button"
+                          aria-label={t('games.unfavorite', { name: text.title })}
+                          aria-pressed
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleFavorite(game);
+                          }}
+                          className="absolute left-0 top-0 z-10 flex h-[20px] w-[20px] items-center justify-center bg-ink-950/85 leading-none text-accent transition-colors hover:bg-ink-950 hover:text-danger"
+                        >
+                          <span className="text-[11px]">★</span>
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )
           ) : (
             /*
               历史用**行**而不是卡片：一行装得下的信息比卡片多（标题可能很长），
