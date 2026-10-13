@@ -247,3 +247,84 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 -- 列表一律「新的在前」，游标翻页也走这个序
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback (created_at DESC, id DESC);
+
+-- 游戏问题反馈（2026-10-13 加，用户要的详情页那颗「反馈问题」）
+--
+-- ⚠️ 和上面那本**留言本刻意分成两张表**，别合并：
+--   · `feedback`      —— 任何人可写、**所有人可读**（打开就是一张公开留言列表），
+--                        说的是「这个站」；
+--   · `game_reports`  —— **只对后台可见**，一条针对**某一款游戏**，
+--                        处理完标记 resolved。说的是「这盘游戏有问题」。
+--   合成一张的话，玩家随手报的一个 bug 会立刻出现在公开留言板上；
+--   而且列表页的语义（游标翻页 + 字段）本来就不一样。
+--
+-- `game_title` 是**快照**：后台列表要能一眼看出报的是哪一款；而且游戏下架
+-- （`game_id` 指向的行被删）之后这条记录仍然读得懂。读取时**不做 JOIN**
+-- （理由同 user_saves —— 后台要看到「当时报的是什么」）。
+--
+-- **没有 user_id**：提交不需要登录（详情页本来就没有登录入口，见
+-- components/ReportGameButton.tsx 的注释），所以不留作者、只留内容。
+-- 挡刷屏只能靠长度上限 + 后台人工处理（见 app/api/game-reports/route.ts）。
+--
+-- ⚠️ 老库要单独跑一次（只增不删，全程没有 DELETE / UPDATE / DROP）：
+--   node --env-file=.env.local scripts/add-game-reports.mjs
+--   理由同上面几条：本文件只对「还没建过表」的库有效。
+CREATE TABLE IF NOT EXISTS game_reports (
+  id          TEXT PRIMARY KEY,
+  game_id     TEXT NOT NULL,             -- → games.id
+  game_title  TEXT NOT NULL,             -- 快照：提交时的游戏名
+  content     TEXT NOT NULL,             -- 问题正文（必填）
+  resolved    INTEGER NOT NULL DEFAULT 0,-- 0 = 未解决，1 = 已解决（同 feedback）
+  created_at  INTEGER NOT NULL
+);
+
+-- 后台列表「新的在前」，游标翻页走它
+CREATE INDEX IF NOT EXISTS idx_game_reports_created_at ON game_reports (created_at DESC, id DESC);
+-- 「这一款被报了几次」—— 将来想按游戏汇总时走它
+CREATE INDEX IF NOT EXISTS idx_game_reports_game ON game_reports (game_id);
+
+-- 游戏评论（2026-10-13 加，用户要的详情页「评论模块」）
+--
+-- ⚠️ 和上面两张「只留内容、不留作者」的表（feedback / game_reports）**正好相反**：
+--    评论**必须先登录**（用户明确要求），所以每条都有作者。这不是顺带的收获 ——
+--    正因为署了名，这张表才敢**公开可读**（谁都能看这一款下面的评论）。
+--
+-- `username` 是**写评论那一刻的快照**。站内用户名**不能改**（没有改名功能，
+-- 见 app/api/user/profile/route.ts 的注释），所以这个快照基本不会旧；留着它是为了
+-- **账号被删之后这一行仍然读得懂** —— 读取时 LEFT JOIN app_users，名字以库里的为准、
+-- 快照兜底（见 lib/server/comments.ts 的 listGameComments）。
+-- 头像相反：库里现取（`avatar_key`），用户换了头像，他所有旧评论跟着换 —— 头像本来就是
+-- 「现在长什么样」，不是「当时长什么样」。
+--
+-- **没有 status / 隐藏位**：这一版的「管理」就是**作者自己删**
+-- （`DELETE /api/comments/<id>` 只认作者）。站方要删得等后台加一个「评论」tab
+-- （还没做，理由见 lib/server/comments.ts 的收尾注释）。
+--
+-- `rating` 是 **1..5 的整数星级**（2026-10-13 用户要求「评论有星星 1-5」）——
+-- 评论和打分**合成一件事**，不另开一张评分表：一趟提交、一条记录、一份时间戳，
+-- 汇总（那一款的均分 / 评分数）现算 `AVG/COUNT`（见 lib/server/comments.ts）。
+--   · **NOT NULL、没有默认值**：不打分的「评论」在这一版不存在，写入通道只有一条
+--     （`POST /api/games/<id>/comments`，逐个校验 1..5），不会塞进空值。
+--   · **不写 CHECK 约束**：老库那列是 `ALTER TABLE ADD COLUMN` 补的（SQLite 的
+--     ALTER 加不了 CHECK），给新库写 CHECK 就会出现「新库拦得住、老库拦不住」——
+--     正是 `IF NOT EXISTS` 最怕的那种漂。校验一律留在接口层（唯一入口，够用）。
+--
+-- ⚠️ 老库要单独跑一次（只增不删，全程没有 DELETE / UPDATE / DROP）：
+--   node --env-file=.env.local scripts/add-game-comments.mjs         （建表）
+--   node --env-file=.env.local scripts/add-game-comments-rating.mjs  （补 rating 列）
+--   理由同上面几条：本文件只对「还没建过表」的库有效。
+CREATE TABLE IF NOT EXISTS game_comments (
+  id          TEXT PRIMARY KEY,
+  game_id     TEXT NOT NULL,             -- → games.id
+  user_id     TEXT NOT NULL,             -- → app_users.id（必填 —— 评论要登录）
+  username    TEXT NOT NULL,             -- 快照：写评论时的用户名（账号没了时兜底）
+  content     TEXT NOT NULL,             -- 正文（必填）
+  rating      INTEGER NOT NULL,          -- 星级 1..5（必填 —— 打分就是这条评论的一部分）
+  created_at  INTEGER NOT NULL
+);
+
+-- 某一款游戏的评论「新的在前」+ 游标翻页都走它（WHERE game_id = ? 之后按时间倒序取）
+-- 均分那条 `AVG/COUNT ... WHERE game_id = ?` 也吃它的前缀，不用再加索引
+CREATE INDEX IF NOT EXISTS idx_game_comments_game ON game_comments (game_id, created_at DESC, id DESC);
+-- 「我发过哪些评论」/ 将来后台按人查，走它
+CREATE INDEX IF NOT EXISTS idx_game_comments_user ON game_comments (user_id, created_at DESC, id DESC);

@@ -642,3 +642,81 @@ export function HomeIcon({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * 一支**从开口的托盘里升出来的箭头**，表示「分享」——详情页那条安静文字链接的头像
+ * （2026-10-13 加，用户要「增加图标」）。
+ *
+ * 为什么不是那套「三个圆点用斜线连起来」的经典分享图：16px 里那两根连线**全是斜的**，
+ * 像素画只能拿台阶凑；每个点又要 4×4 才认得出是「点」——最后整张图是一团斜方块
+ * （和 `ShieldIcon` 下半段、`HomeIcon` 屋顶踩的是同一个坑）。
+ * 而「一竖箭头 + 一个托盘」**每一根线都对齐像素格**，缩到 16px 一个格都不会糊，
+ * 这正是本文件一贯的取舍（见文件头那条最小线宽）。
+ *
+ * 几何：箭尖 4 格 → 底座 8 格 → 2 格宽的杆；托盘是左右两墙 + 一块底。
+ * ⚠️ 托盘**上口必须留开**（两墙从箭杆两侧才起头），封上就成了一个「往箱子里收」的
+ * 下载箱，语义正好反了 —— 它要讲的是「从这儿发出去」。
+ * 箭杆与托盘内沿各留 2 格缝（杆在 x=7..8，两墙在 x=2..3 / 12..13），不贴边。
+ */
+export function ShareIcon({ size = 16 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      {/* 箭尖：4 格 → 8 格两级，杆 2 格 */}
+      <rect x="6" y="1" width="4" height="2" />
+      <rect x="4" y="3" width="8" height="2" />
+      <rect x="7" y="5" width="2" height="5" />
+      {/* 托盘：左右两墙 + 底，上口留开给箭头 */}
+      <rect x="2" y="8" width="2" height="6" />
+      <rect x="12" y="8" width="2" height="6" />
+      <rect x="2" y="12" width="12" height="2" />
+    </svg>
+  );
+}
+
+/**
+ * 一个**对话气泡，里头一个感叹号**，表示「反馈问题」——详情页另一条安静文字链接的头像
+ * （2026-10-13 加）。
+ *
+ * 这一格要同时说清两件事：「这是给人留言」和「是个问题」。
+ *   · 光画 `WarningIcon` 那个三角 —— 只剩「警告」，跟「反馈」没关系，而且两颗钮挨着放
+ *     会直接撞脸（`GamepadIcon` 换掉 `KeyboardIcon` 就是踩过这个坑）。
+ *   · 光画一个气泡 —— 那只是个「留言」，说不出「出问题了」。
+ * 于是**气泡负责「反馈」、里头的感叹号负责「有问题」**，两件事一块说完。
+ *
+ * `!` 走**竖条 + 一点**（16px 里唯一不会糊的填充方式，同 `WarningIcon` 那个）：
+ * 竖条 3 行、空 1 行、点 2 行，上下各留 1 行喘气（别贴着气泡内壁）。
+ * 气泡本身是**空心方框**（实心块在这个尺寸会糊成一坨，同 `StoreIcon` / `GamepadIcon`）；
+ * 左下角拖一条**两级台阶**的尾巴 —— 斜尾巴画不出来，只能一格格收（同 `ShieldIcon` 下半段）。
+ */
+export function ReportIcon({ size = 16 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      {/* 气泡：四条边拼空心框（各 2px） */}
+      <rect x="2" y="0" width="12" height="2" />
+      <rect x="2" y="0" width="2" height="12" />
+      <rect x="12" y="0" width="2" height="12" />
+      <rect x="2" y="10" width="12" height="2" />
+      {/* 左下拖出来的尾巴：两级台阶 */}
+      <rect x="4" y="12" width="4" height="2" />
+      <rect x="4" y="14" width="2" height="2" />
+      {/* 里头的感叹号：竖条 + 一点（上下各留 1 行，别贴着内壁） */}
+      <rect x="7" y="3" width="2" height="3" />
+      <rect x="7" y="7" width="2" height="2" />
+    </svg>
+  );
+}
+

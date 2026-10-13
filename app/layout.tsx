@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import NextTopLoader from 'nextjs-toploader';
 import { I18nProvider } from '@/components/I18nProvider';
 import LocalePrompt from '@/components/LocalePrompt';
 import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
@@ -288,6 +289,44 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
+        {/*
+          顶部路由加载条（2026-10-13 加）。摆在 `<body>` 第一件事的位置：它只渲染
+          一段 `<style>`，那个 `#nprogress` 容器要等第一次 `start()` 才被 nprogress
+          插进 body —— 不占布局，放开头纯粹是让「全站性的一层」一眼能看见。
+
+          **为什么用这个包而不是自己写**：App Router 没有 `router.events` 这类可订阅的
+          信号（那是 Pages Router 的东西），自己写就得「拦点击 + 打 history 的补丁 +
+          猜什么时候算到站」三件事全干一遍。`nextjs-toploader` 正是把这三件事做全的
+          那个现成件，`nprogress` 那套动画（爬升、收尾、并发的两次导航）也一并有了。
+
+          **三个刻意的参数**：
+            · `color="var(--color-accent)"` —— 这个包把 color **直接拼进它注入的 CSS**
+              （`background:<color>`），所以这里能吃 CSS 变量。写死一个色值的话，
+              浅色主题下会撞底（accent 在明暗两套里是两个值：#e8b339 / #a9761a），
+              交给变量就能自己跟着 `<html data-theme>` 走，不用任何 JS 去读主题。
+            · `showSpinner={false}` —— 它默认在右上角转一个圆圈。像素风里不画圆弧
+              （同 `AdminLoading` 里那条注释：圆弧是反像素的），关掉之后只剩那条 bar。
+            · `zIndex={70}` —— 要盖过房间里那几层（遮罩 44 / 抽屉 45 / 菜单钮 46 /
+              面板 50 / 操作指引 60）。它的默认值 1600 是给普通站用的，本站的层级是
+              一套小数字，放进这套里更好读，也省得为它记一个例外。
+
+          `shadow` 默认是「10px 柔光 × 2」，这里收到 6px：3px 高的条子上默认那圈会糊成
+          一片，收窄之后还是「CRT 荧光」那个意思，但不抢戏。
+
+          ⚠️ 它只是**听**（`document` 上的点击 + history 补丁），题目外那几种情况它听不见，
+          得靠 `useTopLoader()` 手动喊 —— 全站只有三处（都带注释，搜 `topLoader`）：
+            · `ConsoleScene` —— 屋里有活时点「游戏列表 / 账号 / 首页」弹确认框，
+              那次点击**没有**跳转，要把已经起来的条收掉（写在那条 effect 里）；
+            · `ConsoleScene` —— 语言那颗下拉不是 `<a>`，`router.push` 前手动 `start()`；
+            · `AccountCenter` —— 退出登录后那次 `router.push`，同上。
+        */}
+        <NextTopLoader
+          color="var(--color-accent)"
+          height={3}
+          shadow="0 0 6px var(--color-accent)"
+          showSpinner={false}
+          zIndex={70}
+        />
         <I18nProvider initialLocale={locale}>
           {children}
           {/*

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useTopLoader } from 'nextjs-toploader';
 import {
   useCallback,
   useEffect,
@@ -749,6 +750,42 @@ export default function ConsoleScene() {
    * 空房间（`roomBusy` 为假）不拦，点一下直接走。
    */
   const [leaveOpen, setLeaveOpen] = useState(false);
+  /**
+   * 顶部加载条（`app/layout.tsx` 里那颗 `<NextTopLoader>`）的手动接口。
+   *
+   * 那个包自己听得见两件事：「点了 `<a>`（含 `<Link>`）」和「history 被写了一次」。
+   * 剩下两种情况它听不见，得我们喊一声 —— 两种都在这个组件里：
+   *
+   *   · **这次点击其实没跳**：屋里有活时点「游戏列表 / 账号 / 首页」，弹出来的只是
+   *     下面那个「留下 / 离开」确认框，页面并没有换。见紧跟着的那条 effect。
+   *   · **程序化导航**：语言那颗下拉不是 `<a>`，只能 `router.push`（见它自己的
+   *     `onClick`）。那种地方要手动 `start()`。
+   *
+   * ⚠️ 该喊不喊的后果不是「少个动画」：nprogress 会一直往上爬（它不知道自己该停了），
+   * 用户看到的是**一条永远走不完的进度条僵在顶上**，比没有它难受得多。
+   *
+   * `useTopLoader()` 每次渲染都返回**新对象**（里面是几个新箭头函数），直接丢进
+   * effect 依赖会让那条 effect 每渲染跑一遍，所以用 `useState` 的惰性初值把**第一份**
+   * 冻结下来（不能改用 `useRef(...).current`：现在这条规则禁止在渲染期读 `current`）。
+   * 它那几个方法都是「直调模块级 nprogress」，跟这个对象本身无关，钉一份完全够。
+   */
+  const topLoader = useTopLoader();
+  const [topLoaderDone] = useState(() => topLoader.done);
+  useEffect(() => {
+    /*
+     * 确认框弹出的那一刻，把已经开始的加载条收掉 —— 上面说的第一种情况。
+     *
+     * 为什么放在**这条 effect** 里、而不是写进那两个 `onClick` 的 `preventDefault()`
+     * 旁边：那里只是「标记这次点击作废」，而加载条那个包的监听器也挂在 `document`
+     * 上、和 React 的监听器谁先跑**不确定**（取决于注册顺序）。写在 `onClick` 里可能
+     * 变成「先 done 再 start」，条照样挂住。effect 跑在整轮事件派发**之后**，
+     * 顺序是死的。
+     *
+     * `topLoaderDone()` 在没跑过加载条时是空转（nprogress 自己判 `status`），
+     * 所以不必再判一次「这次是不是真有条」。
+     */
+    if (leaveOpen) topLoaderDone();
+  }, [leaveOpen, topLoaderDone]);
   /**
    * 分享链接带进来的房间码，等用户确认。null = 没有待确认的邀请。
    *
@@ -3178,6 +3215,8 @@ export default function ConsoleScene() {
                       // 点的是当前语言：只是收起来，不必白跑一趟导航
                       if (option.value === locale) return;
                       rememberLocale(option.value);
+                      // 这颗下拉不是 `<a>`，顶部加载条那个包听不见 —— 手动喊一声
+                      topLoader.start();
                       router.push(altHref);
                     }}
                   >

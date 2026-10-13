@@ -101,7 +101,7 @@ interface ConsoleScreenProps {
   /** 系统文件正悬停在机身上（桌面端才有；移动端恒为 false） */
   fileOver: boolean;
   /**
-   * 待机提示用哪一套。桌面端三行（拖 / 点 / 从库启动），移动端两行（只从库）——
+   * 待机提示用哪一套。两端都是两行：桌面端「点本地 / 从在线库启动」，移动端「只从库」——
    * 移动端没有拖拽、也没有「选本地文件」那条路，见 lib/i18n.ts 的 `screen.mobile*`。
    */
   variant: 'desktop' | 'mobile';
@@ -221,14 +221,14 @@ export default function ConsoleScreen({
         拖拽由外壳根元素的 onDrop 接，事件从这一层冒泡上去，这里不用管。
         载入中不显示 —— 那时屏幕里是进度条，两样东西叠在一起会打架。
 
-        配色走 crt-*；三行的层次**只靠字号**（11 / 10 / 10），颜色是同一档 `crt-ink-200`
+        配色走 crt-*；两行的层次**只靠字号**（11 / 10），颜色是同一档 `crt-ink-200`
         （`crt-ink-200` 是屏幕上文案的亮度下限：屏幕底不是纯黑就是 0.72 的雪花 ——
         后者合成出来约 #5c5c5c，比它暗的灰压上去等于看不见。2026-10-12 用户原话
         「后两句字号太小且颜色和电视背景接近 难以读」）。这几句都在 i18n 文案表里
         （`screen.*`）；中文靠字体回退显示，所以两档在中文下各抬 1px
         （见 globals.css 的 .screen-hint-*）。
 
-        `!crtOff`：关机收缩那 0.4 秒里**让位** —— 否则三行提示会在画面往中间收缩的
+        `!crtOff`：关机收缩那 0.4 秒里**让位** —— 否则待机提示会在画面往中间收缩的
         同时正中间跳出来，动画就白做了。
       */}
       {!hasPicture &&
@@ -259,10 +259,7 @@ export default function ConsoleScreen({
                     {variant === 'desktop' ? (
                       <>
                         <span className="screen-hint-sm font-pixel text-[11px] text-crt-ink-200">
-                          {t('screen.dragDrop')}
-                        </span>
-                        <span className="screen-hint-xs font-pixel text-[10px] text-crt-ink-200">
-                          {t('screen.orClick')}
+                          {t('screen.tapLoad')}
                         </span>
                         <span className="screen-hint-xs font-pixel text-[10px] text-crt-ink-200">
                           {t('screen.orLibrary')}

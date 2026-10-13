@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
 import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
 import FavoriteButton from '@/components/FavoriteButton';
+import GameComments from '@/components/GameComments';
 import GamesShell from '@/components/GamesShell';
+import ReportGameButton from '@/components/ReportGameButton';
 import ShareGameButton from '@/components/ShareGameButton';
 import {
   SITE_NAME,
@@ -17,8 +20,10 @@ import {
   type Locale,
   type MessageKey,
 } from '@/lib/i18n';
+import { USER_SESSION_COOKIE, verifyUserSession } from '@/lib/server/app-session';
 import { getGame, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
+import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /**
@@ -44,6 +49,24 @@ import { resolveSiteOrigin } from '@/lib/site';
  * （本来也不会被静态化：读 cookie + 读 D1）。
  */
 const loadGame = cache(async (id: string) => getGame(id));
+
+/**
+ * 当前浏览者是谁（没登录就是 null）。
+ *
+ * 只有一件事要用它：**评论模块**（登录了才画输入框，未登录画「去登录」那颗链接）。
+ *
+ * ⚠️ 只验签名、**不查库** —— 和登录页 / 账号页同一个取舍（见 `app/[locale]/login/page.tsx`
+ *    里那段）：把一次 D1 查询拖进详情页的首屏渲染路径不值当，封禁那道闸在真正写数据的
+ *    那条接口上（`POST /api/games/<id>/comments` 的 `assertUser`）。所以这里给出的是
+ *    「有没有一张签名有效的票」，**不是**「这个人现在能不能说话」。
+ *
+ * 用 `cache()` 包一层（同 `loadGame`）：一次渲染里它只会被读一遍。
+ */
+const readViewer = cache(async (): Promise<string | null> => {
+  const store = await cookies();
+  const session = await verifyUserSession(store.get(USER_SESSION_COOKIE)?.value);
+  return session?.uid ?? null;
+});
 
 /**
  * 说明文字的长度上限。
@@ -219,14 +242,33 @@ export default async function GameDetailPage({
   params: Promise<{ locale: string; id: string }>;
 }) {
   const { id } = await params;
-  const [locale, game, origin] = await Promise.all([
+  /*
+   * 这几件事**并行取**（串行就是白等一个来回）：
+   *   · 游戏资料 / 语言 / 站点域名 —— 页面本身；
+   *   · `countGameFavorites` —— 收藏钮上那个数字的**初值**（之后前端乐观更新，
+   *     见 FavoriteButton）；
+   *   · `readViewer` —— 评论模块要的登录态（**不查库**，见上面那个函数的注释）。
+   * 代价是 404 时那几句查询白跑一次 —— 404 是少数，不值得为它让每个正常页面多等一程。
+   */
+  const [locale, game, origin, favoriteCount, viewer] = await Promise.all([
     readLocaleParam(params),
     loadGame(id),
     resolveSiteOrigin(),
+    countGameFavorites(id),
+    readViewer(),
   ]);
   if (!game) notFound();
 
   const t: Transl = (key, vars) => translate(locale, key, vars);
+
+  /*
+   * 未登录时评论模块里那颗「去登录」的落点。
+   *
+   * `?next=` 里放的是**不带语言前缀**的站内路径（`/games/<id>`）—— 拼前缀是登录页
+   * 自己的事（见 `components/LoginPanel.tsx`），在这儿先拼上 `/zh` 会拼出 `/zh/zh/...`。
+   * 合法性由登录页的 `parseNext` 白名单把关（只收站内绝对路径）。
+   */
+  const signInHref = `${localePath(locale, '/login')}?next=${encodeURIComponent(`/games/${game.id}`)}`;
 
   /*
    * 按语言选定文案（中英各一份都从库里取出来了，这里挑一份）。
@@ -309,34 +351,91 @@ export default async function GameDetailPage({
 
         <div className="min-w-0 flex-1">
           {/*
-            四个动作。前两个**都是 `<Link>` 不是 `<button>`** —— 它们去的是两个真地址
+            动作区**分两层**（2026-10-13 用户反馈「这五个按钮放在一排 真的丑」之后重排）。
+
+            旧版是五颗一模一样的灰砖头并排（只有第一颗带强调色），丑的根源**不是数量、
+            是没有主次** —— 五颗等大等重，眼睛没有落点；而且它们干的是五件不同量级的事，
+            却被画成了同一种东西。
+
+            第一层 · **主行动**（三颗，有描边的实体钮，同一档高度）
+              尺寸 = 站内**紧凑钮**那一档：`py-2` + `12px` 字（同 AdminGames /
+              GameLibraryPanel 里那批钮）。2026-10-13 用户说「上面三个按钮的尺寸缩小点」，
+              从原来的 `py-2.5` + `13px` 降下来 —— 原来那档比全站任何一颗钮都大一号，
+              摆在这一页反倒显得笨。
+              · 「开始游戏」—— **唯一**用强调色的，也是三颗里最宽的一颗（`px-5`），
+                前面带一个 `▸`。这一页存在的全部意义就是让人按它，所以只有它配这么亮。
+              · 「收藏」—— 紧跟在它后面（用户 2026-10-13 原话「开始游戏旁边」），
+                收藏数就挂在这颗钮里（`★ 收藏 12`）—— 同一个 state 才能跟着乐观更新
+                一起走，见 FavoriteButton 的注释。
+              · 「下载 ROM」—— 也留在这层：它是「把这盘带子拿走」，和上面两颗同属
+                **主要动作**，只是不需要强调色来撑。
+              三颗宽度不一样（字数不同），但基线齐、重心齐，看着是**一组**而不是一排砖。
+              三颗之间 `gap-2`（8px）—— 比原来的 10px 再收紧一点，小尺寸下 10px 会显得散。
+
+            第二层 · **次要动作**（两颗，**去掉描边和底色的文字链接**，带 16px 像素图标）
+              · 「分享游戏」「反馈问题」—— 一个往剪贴板写地址、一个开弹窗写问题，
+                都不是「玩这款游戏」本身。所以压到下一行、去掉钮身，
+                只剩「图标 + 字」，字色 = `accent`（2026-10-13 用户要「增加图标 +
+                修改文字颜色」改的，原来是暗灰 `ink-400`）——
+                这一页的**文字链接**口径本来就是强调色（同一页资料表里那个「开发商」
+                链接用的也是它），比暗灰一眼看得出是能点的东西。
+                悬停不换色、改**加下划线**（颜色已经用了强调色，没有更亮的一档可去）。
+                它们**不是不重要**，只是不该跟主行动抢视线。
+              跟上一层拉开 `mt-6`（24px，2026-10-13 用户要求「距离上面三个按钮距离大点」，
+              原来只有 `mt-3` = 12px）。12px 时这行看着像**黏在上面那排的尾巴**；
+              24px 之后才读得出「这是另一组东西」—— 而且 24px 正是这一页的**段落间距**
+              （下面正文、资料表都是 `mt-6`），拉开之后整页的纵向节奏才对得上。
+
+            ⚠️ 试过但否掉的方案：把五颗塞进**一个分段控件**（一条描边里切五格）。
+              像素风里它当然成立，但 5 段摊在右栏 ~700px 里每段只剩 130px，
+              「反馈问题」四个字会贴边；而且分段控件讲的是「同一件事的几种模式」，
+              这五颗却是五件不同的事，语义也不对。
+
+            前两颗**都是 `<Link>` 不是 `<button>`** —— 它们去的是两个真地址
             （`/room?id=` 和 `/games/<id>/download`），用链接才能：新标签打开、被复制、
             被爬虫顺着走。按钮语义在这里是错的。
             「分享游戏」不一样：它不跳转，只是把**这一页的地址**写进剪贴板，
             所以是 `<button>`，而且必须是客户端组件（见 ShareGameButton）。
             复制的是 `origin` 现算的规范地址，不是 `window.location` —— 免得把
             `?id=` 之类的来源参数一起分享出去。
-
-            2026-10-13 用户要的「收藏」也在这排里，**紧跟在「开始游戏」后面**（他原话
-            「开始游戏旁边」）。这两颗是这一页最主要的两个动作 —— 玩，或者先存起来，
-            所以挨着放；「下载 ROM」往后挪一位。`FavoriteButton` 同样是客户端组件
-            （要读登录态 + 打接口）。
+            `FavoriteButton` / `ReportGameButton` 同样得是客户端组件
+            （一个要读登录态 + 打接口，一个要开关弹窗 + 提交）。
           */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <Link
               href={localePath(locale, `/room?id=${game.id}`)}
-              className="pixel-edge pxw-3 pxc-600 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
+              className="pixel-edge pxw-3 pxc-600 inline-flex items-center gap-1.5 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
             >
+              {/*
+                `▸` 而不是 `▶`：后者在部分平台带 emoji 呈现，`▸` 没有 emoji 映射，稳。
+                字号 `15px`（钮里的字只有 12px）：钮变小之后（2026-10-13 用户要求缩小）
+                这两个符号跟着降到 10px，用户随即反馈「这仨个按钮前面的图标都太小了」——
+                所以说**钮缩小 ≠ 图标跟着缩**。15px 是照着站内那套 svg 图标定的
+                （`icons.tsx` 一律 `size=16`，配的也是 12px 字，见同页第二层那两枚）；
+                再配 `leading-none`，符号本身的行高只有 15px < 文字的 18px，
+                所以**钮的总高不会因为这个变大**，只是符号在钮里变显眼。
+              */}
+              <span aria-hidden="true" className="text-[15px] leading-none">
+                ▸
+              </span>
               {t('gamesPage.play')}
             </Link>
-            <FavoriteButton gameId={game.id} />
+            <FavoriteButton gameId={game.id} count={favoriteCount} />
             <Link
               href={localePath(locale, `/games/${game.id}/download`)}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-4 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
             >
+              <span aria-hidden="true" className="text-[15px] leading-none">
+                ↓
+              </span>
               {t('gamesPage.download')}
             </Link>
+          </div>
+
+          {/* 第二层：图标 + 文字链接（口径见上面那段注释，字色 = accent） */}
+          <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
             <ShareGameButton url={`${origin}${localePath(locale, `/games/${game.id}`)}`} />
+            <ReportGameButton gameId={game.id} gameName={text.title} />
           </div>
 
           {/*
@@ -366,6 +465,20 @@ export default async function GameDetailPage({
           </dl>
         </div>
       </div>
+
+      {/*
+        评论模块（2026-10-13 加，用户要求「详情页面详情模块下方再增加一个评论模块」）。
+
+        位置就是上面那一大块「详情」的**正下方**（封面 + 动作 + 正文 + 资料表都在那一块里），
+        整页的层级于是是：标题摘要 → 这盘游戏是什么 → **大家怎么说**。
+
+        ⚠️ 它**自己是一个客户端组件**（`'use client'`），而这一页是服务端组件 ——
+        和 `FavoriteButton` / `ReportGameButton` 同一个拆法：正文要能被搜索引擎整段读走，
+        评论要有事件处理（发表 / 加载更多 / 删自己的），塞不进服务端组件。
+        传下去的两样东西都在这儿现算：`signedIn` 来自 `readViewer()`（服务端读 cookie，
+        **所以首屏就是对的**，不会先画输入框再跳成「去登录」），`signInHref` 见上面那段注释。
+      */}
+      <GameComments gameId={game.id} signedIn={viewer !== null} signInHref={signInHref} />
     </GamesShell>
   );
 }

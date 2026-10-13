@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useTopLoader } from 'nextjs-toploader';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
 import type { ConsoleType } from '@/lib/emulator';
@@ -192,6 +193,12 @@ export default function AccountCenter() {
    * （cookie 没被清掉，这时跳回房间会显得「明明点了退出却还登着」）。
    */
   const router = useRouter();
+  /**
+   * 顶部加载条的接口（组件挂在 `app/layout.tsx`）。这里只有一处要用：
+   * 退出登录后的那次 `router.push` —— 它不是 `<a>`，那个包听不见，
+   * 只能自己 `start()`（不喊的话这次导航就没有加载条，而不是「多一条」）。
+   */
+  const topLoader = useTopLoader();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState(false);
 
@@ -203,6 +210,7 @@ export default function AccountCenter() {
       const res = await fetch('/api/user/login', { method: 'DELETE' });
       if (!res.ok) throw new Error(String(res.status));
       // 回**当前语言**的房间（`/zh/account` 上退出不该把人扔进英文房间）
+      topLoader.start();
       router.push(localeHref('/room'));
       // 落地页在守卫里（layout 读 cookie），push 之后本组件会被卸载，不必再复位 busy
     } catch {

@@ -22,11 +22,23 @@ import { useI18n } from './I18nProvider';
  * ⚠️ **首屏问两次**（`/api/user/profile` 判登录态，再 `?ids=1` 取收藏集合）。
  *    为什么不合成一次：收藏接口未登录直接 401，拿不到「我是谁」。所以先问 profile，
  *    401 就当未登录 —— 这也是**唯一的登录态判据**（同 ConsoleScene 的 fetchCurrentUser）。
+ *
+ * 2026-10-13 用户要求「详情页显示游戏收藏数量」：这个数就挂在**这颗钮上**
+ * （`★ 收藏 12`），而不是另起一行资料 ——
+ *   · 它属于「收藏」这件事，紧挨着才对得上；
+ *   · 而且它在**同一处**才能跟着乐观更新一起走：点一下收藏，数字立刻 +1，
+ *     不需要刷新页面。另放一行的话，那颗数字要么滞后、要么得再拆一层状态。
+ * 初值由详情页服务端取好传进来（`count`），所以首屏 / 爬虫都能看见真实数字。
  */
-export default function FavoriteButton({ gameId }: { gameId: string }) {
+export default function FavoriteButton({ gameId, count }: { gameId: string; count: number }) {
   const { t } = useI18n();
   const /** null = 未登录 / 未知；true / false = 已收 / 未收 */
     [favorited, setFavorited] = useState<boolean | null>(null);
+  /**
+   * 收藏数。**乐观更新**（和 `favorited` 一起翻），失败的 catch 里翻回来 ——
+   * 用函数式 setState，别在闭包里读 `total`：那个值是渲染那一刻的旧值。
+   */
+  const [total, setTotal] = useState(count);
   const [signedIn, setSignedIn] = useState(false);
   const [busy, setBusy] = useState(false);
   /** 提示（未登录 or 请求失败），2 秒后自己收回 */
@@ -87,6 +99,7 @@ export default function FavoriteButton({ gameId }: { gameId: string }) {
      * 理由同 ConsoleScene 的 toggleFavorite —— 等接口回来才动会像「点了没反应」。
      */
     setFavorited(!owned);
+    setTotal((n) => Math.max(0, n + (owned ? -1 : 1)));
     try {
       const res = await fetch(
         owned ? `/api/user/favorites?gameId=${encodeURIComponent(gameId)}` : '/api/user/favorites',
@@ -99,6 +112,7 @@ export default function FavoriteButton({ gameId }: { gameId: string }) {
       if (!res.ok) throw new Error(String(res.status));
     } catch {
       setFavorited(owned); // 翻回去，别停在假的收藏态上
+      setTotal((n) => Math.max(0, n + (owned ? 1 : -1)));
       setNotice(t('gamesPage.favoriteFailed'));
     } finally {
       setBusy(false);
@@ -124,15 +138,41 @@ export default function FavoriteButton({ gameId }: { gameId: string }) {
         aria-pressed={active}
         aria-label={label}
         title={label}
-        className={`pixel-edge pxw-2 pxc-500 flex items-center gap-2 px-4 py-2 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        /*
+         * 尺寸 = 站内紧凑钮那一档（`py-2` + `12px` + `px-3.5`），
+         * 2026-10-13 跟详情页那排钮一起降下来的（用户说「上面三个按钮的尺寸缩小点」）——
+         * 这三颗必须**同档**，谁大一点都会把那排拆成「一颗主钮 + 两颗陪衬」。
+         * 口径同 AdminGames / GameLibraryPanel 里那批钮。
+         */
+        className={`pixel-edge pxw-2 pxc-600 flex items-center gap-1.5 px-3.5 py-2 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
           active
             ? 'bg-accent text-ink-950 hover:bg-accent/80'
-            : 'bg-ink-800 text-ink-200 hover:text-accent'
+            : 'bg-ink-800 text-ink-200 hover:bg-ink-700 hover:text-accent'
         }`}
       >
-        {/* ★ 实心 / ☆ 空心 —— 用同一个字符集里的两颗星，比画 SVG 更像素风 */}
-        <span aria-hidden="true">{active ? '★' : '☆'}</span>
+        {/*
+          ★ 实心 / ☆ 空心 —— 用同一个字符集里的两颗星，比画 SVG 更像素风。
+          字号 15px（钮里的字只有 12px）—— 和「开始游戏」的 `▸`、「下载 ROM」的 `↓`
+          同一个尺寸：三颗钮的图标得一样大，不然一行里三个符号三种重量。
+          配 `leading-none` 是为了**不撑高钮**（15px < 文字的 18px 行高），
+          和字号本身是两件事。
+        */}
+        <span aria-hidden="true" className="text-[15px] leading-none">
+          {active ? '★' : '☆'}
+        </span>
         {label}
+        {/*
+          收藏数。夹在钮里而不是另起一行：**同一个 state 才能一起乐观更新**（见上面）。
+          数字本身不上读屏 —— 钮的 `aria-label` 说的是「点了会发生什么」（那个才是
+          按钮的名字），数量放在 `title` 里给鼠标用户看。
+        */}
+        <span
+          aria-hidden="true"
+          title={t('gamesPage.favoriteCount', { n: total })}
+          className="text-[10px] opacity-70"
+        >
+          {total}
+        </span>
       </button>
 
       {/*

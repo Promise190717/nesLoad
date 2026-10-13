@@ -507,6 +507,25 @@ export async function listUserFavoriteIds(userId: string): Promise<string[]> {
 }
 
 /**
+ * 某款游戏**被多少人收藏了** —— 详情页那颗收藏钮上的数字（2026-10-13 用户要求）。
+ *
+ * ⚠️ **刻意不缓存**。这个数每次渲染详情页就要读一遍（D1 走 REST，一次就是一次 API
+ *    调用），看着像该缓存；但：
+ *    · 它只是 user_favorites 上一句 COUNT，表本身就小，且查询走 game_id 索引；
+ *    · 缓存了就会「刚收藏完，自己那边数字没变」，比多一次查询更让人困惑
+ *      （按钮上的数字是**乐观更新**的，见 FavoriteButton —— 它读的是这份初值）。
+ *    真出现配额压力，正确的做法是在**页侧**套一层 `unstable_cache`（本项目一贯如此，
+ *    见 MEMORY 里「缓存留在页-侧，不下沉数据层」那条），而不是在这儿藏一层。
+ */
+export async function countGameFavorites(gameId: string): Promise<number> {
+  const rows = await query<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM user_favorites WHERE game_id = ?',
+    [gameId]
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
  * 加收藏。已经在收藏里就是空操作（主键冲突被 DO NOTHING 吃掉）——
  * 重复点不该报错、也不该刷新收藏时间（那是「收藏时间」，不是「最后一次点星标的时间」）。
  *

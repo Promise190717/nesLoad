@@ -200,7 +200,7 @@ const en = {
    */
   'home.hero.title': 'Play classic retro games in your browser',
   'home.hero.lead':
-    '{site} has NES, SNES / SFC, GBA and arcade games you can play right here. You can also use your own ROM files.',
+    '{site} has NES, SNES / SFC, GBA and arcade games you can play online, with two-player netplay.',
   /* 首屏两颗钮：左边进屋子（真的开玩），右边进列表（先挑一挑） */
   'home.hero.play': 'Enter the room',
   'home.hero.browse': 'Browse all games',
@@ -385,15 +385,19 @@ const en = {
    * 字越大越糊；10px 是这套界面上中文的下限
    * （再小笔画就黏在一起了，见 RetroTv 里那几处的字号注释）。
    * 全大写是**英文那一侧的排版风格**，中文不跟（汉字没有大小写）。
+   *
+   * 2026-10-13：桌面待机提示从三行（拖 / 点 / 库）收成两行 —— 不再提「拖进来」，
+   * 第一行直接说点屏幕能干嘛（加载本地 ROM），第二行说在线游戏库。
+   * 拖拽功能本身还在（外壳的 onDrop 没动），只是待机文案不再宣传它；
+   * 悬停时那句 `screen.pick`（title）仍保留「或把文件拖到这里」的说法。
    */
-  'screen.dragDrop': 'DRAG & DROP A ROM',
-  'screen.orClick': 'OR CLICK TO CHOOSE A FILE',
-  'screen.orLibrary': 'OR LAUNCH FROM LIBRARY',
+  'screen.tapLoad': 'CLICK TO LOAD A LOCAL ROM',
+  'screen.orLibrary': 'OR LAUNCH FROM THE ONLINE LIBRARY',
   'screen.release': 'RELEASE TO LOAD',
   /*
    * 移动端的待机提示（2026-10-12）。移动端**只能从在线游戏库载入** ——
    * 手机上没有拖拽、也没有「选本地文件」那条路（点屏幕 = 打开游戏库），
-   * 所以桌面那三行（拖 / 点 / 库）换成这两行，措辞也不再提文件。
+   * 所以措辞不再提文件，只说从库启动。
    * 两行 + 光标，结构和桌面那套一一对应（主提示 `.screen-hint-sm`，副提示 `.screen-hint-xs`）。
    */
   'screen.mobileLibrary': 'LAUNCH FROM LIBRARY',
@@ -1056,6 +1060,7 @@ const en = {
   'admin.nav.games': 'Games',
   'admin.nav.developers': 'Developers',
   'admin.nav.feedback': 'Guestbook',
+  'admin.nav.reports': 'Game reports',
   'admin.nav.users': 'Users',
   'admin.upload.title': 'Add a game',
   'admin.field.title': 'Title',
@@ -1168,6 +1173,18 @@ const en = {
   'admin.feedback.markResolved': 'Mark resolved',
   'admin.feedback.markUnresolved': 'Mark open',
   'admin.feedback.failed': 'Request failed.',
+  /*
+   * 后台 · 游戏反馈 tab（2026-10-13 加）。和上面留言本那个 tab 是两块，
+   * 文案也刻意分开：这边每条都挨着**某一款游戏**（见 components/AdminReports.tsx）。
+   */
+  'admin.reports.title': 'Game reports',
+  'admin.reports.empty': 'No reports yet.',
+  'admin.reports.loadMore': 'Load more',
+  'admin.reports.resolved': 'Resolved',
+  'admin.reports.unresolved': 'Open',
+  'admin.reports.markResolved': 'Mark resolved',
+  'admin.reports.markUnresolved': 'Mark open',
+  'admin.reports.failed': 'Request failed.',
 
   /*
    * 用户管理（2026-10-13 加）。
@@ -1283,6 +1300,8 @@ const en = {
   'gamesPage.searchLabel': 'Search the game library',
   'gamesPage.searchPlaceholder': 'Search title / developer / series',
   'gamesPage.searchSubmit': 'Search',
+  /* 提交后的 pending 态（GamesSearchForm）：D1 查询那一两秒里按钮上的字 */
+  'gamesPage.searchLoading': 'Searching…',
   'gamesPage.searchClear': 'Clear search',
   'gamesPage.searchResults': '“{keyword}” — {count} matching games.',
   'gamesPage.searchEmpty': 'No games match “{keyword}”. Try a shorter word, or the game title.',
@@ -1337,6 +1356,69 @@ const en = {
   'gamesPage.favoriteSignIn': 'Sign in to save favorites — tap the account button in the room.',
   /* 请求失败的回滚提示（乐观更新翻回去之后说一句） */
   'gamesPage.favoriteFailed': 'Could not update favorites — try again.',
+  /*
+   * 收藏钮上那个数字（2026-10-13 加，用户要的「详情页显示游戏收藏数量」）。
+   * `{n}` = 收藏人数。只当 `title`/悬停说明用 —— 按钮本身显示的就是那个数字，
+   * 而按钮的可访问名字仍是「收藏 / 取消收藏」（说的是点了会发生什么）。
+   */
+  'gamesPage.favoriteCount': '{n} on the favorites list',
+  /*
+   * 详情页那颗「反馈问题」+ 它弹出的那个窗（2026-10-13 加）。
+   * 见 components/ReportGameButton.tsx —— 提交**不需要登录**，所以文案里
+   * 不要出现「登录」二字。
+   */
+  'gamesPage.report': 'Report a problem',
+  'gamesPage.reportTitle': 'Report a problem',
+  /* `{name}` = 游戏名：说清报的是哪一款，免得用户在别的游戏上遇到问题却报错地方 */
+  'gamesPage.reportSubject': 'About: {name}',
+  'gamesPage.reportPlaceholder':
+    'What went wrong? For example: it will not start, the picture is garbled, the sound is missing…',
+  'gamesPage.reportSubmit': 'Send report',
+  'gamesPage.reportSubmitting': 'Sending…',
+  'gamesPage.reportOk': 'Thanks — we will look into it.',
+  /* 空串 / 纯空白不让提交（前端拦一道，服务端还有一道） */
+  'gamesPage.reportRequired': 'Please describe the problem first.',
+  'gamesPage.reportFailed': 'Could not send — try again.',
+  'gamesPage.reportClose': 'Cancel',
+  /*
+   * 详情页的**评论模块**（2026-10-13 加，用户要求「详情模块下方再加一个评论模块」）。
+   * 见 components/GameComments.tsx。
+   *
+   * ⚠️ 和上面「反馈问题」那组**最要紧的区别**：**发评论必须先登录**（用户明确要求），
+   *    所以这里多出一组登录相关的文案（`signInLead` / `signIn` / `signInRequired`）。
+   *    列表本身是公开的 —— 未登录也看得到别人写了什么。
+   */
+  'comments.heading': 'Comments',
+  /* 列表全部载完才显示（还有下一页时不报数，免得「{n} 条」被当成总数） */
+  'comments.count': '{n} comments',
+  'comments.empty': 'No comments yet — be the first.',
+  'comments.placeholder': 'What do you think of this game?',
+  'comments.ratingLabel': 'Your rating',
+  'comments.ratingStar': 'Rate {n} out of 5',
+  'comments.ratingValue': '{n} out of 5 stars',
+  'comments.ratingAverage': '{avg} / 5',
+  'comments.ratingRequired': 'Pick a star rating first.',
+  'comments.submit': 'Post comment',
+  'comments.submitting': 'Posting…',
+  'comments.ok': 'Posted — it is at the top of the list.',
+  'comments.required': 'Write something first.',
+  'comments.failed': 'Could not post — try again.',
+  /* 未登录时顶掉输入框的那一行 + 那颗链接（链接带着 `?next=` 把人送回这一页） */
+  'comments.signInLead': 'Sign in to post a comment.',
+  'comments.signIn': 'Sign in',
+  /* 发表时才发现没登录（会话过期）：比「发表失败」更准，说清该怎么办 */
+  'comments.signInRequired': 'Please sign in again to post.',
+  'comments.loading': 'Loading comments…',
+  'comments.retry': 'Retry',
+  /* 列表本身拉不到（和「发表失败」是两件事，别共用一条） */
+  'comments.loadFailed': 'Could not load comments.',
+  'comments.loadMore': 'Load more',
+  /* 自己的那条上的删除（两步：先「删除」，再「确认」，见组件里的 pendingDelete） */
+  'comments.delete': 'Delete',
+  'comments.deleteConfirm': 'Confirm',
+  'comments.cancel': 'Cancel',
+  'comments.deleted': 'Comment removed.',
+  'comments.deleteFailed': 'Could not delete — try again.',
   'gamesPage.field.console': 'Console',
   'gamesPage.field.year': 'Year',
   'gamesPage.field.developer': 'Developer',
@@ -1417,8 +1499,14 @@ const zh: Record<MessageKey, string> = {
 
   /* 首页落地页，见上面英文那份的注释 */
   'home.hero.title': '在浏览器里在线玩经典复古游戏',
+  /*
+   * ⚠️「支持联机对战」这半句（2026-10-13 用户要求加）和下面的 `home.faq.a6`、联机面板那颗
+   *    `netplay.open`（「联机对战」）说的是同一件事，**措辞对齐** —— 三处都只说「能一起对战」。
+   *    **不在这儿展开「谁开房 / 公网那一档要不要 TURN」**：那类前提由联机面板里的
+   *    `netplay.wanDev` 兜着（没配 TURN 时公网档进不去），落地页不背这个包袱。
+   */
   'home.hero.lead':
-    '{site}上能直接玩 NES、SFC（超级任天堂）、GBA 和街机的游戏。也可以用自己电脑里的 ROM。',
+    '{site}上在线玩 NES、SFC（超级任天堂）、GBA 和街机的游戏，支持联机对战。',
   'home.hero.play': '进入小屋',
   'home.hero.browse': '浏览全部游戏',
   'home.hero.or': '或',
@@ -1513,10 +1601,9 @@ const zh: Record<MessageKey, string> = {
   'screen.pick': '点击选择 ROM 文件，或把文件拖到这里',
   'screen.srLabel': '选择要运行的 ROM 文件',
 
-  /* 屏幕里那几句提示的可见文字（英文那侧全大写，中文不跟） */
-  'screen.dragDrop': '把 ROM 拖进来',
-  'screen.orClick': '或点屏幕选择文件',
-  'screen.orLibrary': '或从游戏库启动',
+  /* 屏幕里那几句提示的可见文字（英文那侧全大写，中文不跟）。2026-10-13 从三行收成两行，见 en 那边的注释 */
+  'screen.tapLoad': '点击从本地加载',
+  'screen.orLibrary': '或者从在线游戏库启动',
   'screen.release': '松手载入',
   /* 移动端的待机提示 —— 移动端只能从在线游戏库载入，见 en 那边同一段的注释 */
   'screen.mobileLibrary': '从游戏库载入游戏',
@@ -1901,6 +1988,7 @@ const zh: Record<MessageKey, string> = {
   'admin.nav.games': '游戏列表',
   'admin.nav.developers': '开发商',
   'admin.nav.feedback': '留言本',
+  'admin.nav.reports': '游戏反馈',
   'admin.nav.users': '用户',
   'admin.upload.title': '添加游戏',
   'admin.field.title': '游戏名',
@@ -1994,6 +2082,18 @@ const zh: Record<MessageKey, string> = {
   'admin.feedback.markResolved': '标记已解决',
   'admin.feedback.markUnresolved': '标记未解决',
   'admin.feedback.failed': '请求失败。',
+  /*
+   * 后台 · 游戏反馈 tab（2026-10-13 加）。和上面留言本那个 tab 是两块，
+   * 文案也刻意分开：这边每条都挨着**某一款游戏**（见 components/AdminReports.tsx）。
+   */
+  'admin.reports.title': '游戏反馈',
+  'admin.reports.empty': '还没有反馈。',
+  'admin.reports.loadMore': '加载更多',
+  'admin.reports.resolved': '已解决',
+  'admin.reports.unresolved': '未解决',
+  'admin.reports.markResolved': '标记已解决',
+  'admin.reports.markUnresolved': '标记未解决',
+  'admin.reports.failed': '请求失败。',
 
   /* 用户管理，见上面英文那份的注释（⚠️ 这是前台注册用户，不是后台管理员） */
   'admin.users.title': '用户',
@@ -2056,6 +2156,7 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.searchLabel': '搜索游戏库',
   'gamesPage.searchPlaceholder': '搜索标题 / 开发者 / 系列',
   'gamesPage.searchSubmit': '搜索',
+  'gamesPage.searchLoading': '搜索中…',
   'gamesPage.searchClear': '清除搜索',
   'gamesPage.searchResults': '「{keyword}」共 {count} 个结果。',
   'gamesPage.searchEmpty': '没有匹配「{keyword}」的游戏，换个短一点的词，或者直接搜游戏名。',
@@ -2077,6 +2178,51 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.unfavorite': '已收藏',
   'gamesPage.favoriteSignIn': '登录后才能收藏 —— 点房间里右上角那颗账号钮登录。',
   'gamesPage.favoriteFailed': '收藏没能更新，请重试。',
+  /* 收藏钮上那个数字（2026-10-13 加，用户要的「详情页显示游戏收藏数量」），只当悬停说明用 */
+  'gamesPage.favoriteCount': '{n} 人收藏',
+  /*
+   * 详情页那颗「反馈问题」+ 它弹出的那个窗（2026-10-13 加）。
+   * 见 components/ReportGameButton.tsx —— 提交**不需要登录**，文案里别写「登录」。
+   */
+  'gamesPage.report': '反馈问题',
+  'gamesPage.reportTitle': '反馈问题',
+  /* `{name}` = 游戏名：说清报的是哪一款，免得用户在别的游戏上遇到问题却报错地方 */
+  'gamesPage.reportSubject': '关于：{name}',
+  'gamesPage.reportPlaceholder': '遇到了什么问题？比如：打不开、画面花了、没有声音…',
+  'gamesPage.reportSubmit': '提交反馈',
+  'gamesPage.reportSubmitting': '提交中…',
+  'gamesPage.reportOk': '已收到，谢谢！',
+  /* 空串 / 纯空白不让提交（前端拦一道，服务端还有一道） */
+  'gamesPage.reportRequired': '先说说遇到了什么问题吧。',
+  'gamesPage.reportFailed': '提交失败，再试一次。',
+  'gamesPage.reportClose': '取消',
+  /* 详情页的评论模块（2026-10-13 加），见英文表里那一段的说明 —— 发评论必须先登录 */
+  'comments.heading': '评论',
+  'comments.count': '{n} 条评论',
+  'comments.empty': '还没有评论，来做第一个吧。',
+  'comments.placeholder': '说说你对这款游戏的看法…',
+  'comments.ratingLabel': '打个分',
+  'comments.ratingStar': '打 {n} 星',
+  'comments.ratingValue': '{n} 星',
+  'comments.ratingAverage': '{avg} / 5',
+  'comments.ratingRequired': '先给个星数吧。',
+  'comments.submit': '发表评论',
+  'comments.submitting': '发表中…',
+  'comments.ok': '已发表，在上面第一条。',
+  'comments.required': '写点什么再发表吧。',
+  'comments.failed': '发表失败，再试一次。',
+  'comments.signInLead': '登录后才能发表评论。',
+  'comments.signIn': '去登录',
+  'comments.signInRequired': '请重新登录后再发表。',
+  'comments.loading': '正在载入评论…',
+  'comments.retry': '重试',
+  'comments.loadFailed': '评论载入失败。',
+  'comments.loadMore': '加载更多',
+  'comments.delete': '删除',
+  'comments.deleteConfirm': '确认删除',
+  'comments.cancel': '取消',
+  'comments.deleted': '评论已删除。',
+  'comments.deleteFailed': '删除失败，再试一次。',
   'gamesPage.field.console': '类型',
   'gamesPage.field.year': '年份',
   'gamesPage.field.developer': '开发商',

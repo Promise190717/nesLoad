@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useI18n } from './I18nProvider';
+import { ShareIcon } from './icons';
 
 /**
  * 详情页那颗「分享游戏」：点一下把**这一页的地址**复制进剪贴板，1.6 秒后自己变回原样
@@ -64,15 +65,38 @@ export default function ShareGameButton({ url }: { url: string }) {
         ? t('gamesPage.shareFailed')
         : t('gamesPage.share');
 
+  /*
+   * 常态字色 = `accent`（2026-10-13 用户要「修改文字颜色」）：这一页的「文字链接」口径
+   * 就是强调色（同一页资料表里那个「开发商」链接用的也是它），比原来那档暗灰一眼看得出
+   * 是**能点的东西**。钮身上没有描边可依托，反馈就全压在字上 ——
+   *   · 常态 / 悬停：换**颜色**（accent → 下划线）；
+   *   · 成 / 败：换色（`text-ok` / `text-danger`，1.6 秒后褪回）。
+   * 只换文案在安静的一行里太容易被眼角漏掉。
+   */
+  const tone =
+    result === 'ok' ? 'text-ok' : result === 'fail' ? 'text-danger' : 'text-accent';
+
   return (
     <button
       type="button"
       onClick={copy}
-      /* 成功 / 失败都只在按钮文字上体现，不动 aria-label —— 名字变来变去反而让人迷惑 */
+      /*
+       * 成功 / 失败都只在按钮文字上体现，不动 aria-label —— 名字变来变去反而让人迷惑
+       */
       aria-label={t('gamesPage.share')}
-      className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-4 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
+      className={`group inline-flex items-center gap-1.5 text-[12px] transition-colors ${tone}`}
     >
-      {label}
+      {/*
+        头像走 `ShareIcon`（`aria-hidden` 在图标里），尺寸**必须传 16** ——
+        非整数倍会在 DPR=1 的屏上把 1 单位的线吃掉（见 icons.tsx 文件头那条）。
+      */}
+      <ShareIcon size={16} />
+      {/*
+        ⚠️ 下划线只加在**文字**上（`group-hover`），不是整颗钮：钮是 `inline-flex`，
+        直接 `hover:underline` 能不能落到字上取决于浏览器对原子内联盒装饰传播的实现，
+        写在文字这一层是确定的。图标也不该被划线（它是图形，不是文本）。
+      */}
+      <span className="group-hover:underline">{label}</span>
     </button>
   );
 }

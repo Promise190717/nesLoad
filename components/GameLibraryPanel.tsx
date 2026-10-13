@@ -121,7 +121,7 @@ export function localizeLibraryGame(game: LibraryGame, locale: Locale): Localize
 /**
  * 封面右侧那个**语言角标**（排在机种角标下面）。
  *
- * 库里 `language` 存的是短码（`zh` / `en`，见后台 AdminGames 的 `LANGUAGE_OPTIONS`），
+ * 库里 `language` 存的是短码（`zh` / `en` / `ja`，见后台 AdminGames 的 `LANGUAGE_OPTIONS`），
  * 但 DB 那列没有约束，老数据可能是自由文本 —— 所以这里**不做映射**，直接把值转大写当标识：
  * `ZH` / `EN`。全大写 ASCII 正好能走 `font-pixel`，和机种角标同一套字模。
  *

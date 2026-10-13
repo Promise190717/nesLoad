@@ -8,16 +8,20 @@ import { useI18n } from './I18nProvider';
 /**
  * 左侧那几个 tab。`href` 同时是**路由**和**高亮依据** —— 加了新页就往这里加一条。
  *
- * 四条的顺序＝日常使用频率：游戏列表（默认页）→ 开发商库 → 留言本 → 用户。
+ * 五条的顺序＝日常使用频率：游戏列表（默认页）→ 开发商库 → 留言本 → 游戏反馈 → 用户。
  * 开发商（2026-10-12 加的「厂商库」）排在留言本前面，因为它和游戏列表是**同一件事的两半**：
  * 添加游戏时那个开发商下拉框，读的就是这个库里新建的条目。
+ * 游戏反馈（2026-10-13 加，配合详情页那颗「反馈问题」）**紧跟留言本** ——
+ * 两条都是「看用户写了什么、处理完打个勾」，放在一起顺手；它排在留言本后面是因为
+ * 量更小、而且只跟**某一款游戏**有关（见 db/schema.sql 里 `game_reports` 的注释）。
  * 用户（2026-10-13 加）排最后 —— 它是**低频**的运营页（看一眼有没有刷屏的号），
- * 和上面三条「日常维护内容」不是一路。
+ * 和上面四条「日常维护内容」不是一路。
  */
 const TABS = [
   { href: '/admin/games', key: 'admin.nav.games' },
   { href: '/admin/developers', key: 'admin.nav.developers' },
   { href: '/admin/feedback', key: 'admin.nav.feedback' },
+  { href: '/admin/reports', key: 'admin.nav.reports' },
   { href: '/admin/users', key: 'admin.nav.users' },
 ] as const;
 

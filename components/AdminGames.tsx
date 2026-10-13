@@ -70,6 +70,7 @@ const PAGE_SIZE = 10;
 const LANGUAGE_OPTIONS: readonly { value: string; label: string }[] = [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
 ];
 
 /**
@@ -81,7 +82,11 @@ const LANGUAGE_OPTIONS: readonly { value: string; label: string }[] = [
  */
 const DEFAULT_LANGUAGE = 'en';
 
-const LANGUAGE_LABEL: Record<string, string> = { zh: '中文', en: 'English' };
+const LANGUAGE_LABEL: Record<string, string> = {
+  zh: '中文',
+  en: 'English',
+  ja: '日本語',
+};
 
 /** 语言短码转可读名字；老数据若是自由文本则原样返回。 */
 function languageLabel(value: string | null): string | null {

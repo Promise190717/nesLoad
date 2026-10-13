@@ -5,6 +5,7 @@ import { cache } from 'react';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import GamesShell from '@/components/GamesShell';
 import GameCardGrid from '@/components/GameCardGrid';
+import GamesSearchForm from '@/components/GamesSearchForm';
 import {
   SITE_NAME,
   alternatesFor,
@@ -365,64 +366,12 @@ export default async function GamesPage({
       showAllGamesLink={false}
     >
       {/*
-        搜索框。**真正的 GET 表单**，不是客户端 state —— 提交后浏览器自己跳到
-        `/games?q=…`，于是搜索有真地址（可分享 / 可收藏 / 爬虫走得通），而且零 JS。
-        用 `defaultValue`（非受控）而不是 `value`：这一页是服务端组件，
-        输入框的内容由 **URL** 决定 —— 那才是一切的真相。
+        搜索框（2026-10-13 加 loading 后拆成 `components/GamesSearchForm.tsx`）：
+        提交走客户端路由，pending 时按钮显示「搜索中…」；JS 不可用时回落成原生
+        GET 表单（`action` + `method` 在组件里留着），「搜索有真地址、零 JS 也成立」
+        的底线不变 —— 那边的注释写了完整的来龙去脉。
       */}
-      <form
-        /*
-         * ⚠️ `action` 必须带语言前缀 —— 写死 `/games` 的话，中文用户在 `/zh/games`
-         * 搜一下就被送到英文列表页（`method="get"` 会丢掉 query，所以这里是裸列表地址）。
-         */
-        action={localePath(locale, '/games')}
-        method="get"
-        role="search"
-        className="mt-8 flex flex-wrap items-center gap-2"
-      >
-        <label htmlFor="games-search" className="sr-only">
-          {t('gamesPage.searchLabel')}
-        </label>
-        <input
-          id="games-search"
-          type="search"
-          name="q"
-          defaultValue={keyword}
-          placeholder={t('gamesPage.searchPlaceholder')}
-          autoComplete="off"
-          className="pixel-edge pxw-2 pxc-500 h-[34px] min-w-[180px] flex-1 bg-ink-900 px-3 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none"
-        />
-        {/*
-          筛着机种搜的时候，把机种**跟着表单一起提交**（2026-10-13 加）：不然在「NES」
-          里搜一下，提交后 `console` 就丢了，结果又变回全库。
-          ⚠️ 它必须排在 `q` **后面**：GET 表单按 DOM 顺序拼查询串，而规范顺序是
-          `q` → `console` → `page`（见 `gamesHref`）—— 排在前面白多一跳 307。
-        */}
-        {consoleType && <input type="hidden" name="console" value={consoleType} />}
-        <button
-          type="submit"
-          className="pixel-edge pxw-2 pxc-500 flex h-[34px] shrink-0 items-center bg-ink-700 px-4 text-[11px] text-ink-200 transition-colors hover:text-accent"
-        >
-          {t('gamesPage.searchSubmit')}
-        </button>
-        {/*
-          「清除」是一条**链接**而不是清空按钮：没有关键词时它压根不画（指向 /games
-          的死链比少一个链接更糟，和下面那个「上一页」同一个道理），
-          而且它就该是一个能直接点走的地址 —— 无 JS 也成立。
-
-          ⚠️ 落点用 `gamesHref(locale, 1, '', consoleType)` 而不是裸 `/games`：
-          清掉的只是**关键词**，用户当前筛着的机种该留着（他在 NES 里搜了一轮，
-          点「清除搜索」想看的是全部 NES，不是全库）。
-        */}
-        {keyword && (
-          <Link
-            href={gamesHref(locale, 1, '', consoleType)}
-            className="text-[11px] text-ink-400 transition-colors hover:text-accent"
-          >
-            {t('gamesPage.searchClear')}
-          </Link>
-        )}
-      </form>
+      <GamesSearchForm locale={locale} keyword={keyword} consoleType={consoleType} />
 
       {/*
         机种筛选条（2026-10-13 加）。**一排链接**而不是 `<select>` 或按钮组：每个机种都是

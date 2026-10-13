@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { downloadFile } from '@/lib/download';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -14,9 +15,14 @@ import { useI18n } from './I18nProvider';
  *
  * 下载本身**不走 fetch**：ROM 是几十 MB 的二进制，走 fetch 就得先在内存里攒完
  * 再转成 Blob，白占一份内存、还丢掉了浏览器原生的下载管理（进度、暂停、续传）。
- * 办法是**造一个 `<a download>` 再点它** —— 和用户自己点链接完全等价，
- * 浏览器的下载器接管一切。`download` 属性对同源地址才生效，而 `/api/games/<id>/rom`
- * 就是同源代理（顺带把文件名也从 Content-Disposition 带回来了）。
+ * 实际的甩文件动作交给 `lib/download.ts` 的 `downloadFile()`（造个 `<a download>`
+ * 点一下），`download` 属性对同源地址才生效，而 `/api/games/<id>/rom` 就是同源代理
+ * （顺带把文件名也从 Content-Disposition 带回来了）。
+ *
+ * ⚠️ **别再在这里手写 `<a>`**（2026-10-13 之前就是手写的）：少了那句
+ * `stopPropagation`，这一下点击会惊动挂在 `document` 上的**顶部路线进度条** ——
+ * 它当成「要换页了」起条，而下载不换页、没有 `pushState` 来收尾，条子会一直挂着。
+ * 完整的来龙去脉写在 lib/download.ts 的文件头。
  *
  * 倒计时用 `setInterval` 而不是 `setTimeout` 链：只需要一个定时器，值放在 state 里，
  * 用户能看见还剩几秒。1 秒一次而不是每 100ms 一次 —— 文案只显示整秒，
@@ -37,15 +43,9 @@ export default function RomDownloadGate({
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'done'>('idle');
   const [seconds, setSeconds] = useState(DELAY_SECONDS);
 
-  /** 真的把文件甩出去。造一个隐藏的 `<a download>` 点一下，然后把节点摘掉。 */
+  /** 真的把文件甩出去。造链、点一下、掐掉冒泡这些细节都在 lib/download.ts。 */
   const triggerDownload = useCallback(() => {
-    const anchor = document.createElement('a');
-    anchor.href = romUrl;
-    anchor.download = romName;
-    anchor.rel = 'noopener';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+    downloadFile(romUrl, romName);
   }, [romUrl, romName]);
 
   useEffect(() => {

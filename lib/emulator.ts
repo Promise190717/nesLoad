@@ -4,6 +4,7 @@ import { Nostalgist } from 'nostalgist';
 import { resolveArcadeCore } from './arcade-core';
 import { installAudioTap } from './audio-tap';
 import { NEOGEO_BIOS_NAME } from './bios';
+import { downloadFile } from './download';
 import {
   bindingsToRetroArch,
   DEFAULT_BINDINGS,
@@ -295,17 +296,6 @@ export async function unsupportedArchive(file: File): Promise<'7z' | 'rar' | nul
   }
 
   return null;
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 /**
@@ -721,11 +711,11 @@ export class EmulatorController {
    */
   async downloadState(blob?: Blob): Promise<void> {
     if (!this.instance || !this.currentRom) return;
-    const state = blob ?? (await this.instance.saveState()).state;
-    downloadBlob(
-      new Blob([state], { type: 'application/octet-stream' }),
-      `${this.currentRom.name.replace(/\.[^.]+$/, '')}.state`
-    );
+  const state = blob ?? (await this.instance.saveState()).state;
+  downloadFile(
+    new Blob([state], { type: 'application/octet-stream' }),
+    `${this.currentRom.name.replace(/\.[^.]+$/, '')}.state`
+  );
   }
 
   async togglePause(): Promise<void> {
