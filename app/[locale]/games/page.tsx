@@ -483,7 +483,7 @@ export default async function GamesPage({
           */}
           {page > 1 ? (
             <Link
-              href={gamesHref(locale, page - 1, keyword)}
+              href={gamesHref(locale, page - 1, keyword, consoleType)}
               rel="prev"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
             >
@@ -504,7 +504,7 @@ export default async function GamesPage({
 
           {page < pageCount ? (
             <Link
-              href={gamesHref(locale, page + 1, keyword)}
+              href={gamesHref(locale, page + 1, keyword, consoleType)}
               rel="next"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
             >
