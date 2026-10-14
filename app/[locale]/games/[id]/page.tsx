@@ -408,7 +408,7 @@ export default async function GameDetailPage({
           */}
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={localePath(locale, `/room?id=${game.id}`)}
+              href={localePath(locale, `/play?id=${game.id}&mode=solo`)}
               className="pixel-edge pxw-3 pxc-600 inline-flex items-center gap-1.5 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
             >
               {/*
@@ -438,7 +438,7 @@ export default async function GameDetailPage({
               用文字符号表不出来。
             */}
             <Link
-              href={localePath(locale, `/play?id=${game.id}`)}
+              href={localePath(locale, `/play?id=${game.id}&mode=host`)}
               className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
             >
               <PlayersIcon size={16} />

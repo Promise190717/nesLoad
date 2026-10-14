@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition, type FormEvent } from 'react';
+import { useState, useTransition, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
@@ -22,12 +22,14 @@ export default function GamesSearchForm({
   locale,
   keyword,
   consoleType,
+  actionPath = '/games',
 }: {
   locale: Locale;
   /** URL 里的当前关键词（服务端渲染时传入，是「真相」）。 */
   keyword: string;
   /** 当前筛着的机种 —— 提交时要跟着表单一起带回去，别把筛选条件搜丢了。 */
   consoleType: ConsoleType | null;
+  actionPath?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -39,9 +41,11 @@ export default function GamesSearchForm({
    * 打字不受干扰（和原来 uncontrolled `defaultValue` 的体感一致）。
    */
   const [value, setValue] = useState(keyword);
-  useEffect(() => {
+  const [previousKeyword, setPreviousKeyword] = useState(keyword);
+  if (previousKeyword !== keyword) {
+    setPreviousKeyword(keyword);
     setValue(keyword);
-  }, [keyword]);
+  }
 
   const t = (key: MessageKey) => translate(locale, key);
 
@@ -61,7 +65,7 @@ export default function GamesSearchForm({
     const query = params.toString();
 
     startTransition(() => {
-      router.push(localePath(locale, '/games') + (query ? `?${query}` : ''));
+      router.push(localePath(locale, actionPath) + (query ? `?${query}` : ''));
     });
   };
 
@@ -71,7 +75,7 @@ export default function GamesSearchForm({
        * ⚠️ `action` 必须带语言前缀 —— 写死 `/games` 的话，中文用户在 `/zh/games`
        * 搜一下就被送到英文列表页。JS 可用时它只是无 JS 回退的落点。
        */
-      action={localePath(locale, '/games')}
+      action={localePath(locale, actionPath)}
       method="get"
       role="search"
       onSubmit={onSubmit}
@@ -117,7 +121,7 @@ export default function GamesSearchForm({
       {keyword && (
         <Link
           /* 只剥关键词、机种保留；page=1 不写参数，与 gamesHref 的形态一致 */
-          href={localePath(locale, '/games') + (consoleType ? `?console=${consoleType}` : '')}
+          href={localePath(locale, actionPath) + (consoleType ? `?console=${consoleType}` : '')}
           className="text-[12px] text-ink-400 transition-colors hover:text-accent"
         >
           {t('gamesPage.searchClear')}

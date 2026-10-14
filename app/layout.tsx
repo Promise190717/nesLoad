@@ -302,7 +302,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           **三个刻意的参数**：
             · `color="var(--color-accent)"` —— 这个包把 color **直接拼进它注入的 CSS**
               （`background:<color>`），所以这里能吃 CSS 变量。写死一个色值的话，
-              浅色主题下会撞底（accent 在明暗两套里是两个值：#e8b339 / #a9761a），
+              浅色主题下会撞底（accent 在明暗两套里是两个值：#d16c70 / #a83e46），
               交给变量就能自己跟着 `<html data-theme>` 走，不用任何 JS 去读主题。
             · `showSpinner={false}` —— 它默认在右上角转一个圆圈。像素风里不画圆弧
               （同 `AdminLoading` 里那条注释：圆弧是反像素的），关掉之后只剩那条 bar。

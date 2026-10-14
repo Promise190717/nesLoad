@@ -31,6 +31,7 @@ export default function GamesShell({
   backToAllHref,
   showHeader = true,
   fill = false,
+  wide = false,
   showAllGamesLink = true,
   showTopBar = true,
   showHomeLink = false,
@@ -80,6 +81,8 @@ export default function GamesShell({
    * `children` 套一层 `flex-1`，于是页脚自然落到最底；`children` 自己拿 `flex-1` 撑高。
    */
   fill?: boolean;
+  /** 播放页使用更宽的内容区域，让屏幕随浏览器宽度展开。 */
+  wide?: boolean;
   /**
    * 顶部那行**顶栏**（语言 / 账号 / 游戏库，2026-10-13 加）出不出现，默认出。
    *
@@ -118,14 +121,14 @@ export default function GamesShell({
   const allGames = backToAllHref ?? localePath(locale, '/games');
 
   return (
-    <main className="wall min-h-screen px-6 py-6 sm:py-12">
+    <main className={wide ? 'play-page wall min-h-screen px-4 py-5' : 'wall min-h-screen px-6 py-6 sm:py-12'}>
       {/*
         `fill` 打开时这一栏自己也要是个「至少撑满一屏」的 flex 列：
         `min-h` 那两个值就是扣掉 `<main>` 的上下页边距（`py-6` = 3rem、
         `sm:py-12` = 6rem），否则页脚到不了视口最底。
       */}
       <div
-        className={`mx-auto w-full max-w-5xl ${
+        className={`mx-auto w-full ${wide ? 'max-w-none' : 'max-w-5xl'} ${
           fill ? 'flex min-h-[calc(100vh-3rem)] flex-col sm:min-h-[calc(100vh-6rem)]' : ''
         }`}
       >
@@ -134,7 +137,7 @@ export default function GamesShell({
           它自己占一行、靠右；下面那颗返回链接紧跟着，所以这里给它一个下边距
           （不这么写的话返回会贴到顶栏上，看着像一行里的两块）。
         */}
-        {showTopBar && (
+        {showTopBar && !wide && (
           <div className="mb-6">
             <TopBar />
           </div>
@@ -165,11 +168,11 @@ export default function GamesShell({
           用 `justify-between` 而不是 `gap`：不传 `showHomeLink` 时只有一个孩子，
           它照样贴左 —— 别的内容页版式一个字都不变。
         */}
-        <div className="flex items-center justify-between gap-4">
+        <div className={wide ? 'play-navigation mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-ink-700 pb-4' : 'flex items-center justify-between gap-4'}>
           {back.mode === 'history' ? (
             <BackLink
               href={back.href}
-              className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
+              className={wide ? 'inline-flex shrink-0 items-center gap-2 border border-ink-600 bg-ink-900 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:border-accent/50 hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
             >
               <span aria-hidden="true">←</span>
               <span>{t(back.label)}</span>
@@ -177,7 +180,7 @@ export default function GamesShell({
           ) : (
             <Link
               href={back.href}
-              className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
+              className={wide ? 'inline-flex shrink-0 items-center gap-2 border border-ink-600 bg-ink-900 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:border-accent/50 hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
             >
               <span aria-hidden="true">←</span>
               <span>{t(back.label)}</span>
@@ -189,6 +192,7 @@ export default function GamesShell({
               {t('common.home')}
             </Link>
           )}
+          {wide && showTopBar && <TopBar />}
         </div>
 
         {showHeader && (

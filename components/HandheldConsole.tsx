@@ -605,3 +605,84 @@ function PanelBtn({
     />
   );
 }
+
+/** /play 的触屏手柄，复用掌机的机种映射与按键控件。 */
+export function MobileGamepad({ consoleType, enabled, onButton }: {
+  consoleType: ConsoleType;
+  enabled: boolean;
+  onButton: (button: ButtonName, down: boolean) => void;
+}) {
+  const pressed = useRef<Set<ButtonName>>(new Set());
+
+  /*
+   * `onButton` 每次都可能是新函数（父级的依赖里有联机角色），而这个 effect 只挂一次。
+   * 用 ref 转一手，免得 effect 里攥着一个过期的闭包 —— 也免得依赖一变就重挂监听
+   * （重挂本身会触发一次 releaseAll，手指还按着的话那一下就丢了）。
+   */
+  const onButtonRef = useRef(onButton);
+  useEffect(() => {
+    onButtonRef.current = onButton;
+  }, [onButton]);
+
+  /** 按 / 松。重复的按下（手指抖一下连发两次 pointerdown）不重复发。 */
+  const press = (button: ButtonName, down: boolean) => {
+    if (down && !enabled) return;
+    const set = pressed.current;
+    if (down) {
+      if (set.has(button)) return;
+      set.add(button);
+    } else {
+      if (!set.has(button)) return;
+      set.delete(button);
+    }
+    onButtonRef.current(button, down);
+  };
+
+  /**
+   * 切走标签页 / 切走窗口 / 卸载时，把手里的钮一次性松开。
+   *
+   * 浏览器**不会补发** pointerup，不补的话房主那边会一直以为你按着那个方向，
+   * 角色自己往边上走（和联机那条键盘转发里的 releaseAll 是同一个理由）。
+   *
+   * 这段只在 effect 里用，所以直接写在 effect 里 —— 定义在外面会被
+   * `react-hooks/exhaustive-deps` 要求进依赖，而它每次渲染都是新函数。
+   */
+  useEffect(() => {
+    const releaseAll = () => {
+      for (const button of pressed.current) onButtonRef.current(button, false);
+      pressed.current.clear();
+    };
+    const onVisibility = () => {
+      if (document.hidden) releaseAll();
+    };
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('blur', releaseAll);
+      document.removeEventListener('visibilitychange', onVisibility);
+      releaseAll();
+    };
+  }, [consoleType, enabled, onButton]);
+
+  const faceRows = FACE_ROWS[consoleType];
+  return (
+    <div className="play-touch" data-console={consoleType}>
+      <fieldset disabled={!enabled} className="min-w-0 border-0 p-0 disabled:opacity-40">
+        {consoleType === 'snes' && (
+          <div className="play-shoulders">
+            <PillBtn label="L" button="l" onPress={press} />
+            <PillBtn label="R" button="r" onPress={press} />
+          </div>
+        )}
+        <div className="play-touch-main">
+          <DPad onPress={press} />
+          <FacePad rows={faceRows} onPress={press} />
+        </div>
+        <div className="play-touch-system">
+          <PillBtn label={consoleType === 'arcade' ? 'COIN' : 'SELECT'} button="select" onPress={press} />
+          <PillBtn label="START" button="start" onPress={press} />
+        </div>
+      </fieldset>
+    </div>
+  );
+}

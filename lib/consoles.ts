@@ -78,7 +78,7 @@ export const CONSOLE_TYPES: readonly ConsoleType[] = [
  * 十二个色相彼此拉开，但刻意不要求「认色识机种」，那件事由旁边的丝印词负责。
  */
 export const CONSOLE_TINT: Record<ConsoleType, string> = {
-  nes: '#e8b339',
+  nes: '#d16c70',
   snes: '#6fa8c9',
   gb: '#7fa05f',
   gbc: '#b57fa8',

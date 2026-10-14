@@ -6,6 +6,7 @@ import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
 import { isConsoleType } from '@/lib/consoles';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
+import GamesSearchForm from '@/components/GamesSearchForm';
 import {
   SITE_NAME,
   alternatesFor,
@@ -16,9 +17,9 @@ import {
   type Locale,
   type MessageKey,
 } from '@/lib/i18n';
-import { pageCountOf, pageHref, parsePageParam } from '@/lib/pager';
+import { pageCountOf, parsePageParam } from '@/lib/pager';
 import { getConsole, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
-import { listGamesByConsoleCached } from '@/lib/server/games';
+import { listGamesByConsoleCached, listGamesPageCached } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
 
@@ -53,9 +54,11 @@ const loadConsole = cache(async (type: string) => getConsole(type));
  * 两处要的其实是不同的 `page`，所以真正的作用是同一页里别查两遍。
  */
 const loadGames = cache(
-  async (type: string, page: number) => {
+  async (type: string, page: number, keyword = '') => {
     if (!isConsoleType(type)) return { games: [], total: 0, offset: 0, limit: PAGE_SIZE };
-    return listGamesByConsoleCached(type, (page - 1) * PAGE_SIZE, PAGE_SIZE);
+    return keyword
+      ? listGamesPageCached((page - 1) * PAGE_SIZE, PAGE_SIZE, keyword, type)
+      : listGamesByConsoleCached(type, (page - 1) * PAGE_SIZE, PAGE_SIZE);
   }
 );
 
@@ -68,8 +71,11 @@ const loadGames = cache(
 /**
  * 第几页的地址。**语言前缀在这里加**（`lib/pager.ts` 的 `pageHref` 只认裸路径）。
  */
-function consoleHref(locale: Locale, type: string, page: number): string {
-  return localePath(locale, pageHref(`/consoles/${type}`, page));
+function consoleHref(locale: Locale, type: string, page: number, keyword = ''): string {
+  const query = new URLSearchParams();
+  if (keyword) query.set('q', keyword);
+  if (page > 1) query.set('page', String(page));
+  return localePath(locale, `/consoles/${type}`) + (query.size ? `?${query}` : '');
 }
 
 export async function generateMetadata({
@@ -197,17 +203,20 @@ export default async function ConsoleDetailPage({
   const text = localizeConsole(consoleRow, locale);
 
   const { page, canonical } = parsePageParam(rawQuery.page);
+  const keyword = typeof rawQuery.q === 'string' ? rawQuery.q.trim() : '';
   // 和 /games 同一套：`?page=1` / `?page=01` / 重复参数都收敛到规范地址
-  if (!canonical) redirect(consoleHref(locale, id, page));
+  if (!canonical || (rawQuery.q !== undefined && rawQuery.q !== keyword) || rawQuery.q === '') {
+    redirect(consoleHref(locale, id, page, keyword));
+  }
 
-  const data = await loadGames(id, page);
+  const [data, allGames] = await Promise.all([loadGames(id, page, keyword), loadGames(id, 1)]);
   const pageCount = pageCountOf(data.total, PAGE_SIZE);
 
   // 越界（这个机种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
-  if (page > pageCount) redirect(consoleHref(locale, id, pageCount));
+  if (page > pageCount) redirect(consoleHref(locale, id, pageCount, keyword));
 
   // 游戏数：走列表那次查询的 total（countGamesCached，12 小时缓存），理由见 generateMetadata
-  const gameCount = data.total;
+  const gameCount = allGames.total;
 
   const facts: { label: string; value: string }[] = [
     ...(consoleRow.releaseYear
@@ -292,8 +301,15 @@ export default async function ConsoleDetailPage({
           {t('consolesPage.gamesHeading', { name: text.name })}
         </h2>
 
+        <GamesSearchForm locale={locale} keyword={keyword} consoleType={null} actionPath={`/consoles/${id}`} />
+        {keyword && (
+          <p className="mt-4 text-[12px] text-ink-300">
+            {t('gamesPage.searchResults', { keyword, count: data.total })}
+          </p>
+        )}
+
         {data.games.length === 0 ? (
-          <p className="mt-8 text-[13px] text-ink-400">{t('consolesPage.gamesEmpty')}</p>
+          <p className="mt-8 text-[13px] text-ink-400">{keyword ? t('gamesPage.searchEmpty', { keyword }) : t('consolesPage.gamesEmpty')}</p>
         ) : (
           /* 满屏都是同一个机种，游戏卡片下面那行依然照常报开发商 / 年份 —— 只有机种那截是重复的 */
           <GameCardGrid games={data.games} locale={locale} />
@@ -303,7 +319,7 @@ export default async function ConsoleDetailPage({
           <nav className="mt-10 flex items-center justify-center gap-4">
             {page > 1 ? (
               <Link
-                href={consoleHref(locale, id, page - 1)}
+                href={consoleHref(locale, id, page - 1, keyword)}
                 rel="prev"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
@@ -320,7 +336,7 @@ export default async function ConsoleDetailPage({
 
             {page < pageCount ? (
               <Link
-                href={consoleHref(locale, id, page + 1)}
+                href={consoleHref(locale, id, page + 1, keyword)}
                 rel="next"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >

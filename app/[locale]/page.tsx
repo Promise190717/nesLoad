@@ -1,21 +1,24 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/components/CartridgeSprite';
-import GameCardGrid from '@/components/GameCardGrid';
+import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
+import ConsoleCard from '@/components/ConsoleCard';
+import GameHouseLogo from '@/components/GameHouseLogo';
 import PixelHeroes from '@/components/PixelHeroes';
+import { PlayersIcon } from '@/components/icons';
 import TopBar from '@/components/TopBar';
 import { cardDelayMs } from '@/lib/card-stagger';
 import { SITE_NAME, localePath, translate, type MessageKey } from '@/lib/i18n';
 import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/developers';
-import { countGamesByConsoleCached, listLatestGamesCached } from '@/lib/server/games';
+import { countGamesByConsoleCached } from '@/lib/server/games';
+import { listConsolesCached } from '@/lib/server/consoles';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
  * `/` —— 首页**落地页**（2026-10-13 加）。
  *
  * 参考 retrogamesnexus.com 那种「内容型首页」的骨架做的：Hero（标题 + 搜索 + 两个入口）
- * → 按机种浏览 → 最新收录 → 按开发商浏览 → 折叠问答 → 页脚。
+ * → 按机种浏览 → 按开发商浏览 → 折叠问答 → 页脚。
  *
  * **为什么要它**：2026-10-13 之前 `/` 就是那间像素小屋（现在挪到了 `/room`）。
  * 那间屋子整页只有 canvas 和 CSS 画的家具，**没有一个字是能索引的正文**
@@ -30,7 +33,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   `title.default` 只在页面自己不写标题时生效，正好是为它准备的。再写一份只是把
  *   同一句话写两遍，而且两份迟早会漂。
  *
- * - **数据全部走带缓存的那几个函数**（`listLatestGamesCached` / `countGamesByConsoleCached`
+ * - **数据全部走带缓存的那几个函数**（`listConsolesCached` / `countGamesByConsoleCached`
  *   / `listTopDevelopersCached`，TTL 都是 12 小时）：这一页是给爬虫和过路访客看的，
  *   内容变得很慢（只有后台上传游戏时才变），每次渲染打三趟 D1 不划算。
  *   副作用和后台上传游戏那条一样：新传的游戏最多晚 12 小时出现在首页
@@ -42,7 +45,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   首页真正在用的 Next 缓存是**数据层**那三个 `unstable_cache`（见上一条），
  *   这也正是本项目一贯的做法：缓存留在「页-侧」，不要下沉到数据层。
  *
- * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），再最新收录（十二款），
+ * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），
  *   最后按开发商（八家）。参考站还有「类型 / 系列」两个维度，本站没有那两张表
  *   （系列只是 `games.series` 这一列自由文本），所以不做 —— 宁可少一个区块，
  *   也不要做一个点进去什么都没筛出来的入口。
@@ -53,13 +56,6 @@ import { readLocaleParam } from '@/lib/server/locale';
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/**
- * 首页三个区块各取几条。
- *
- * 「最新收录」取 12：`GameCardGrid` 一行 5 个（lg），12 条 = 两行多两个，正好暗示
- * 「还有更多」而不至于把首页拉得太长。要凑满三行（15 条）也行，但首页不是列表页。
- */
-const LATEST_COUNT = 12;
 /** 「按开发商浏览」取 8：两行正好排满（sm 起一行 4 个）。 */
 const DEVELOPER_COUNT = 8;
 /** 「按机种浏览」最多几张卡：8 是这个网格的两整行（`grid-cols-2 sm:grid-cols-4`）。 */
@@ -91,7 +87,7 @@ const FAQS = [
 /**
  * 首页每个区块的外壳：一条分隔线 + 标题 + 一行说明 + 右上角那个「看全部」。
  *
- * 抽出来是因为四个区块（机种 / 最新收录 / 开发商 / 问答）的版式完全一样，
+ * 抽出来是因为三个区块（机种 / 开发商 / 问答）的版式完全一样，
  * 各写一遍迟早会有块高度不一样。**问答那个不传 `href`**（它没有「全部」可去），
  * 所以链接是可选的。
  */
@@ -109,9 +105,9 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="mt-14 border-t border-ink-800 pt-8">
+    <section className="home-section mt-12 sm:mt-16">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-        <h2 className="text-[17px] font-semibold text-ink-100">{title}</h2>
+        <h2 className="text-[21px] font-semibold text-ink-100">{title}</h2>
         {href && linkLabel && (
           <Link
             href={href}
@@ -121,7 +117,7 @@ function Section({
           </Link>
         )}
       </div>
-      {lead && <p className="mt-2 text-[12px] leading-6 text-ink-500">{lead}</p>}
+      {lead && <p className="mt-3 text-[13px] leading-6 text-ink-300">{lead}</p>}
       {children}
     </section>
   );
@@ -159,8 +155,8 @@ export default async function HomePage({
    * ⚠️ 不用 `cache()` 包一层（`/games` 那边包了）：那是为了让 `generateMetadata`
    * 与正文共用同一次查询，而**首页不写 metadata**（见文件头），一次请求只会走一次这里。
    */
-  const [latest, counts, developers] = await Promise.all([
-    listLatestGamesCached(LATEST_COUNT),
+  const [consoles, counts, developers] = await Promise.all([
+    listConsolesCached(),
     countGamesByConsoleCached(),
     listTopDevelopersCached(DEVELOPER_COUNT),
   ]);
@@ -188,58 +184,46 @@ export default async function HomePage({
     'pixel-edge pxw-2 pxc-700 flex h-full flex-col items-center justify-center gap-2 bg-ink-900 p-4 text-center transition-colors hover:bg-ink-800';
 
   return (
-    <main className="wall min-h-screen px-6 py-6 sm:py-12">
+    <main className="home-page min-h-screen px-4 pb-8 pt-4 sm:px-8 sm:pt-6">
       <div className="mx-auto w-full max-w-5xl">
         {/*
           顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库，靠右。
           首页的 Hero 是居中的，所以它不跟 Hero 抢中间那条竖线 —— 单独占顶上一行。
           和 `/games` 那几个内容页共用同一个 `TopBar`（口径一致）。
         */}
-        <TopBar />
+        <div className="home-nav flex flex-wrap items-center justify-between gap-4 border-b border-ink-700/70 pb-5"><Link href={localePath(locale, "/")} className="flex items-center gap-3 text-[16px] font-semibold text-ink-100"><GameHouseLogo />{SITE_NAME[locale]}</Link><TopBar /></div>
 
         {/*
           Hero。居中的大字 + 一句说明 + 两个入口 + 搜索框 —— 参考站的骨架。
           最上面那行小标签**刻意全 ASCII**（`font-pixel` 没有汉字，写中文只会掉到
           系统字体上，和 `GamesShell` 的 `label` 同一条规矩）。
         */}
-        <header className="pt-4 text-center">
-          <span className="font-pixel text-[12px] tracking-wider text-accent">
+        <header className="home-hero"><div className="home-hero-intro">
+          <span className="inline-flex border border-accent/25 bg-accent/10 px-3 py-2 font-pixel text-[9px] leading-5 tracking-wider text-accent">
             RETRO GAMES ONLINE
           </span>
-          <h1 className="mx-auto mt-6 max-w-3xl text-[24px] leading-snug font-semibold text-ink-100 sm:text-[32px]">
+          <h1 className="mt-5 max-w-2xl text-[28px] leading-[1.3] font-semibold tracking-tight text-ink-100 sm:text-[40px]">
             {t('home.hero.title')}
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-[13px] leading-7 text-ink-400">
+          <p className="mt-5 max-w-xl text-[14px] leading-7 text-ink-300">
             {t('home.hero.lead')}
           </p>
 
-          {/*
-            两个入口**都是 `<Link>`**：它们去的是两个真地址（`/room` 和 `/games`），
-            要能被中键新标签打开、被复制、被爬虫顺着走。
-            「进入小屋」在前 —— 这一页的终点是玩，不是挑。
-          */}
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Link
-              href={localePath(locale, '/room')}
-              className="pixel-edge pxw-3 pxc-600 bg-accent px-6 py-2.5 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
-            >
-              {t('home.hero.play')}
-            </Link>
+          <div className="mt-7 flex flex-wrap items-center gap-3">
             <Link
               href={localePath(locale, '/games')}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-5 py-2.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
+              className="inline-flex min-h-11 items-center justify-center bg-accent px-6 text-[13px] font-semibold text-ink-950 transition-colors hover:bg-accent/80"
             >
               {t('home.hero.browse')}
             </Link>
           </div>
 
+          </div>
+
           {/*
             加入房间（2026-10-14 用户要求）：房间号 + 一颗钮 → `/play?room=<码>`。
 
-            放在两个入口的正下方，因为它是**同一类东西** —— 「怎么开这一局」，
-            只是这一条得先拿到一个带外传来的房间码（那间房的房主念给你的，或者
-            他直接把链接发给你）。下面「或 → 搜索」是另一类（找游戏），所以这里
-            不并进那一组，免得把「找」和「玩」混成一排。
+            首屏右侧为联机入口，搜索区域放在下方铺满整行。
 
             **零 JS**：就是一个 GET 表单，提交后浏览器自己跳到 `/play?room=<码>`，
             和上面那个搜索框同一个套路（可分享、可被爬、无 JS 也能用）。
@@ -256,11 +240,22 @@ export default async function HomePage({
           <form
             action={localePath(locale, '/play')}
             method="get"
-            className="mt-4 flex flex-wrap items-center justify-center gap-2"
+            className="home-join w-full border border-ink-600 bg-ink-900 p-5 text-left sm:p-6"
           >
-            <label htmlFor="home-room" className="sr-only">
-              {t('netplay.roomCode')}
-            </label>
+            <div className="mb-4 flex items-start gap-3">
+              <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center border border-accent/25 bg-accent/10 text-accent">
+                <PlayersIcon size={16} />
+              </span>
+              <div>
+                <label htmlFor="home-room" className="block text-[13px] font-semibold text-ink-100">
+                  {t('home.join.title')}
+                </label>
+                <p id="home-room-hint" className="mt-1 text-[12px] leading-5 text-ink-400">
+                  {t('home.join.hint')}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
             <input
               id="home-room"
               name="room"
@@ -270,18 +265,22 @@ export default async function HomePage({
               autoComplete="off"
               autoCapitalize="characters"
               spellCheck={false}
+              aria-label={t('netplay.roomCode')}
+              aria-describedby="home-room-hint"
               placeholder={t('netplay.codePlaceholder')}
-              className="pixel-edge pxw-2 pxc-500 h-[38px] w-[128px] bg-ink-900 px-3 text-center font-pixel text-[13px] tracking-[0.25em] text-ink-100 uppercase placeholder:text-ink-600 focus:outline-none"
+              className="h-11 w-full min-w-0 border border-ink-600 bg-ink-950 px-4 text-center font-pixel text-[14px] tracking-[0.3em] text-ink-100 uppercase placeholder:text-ink-500 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:flex-1"
             />
             <button
               type="submit"
-              className="pixel-edge pxw-2 pxc-500 flex h-[38px] shrink-0 items-center bg-ink-800 px-5 text-[12px] text-ink-200 transition-colors hover:text-accent"
+              className="flex h-11 shrink-0 items-center justify-center gap-2 bg-accent px-5 text-[13px] font-semibold text-ink-950 transition-colors hover:bg-accent/80 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
             >
-              {t('netplay.join')}
+              {t('home.join.submit')}
+              <span aria-hidden="true">→</span>
             </button>
+            </div>
           </form>
 
-          <p className="mt-8 font-pixel text-[12px] text-ink-700">{t('home.hero.or')}</p>
+          <div className="home-search-area">
 
           {/*
             搜索框上那排像素小人（2026-10-13 用户加的）：马里奥 / 林克 / 萨姆斯 /
@@ -317,15 +316,16 @@ export default async function HomePage({
               name="q"
               placeholder={t('home.search.placeholder')}
               autoComplete="off"
-              className="pixel-edge pxw-2 pxc-500 h-[38px] min-w-[200px] flex-1 bg-ink-900 px-3 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none"
+              className="h-12 min-w-0 flex-1 border border-ink-600 bg-ink-900 px-4 text-[14px] text-ink-100 placeholder:text-ink-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
             />
             <button
               type="submit"
-              className="pixel-edge pxw-2 pxc-500 flex h-[38px] shrink-0 items-center bg-ink-700 px-5 text-[12px] text-ink-200 transition-colors hover:text-accent"
+              className="flex h-12 shrink-0 items-center border border-ink-600 bg-ink-800 px-6 text-[13px] font-semibold text-ink-100 transition-colors hover:border-accent hover:text-accent"
             >
               {t('home.search.submit')}
             </button>
           </form>
+          </div>
         </header>
 
         {/*
@@ -343,37 +343,11 @@ export default async function HomePage({
         >
           <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {homeConsoles.map((type, index) => (
-              /*
-               * 入场动效和 `/games` 的卡片、开发商卡片共用一套（`.card-in` +
-               * lib/card-stagger.ts 的错峰参数）—— 同一个站里几处网格的出场节奏
-               * 不该不一样。延迟只是个内联 style，服务端算好渲染进 HTML 就行。
-               */
               <li key={type} className="card-in" style={{ animationDelay: `${cardDelayMs(index)}ms` }}>
-                <Link href={localePath(locale, `/consoles/${type}`)} className={chip}>
-                  {/* 机种标签是丝印词（NES / SFC / GBA / ARC 这类），不进文案表 */}
-                  <span className="font-pixel text-[18px] text-accent">{CONSOLE_LABEL[type]}</span>
-                  <span className="text-[12px] text-ink-400">
-                    {t('home.consoles.count', { count: counts[type] })}
-                  </span>
-                </Link>
+                <ConsoleCard type={type} row={consoles.find((row) => row.type === type) ?? null} count={counts[type]} locale={locale} />
               </li>
             ))}
           </ul>
-        </Section>
-
-        {/* 最新收录。卡片网格直接用 `/games` 那个 `GameCardGrid`（同一套版式与动效） */}
-        <Section
-          title={t('home.latest.title')}
-          lead={t('home.latest.lead')}
-          href={localePath(locale, '/games')}
-          linkLabel={t('home.latest.viewAll')}
-        >
-          {latest.games.length > 0 ? (
-            <GameCardGrid games={latest.games} locale={locale} />
-          ) : (
-            /* 库空了才会走到这儿 —— 正常情况下上面那个区块也一并是空的 */
-            <p className="mt-8 text-[13px] text-ink-400">{t('home.empty')}</p>
-          )}
         </Section>
 
         {/*
@@ -438,7 +412,7 @@ export default async function HomePage({
             {FAQS.map((item) => (
               <details
                 key={item.q}
-                className="pixel-edge pxw-2 pxc-700 bg-ink-900 px-4 py-3"
+                className="home-faq border border-ink-700 bg-ink-900 px-5 py-4"
               >
                 <summary className="cursor-pointer text-[13px] text-ink-100">
                   {t(item.q)}

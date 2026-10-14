@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { canReturnWithinSite } from '@/lib/site-history';
 import { getAudioTrack } from '@/lib/audio-tap';
 import { ensureBios } from '@/lib/bios';
 import { EmulatorController, VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
@@ -8,6 +10,9 @@ import { readGamepads } from '@/lib/gamepad';
 import { isAbortError, readBodyWithProgress } from '@/lib/http';
 import type { MessageKey } from '@/lib/i18n';
 import {
+  BUTTONS,
+  buttonLabel,
+  codeLabel,
   codeToButton,
   DEFAULT_BINDINGS,
   loadBindings,
@@ -31,7 +36,9 @@ import ConsoleScreen from './ConsoleScreen';
 import { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
-import { ExpandIcon, MoonIcon, SunIcon } from './icons';
+import PlaySaveControls from './PlaySaveControls';
+import { MobileGamepad } from './HandheldConsole';
+import { ExpandIcon, PlayMoonIcon, ReloadIcon, SunIcon } from './icons';
 
 /*
  * `/play` —— 从游戏详情那颗「联机游戏」进来的**简洁版房间**（2026-10-14 加，用户要求）。
@@ -86,15 +93,55 @@ interface PlaySceneProps {
    * `null` = 有 id 但库里没有、`Game` = 查到了。
    */
   serverGame?: LibraryGame | null;
+  initialMode?: 'solo' | 'host';
+  autoStart?: boolean;
+  initialRoomCode?: string;
 }
 
-export default function PlayScene({ serverGame }: PlaySceneProps) {
-  const { t, locale } = useI18n();
+export default function PlayScene({ serverGame, initialMode = 'solo', autoStart = false, initialRoomCode = '' }: PlaySceneProps) {
+  const { t, locale, href } = useI18n();
+  const router = useRouter();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const screenRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLElement>(null);
+  const displayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    const display = displayRef.current;
+    if (!stage || !display) return;
+    const updateSize = () => {
+      const stageStyle = getComputedStyle(stage);
+      const frame = display.querySelector('.play-frame');
+      if (!frame) return;
+      const frameStyle = getComputedStyle(frame);
+      const number = (value: string) => Number.parseFloat(value) || 0;
+      const workspace = stage.parentElement;
+      const top = (workspace ?? stage).getBoundingClientRect().top + window.scrollY + (workspace ? number(getComputedStyle(workspace).paddingTop) : 0);
+      const availableHeight = Math.max(0, window.innerHeight - top - 20) * 0.92;
+      const stageInset = number(stageStyle.paddingTop) + number(stageStyle.paddingBottom) + number(stageStyle.borderTopWidth) + number(stageStyle.borderBottomWidth);
+      const frameInsetY = number(frameStyle.paddingTop) + number(frameStyle.paddingBottom);
+      const frameInsetX = number(frameStyle.paddingLeft) + number(frameStyle.paddingRight);
+      const maxWidth = Math.max(0, availableHeight - stageInset - frameInsetY) * 4 / 3 + frameInsetX;
+      stage.style.setProperty('--play-display-height', `${Math.max(0, availableHeight - stageInset)}px`);
+      stage.style.setProperty('--play-display-max-width', `${maxWidth}px`);
+      stage.parentElement?.style.setProperty('--play-display-max-width', `${maxWidth}px`);
+      document.querySelector<HTMLElement>('.play-navigation')?.style.setProperty('--play-display-max-width', `${maxWidth}px`);
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    const navigation = document.querySelector('.play-navigation');
+    if (navigation) observer.observe(navigation);
+    window.addEventListener('resize', updateSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
   /** 防重入：载入中再点一次「开始」不该把正在跑的那次搅了（和 room 里同一个理由） */
   const loadingRef = useRef(false);
+  const activeRef = useRef(false);
 
   // 惰性初始化持有实例：只建一次，也避免在渲染期读写 ref（react-hooks/refs）
   const [controller] = useState(() => new EmulatorController());
@@ -103,6 +150,8 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
   const [rom, setRom] = useState<LoadedRom | null>(null);
   const [paused, setPaused] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
+  const [loadCancelled, setLoadCancelled] = useState(false);
+  const directSolo = autoStart && initialMode === 'solo';
   /** ROM 整包下载进度（0..1），null = 拿不到字节数或这一阶段还没开始 */
   const [romRatio, setRomRatio] = useState<number | null>(null);
   /** 核心包下载进度（0..1），null = 拿不到字节数 */
@@ -133,16 +182,44 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
 
   const [volume, setVolume] = useState(VOLUME_MAX);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const pageThemeRef = useRef<HTMLElement | null>(null);
+  const themeFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const page = workspaceRef.current?.closest<HTMLElement>('.play-page');
+    if (!page) return;
+    pageThemeRef.current = page;
+    page.dataset.playTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    return () => {
+      if (themeFadeTimer.current !== null) clearTimeout(themeFadeTimer.current);
+      page.classList.remove('play-theme-fading');
+      delete page.dataset.playTheme;
+      pageThemeRef.current = null;
+    };
+  }, []);
   const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
   const [keybindOpen, setKeybindOpen] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [savesOpen, setSavesOpen] = useState(false);
+  const [keysPlayer, setKeysPlayer] = useState<'p1' | 'p2'>(initialRoomCode ? 'p2' : 'p1');
+  const [screenSize, setScreenSize] = useState<'small' | 'medium' | 'large'>('large');
 
-  const [mode, setMode] = useState<PlayMode>('solo');
-  const [joinCode, setJoinCode] = useState('');
-  const [netplayMode, setNetplayMode] = useState<NetplayMode>('lan');
+  const [mode] = useState<PlayMode>(initialRoomCode ? 'join' : initialMode);
+  const autoStartedRef = useRef(false);
+  const [joinCode] = useState(initialRoomCode.toUpperCase());
+  const [netplayMode] = useState<NetplayMode>('wan');
   const [streamQuality, setStreamQuality] = useState<StreamQuality>(DEFAULT_STREAM_QUALITY);
   const [netplayState, setNetplayState] = useState<NetplayState>(IDLE_NETPLAY_STATE);
   const [netplayBusy, setNetplayBusy] = useState(false);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [roomToast, setRoomToast] = useState<{ key: MessageKey; kind: 'ok' | 'danger'; id: number } | null>(null);
+
+  useEffect(() => {
+    if (!roomToast) return;
+    const timer = setTimeout(() => setRoomToast(null), 4500);
+    return () => clearTimeout(timer);
+  }, [roomToast]);
 
   /**
    * 联机控制器。回调里要读 `controller`（房主把对方的输入打进本机），
@@ -152,9 +229,21 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
    * 这一页的状态行是常驻在右侧的（房间码下面那行），不需要另开一条会过期的通道。
    */
   const [netplay] = useState(
-    () =>
-      new NetplayController({
-        onState: setNetplayState,
+    () => {
+      let previousState = IDLE_NETPLAY_STATE;
+      return new NetplayController({
+        onState: (next) => {
+          const previous = previousState;
+          previousState = next;
+          setNetplayState(next);
+          if (next.status === 'connected' && previous.status !== 'connected') {
+            setRoomToast({ key: next.role === 'host' ? 'netplay.toastHost' : 'netplay.toastGuest', kind: 'ok', id: Date.now() });
+          } else if (previous.status === 'connected' && next.status === 'waiting' && next.role === 'host') {
+            setRoomToast({ key: 'netplay.toastGuestLeft', kind: 'danger', id: Date.now() });
+          } else if (next.error === 'host-left' && previous.error !== 'host-left') {
+            setRoomToast({ key: 'netplay.toastHostLeft', kind: 'danger', id: Date.now() });
+          }
+        },
         onRemoteButton: (button, down, role) => {
           // 只有房主本机跑着模拟器；加入者那份注入无处可去，所以这里是单向的
           if (role !== 'host') return;
@@ -162,7 +251,8 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
           controller.pressButton(button, 2, down);
         },
         onRemoteStream: (stream) => setRemoteStream(stream),
-      })
+      });
+    }
   );
 
   const hasPicture = Boolean(rom) || Boolean(remoteStream);
@@ -174,6 +264,26 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
    */
   const gameText = game ? localizeLibraryGame(game, locale) : null;
   const title = gameText?.title ?? '';
+
+  // 路由返回不会刷新浏览器，必须显式释放模拟器和联机资源。
+  useEffect(() => {
+    activeRef.current = true;
+    const stop = () => {
+      activeRef.current = false;
+      abortRef.current?.abort();
+      lastRomRef.current = null;
+      void controller.exit().catch((error) => console.warn('[play] 退出失败', error));
+      void netplay.leave().catch((error) => console.warn('[play] 退房失败', error));
+    };
+    const restore = () => { activeRef.current = true; };
+    window.addEventListener('pagehide', stop);
+    window.addEventListener('pageshow', restore);
+    return () => {
+      window.removeEventListener('pagehide', stop);
+      window.removeEventListener('pageshow', restore);
+      stop();
+    };
+  }, [controller, netplay]);
 
   /* ---------------- 首屏：把 localStorage / <html> 上的偏好同步进来 ---------------- */
 
@@ -199,21 +309,6 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
     controller.setBindings(stored);
     void Promise.resolve().then(() => setBindings(stored));
 
-    /*
-     * 分享链接里的 `?room=XXXX` —— 别人把房间码分享过来时，直接把「加入」这一档
-     * 选好、码填上，用户点一下「加入房间」就进屋。
-     *
-     * ⚠️ **刻意不自动连**：这一页的入口是「游戏详情 → 联机游戏」，进来的人多半是想
-     * 自己开一局；地址上那个码有可能是上一次留下的。等他点一下再连，比默默连进
-     * 某个房间安全得多。
-     */
-    const code = new URL(window.location.href).searchParams.get(ROOM_QUERY_PARAM);
-    if (code) {
-      void Promise.resolve().then(() => {
-        setMode('join');
-        setJoinCode(code.toUpperCase());
-      });
-    }
   }, [controller]);
 
   /* ---------------- 游戏数据 ---------------- */
@@ -256,6 +351,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
    */
   const load = useCallback(
     async (file?: File) => {
+      if (!activeRef.current) return;
       if (!game && !file) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -263,6 +359,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
       if (loadingRef.current) return;
 
       loadingRef.current = true;
+      setLoadCancelled(false);
       setNotice(null);
       setRomRatio(null);
       setCoreRatio(null);
@@ -281,6 +378,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
           romFile = new File([blob], game!.romName, { type: 'application/octet-stream' });
         }
 
+        if (ac.signal.aborted || !activeRef.current) return;
         setPhase('booting');
         lastRomRef.current = romFile;
 
@@ -291,6 +389,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
          */
         const consoleType = game?.consoleType ?? null;
         const bios = consoleType === 'arcade' ? await ensureBios() : null;
+        if (ac.signal.aborted || !activeRef.current) return;
 
         /*
          * 核心包那段进度按 1% 节流（几百个 chunk 全 setState 会把整页重渲染几百次）；
@@ -301,6 +400,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
           romFile,
           canvas,
           (loaded, total) => {
+            if (ac.signal.aborted || !activeRef.current) return;
             if (total <= 0) return;
             const pct = Math.floor((loaded / total) * 100);
             if (pct === lastPct) return;
@@ -310,10 +410,16 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
           bios
         );
 
+        // 核心启动不可中断；离开时尚未完成的启动，在完成后立即退出。
+        if (ac.signal.aborted || !activeRef.current) {
+          await controller.exit();
+          return;
+        }
         setRom(controller.rom);
         setPaused(false);
         setPhase('ready');
       } catch (error) {
+        if (!activeRef.current) return;
         // 用户自己掐的：不是故障，回到「设置好了，点开始」那一屏
         if (isAbortError(error)) console.info('[play] 已取消载入：', game?.title);
         else {
@@ -330,8 +436,10 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
       } finally {
         loadingRef.current = false;
         if (abortRef.current === ac) abortRef.current = null;
-        setRomRatio(null);
-        setCoreRatio(null);
+        if (activeRef.current) {
+          setRomRatio(null);
+          setCoreRatio(null);
+        }
       }
     },
     [controller, game]
@@ -339,6 +447,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
 
   /** 取消正在飞的那一笔 ROM 下载。没有下载在飞时是空操作。 */
   const cancelLoad = useCallback(() => {
+    setLoadCancelled(true);
     abortRef.current?.abort();
   }, []);
 
@@ -351,11 +460,13 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
    * 和 room 那三个回调同一个规矩，`busy` 一律放 finally（漏一条按钮就永久变灰）。
    */
   const start = useCallback(async () => {
+    if (!activeRef.current) return;
     if (mode === 'join') {
       if (!joinCode.trim()) return;
       setNetplayBusy(true);
       try {
         await netplay.join(joinCode.trim().toUpperCase(), netplayMode);
+        if (!activeRef.current) await netplay.leave();
       } catch (error) {
         console.warn('[play] 加入房间失败', error);
       } finally {
@@ -369,6 +480,15 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
       setNetplayBusy(true);
       try {
         await netplay.host(netplayMode);
+        if (!activeRef.current) {
+          await netplay.leave();
+          return;
+        }
+        // host() 的失败也可能通过 state.error 返回，只有建房成功才加载游戏。
+        if (netplay.current.status === 'idle' || netplay.current.error) {
+          setNetplayBusy(false);
+          return;
+        }
       } catch (error) {
         console.warn('[play] 创建房间失败', error);
         setNetplayBusy(false);
@@ -381,16 +501,41 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
     await load();
   }, [joinCode, load, mode, netplay, netplayMode]);
 
+  useEffect(() => {
+    if (!autoStart || initialMode !== 'solo' || mode !== 'solo' || !game || autoStartedRef.current) return;
+    let cancelled = false;
+    // 等挂载和偏好初始化完成；StrictMode 清理的那次任务不会执行。
+    void Promise.resolve().then(() => {
+      if (cancelled || autoStartedRef.current) return;
+      autoStartedRef.current = true;
+      void start();
+    });
+    return () => { cancelled = true; };
+  }, [autoStart, initialMode, mode, game, start]);
+
+  useEffect(() => {
+    if (mode !== 'join' || !joinCode || autoStartedRef.current) return;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled || autoStartedRef.current) return;
+      autoStartedRef.current = true;
+      void start();
+    });
+    return () => { cancelled = true; };
+  }, [mode, joinCode, start]);
+
   const leaveRoom = useCallback(async () => {
     setNetplayBusy(true);
     try {
       await netplay.leave();
+      if (canReturnWithinSite()) router.back();
+      else router.replace(href('/'));
     } catch (error) {
       console.warn('[play] 离开房间失败', error);
     } finally {
       setNetplayBusy(false);
     }
-  }, [netplay]);
+  }, [netplay, router, href]);
 
   /**
    * 房主：插上卡带就把画面推给对方。
@@ -442,7 +587,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
    * 但手上按的该是自己配惯的那套 —— 房主那边按自己的表合成按键事件。
    */
   useEffect(() => {
-    if (netplayState.role !== 'guest' || keybindOpen) return;
+    if (netplayState.role !== 'guest' || keybindOpen || savesOpen) return;
 
     const keys = codeToButton(bindings.p1);
     /*
@@ -515,7 +660,15 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
       // 摘监听时把欠着的 keyup 补上，否则房主会一直以为你还按着方向键
       releaseAll();
     };
-  }, [netplayState.role, netplay, bindings, keybindOpen]);
+  }, [netplayState.role, netplay, bindings, keybindOpen, savesOpen]);
+
+  const handleTouchButton = useCallback((button: ButtonName, down: boolean) => {
+    if (netplayState.role === 'guest') {
+      netplay.sendButton(button, down);
+    } else {
+      controller.pressButton(button, 1, down);
+    }
+  }, [controller, netplay, netplayState.role]);
 
   /* ---------------- 播放控制 ---------------- */
 
@@ -533,15 +686,7 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
     await load(file);
   }, [load]);
 
-  const eject = useCallback(async () => {
-    await controller.exit();
-    setRom(null);
-    setPaused(false);
-    setPhase('idle');
-    lastRomRef.current = null;
-  }, [controller]);
-
-  const changeVolume = useCallback(
+const changeVolume = useCallback(
     (level: number) => setVolume(controller.setVolume(level)),
     [controller]
   );
@@ -549,20 +694,33 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
   /* ---------------- 主题 / 全屏 ---------------- */
 
   /**
-   * 主题切换。**真身是 `<html data-theme>`**（CSS 按它翻整页的色板），
+   * 主题切换只改当前 `.play-page` 的局部色板，保留全站主题。
    * 这份 state 只喂按钮的 title / aria —— 和 room 那边同一套路，
-   * 只是这里不做那一层 View Transitions 的「天光」动画（这一页没有屋子）。
+   * 昼夜切换只做颜色过渡。
    */
   const toggleTheme = useCallback(() => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    setTheme(next);
-    try {
-      localStorage.setItem('nesload:theme', next);
-    } catch {
-      // 隐私模式下写不进去，忽略即可（下次打开退回跟随系统）
+    const root = pageThemeRef.current;
+    if (!root) return;
+    const next = root.dataset.playTheme === 'dark' ? 'light' : 'dark';
+    const commit = () => {
+      root.dataset.playTheme = next;
+      setTheme(next);
+    };
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      commit();
+    } else {
+      root.classList.add('play-theme-fading');
+      root.style.setProperty('--theme-fade-duration', '0.5s');
+      void root.offsetHeight;
+      commit();
+      if (themeFadeTimer.current !== null) clearTimeout(themeFadeTimer.current);
+      themeFadeTimer.current = setTimeout(() => {
+        root.classList.remove('play-theme-fading');
+        root.style.removeProperty('--theme-fade-duration');
+        themeFadeTimer.current = null;
+      }, 550);
     }
-  }, [theme]);
+  }, []);
 
   const requestFullscreen = useCallback(async () => {
     const screen = screenRef.current;
@@ -602,13 +760,33 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
 
   return (
     <>
+      {roomToast && (
+        <div role="status" aria-live="polite" className={`fixed left-1/2 top-5 z-[80] flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 border bg-ink-900 px-5 py-3 text-[13px] shadow-lg ${roomToast.kind === 'ok' ? 'border-ok/40 text-ok' : 'border-danger/40 text-danger'}`}>
+          <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-current" />
+          <span>{t(roomToast.key)}</span>
+        </div>
+      )}
+      {mode === 'host' && !inRoom && !busy && (
+        <QualityDialog
+          quality={streamQuality}
+          onQuality={setStreamQuality}
+          pending={netplayBusy}
+          disabled={mode === 'host' ? !game : !joinCode.trim()}
+          error={netplayState.error ? t(NETPLAY_ERROR_MESSAGE[netplayState.error]) : null}
+          onConfirm={() => void start()}
+          onBack={() => {
+            if (window.history.length > 1) window.history.back();
+            else window.location.assign(locale === 'zh' ? '/zh/games' : '/games');
+          }}
+        />
+      )}
       {/*
         这一行的根**不是 `<main>`**：`.wall` 背景、右上一排入口、返回、页脚全在
         `GamesShell` 里（见 `app/[locale]/play/page.tsx`），`<main>` 由外层出。
         这里 `flex-1` + `lg:items-stretch` 是为了「吃掉外壳剩下来的纵向空间」——
         `GamesShell` 传了 `fill`，页脚因此被压到视口最底部（2026-10-14 用户要求）。
       */}
-      <div className="flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-stretch">
+      <div ref={workspaceRef} className="play-workspace flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-stretch">
         {/*
           这一页没有可见的大标题（用户要的就是干净），但**不能没有 h1** ——
           读屏和爬虫都靠它认「这一页在讲什么」。用游戏名当它，没有就退回页面自己的名字。
@@ -631,14 +809,15 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
           ⚠️ 别改成给屏幕挂 `max-h`（或 `h-full`）—— 会和 `aspect-ratio` 打架：
           宽度还是 100%、高度被截短，而 canvas 是 `h-full w-full`，画面会被压扁。
         */}
-        <section className="flex min-w-0 flex-1 items-center justify-center">
-          <div className="w-full max-w-[min(100%,calc((100vh_-_320px)*4/3))]">
+        <section ref={stageRef} className="play-stage flex min-w-0 flex-1 items-center justify-center">
+          <div className="play-screen-area">
+          <div ref={displayRef} className="play-display w-full" data-screen-size={screenSize}>
             {/*
               屏幕外框就是站上那套像素描边（`pixel-edge pxw-3 pxc-600 bg-ink-800 p-3`）——
               和别处的「一块屏幕」同一个观感，**别改成 1px 细边**（我第一版那么写过，被退了）。
             */}
-            <div className="pixel-edge pxw-3 pxc-600 bg-ink-800 p-3">
-            <div className="relative">
+            <div className="play-frame">
+            <div className="relative" data-playing={hasPicture}>
               <ConsoleScreen
                 canvasRef={canvasRef}
                 screenRef={screenRef}
@@ -655,13 +834,13 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
                 fileOver={false}
                 variant="desktop"
                 hideHint
-                frameClassName="aspect-[4/3] w-full"
+                frameClassName="play-game-screen w-full"
                 onExitFullscreen={exitFullscreen}
               />
 
               {/*
                 叠层：没画面时盖住整块屏幕。三种状态按优先级分开说 ——
-                载入中（进度 + 取消）→ 联机中（房间码 / 状态 / 离开）→ 房间选择。
+                载入中（进度 + 取消）→ 联机等待 → 房间选择；房间信息显示在右侧。
                 有画面（本机的或房主推来的）就整块撤掉。
 
                 配色一律 `crt-*`：屏幕底永远是黑的，而 `ink-*` 会跟着主题翻转，
@@ -669,9 +848,9 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
                 装不下那几行时能滚，而不是把内容顶出去。
               */}
               {!hasPicture && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-y-auto bg-black/90 px-8 py-8 text-center">
+                <div className="play-overlay absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-y-auto px-8 py-8 text-center">
                   {/* 先报「这是哪一款 / 出了什么事」 */}
-                  <div className="flex flex-col items-center gap-1">
+                  <div className="play-headline flex flex-col items-center gap-1">
                     {headline && <span className="text-[13px] text-crt-ink-200">{headline}</span>}
                     {game && (
                       <span className="text-[12px] text-crt-ink-500">
@@ -681,7 +860,21 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
                     {game && notice && <span className="text-[12px] text-danger">{t(notice)}</span>}
                   </div>
 
-                  {busy ? (
+                  {mode === 'join' && netplayState.status !== 'connected' ? (
+                    <div className="flex w-full max-w-[320px] flex-col items-center gap-4" role="status">
+                      {netplayState.error ? (
+                        <>
+                          <p className="text-[12px] text-danger">{t(NETPLAY_ERROR_MESSAGE[netplayState.error])}</p>
+                          <button type="button" disabled={netplayBusy} onClick={() => void start()} className="border border-crt-ink-500 px-4 py-2 text-[12px] text-crt-ink-200 disabled:opacity-40">{t('play.retryJoin')}</button>
+                        </>
+                      ) : (
+                        <>
+                          <span aria-hidden="true" className="h-7 w-7 animate-spin rounded-full border-2 border-crt-ink-600 border-t-crt-ink-200 motion-reduce:animate-none" />
+                          <p className="text-[13px] text-crt-ink-200">{t('netplay.joining')}</p>
+                        </>
+                      )}
+                    </div>
+                  ) : busy ? (
                     /* ① 载入中：阶段 + 进度 + 取消 */
                     <>
                       <span className="text-[12px] text-crt-ink-300">
@@ -702,183 +895,43 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
                         {t('play.cancel')}
                       </button>
                     </>
-                  ) : inRoom ? (
-                    /* ② 联机中：房间码 + 分享 + 状态 + 离开 */
+                  ) : directSolo ? (
                     <div className="flex w-full max-w-[320px] flex-col items-center gap-4">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[12px] text-crt-ink-400">{t('netplay.roomCode')}</span>
-                        <span className="font-pixel text-[24px] leading-none tracking-[0.3em] text-crt-accent">
-                          {netplayState.code}
-                        </span>
-                        <div className="mt-2 flex items-center gap-2">
-                          <CopyBtn
-                            text={netplayState.code ?? ''}
-                            label={t('netplay.copy')}
-                            done={t('netplay.copied')}
-                          />
-                          <CopyBtn
-                            text={shareLink(netplayState.code ?? '')}
-                            label={t('netplay.share')}
-                            done={t('netplay.shareCopied')}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-center gap-2 text-[12px]">
-                        <span
-                          className={`h-[6px] w-[6px] shrink-0 ${
-                            netplayState.status === 'connected' ? 'bg-crt-ok' : 'bg-crt-accent'
-                          }`}
-                        />
-                        <span className="min-w-0 truncate text-crt-ink-200">
-                          {netplayState.status === 'connected'
-                            ? t('netplay.connected')
-                            : netplayState.role === 'guest'
-                              ? t('netplay.joining')
-                              : t('netplay.waiting')}
-                        </span>
-                        {netplayState.status === 'connected' && netplayState.rtt !== null && (
-                          <span className="text-crt-ink-500">{Math.round(netplayState.rtt)}ms</span>
-                        )}
-                      </div>
-
-                      <p className="text-[12px] leading-relaxed text-crt-ink-400">
-                        {netplayState.role === 'host'
-                          ? t('netplay.youAreHost')
-                          : t('netplay.youAreGuest')}
-                      </p>
-
-                      {/* 加入者连上了、房主还没开跑 —— 说清楚是在等，不是坏了 */}
-                      {netplayState.role === 'guest' &&
-                        netplayState.status === 'connected' &&
-                        !remoteStream && (
-                          <span className="text-[12px] text-crt-ink-300">
-                            {t('netplay.waitingGame')}
-                          </span>
-                        )}
-
-                      {/*
-                        房主、房间开好了、卡带还没插上 —— 给他一颗按钮。
-
-                        为什么非要这一颗：上面那颗「开始」是**建房 + 载入**一次做完的，
-                        点下去之后屏幕就换成房间信息了；万一**建房成了、载入失败**
-                        （网络抖、ROM 404），页面就停在一间没人玩的空房里，再没有第二个入口
-                        —— 那是条死路。加入者不需要它：他的画面由房主推过来。
-                      */}
-                      {netplayState.role === 'host' && !rom && (
-                        <button
-                          type="button"
-                          disabled={busy || !game}
-                          onClick={() => void load()}
-                          className="pixel-edge pxw-3 pxc-600 w-[220px] bg-crt-accent py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-crt-accent/80 disabled:cursor-not-allowed disabled:opacity-35"
-                        >
-                          {busy ? t('play.downloading') : t('play.start')}
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        disabled={netplayBusy}
-                        onClick={() => void leaveRoom()}
-                        className="pixel-edge pxw-2 pxc-500 bg-crt-950/85 px-4 py-1.5 text-[12px] text-crt-ink-300 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-35"
-                      >
-                        {t('netplay.leave')}
-                      </button>
-                    </div>
-                  ) : (
-                    /* ③ 房间选择。**这一页开局要做的选择全在这儿**（右侧只剩操作表） */
-                    <div className="flex flex-col items-center gap-4">
-                      {/* 三个项目：单人 / 开房 / 加入。选中的那颗实心 accent */}
-                      <div className="flex gap-2">
-                        {PLAY_MODES.map((value) => (
-                          <OvBtn
-                            key={value}
-                            active={mode === value}
-                            disabled={busy}
-                            onClick={() => setMode(value)}
-                          >
-                            {t(PLAY_MODE_MESSAGE[value])}
-                          </OvBtn>
-                        ))}
-                      </div>
-
-                      {/* 加入才要码 */}
-                      {mode === 'join' && (
-                        <input
-                          value={joinCode}
-                          onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                          maxLength={4}
-                          placeholder={t('netplay.codePlaceholder')}
-                          aria-label={t('netplay.codePlaceholder')}
-                          className="pixel-edge pxw-2 pxc-500 w-[148px] bg-crt-950/85 px-3 py-2 text-center font-pixel text-[14px] text-crt-ink-100 uppercase tracking-[0.25em] placeholder:text-crt-ink-500 focus:outline-none"
-                        />
-                      )}
-
-                      {/* 联机才要这两项：单人模式它们一个都不生效 */}
-                      {mode !== 'solo' && (
+                      {!notice && !loadCancelled ? (
                         <>
-                          <div className="flex gap-2">
-                            {(['lan', 'wan'] as const).map((value) => (
-                              <OvBtn
-                                key={value}
-                                active={netplayMode === value}
-                                disabled={busy}
-                                onClick={() => setNetplayMode(value)}
-                              >
-                                {t(value === 'lan' ? 'netplay.modeLan' : 'netplay.modeWan')}
-                              </OvBtn>
-                            ))}
-                          </div>
-
-                          <div className="flex flex-col items-center gap-2">
-                            <span className="text-[12px] text-crt-ink-400">{t('netplay.quality')}</span>
-                            <div className="flex gap-2">
-                              {QUALITY_ORDER.map((value) => (
-                                <OvBtn
-                                  key={value}
-                                  active={streamQuality === value}
-                                  disabled={busy}
-                                  onClick={() => setStreamQuality(value)}
-                                >
-                                  {t(QUALITY_MESSAGE[value])}
-                                </OvBtn>
-                              ))}
-                            </div>
-                          </div>
+                          <span role="status" className="text-[12px] text-crt-ink-300">{t('play.downloading')}</span>
+                          <LoadBar ratio={null} />
+                        </>
+                      ) : (
+                        <>
+                          {loadCancelled && <span role="status" className="text-[12px] text-crt-ink-300">{t('play.cancelled')}</span>}
+                          {game && (
+                            <button type="button" onClick={() => void load()} className="pixel-edge pxw-2 pxc-500 bg-crt-950/85 px-4 py-1.5 text-[12px] text-crt-ink-200 hover:text-crt-accent">
+                              {t('play.retry')}
+                            </button>
+                          )}
                         </>
                       )}
-
-                      <button
-                        type="button"
-                        disabled={busy || netplayBusy || !game || (mode === 'join' && !joinCode.trim())}
-                        onClick={() => void start()}
-                        className="pixel-edge pxw-3 pxc-600 w-[220px] bg-crt-accent py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-crt-accent/80 disabled:cursor-not-allowed disabled:opacity-35"
-                      >
-                        {/*
-                          按钮说的是**这一下要干的动作**，不是选项的名字：
-                          「开始」是下 ROM 开跑（单人 / 房主都算），「加入」是连过去。
-                        */}
-                        {busy
-                          ? t('play.downloading')
-                          : mode === 'join'
-                            ? t('netplay.join')
-                            : t('play.start')}
-                      </button>
-
-                      {/* 报错只在这一处：房主那把 `error` 写进 state 的理由，见 start() 的注释 */}
-                      {netplayState.error && (
-                        <p className="text-[12px] text-danger">
-                          {t(NETPLAY_ERROR_MESSAGE[netplayState.error])}
-                        </p>
-                      )}
                     </div>
-                  )}
+                  ) : inRoom ? (
+                    <span role="status" className="flex items-center gap-2 text-[12px] text-info">
+                      <span aria-hidden="true" className="h-2 w-2 animate-pulse rounded-full bg-current motion-reduce:animate-none" />
+                      {t(netplayState.role === 'guest' ? 'netplay.waitingGame' : 'netplay.waiting')}
+                    </span>
+                  ) : null}
+
                 </div>
               )}
               </div>
             </div>
           </div>
 
+          </div>
+          <MobileGamepad
+            consoleType={rom?.console ?? netplayState.remoteGame?.console ?? game?.consoleType ?? 'nes'}
+            enabled={hasPicture && !busy && !saveBusy && !savesOpen && !paused && !netplayState.remotePaused && !keybindOpen}
+            onButton={handleTouchButton}
+          />
         </section>
 
         {/*
@@ -890,9 +943,9 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
           （`pixel-edge pxw-* pxc-*`）——「干净」指的是**只放该有的东西**（说明 + 控件，
           没有分组卡片、没有键帽、没有多余标题），不是把站上的视觉语言砍掉。
         */}
-        <aside className="flex w-full shrink-0 flex-col gap-6 lg:w-[264px]">
+        <aside className="play-sidebar">
           {game && (
-            <div className="flex gap-3">
+            <div className="play-game flex gap-3">
               <div className="pixel-edge pxw-2 pxc-700 w-[92px] shrink-0 bg-ink-900">
                 {/*
                   图不在链接里、是这一页自己的主图，所以配 alt
@@ -919,33 +972,127 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
             </div>
           )}
 
-          <ul className="divide-y divide-ink-800 border-y border-ink-800">
+          <section aria-label={t('keybind.open')} className="play-keys">
+            <div className="play-panel-heading"><h2>{t('keybind.open')}</h2>          {/* 编辑仍复用原有按键设置，右侧列表跟随自定义键位更新。 */}
+          <button
+            type="button"
+            onClick={() => setKeybindOpen(true)}
+            title={t('keybind.open')}
+            aria-label={t('keybind.open')}
+            className="play-edit pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
+          >
+            {t('play.edit')}
+          </button>
+
+
+</div>
+            <div className="mb-3 flex gap-2" role="group" aria-label={t('keybind.open')}>
+              {(['p1', 'p2'] as const).map((player) => (
+                <button
+                  key={player}
+                  type="button"
+                  aria-pressed={keysPlayer === player}
+                  onClick={() => setKeysPlayer(player)}
+                  className={`flex-1 px-2 py-1.5 text-[12px] transition-colors ${keysPlayer === player ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
+                >
+                  {t(`keybind.${player}`)}
+                </button>
+              ))}
+            </div>
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+              {BUTTONS.map((button) => (
+                <div key={button} className="flex min-w-0 items-center justify-between gap-1 border-b border-ink-800 pb-2">
+                  <dt className="shrink-0 text-[12px] text-ink-300">{buttonLabel(button, t)}</dt>
+                  <dd className="min-w-0 text-right">
+                    <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">{codeLabel(bindings[keysPlayer][button])}</kbd>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {netplayState.role && <p className="mt-3 text-[12px] leading-5 text-ink-300">{t('play.netplayKeysHint')}</p>}
+          </section>
+
+          {inRoom && netplayState.code && (
+            <section aria-label={t('netplay.roomCode')} className="play-room">
+              <p className="text-[12px] text-ink-300">{t('netplay.roomCode')}</p>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="font-pixel text-[22px] tracking-[0.25em] text-accent">{netplayState.code}</p>
+                <CopyBtn text={netplayState.code} label={t('netplay.copy')} done={t('netplay.copied')} sidebar />
+              </div>
+              <p role="status" className={`mt-3 flex items-center gap-2 text-[12px] ${netplayState.error ? 'text-danger' : netplayState.status === 'connected' ? 'text-ok' : netplayState.role === 'guest' ? 'text-accent' : 'text-info'}`}>
+                <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full bg-current ${!netplayState.error && netplayState.status !== 'connected' ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
+                {netplayState.error ? t(NETPLAY_ERROR_MESSAGE[netplayState.error]) : t(netplayState.status === 'connected' ? 'netplay.connected' : netplayState.role === 'guest' ? 'netplay.joining' : 'netplay.waiting')}
+              {netplayState.status === 'connected' && (
+                <span className={`ml-auto shrink-0 text-right text-[12px] ${netplayState.rtt === null ? 'text-ink-300' : netplayState.rtt < 100 ? 'text-ok' : netplayState.rtt < 200 ? 'text-warn' : 'text-danger'}`}>
+                  {t('play.latency')} · {netplayState.rtt === null ? t('play.measuringLatency') : `${Math.round(netplayState.rtt)} ms`}
+                </span>
+              )}
+              </p>
+              {netplayState.role === 'host' && <p className="mt-2 text-[12px] text-ink-400">{t('netplay.quality')} · {t(QUALITY_MESSAGE[streamQuality])}</p>}
+
+              {netplayState.error && <p role="alert" className="mt-3 text-[12px] text-danger">{t(NETPLAY_ERROR_MESSAGE[netplayState.error])}</p>}
+              {netplayState.role === 'host' && !rom && !busy && (
+                <button type="button" disabled={!game || netplayBusy} onClick={() => void load()} className="mt-3 w-full bg-accent px-3 py-2 text-[12px] text-ink-950 disabled:opacity-40">{t('play.retry')}</button>
+              )}
+              <div className="play-share-row mt-3 flex items-center gap-3">
+              <input
+                aria-label={t('netplay.share')}
+                readOnly
+                value={shareLink(netplayState.code)}
+                onFocus={(event) => event.currentTarget.select()}
+                className="w-full min-w-0 flex-1 border border-ink-700 bg-ink-950 px-2 py-2 text-[12px] text-ink-300"
+              />
+              <CopyBtn text={shareLink(netplayState.code)} label={t('netplay.share')} done={t('netplay.shareCopied')} sidebar />
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" disabled={netplayBusy} onClick={() => void leaveRoom()} className="ml-auto inline-flex items-center border border-danger/40 bg-danger/10 px-2.5 py-1 text-[12px] text-danger transition-colors hover:bg-danger/20 disabled:opacity-40">
+                {t(netplayState.role === 'host' ? 'netplay.closeRoom' : 'netplay.leave')}
+              </button>
+              </div>
+            </section>
+          )}
+
+
+
+          <section className="play-control-panel">
+            <h2 className="play-panel-title">{t('play.controlsTitle')}</h2>
+          <ul className="play-controls">
             <Row label={t(paused ? 'panel.resume' : 'panel.pause')}>
               <RowBtn
                 label={t(paused ? 'panel.resume' : 'panel.pause')}
                 onClick={() => void togglePause()}
-                disabled={!rom}
+                disabled={!rom || saveBusy}
               >
                 {paused ? '▶' : '❚❚'}
               </RowBtn>
             </Row>
 
             <Row label={t('panel.reset')}>
-              <RowBtn label={t('panel.reset')} onClick={() => void reload()} disabled={!rom || busy}>
-                ↻
+              <RowBtn label={t('panel.reset')} onClick={() => void reload()} disabled={!rom || busy || saveBusy}>
+                <ReloadIcon size={16} />
               </RowBtn>
             </Row>
 
-            {/* 弹出是危险动作：默认就带一档红，不靠 hover 才看得出来 */}
-            <Row label={t('panel.eject')}>
-              <RowBtn label={t('panel.eject')} danger onClick={() => void eject()} disabled={!rom}>
-                ⏏
+<Row label={t('play.fullscreen')}>
+              <RowBtn label={t('play.fullscreen')} onClick={() => void requestFullscreen()}>
+                <ExpandIcon size={15} />
+              </RowBtn>
+            </Row>
+
+            {/* 显示（夜 / 昼）。说明写的是「点了会变成什么」，和上面几行同一口径 */}
+            <Row label={t('play.theme')}>
+              <RowBtn
+                label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
+                onClick={toggleTheme}
+              >
+                {theme === 'dark' ? <SunIcon size={15} /> : <PlayMoonIcon size={16} />}
               </RowBtn>
             </Row>
 
             {/* 音量：− / 档位格 / +。点档位格直接跳档（和 `/room` 面板上那套同语义） */}
-            <Row label={t('play.volume')}>
-              <span className="flex items-center gap-1.5">
+            <PlaySaveControls controller={controller} rom={rom} gameId={game?.id} disabled={busy || saveBusy} onBusy={setSaveBusy} onOpen={setSavesOpen} />
+            <Row label={t('play.volume')} wide>
+              <span className="play-volume-group flex items-center gap-1.5" style={{ width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)` }}>
                 <RowBtn
                   label={t('volume.down')}
                   onClick={() => changeVolume(volume - 1)}
@@ -977,38 +1124,25 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
               </span>
             </Row>
 
-            {/* 显示（夜 / 昼）。说明写的是「点了会变成什么」，和上面几行同一口径 */}
-            <Row label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}>
-              <RowBtn
-                label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
-                onClick={toggleTheme}
-              >
-                {theme === 'dark' ? <SunIcon size={15} /> : <MoonIcon size={15} />}
-              </RowBtn>
+            <Row label={t('play.screenSize')} wide>
+              <span className="play-size-group grid grid-cols-3 items-center gap-3" style={{ width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)` }}>
+                {(['small', 'medium', 'large'] as const).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    aria-pressed={screenSize === size}
+                    onClick={() => setScreenSize(size)}
+                    className={`pixel-edge pxw-2 pxc-500 px-2 py-1 text-[12px] transition-colors ${screenSize === size ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
+                  >
+                    {t(`tvSize.opt.${size}`)}
+                  </button>
+                ))}
+              </span>
             </Row>
 
-            <Row label={t('play.fullscreen')}>
-              <RowBtn label={t('play.fullscreen')} onClick={() => void requestFullscreen()}>
-                <ExpandIcon size={15} />
-              </RowBtn>
-            </Row>
+
           </ul>
-
-          {/*
-            「编辑」。可见文字就这俩字（用户要的），具体编辑什么交给 tooltip ——
-            它开的是按键设置面板，那份键位配置和 `/room` 共用同一套 localStorage。
-          */}
-          <button
-            type="button"
-            onClick={() => setKeybindOpen(true)}
-            title={t('keybind.open')}
-            aria-label={t('keybind.open')}
-            className="pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
-          >
-            {t('play.edit')}
-          </button>
-
-          <p className="text-[12px] leading-relaxed text-ink-600">{t('play.hint')}</p>
+          </section>
         </aside>
       </div>
 
@@ -1040,16 +1174,6 @@ export default function PlayScene({ serverGame }: PlaySceneProps) {
 /** 重试音频轨的最长尝试次数（每次 500ms）—— 和 ConsoleScene 里那个常量同值 */
 const AUDIO_RETRY_LIMIT = 10;
 
-/** 房间设置区三个项目的顺序（数组顺序 = 界面顺序，别改成对象遍历） */
-const PLAY_MODES: PlayMode[] = ['solo', 'host', 'join'];
-
-const PLAY_MODE_MESSAGE: Record<PlayMode, MessageKey> = {
-  solo: 'play.modeSolo',
-  // 「创建房间」和「加入」两个词直接借联机面板那两句：同一件事在站上只有一种说法
-  host: 'netplay.create',
-  join: 'netplay.join',
-};
-
 /** 画质三档的顺序：由省到费 */
 const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
 
@@ -1058,6 +1182,49 @@ const QUALITY_MESSAGE: Record<StreamQuality, MessageKey> = {
   balanced: 'netplay.qualityBalanced',
   sharp: 'netplay.qualitySharp',
 };
+
+function QualityDialog({ quality, onQuality, pending, disabled, error, onConfirm, onBack }: {
+  quality: StreamQuality;
+  onQuality: (quality: StreamQuality) => void;
+  pending: boolean;
+  disabled: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onBack: () => void;
+}) {
+  const { t } = useI18n();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    headingRef.current?.focus();
+    return () => dialog?.close();
+  }, []);
+  return (
+    <dialog ref={dialogRef} aria-labelledby="play-quality-title" onCancel={(event) => event.preventDefault()} onKeyDown={(event) => event.stopPropagation()} className="play-quality-dialog">
+      <h2 ref={headingRef} tabIndex={-1} id="play-quality-title" className="text-[20px] font-semibold text-ink-100 outline-none">{t('netplay.quality')}</h2>
+      <p className="mt-2 text-[13px] leading-6 text-ink-300">{t('play.qualityIntro')}</p>
+      <div className="my-5 flex flex-col gap-2.5">
+        {QUALITY_ORDER.map((value) => (
+          <button key={value} type="button" disabled={pending} aria-pressed={quality === value} onClick={() => onQuality(value)} className={`flex items-center gap-3 border px-4 py-3 text-left transition-colors disabled:opacity-50 ${quality === value ? 'border-ink-300 bg-ink-800' : 'border-ink-700 bg-ink-900 hover:bg-ink-850'}`}>
+            <span aria-hidden="true" className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[12px] ${quality === value ? 'border-ink-200 bg-ink-200 text-ink-950' : 'border-ink-500'}`}>{quality === value ? '✓' : ''}</span>
+            <span>
+              <span className="block text-[13px] font-semibold text-ink-100">{t(QUALITY_MESSAGE[value])}</span>
+              <span className="mt-1 block text-[12px] leading-5 text-ink-300">{t(`play.qualityHint.${value}`)}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+      {error && <p role="alert" className="mb-4 text-[12px] text-danger">{error}</p>}
+      <p className="mb-4 text-[12px] leading-5 text-ink-400">{t('play.qualityConfirmHint')}</p>
+      <div className="grid grid-cols-2 gap-3 border-t border-ink-700 pt-4">
+        <button type="button" onClick={onBack} className="border border-ink-600 px-4 py-2.5 text-[13px] text-ink-200 hover:bg-ink-800">{t('common.back')}</button>
+        <button type="button" disabled={pending || disabled} onClick={onConfirm} className="bg-accent px-4 py-2.5 text-[13px] font-semibold text-ink-950 hover:bg-accent/80 disabled:opacity-40">{t(pending ? 'play.connecting' : 'play.confirm')}</button>
+      </div>
+    </dialog>
+  );
+}
 
 /**
  * 错误码 → 文案。写成 Record 是为了拿穷尽性检查：`lib/netplay.ts` 里加了新码、
@@ -1087,6 +1254,8 @@ function shareLink(code: string): string {
   if (typeof window === 'undefined') return '';
   const url = new URL(window.location.href);
   url.searchParams.set(ROOM_QUERY_PARAM, code);
+  // 邀请链接只预填加入房间，不能继承房主入口的自动创建行为。
+  url.searchParams.delete('mode');
   url.hash = '';
   return url.toString();
 }
@@ -1123,7 +1292,7 @@ function LoadBar({ ratio }: { ratio: number | null }) {
 }
 
 /** 复制一颗东西到剪贴板，成功后自己显示一小会儿「已复制」。 */
-function CopyBtn({ text, label, done }: { text: string; label: string; done: string }) {
+function CopyBtn({ text, label, done, sidebar = false }: { text: string; label: string; done: string; sidebar?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -1143,7 +1312,7 @@ function CopyBtn({ text, label, done }: { text: string; label: string; done: str
           () => undefined
         );
       }}
-      className="pixel-edge pxw-2 pxc-500 bg-crt-950/85 px-2.5 py-1 text-[12px] text-crt-ink-200 transition-colors hover:text-crt-accent"
+      className={`pixel-edge pxw-2 pxc-500 shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] transition-colors ${sidebar ? 'bg-ink-800 text-ink-200 hover:text-accent' : 'bg-crt-950/85 text-crt-ink-200 hover:text-crt-accent'}`}
     >
       {copied ? done : label}
     </button>
@@ -1156,9 +1325,9 @@ function CopyBtn({ text, label, done }: { text: string; label: string; done: str
  * 抽出来是因为六行的版式完全一样（`justify-between` + 同样的上下内边距），
  * 各写一遍迟早会有行高不一样。行之间的分隔线交给父级 `<ul>` 的 `divide-y`。
  */
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
-    <li className="flex items-center justify-between gap-3 py-2.5">
+    <li className={`flex items-center justify-between gap-3 py-2.5 ${wide ? 'col-span-2' : ''}`}>
       <span className="text-[12px] text-ink-400">{label}</span>
       {children}
     </li>
@@ -1184,7 +1353,7 @@ function RowBtn({
       type="button"
       title={label}
       aria-label={label}
-      className={`pixel-edge pxw-2 pxc-500 flex h-[28px] min-w-[28px] shrink-0 items-center justify-center px-1.5 text-[12px] leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+      className={`play-icon-button pixel-edge pxw-2 pxc-500 flex shrink-0 items-center justify-center text-[12px] leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         danger
           ? 'bg-ink-800 text-danger/75 enabled:hover:bg-ink-700 enabled:hover:text-danger'
           : 'bg-ink-800 text-ink-300 enabled:hover:bg-ink-700 enabled:hover:text-accent'
@@ -1196,29 +1365,3 @@ function RowBtn({
   );
 }
 
-/**
- * 屏幕里那颗选项钮（单人 / 创建房间 / 加入、局域网 / 公网、画质三档）。
- *
- * ⚠️ 配色只能走 `crt-*`：这一层浮在全黑的屏幕上，`ink-*` 会跟着主题翻转，
- * 浅色主题下就成了黑底黑字（见文件头那条）。选中态实心 accent。
- */
-function OvBtn({
-  active,
-  children,
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { active: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={`pixel-edge pxw-2 pxc-500 px-4 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
-        active
-          ? 'bg-crt-accent text-ink-950'
-          : 'bg-crt-950/85 text-crt-ink-200 enabled:hover:text-crt-accent'
-      }`}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}

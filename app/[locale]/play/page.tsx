@@ -27,10 +27,8 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 于是 `.wall` 背景、右上一排入口（`TopBar`）、左上「返回」、页脚都和内容页一致，
  * 只是把中间那块页头关掉了（`showHeader={false}`，名字与资料在右列顶上，见下面注释）。
  *
- * ⚠️ **两页的 `?id=` 语义刻意不同**：`/room?id=` 进来自动就下 ROM 开玩，
- * 而这一页**不自动载入** —— 用户要的是「先进房间设置，点开始才加载」，
- * `?id=` 只把要玩的那一款摆在黑区里。所以这个地址分享出去是「来一起玩这一款」，
- * 不是「打开就在下东西」。
+ * 详情入口单机直接载入；联机先选择画质并确认，再建房和载入。
+ * 只有 `?id=` 时保留手动设置；邀请链接带 `?room=` 时只预填加入，不自动载入 ROM。
  *
  * meta 的口径和 `/room` **完全一样**（带 id 就用这一款的标题 / 说明 / 封面，
  * 查不到退回通用那份、页面照常渲染），只是通用那两句换成 `seo.play.*` ——
@@ -170,8 +168,14 @@ export default async function PlayPage({
         屏幕在里头上下居中、页脚压到视口最底部」—— 见 `GamesShell` 那个 prop 的注释。
       */
       fill
+      wide
     >
-      <PlayScene serverGame={serverGame} />
+      <PlayScene
+        serverGame={serverGame}
+        initialMode={sp.mode === 'host' ? 'host' : 'solo'}
+        initialRoomCode={typeof sp.room === 'string' ? sp.room.trim() : ''}
+        autoStart={Boolean(id) && !sp.room && sp.mode !== 'host'}
+      />
     </GamesShell>
   );
 }

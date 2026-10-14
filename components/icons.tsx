@@ -22,6 +22,25 @@ interface IconProps {
   size?: number;
 }
 
+/** Play 页使用圆润弯月，外弧与内弧构成清晰的月牙。 */
+export function PlayMoonIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M7.2 1.5a6.5 6.5 0 1 0 7.3 7.3A5.2 5.2 0 0 1 7.2 1.5Z" />
+    </svg>
+  );
+}
+
+/** 重载：粗圆弧与箭头，开口留白避免小尺寸下粘连。 */
+export function ReloadIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12.5 5A5 5 0 1 0 13 9.5" />
+      <path d="M9.5 5H13V1.5" />
+    </svg>
+  );
+}
+
 export function SunIcon({ size = 16 }: IconProps) {
   return (
     <svg

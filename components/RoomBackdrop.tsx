@@ -222,7 +222,7 @@ export function RoomWindow({
 
             {/* 花：春天开得最多 */}
             <rect x="3" y="49" width="1" height="4" fill="#3d6f3a" />
-            <rect x="2" y="48" width="3" height="2" fill="#e8b339" />
+            <rect x="2" y="48" width="3" height="2" fill="#d16c70" />
             <rect x="13" y="50" width="1" height="3" fill="#3d6f3a" />
             <rect x="12" y="49" width="3" height="2" fill="#e07a8a" />
             <rect x="25" y="50" width="1" height="3" fill="#3d6f3a" />
@@ -345,7 +345,7 @@ export function RoomWindow({
             <rect x="3" y="49" width="1" height="4" fill="#2f6b2d" />
             <rect x="2" y="48" width="3" height="2" fill="#e04a3a" />
             <rect x="26" y="50" width="1" height="3" fill="#2f6b2d" />
-            <rect x="25" y="49" width="3" height="2" fill="#e8b339" />
+            <rect x="25" y="49" width="3" height="2" fill="#d16c70" />
 
             {/* 草丛 */}
             <rect x="1" y="51" width="1" height="3" fill="#2f6b2d" />

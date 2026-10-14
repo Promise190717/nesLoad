@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { trackSiteHistory } from '@/lib/site-history';
 import {
   LOCALE_COOKIE,
   SITE_NAME,
@@ -60,6 +61,7 @@ export function I18nProvider({
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  useEffect(trackSiteHistory, []);
 
   const admin = isAdminPath(pathname);
   const locale = admin ? initialLocale : splitLocalePath(pathname).locale;

@@ -1,5 +1,237 @@
 @import 'tailwindcss';
 
+.play-controls { --play-control-size: 26px; }
+.play-size-group { flex-shrink: 0; }
+.play-controls .play-size-group > button { padding-inline: 4px; }
+@media (max-width: 767px), (pointer: coarse) {
+  .play-controls { --play-control-size: 40px; }
+}
+.play-quality-dialog { margin: auto; width: min(440px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 24px; border: 1px solid var(--color-ink-700); border-radius: 12px; background: var(--color-ink-900); color: var(--color-ink-100); box-shadow: 0 24px 80px rgba(0,0,0,.3); }
+.play-quality-dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
+.play-quality-dialog button { border-radius: 6px; }
+.play-quality-dialog button:focus-visible { outline: 2px solid var(--color-ink-300); outline-offset: 3px; }
+.play-quality-dialog #play-quality-title:focus,
+.play-quality-dialog #play-quality-title:focus-visible { outline: none; box-shadow: none; }
+
+/* Play keeps the shared pixel edges, with a focused screen and compact controls. */
+.play-page { background: radial-gradient(ellipse at 25% 25%, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent 55%), var(--color-ink-950); }
+.play-page > div { min-height: calc(100dvh - 40px); }
+.play-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: center; gap: 20px; padding-top: 8px; max-width: min(100%, calc(var(--play-display-max-width, 1100px) + 300px)); margin-inline: auto; }
+.play-navigation nav { flex-wrap: wrap; gap: 12px; }
+.play-navigation { width: 100%; max-width: min(100%, calc(var(--play-display-max-width, 1100px) + 300px)); margin-inline: auto; }
+.play-stage { position: sticky; top: 24px; align-self: start; padding: 0; border: 0; background: transparent; }
+.play-screen-area { display: flex; width: 100%; height: var(--play-display-height, 80dvh); align-items: flex-start; justify-content: center; border: 0; background: transparent; }
+.play-display { --play-size-scale: 1; width: 100%; height: calc(var(--play-display-height, 80dvh) * var(--play-size-scale)); max-width: min(100%, var(--play-display-max-width, calc((100dvh - 160px) * 4 / 3))); }
+.play-display[data-screen-size='small'] { --play-size-scale: .75; width: 75%; max-width: min(75%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .75)); }
+.play-display[data-screen-size='medium'] { --play-size-scale: .88; width: 88%; max-width: min(88%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .88)); }
+.play-display .play-frame,
+.play-display .play-frame > div { height: 100%; }
+.play-game-screen:not(:fullscreen) { height: 100%; aspect-ratio: auto; }
+.play-game-screen canvas { object-fit: contain; }
+.play-frame {
+  padding: 0;
+  background: transparent;
+  position: relative;
+}
+.play-frame::after {
+  display: none;
+  content: '';
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: -9px;
+  height: 3px;
+  background: color-mix(in srgb, var(--color-accent) 35%, var(--color-ink-700));
+}
+.play-overlay {
+  background:
+    radial-gradient(ellipse at 50% 35%, #252525 0%, #171717 45%, #0c0c0c 100%);
+  gap: 28px;
+}
+.play-headline { max-width: 100%; gap: 8px; }
+.play-headline > span:first-child { font-size: 18px; line-height: 1.5; font-weight: 600; }
+.play-headline > span:nth-child(2) { letter-spacing: .14em; }
+.play-setup { width: min(100%, 360px); gap: 24px; }
+.play-mode-switch { width: 100%; gap: 8px; }
+.play-mode-switch > button { flex: 1; padding: 12px 4px; white-space: nowrap; }
+.play-option { min-height: 36px; }
+.play-option[aria-pressed='false'] { background: #232323; color: #bcbcbc; --px-c: #414141; }
+.play-option[aria-pressed='true'] { color: #161616; --px-c: var(--color-crt-accent); }
+.play-start { width: 100%; max-width: 320px; min-height: 44px; font-weight: 600; color: #161616; }
+.play-sidebar { display: flex; min-width: 0; width: 100%; flex-direction: column; gap: 12px; align-self: start; }
+.play-game, .play-keys, .play-room, .play-control-panel { border: 1px solid var(--color-ink-700); background: var(--color-ink-900); padding: 14px; }
+.play-game { align-items: center; gap: 12px; }
+.play-game > div:first-child { width: 64px; }
+.play-game > div:last-child { min-width: 0; }
+.play-game p:first-child { font-size: 15px; line-height: 1.5; font-weight: 600; }
+.play-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.play-panel-heading h2, .play-panel-title { font-size: 12px; font-weight: 600; color: var(--color-ink-200); }
+.play-panel-title { margin-bottom: 8px; }
+.play-share-row > input,
+.play-share-row > button { height: 30px; padding-block: 0; }
+.play-keys dl > div { border-bottom: 0; padding-bottom: 0; min-height: 25px; }
+.play-keys kbd { border-color: var(--color-ink-700); background: var(--color-ink-800); }
+.play-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; border: 0; padding: 0; background: transparent; }
+.play-controls > li { min-width: 0; min-height: 38px; padding-block: 6px; gap: 8px; border-bottom: 1px solid var(--color-ink-800); }
+.play-controls > li > span:first-child { color: var(--color-ink-300); }
+.play-controls > li button { min-height: 26px; min-width: 26px; height: 26px; padding-block: 3px; --px-w: 1px; }
+.play-controls > li button[title] { font-size: 12px; }
+.play-controls .play-icon-button { width: 26px; min-width: 26px; max-width: 26px; height: 26px; min-height: 26px; max-height: 26px; padding: 0; flex: 0 0 26px; box-sizing: border-box; }
+.play-controls > li span > span > button { min-width: 6px; min-height: 16px; height: 16px; padding: 0; }
+.play-edit { min-height: 26px; padding: 4px 10px; font-size: 11px; --px-w: 1px; }
+.play-workspace button:focus-visible,
+.play-workspace input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 5px; }
+.play-overlay button:focus-visible,
+.play-overlay input:focus-visible { outline-color: var(--color-crt-accent); }
+@media (max-width: 1023px) {
+  .play-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; max-width: 100%; }
+  .play-navigation { max-width: 100%; }
+  .play-stage { position: static; min-height: 0; }
+  .play-screen-area { height: auto; aspect-ratio: 4 / 3; }
+  .play-display { height: auto; }
+  .play-display .play-frame,
+  .play-display .play-frame > div { height: auto; }
+  .play-game-screen:not(:fullscreen) { height: auto; aspect-ratio: 4 / 3; }
+  .play-sidebar { max-width: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .play-game { grid-column: 1 / -1; }
+  .play-keys { grid-column: 1 / -1; }
+  .play-room { grid-column: 1 / -1; }
+  .play-control-panel { grid-column: 1 / -1; }
+  .play-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+}
+@media (max-width: 540px) {
+  .play-sidebar { display: flex; }
+  .play-stage { padding: 0; }
+  .play-frame { padding: 0; }
+  .play-frame > div { min-height: 0; background: #0c0c0c; }
+  .play-frame > div[data-playing='true'] { min-height: 0; }
+  .play-overlay { padding: 20px 16px; gap: 22px; }
+  .play-headline > span:first-child { font-size: 16px; }
+  .play-setup { gap: 20px; }
+  .play-option { padding-inline: 10px; }
+  .play-mode-switch > button { font-size: 11px; }
+  .play-controls { column-gap: 16px; padding-inline: 8px; }
+}
+
+.play-touch { display: none; }
+@media (max-width: 767px), (pointer: coarse) {
+  .play-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+  .play-stage { position: static; flex-direction: column; justify-content: flex-start; gap: 20px; min-height: 0; padding: 0; }
+  .play-display,
+  .play-display[data-screen-size='small'],
+  .play-display[data-screen-size='medium'] { width: 100%; max-width: min(100%, var(--play-display-max-width, calc((100dvh - 160px) * 4 / 3))); }
+  .play-frame > div[data-playing='false'] { min-height: 0; }
+  .play-overlay { padding: 20px 12px; }
+  .play-sidebar { display: flex; flex-direction: column; min-width: 0; }
+  .play-sidebar > * { width: 100%; min-width: 0; }
+  .play-keys { display: none; }
+  .play-touch {
+    display: block;
+    width: 100%;
+    --pad-btn: clamp(30px, 8vw, 50px);
+    --pad-font: 14px;
+    padding: 12px 8px max(16px, env(safe-area-inset-bottom));
+  }
+  .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
+  .play-touch-system button, .play-shoulders button { min-height: 40px; min-width: 76px; }
+  .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
+  .play-controls { column-gap: 16px; }
+  .play-controls > li { min-height: 52px; }
+  .play-controls > li button { min-width: 40px; min-height: 40px; height: 40px; }
+  .play-controls .play-icon-button { width: 40px; min-width: 40px; max-width: 40px; height: 40px; min-height: 40px; max-height: 40px; padding: 0; flex-basis: 40px; }
+  .play-controls > li span > span > button { min-width: 6px; min-height: 24px; height: 24px; }
+  .play-room input { min-height: 44px; }
+  .play-room button { min-height: 40px; }
+  .play-page { padding-bottom: env(safe-area-inset-bottom); }
+}
+@media (max-width: 359px) {
+  .play-touch { --pad-btn: 30px; padding-inline: 2px; }
+  .play-touch-main { gap: 8px; }
+  .play-controls { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-height: 540px) and (orientation: landscape) and (pointer: coarse) {
+  .play-display { max-width: min(100%, 62vh); }
+  .play-touch { --pad-btn: 38px; max-width: 600px; }
+}
+
+/* Homepage: a quiet arcade backdrop, clear entry points, and shared console cards. */
+.home-page {
+  background:
+    radial-gradient(ellipse at 15% 10%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 45%),
+    var(--color-ink-950);
+}
+.home-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 32px 48px;
+  padding-top: 56px;
+}
+.home-join {
+  position: relative;
+  box-shadow: 6px 6px 0 color-mix(in srgb, var(--color-accent) 10%, var(--color-ink-950));
+}
+.home-join::before {
+  content: '';
+  position: absolute;
+  height: 3px;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  background: var(--color-accent);
+}
+.home-search-area {
+  grid-column: 1 / -1;
+  padding: 4px 0 24px;
+  border-bottom: 1px solid var(--color-ink-700);
+}
+.home-section > div:first-child > h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.home-section > div:first-child > h2::before {
+  content: '';
+  width: 4px;
+  height: 20px;
+  background: var(--color-accent);
+}
+.home-section li > a {
+  transition: background-color 160ms, transform 160ms;
+}
+.home-section li > a:hover {
+  transform: translateY(-3px);
+}
+.home-faq[open] {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-700));
+}
+.home-faq summary {
+  line-height: 1.7;
+}
+.home-page a:focus-visible,
+.home-page summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 5px;
+}
+@media (max-width: 767px) {
+  .home-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding-top: 32px;
+  }
+  .home-nav nav {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .home-search-area {
+    padding-bottom: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-section li > a:hover { transform: none; }
+}
+
 /*
  * 设计令牌。
  * ink 是一条从深到浅的灰阶，light 主题直接把整条灰阶反过来映射，
@@ -8,17 +240,17 @@
 @theme {
   --font-pixel: 'Press Start 2P', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-ink-950: #08080a;
-  --color-ink-900: #0d0d10;
-  --color-ink-850: #121216;
-  --color-ink-800: #17171c;
-  --color-ink-700: #23232a;
-  --color-ink-600: #33333c;
-  --color-ink-500: #4a4a55;
-  --color-ink-400: #6d6d7a;
-  --color-ink-300: #9b9ba8;
-  --color-ink-200: #c8c8d2;
-  --color-ink-100: #ececf1;
+  --color-ink-950: #121212;
+  --color-ink-900: #191919;
+  --color-ink-850: #202020;
+  --color-ink-800: #292929;
+  --color-ink-700: #3b3b3b;
+  --color-ink-600: #505050;
+  --color-ink-500: #707070;
+  --color-ink-400: #939393;
+  --color-ink-300: #b5b5b5;
+  --color-ink-200: #d6d6d6;
+  --color-ink-100: #f2f2f2;
 
   /* 机身用的暖灰木色 */
   --color-wood-950: #16120e;
@@ -26,11 +258,11 @@
   --color-wood-800: #2e261b;
   --color-wood-700: #413526;
 
-  --color-floor: #211b16;
+  --color-floor: #292929;
 
-  --color-accent: #e8b339;
+  --color-accent: #d16c70;
   --color-ok: #4ade80;
-  --color-danger: #f87171;
+  --color-danger: #f18b80;
   /*
    * 联机蓝。目前**唯一**的用处是机身那颗 PWR 灯的「联机中」档 ——
    * 别把它当通用蓝去铺大面积，需要中性蓝时优先走 ink 灰阶。
@@ -39,9 +271,7 @@
   /*
    * 黄。两处用：机身 PWR 灯的「房主在等人进房」那一档，以及「离开房间」确认框
    * 里那颗警告三角（`WarningIcon`，套 `text-warn` 上色）。
-   * ⚠️ 它和 accent（琥珀）是**邻近色**：深色下分得开（#facc15 更亮、更饱和），
-   * 浅色下会有点接近（#a16207 vs #a9761a）—— 真觉得糊在一起就把 `pwrClass` 里
-   * 那一档换成 bg-accent（那就和「暂停」同色了）。
+   * 警告保留黄色语义，常规强调色使用暗红。
    */
   --color-warn: #facc15;
 
@@ -51,7 +281,7 @@
    * 「黑底黑字」——实测 text-ink-300 在浅色下是 #4a4a55，压在 #000 上对比度只有约 2.3:1。
    * 取值与深色主题的 ink 灰阶完全相同，所以深色外观不会有任何变化。
    */
-  --color-crt-accent: #e8b339;
+  --color-crt-accent: #d16c70;
   --color-crt-ok: #4ade80;
   --color-crt-950: #08080a;
   --color-crt-ink-200: #c8c8d2;
@@ -86,45 +316,39 @@
    * 墙面（.wall）。深色下比房间底色（ink-950）略亮一点点 —— 整面死黑会像个洞，
    * 但也不能亮过地板（--color-floor），不然墙和地会糊成一片。
    */
-  --wall-top: #13131a;
-  --wall-bottom: #0a0a0e;
+  --wall-top: #202020;
+  --wall-bottom: #141414;
   --wall-seam: rgba(255, 255, 255, 0.04);
 
   /* 地板。暖一点、比墙底亮一档 —— 原来是块冷灰，跟木桌子放一起像块水泥 */
   --floor-seam: rgba(0, 0, 0, 0.32);
 }
 
-:root[data-theme='light'] {
+:root[data-theme='light'],
+.play-page[data-play-theme='light'] {
   color-scheme: light;
 
-  /*
-   * 浅色 ink 阶微暖（2026-10-14）：墙定成暖米之后，原来的冷蓝灰阶（#e8e8ed 那族）
-   * 压上去两族灰打架 —— 用户原话「灰色的主题色和这个黄色很不搭」。
-   * 色相从冷蓝（hue≈240）转到暖（hue≈45），但用户两次嫌黄：
-   * 第一版饱和拉满 → 掺 50% 中性灰；第二版仍「太黄」→ 再掺 50%（合计约 75% 中性）。
-   * 现在只留极薄一层暖底，明度台阶始终不动（对比度不受影响）。
-   * dark 主题的 ink 阶不动（那边墙本来就是冷黑蓝，同族）。
-   */
-  --color-ink-950: #f2f1ee;
-  --color-ink-900: #e9e8e4;
-  --color-ink-850: #e1e0dc;
-  --color-ink-800: #d7d5d1;
-  --color-ink-700: #c7c5c1;
-  --color-ink-600: #b1afa8;
-  --color-ink-500: #918f8d;
-  --color-ink-400: #716f6e;
-  --color-ink-300: #4f4d4d;
-  --color-ink-200: #353434;
-  --color-ink-100: #191819;
+  /* 浅色主题：中性白背景、灰色面板与暗红强调色。 */
+  --color-ink-950: #f7f7f7;
+  --color-ink-900: #eeeeee;
+  --color-ink-850: #e6e6e6;
+  --color-ink-800: #dcdcdc;
+  --color-ink-700: #cacaca;
+  --color-ink-600: #afafaf;
+  --color-ink-500: #909090;
+  --color-ink-400: #737373;
+  --color-ink-300: #545454;
+  --color-ink-200: #393939;
+  --color-ink-100: #202020;
 
   --color-wood-950: #d5c5a8;
   --color-wood-900: #e1d4ba;
   --color-wood-800: #ece1cb;
   --color-wood-700: #bda98a;
 
-  --color-floor: #ddd5c6;
+  --color-floor: #e3e3e3;
 
-  --color-accent: #a9761a;
+  --color-accent: #a83e46;
   --color-ok: #1f9d55;
   --color-danger: #c0392b;
   /* 和上面那三个一样取同色系更深的一档（浅色面板上要压得住） */
@@ -132,19 +356,12 @@
   --color-warn: #a16207;
 
   --shadow-ground: rgba(0, 0, 0, 0.16);
-  --vignette: rgba(120, 110, 90, 0.22);
+  --vignette: rgba(0, 0, 0, 0.08);
 
-  /*
-   * 浅色墙走**暖米**—— 2026-10-14 用户明确「不要灰色背景」。墙和地板（#ddd5c6）、
-   * 木料（wood-*）、琥珀 accent（#a9761a）、「一张纸」（#bfae87）同属一个暖族。
-   * 走过的弯路别回退：冷灰两版（#f7f7fa/#ededf2、#f1f1f4 那族）被否；
-   * 第一版奶油色（#fbf7ec/#f1ead9）被嫌「太黄」→ 现在这版掺了白、只留薄薄一层暖。
-   * 亮度：墙比 ink-900 面板亮半档 —— 背景必须最亮，物件才浮得出来。
-   * 板缝用暖色黑，别用冷黑在米色上压出脏印。
-   */
-  --wall-top: #fbfaf7;
-  --wall-bottom: #f4f2ec;
-  --wall-seam: rgba(110, 90, 55, 0.05);
+  /* 墙面使用中性白，减弱暖黄色和板缝对比。 */
+  --wall-top: #fafafa;
+  --wall-bottom: #f0f0f0;
+  --wall-seam: rgba(0, 0, 0, 0.035);
 
   --floor-seam: rgba(120, 100, 80, 0.22);
 }
@@ -1462,13 +1679,13 @@ body {
 :root.theme-fading *::before,
 :root.theme-fading *::after {
   transition:
-    background-color 0.36s ease,
-    border-color 0.36s ease,
-    color 0.36s ease,
-    box-shadow 0.36s ease,
-    fill 0.36s ease,
-    stroke 0.36s ease,
-    opacity 0.36s ease !important;
+    background-color var(--theme-fade-duration, 0.36s) ease,
+    border-color var(--theme-fade-duration, 0.36s) ease,
+    color var(--theme-fade-duration, 0.36s) ease,
+    box-shadow var(--theme-fade-duration, 0.36s) ease,
+    fill var(--theme-fade-duration, 0.36s) ease,
+    stroke var(--theme-fade-duration, 0.36s) ease,
+    opacity var(--theme-fade-duration, 0.36s) ease !important;
 }
 
 /* 系统开了「减少动态效果」就直接切，两套都不玩 */
@@ -2323,4 +2540,48 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-ink-500);
+}
+
+/* Local play theme overrides inherited site colors without changing html. */
+.play-page[data-play-theme='dark'] {
+  color-scheme: dark;
+  --color-ink-950: #121212;
+  --color-ink-900: #191919;
+  --color-ink-850: #202020;
+  --color-ink-800: #292929;
+  --color-ink-700: #3b3b3b;
+  --color-ink-600: #505050;
+  --color-ink-500: #707070;
+  --color-ink-400: #939393;
+  --color-ink-300: #b5b5b5;
+  --color-ink-200: #d6d6d6;
+  --color-ink-100: #f2f2f2;
+  --color-wood-950: #16120e;
+  --color-wood-900: #221c15;
+  --color-wood-800: #2e261b;
+  --color-wood-700: #413526;
+  --color-floor: #292929;
+  --color-accent: #d16c70;
+  --color-ok: #4ade80;
+  --color-danger: #f18b80;
+  --color-info: #60a5fa;
+  --color-warn: #facc15;
+  --wall-top: #202020;
+  --wall-bottom: #141414;
+  --wall-seam: rgba(255, 255, 255, 0.04);
+  --shadow-ground: rgba(0, 0, 0, 0.55);
+  --vignette: rgba(0, 0, 0, 0.65);
+}
+.play-page.play-theme-fading,
+.play-page.play-theme-fading *,
+.play-page.play-theme-fading *::before,
+.play-page.play-theme-fading *::after {
+  transition: background-color .5s ease, color .5s ease, border-color .5s ease,
+    box-shadow .5s ease, fill .5s ease, stroke .5s ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .play-page.play-theme-fading,
+  .play-page.play-theme-fading *,
+  .play-page.play-theme-fading *::before,
+  .play-page.play-theme-fading *::after { transition: none !important; }
 }

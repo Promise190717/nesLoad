@@ -49,7 +49,7 @@ const INK_900 = '#0d0d10';
 const INK_800 = '#17171c';
 const INK_700 = '#23232a';
 const INK_300 = '#9b9ba8';
-const ACCENT = '#e8b339';
+const ACCENT = '#d16c70';
 const SCREEN_BLACK = '#050506';
 
 /** 顶沿那条散热缝：六个小方块，和机身上画的是同一组。 */

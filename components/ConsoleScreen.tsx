@@ -482,7 +482,7 @@ function RemoteScreen({ stream, volume }: { stream: MediaStream; volume: number 
       ref={ref}
       autoPlay
       playsInline
-      className="absolute inset-0 h-full w-full object-contain"
+      className="pixelated absolute inset-0 h-full w-full object-contain"
     />
   );
 }

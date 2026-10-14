@@ -103,7 +103,7 @@ const CHARACTERS: Record<Family, Character> = {
 };
 
 const TINT: Record<Family, string> = {
-  nes: '#e8b339',
+  nes: '#d16c70',
   snes: '#6fa8c9',
   arcade: '#c96f6f',
 };
@@ -192,7 +192,7 @@ export default function LoginBackdrop() {
     if (!ctx) return;
 
     /* ---------------- 主题色：从 CSS 变量读，读不到就用深色那份兜底 ---------------- */
-    let accent = '#e8b339';
+    let accent = '#d16c70';
     let sparkColor = '#9b9ba8';
     const readThemeColors = () => {
       const cs = getComputedStyle(document.documentElement);
