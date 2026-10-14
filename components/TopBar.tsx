@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { splitLocalePath } from '@/lib/i18n';
 import { fetchCurrentUser, type AuthUser } from './AuthForm';
+import { GamepadIcon } from './icons';
 import { useI18n } from './I18nProvider';
 import LocaleSwitcher from './LocaleSwitcher';
 
@@ -17,6 +18,9 @@ import LocaleSwitcher from './LocaleSwitcher';
  * **顺序（2026-10-14 起）**：语言 → 首页 → 游戏库 → 账号。原来账号夹在首页和游戏库
  * 之间，当天用户要求「登录放在游戏列表后面」，两处一起调成了现在这个组序
  * （房间那行是 语言 → 首页 → 游戏列表 → 账号 → 隐私 → 条款）。
+ *
+ * **「游戏库」文字前带一个手柄图标**（2026-10-14 加，用户要求「游戏列表文字前面加一个
+ * 游戏手柄的图标」）—— 只在这一处，房间那行 / 法务页页脚不加。见下面那条链接的注释。
  *
  * ⚠️ **哪些页面有它**：`/`、`/games*`、`/developers*`、`/privacy`、`/terms`。
  *    **没有**的是 —— `/room`（房间自己那行 `.top-links` 就是它）、
@@ -90,11 +94,27 @@ export default function TopBar() {
       {/*
         游戏库。文案借 `topLinks.games`（房间那行、法务页页脚用的是同一个键）——
         同一个落点（`/games`）在站里只该有一个名字。
+
+        ⚠️ 文字前面那个**手柄图标是 2026-10-14 用户要求加的**（「游戏列表文字前面加一个
+        游戏手柄的图标」）—— 只加在**这个顶栏**（首页 `/` 与 `/games*`、`/developers*`、
+        `/privacy`、`/terms` 共用），房间那行 / 法务页页脚不加。
+
+        ⚠️ **这里刻意不复用 `.row-icon`**：那个类在小屏抽屉里是「左边图标、右边文案」用的，
+        但它**大屏默认 `display: none`**（见 globals.css 那段注释 —— 大屏右上角那一行
+        照规矩是纯文字）。这个顶栏不是抽屉，直接用一个 inline-flex 的 `<span>` 包住图标
+        即可，不碰那套开关。
+
+        用的是 `GamepadIcon` —— 和房间「自定义按键」那颗钮是同一个图标（见 icons.tsx）。
+        ⚠️ 2026-10-14 曾给这一处另画过一个实心手柄剪影（`JoystickIcon`），用户看过之后
+        **当天就要求换回 `GamepadIcon`**，那个图标已删；别再加第二个手柄图标。
       */}
       <Link
         href={localeHref('/games')}
-        className="text-[12px] text-ink-300 transition-colors hover:text-accent"
+        className="inline-flex items-center gap-1.5 text-[12px] text-ink-300 transition-colors hover:text-accent"
       >
+        <span className="inline-flex items-center">
+          <GamepadIcon size={16} />
+        </span>
         {t('topLinks.games')}
       </Link>
 
