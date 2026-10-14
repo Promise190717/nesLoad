@@ -67,7 +67,7 @@ function writeCache(cursor: string, page: FeedbackPage): void {
 }
 
 const FIELD_CLASS =
-  'pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[11px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none';
+  'pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[12px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none';
 
 async function fetchPage(cursor: string | null): Promise<FeedbackPage> {
   const query = cursor
@@ -327,7 +327,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
             type="button"
             aria-label={t('feedback.close')}
             onClick={onClose}
-            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
           >
             ×
           </button>
@@ -370,7 +370,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   onClick={() => goto(cursors, pageIndex)}
-                  className="pixel-edge pxw-2 pxc-paper bg-[#e2d3ae] px-2.5 py-1 text-[10px] text-[#5a4a30] transition-colors hover:bg-[#d8c69c]"
+                  className="pixel-edge pxw-2 pxc-paper bg-[#e2d3ae] px-2.5 py-1 text-[12px] text-[#5a4a30] transition-colors hover:bg-[#d8c69c]"
                 >
                   {t('feedback.retry')}
                 </button>
@@ -417,7 +417,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
                         {/* 标记用「印章」的配色（固定色，压在纸上读得出来），外层 30px 只负责对齐 */}
                         <span className="flex h-[30px] shrink-0 items-center">
                           <span
-                            className={`pixel-edge pxw-2 pxc-paper px-1.5 py-0.5 text-[10px] ${
+                            className={`pixel-edge pxw-2 pxc-paper px-1.5 py-0.5 text-[12px] ${
                               item.resolved
                                 ? 'bg-[#cbdcc0] text-[#2f5a2b]'
                                 : 'bg-[#e2d3ae] text-[#6b5a3a]'
@@ -430,7 +430,7 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
                             )}
                           </span>
                         </span>
-                        <span className="flex h-[30px] w-[92px] shrink-0 items-center justify-end text-[10px] text-[#8a7a5c]">
+                        <span className="flex h-[30px] w-[92px] shrink-0 items-center justify-end text-[12px] text-[#8a7a5c]">
                           {formatTime(item.createdAt, locale)}
                         </span>
                       </button>
@@ -452,18 +452,18 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={goPrev}
             disabled={!canPrev}
-            className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
             {t('feedback.prev')}
           </button>
-          <span className="text-[10px] text-ink-400">
+          <span className="text-[12px] text-ink-400">
             {t('feedback.page', { n: pageIndex + 1 })}
           </span>
           <button
             type="button"
             onClick={goNext}
             disabled={!canNext}
-            className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
             {t('feedback.next')}
           </button>
@@ -488,12 +488,12 @@ export default function FeedbackPanel({ onClose }: { onClose: () => void }) {
           />
           <div className="flex items-center gap-3">
             {/* 计数走系统字体：`font-pixel` 里没有斜杠以外的排版符号，也不值得为它换字体 */}
-            <span className="text-[10px] text-ink-500">
+            <span className="text-[12px] text-ink-500">
               {draft.length}/{MAX_LENGTH}
             </span>
             {notice && (
               <span
-                className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}
+                className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}
               >
                 {notice.text}
               </span>

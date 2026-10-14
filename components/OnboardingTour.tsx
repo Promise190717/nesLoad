@@ -185,7 +185,7 @@ export default function OnboardingTour({
           <div className="flex items-center gap-3 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
             <span className="text-[12px] text-ink-200">{t(step.title)}</span>
             {/* 纯数字，font-pixel 不会掉字形 */}
-            <span className="ml-auto font-pixel text-[8px] text-ink-500">
+            <span className="ml-auto font-pixel text-[12px] text-ink-500">
               {index + 1}/{STEPS.length}
             </span>
           </div>
@@ -195,13 +195,13 @@ export default function OnboardingTour({
             而且正文里会出现 `.nes` / `W A S D` 这类混排 —— 和按键说明、存档列表同一套做法。
           */}
           <div className="flex flex-col gap-3 p-4">
-            <p className="text-[11px] leading-relaxed text-ink-300">{t(step.body)}</p>
+            <p className="text-[12px] leading-relaxed text-ink-300">{t(step.body)}</p>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="text-[11px] text-ink-500 transition-colors hover:text-ink-200"
+                className="text-[12px] text-ink-500 transition-colors hover:text-ink-200"
               >
                 {t('tour.skip')}
               </button>
@@ -211,7 +211,7 @@ export default function OnboardingTour({
                   <button
                     type="button"
                     onClick={() => setIndex((i) => i - 1)}
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1.5 text-[11px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
+                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1.5 text-[12px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
                   >
                     {t('tour.back')}
                   </button>
@@ -219,7 +219,7 @@ export default function OnboardingTour({
                 <button
                   type="button"
                   onClick={() => (last ? onClose() : setIndex((i) => i + 1))}
-                  className="pixel-edge pxw-2 pxc-600 bg-accent px-3 py-1.5 text-[11px] text-ink-950 transition-colors hover:bg-accent/80"
+                  className="pixel-edge pxw-2 pxc-600 bg-accent px-3 py-1.5 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
                 >
                   {last ? t('tour.done') : t('tour.next')}
                 </button>

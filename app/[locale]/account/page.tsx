@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import AccountCenter from '@/components/AccountCenter';
+import { parseAccountTab } from '@/lib/account-tabs';
 import { readLocaleParam } from '@/lib/server/locale';
 import { translate } from '@/lib/i18n';
 
 /*
  * `/account` —— 个人中心（2026-10-13 加）。
  *
- * 三个 tab：收藏 / 存档 / 资料（改密码、性别、头像）。
+ * 五个 tab：收藏 / 历史 / 存档 / 资料 / 密码（当前 tab 在 `?tab=` 上，见文件末尾）。
  * 页面的鉴权在 `app/[locale]/account/layout.tsx` 里（未登录重定向回房间）。
  *
  * **为什么做成真路由而不是屋里再弹一个面板**（用户 2026-10-13 明确要的「个人中心页面」）：
@@ -35,6 +36,17 @@ export async function generateMetadata({
   };
 }
 
-export default function AccountPage() {
-  return <AccountCenter />;
+/*
+ * `?tab=` 上带着初始 tab（2026-10-14 加，用户要求刷新后停在原 tab，别永远回到收藏）。
+ * 解析走 lib/account-tabs.ts 的 `parseAccountTab`（白名单 + 回落收藏）——
+ * ⚠️ 不能从 AccountCenter（'use client'）导函数给服务端调，见 lib 里那条注释。
+ * 服务端算好再传 prop —— 客户端组件内不再读 location，首屏 HTML 和水合结果天然一致。
+ */
+export default async function AccountPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab } = await searchParams;
+  return <AccountCenter initialTab={parseAccountTab(tab)} />;
 }

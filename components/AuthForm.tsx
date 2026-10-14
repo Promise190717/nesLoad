@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useState, type FormEvent } from 'react';
+import { validateEmail } from '@/lib/email';
 import { useI18n } from './I18nProvider';
 import TurnstileWidget from './TurnstileWidget';
 
@@ -19,6 +20,12 @@ import TurnstileWidget from './TurnstileWidget';
  * 口令里**不许有空白字符** —— 注册模式在 `onChange` 里就吃掉，登录模式**刻意不吃**
  * （老账号的口令可能真带空格）。服务端那侧见 `lib/server/app-users.ts` 的 `validatePassword`；
  * 改密码那页（`components/AccountCenter.tsx` 的 PasswordTab）是同一套规则，改一处记得看另一处。
+ *
+ * **注册账号 = 邮箱**（2026-10-14 起）：注册模式的第一个框收邮箱 —— 格式 / 别名
+ * （`+` 后缀、Gmail 加点）/ 临时域三道检查，规则本体在 `lib/email.ts`（前后端共用
+ * 同一份，前端先挡一道省一次往返）。**登录完全不校验邮箱**（用户明确要求）——
+ * 老账号的用户名可能根本不是邮箱，登录框照旧收任何字符串。注册时输入会被
+ * `onChange` 顺手转小写（服务端存库也小写，两边口径一致）。
  *
  * ⚠️ **和后台账号毫无关系** —— 这里的账号住 `app_users` 表、cookie 是 `nesload_user`，
  *    和 `/admin` 那套（`users` 表 + `nesload_admin`）完全隔离。界面文案里也不要暗示
@@ -91,6 +98,10 @@ const ERROR_KEYS: Record<string, string> = {
   'username-too-short': 'user.error.usernameTooShort',
   'username-too-long': 'user.error.usernameTooLong',
   'username-taken': 'user.error.usernameTaken',
+  /* 注册邮箱校验（2026-10-14 起）。规则本体 lib/email.ts，服务端回 `email-<键>` */
+  'email-invalid': 'user.error.emailInvalid',
+  'email-alias': 'user.error.emailAlias',
+  'email-temp': 'user.error.emailTemp',
   'password-invalid': 'user.error.passwordInvalid',
   'password-too-short': 'user.error.passwordTooShort',
   'password-too-long': 'user.error.passwordTooLong',
@@ -130,6 +141,26 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
+
+    /*
+     * 注册模式先做**本地邮箱校验**（2026-10-14）—— 格式 / 别名 / 临时域三道
+     * 都在 `lib/email.ts`（和服务端同一份规则）。这里先挡一道，省一次白跑的
+     * 往返，提示也更直接；服务端会再验一遍（它才是权威）。
+     * ⚠️ 只在注册模式做：**登录不校验邮箱**（用户明确要求）—— 老账号的用户名
+     *    可能根本不是邮箱，登录框里填什么原样发给服务端。
+     */
+    if (mode === 'register') {
+      const emailError = validateEmail(username.trim().toLowerCase());
+      if (emailError) {
+        const keys = {
+          invalid: 'user.error.emailInvalid',
+          alias: 'user.error.emailAlias',
+          temp: 'user.error.emailTemp',
+        } as const;
+        setNotice({ tone: 'error', text: t(keys[emailError]) });
+        return;
+      }
+    }
 
     /*
      * 没解出验证码就别发请求 —— 服务端也会拦（回 `captcha-required`），
@@ -231,7 +262,7 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
         那条还是死的；这条是用户后来点名要的，见 lib/i18n.ts 里 `user.formLead` 的注释。
       */}
       {!hideCloudLead && (
-        <p className="text-[11px] leading-relaxed text-ink-500">{t('user.formLead')}</p>
+        <p className="text-[12px] leading-relaxed text-ink-500">{t('user.formLead')}</p>
       )}
 
       {/*
@@ -243,18 +274,25 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
       */}
       <form onSubmit={submit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-2">
-          <span className="text-[11px] text-ink-400">{t('user.username')}</span>
+          {/* 注册模式的账号是邮箱（2026-10-14 起），标签 / 提示随模式切；
+              登录模式照旧叫「用户名」—— 老账号的用户名不是邮箱 */}
+          <span className="text-[12px] text-ink-400">
+            {t(mode === 'register' ? 'user.emailLabel' : 'user.username')}
+          </span>
           <input
             type="text"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
             /*
-             * 规则提示**当 placeholder 用**（2026-10-13 用户要求「提示放在 input 里面」）——
-             * 只在注册模式给：登录的人不需要知道规则（原来这两句是画在输入框下面的一行小字）。
+             * ⚠️ **注册模式顺手转小写**（2026-10-14）—— 服务端存库前也小写
+             *    （`Foo@x.com` 和 `foo@x.com` 是同一个账号），两边口径一致；
+             *    登录模式**绝不动**：老账号的用户名是区分大小写存的，动了就是
+             *    「明明输对了登不上」。
              */
-            placeholder={mode === 'register' ? t('user.usernameHint') : undefined}
-            // 浏览器自带的账号补全对这些字段有意义（`username` 是标准 token）
-            autoComplete="username"
+            onChange={(e) => setUsername(mode === 'register' ? e.target.value.toLowerCase() : e.target.value)}
+            placeholder={mode === 'register' ? t('user.emailHint') : undefined}
+            // 浏览器自带的补全：登录按「账号」补（老账号可能是用户名），注册按「邮箱」补
+            autoComplete={mode === 'login' ? 'username' : 'email'}
+            inputMode={mode === 'register' ? 'email' : undefined}
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
@@ -263,7 +301,7 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
         </label>
 
         <label className="flex flex-col gap-2">
-          <span className="text-[11px] text-ink-400">{t('user.password')}</span>
+          <span className="text-[12px] text-ink-400">{t('user.password')}</span>
           <input
             type="password"
             value={password}
@@ -301,7 +339,7 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
         )}
 
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
@@ -314,7 +352,7 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
         <button
           type="submit"
           disabled={busy}
-          className="pixel-edge pxw-2 pxc-500 mt-1 self-end bg-accent px-3 py-1.5 text-[11px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
+          className="pixel-edge pxw-2 pxc-500 mt-1 self-end bg-accent px-3 py-1.5 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy
             ? t(mode === 'login' ? 'user.signingIn' : 'user.signingUp')
@@ -340,7 +378,7 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
         ⚠️ 走 `href()` 拼语言前缀，别手写 `/terms` —— 中文站在 `/zh/terms`。
         ⚠️ 字号 2026-10-13 从 10px 提到 11px（用户要求「稍微大点」）。
       */}
-      <p className="text-[11px] leading-relaxed text-ink-500">
+      <p className="text-[12px] leading-relaxed text-ink-500">
         {t(mode === 'login' ? 'user.consentLogin' : 'user.consentRegister')}
         <Link href={href('/terms')} className={CONSENT_LINK_CLASS}>
           {t('legal.terms')}

@@ -392,6 +392,23 @@ export const listGamesByDeveloperCached = unstable_cache(
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
 
+/**
+ * 机种专题页（`/consoles/<type>`）那段「这个机种下的游戏」—— 和开发商详情页那条
+ * **完全同构**：同一个 TTL（30 分钟）、同一套理由，只是缓存键换成自己的前缀
+ * （`games:by-console`），不与 `games:by-developer` 串味。
+ *
+ * `consoleType` 进缓存键意味着**每个机种各有一份缓存** —— 和 `/games?console=` 那个
+ * 筛选（`listGamesPageCached` 的第四维）各存各的：两边 TTL 不同（专题页 30 分钟 vs
+ * 列表页也是 30 分钟，但键形状不该为了另一个页面而变），见 listGamesByDeveloperCached
+ * 那段「为什么不加第四个参数」的说明。
+ */
+export const listGamesByConsoleCached = unstable_cache(
+  async (consoleType: ConsoleType, offset: number, limit: number) =>
+    listGamesPage(offset, limit, { consoleType }),
+  ['games:by-console'],
+  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
+);
+
 export async function getGameRow(id: string): Promise<GameRow | null> {
   const rows = await query<GameRow>('SELECT * FROM games WHERE id = ?', [id]);
   return rows[0] ?? null;

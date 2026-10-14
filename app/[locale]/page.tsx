@@ -83,6 +83,7 @@ const FAQS = [
   { q: 'home.faq.q4', a: 'home.faq.a4' },
   { q: 'home.faq.q5', a: 'home.faq.a5' },
   { q: 'home.faq.q6', a: 'home.faq.a6' },
+  { q: 'home.faq.q7', a: 'home.faq.a7' },
 ] as const satisfies readonly { q: MessageKey; a: MessageKey }[];
 
 /**
@@ -112,7 +113,7 @@ function Section({
         {href && linkLabel && (
           <Link
             href={href}
-            className="text-[11px] text-ink-400 transition-colors hover:text-accent"
+            className="text-[12px] text-ink-400 transition-colors hover:text-accent"
           >
             {linkLabel} →
           </Link>
@@ -174,7 +175,7 @@ export default async function HomePage({
     'pixel-edge pxw-2 pxc-700 flex h-full flex-col items-center justify-center gap-2 bg-ink-900 p-4 text-center transition-colors hover:bg-ink-800';
 
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
+    <main className="wall min-h-screen px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-5xl">
         {/*
           顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库，靠右。
@@ -189,7 +190,7 @@ export default async function HomePage({
           系统字体上，和 `GamesShell` 的 `label` 同一条规矩）。
         */}
         <header className="pt-4 text-center">
-          <span className="font-pixel text-[10px] tracking-wider text-accent">
+          <span className="font-pixel text-[12px] tracking-wider text-accent">
             RETRO GAMES ONLINE
           </span>
           <h1 className="mx-auto mt-6 max-w-3xl text-[24px] leading-snug font-semibold text-ink-100 sm:text-[32px]">
@@ -219,7 +220,7 @@ export default async function HomePage({
             </Link>
           </div>
 
-          <p className="mt-8 font-pixel text-[10px] text-ink-700">{t('home.hero.or')}</p>
+          <p className="mt-8 font-pixel text-[12px] text-ink-700">{t('home.hero.or')}</p>
 
           {/*
             搜索框上那排像素小人（2026-10-13 用户加的）：马里奥 / 林克 / 萨姆斯 /
@@ -259,7 +260,7 @@ export default async function HomePage({
             />
             <button
               type="submit"
-              className="pixel-edge pxw-2 pxc-500 flex h-[38px] shrink-0 items-center bg-ink-700 px-5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 flex h-[38px] shrink-0 items-center bg-ink-700 px-5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('home.search.submit')}
             </button>
@@ -267,14 +268,16 @@ export default async function HomePage({
         </header>
 
         {/*
-          按机种浏览。每张卡片是 `/games?console=<机种>` —— 那正是列表页 2026-10-13
-          加的机种筛选（可收录的真实分类，不是搜索页那种 `noindex`）。
-          ⚠️ 数量是**现读的**（`countGamesByConsoleCached`）：写死会在增减游戏后变成假话。
+          按机种浏览（2026-10-14 起每张卡片指向**机种专题页** `/consoles/<机种>`，
+          右上角那条「全部机种」去 `/consoles` —— 机种有了自己的资料表和列表页，
+          不再借用 `/games?console=` 那个筛选地址；列表页的机种筛选**留着没动**，
+          `/games` 那边照常能用）。
+          ⚠️ 卡片数量是**现读的**（`countGamesByConsoleCached`）：写死会在增减游戏后变成假话。
         */}
         <Section
           title={t('home.consoles.title')}
           lead={t('home.consoles.lead')}
-          href={localePath(locale, '/games')}
+          href={localePath(locale, '/consoles')}
           linkLabel={t('home.consoles.all')}
         >
           <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -285,10 +288,10 @@ export default async function HomePage({
                * 不该不一样。延迟只是个内联 style，服务端算好渲染进 HTML 就行。
                */
               <li key={type} className="card-in" style={{ animationDelay: `${cardDelayMs(index)}ms` }}>
-                <Link href={localePath(locale, `/games?console=${type}`)} className={chip}>
+                <Link href={localePath(locale, `/consoles/${type}`)} className={chip}>
                   {/* 机种标签是那四个丝印词（NES / SFC / GBA / ARC），不进文案表 */}
                   <span className="font-pixel text-[18px] text-accent">{CONSOLE_LABEL[type]}</span>
-                  <span className="text-[11px] text-ink-400">
+                  <span className="text-[12px] text-ink-400">
                     {t('home.consoles.count', { count: counts[type] })}
                   </span>
                 </Link>
@@ -353,7 +356,7 @@ export default async function HomePage({
                         </span>
                       )}
                       <span className="w-full truncate text-[12px] text-ink-100">{text.name}</span>
-                      <span className="font-pixel text-[9px] text-accent">
+                      <span className="font-pixel text-[12px] text-accent">
                         {t('developersPage.gameCount', { count: developer.gameCount })}
                       </span>
                     </Link>
@@ -390,7 +393,7 @@ export default async function HomePage({
           同一套落点）。这里**不放「首页」** —— 首页自己就是。
         */}
         <footer className="mt-14 border-t border-ink-800 pt-6">
-          <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+          <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
             <Link
               href={localePath(locale, '/room')}
               className="text-ink-400 transition-colors hover:text-accent"
@@ -410,6 +413,12 @@ export default async function HomePage({
               {t('developersPage.backToDevelopers')}
             </Link>
             <Link
+              href={localePath(locale, '/consoles')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {t('consolesPage.backToConsoles')}
+            </Link>
+            <Link
               href={localePath(locale, '/privacy')}
               className="text-ink-400 transition-colors hover:text-accent"
             >
@@ -422,7 +431,7 @@ export default async function HomePage({
               {t('legal.terms')}
             </Link>
           </nav>
-          <p className="mt-4 text-[11px] text-ink-600">{SITE_NAME[locale]}</p>
+          <p className="mt-4 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
         </footer>
       </div>
     </main>

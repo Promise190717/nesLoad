@@ -15,7 +15,7 @@
  */
 export default function AdminLoading({ label }: { label: string }) {
   return (
-    <p role="status" aria-live="polite" className="flex items-center gap-1.5 text-[11px] text-ink-500">
+    <p role="status" aria-live="polite" className="flex items-center gap-1.5 text-[12px] text-ink-500">
       {[0, 1, 2].map((i) => (
         <span
           key={i}

@@ -23,8 +23,9 @@ import { useEffect, useRef } from 'react';
  *   · 坐标**吸附到设备像素栅格**（`snap`）：不吸附的话 1.5x / 2x 屏上像素画会被抗锯齿糊掉。
  *
  * ⚠️ 这一层是 `aria-hidden` + `pointer-events-none` 的**纯装饰**，别往里塞内容。
- * ⚠️ 它和正文之间的那层「中间实、两侧透」的遮罩在 `globals.css` 的 `.login-scrim` ——
- *    小人在两侧经过时要保证正文读得清，那一条别删。
+ * ⚠️ 正文列的可读性（小人飘过去别碍事）由**本文件自己的淡出**负责 ——
+ *    见 `CENTER_FADE` 那段注释。原来那层 `.login-scrim` 遮罩 2026-10-14 撤了
+ *    （页面背景换成 `.wall` 后平色补丁对不上），别再加回来。
  */
 
 type Family = 'nes' | 'snes' | 'arcade';
@@ -165,6 +166,22 @@ interface Spark {
 /** 一帧最多画多勤（30fps）。纯装饰，没必要跟着 60Hz 转 */
 const FRAME_MS = 1000 / 30;
 
+/*
+ * 正文列中央的「留空带」（2026-10-14）。
+ *
+ * 原来正文可读性靠 `globals.css` 的 `.login-scrim` 遮罩兜（中间实、两侧透的一层平色）；
+ * 页面背景换成 `.wall`（渐变 + 竖板缝）之后，那块平色补丁跟墙对不上 —— 表单顶上
+ * 能看出一条色差边。遮罩撤了，改由 **canvas 自己**在正文列那一竖条里把
+ * 小人 / 亮点淡出：
+ *   · 距中线小于「正文列半宽」→ 完全不画；
+ *   · 再往外 80px 线性恢复到全亮（对应原来 scrim 左右各 5rem 的渐隐区）。
+ * 正文列半宽现场算：`max-w-md` 一半是 224px，但窄屏上列是 100% 宽再吃掉 `px-6`，
+ * 所以取 `min(224, (视口宽 − 48) / 2)`。
+ * ⚠️ 微光（`drawGlow`）**不参与**淡出 —— 它是半透明的琥珀，正文压得住，
+ *    而且本来就是画给正文列背后垫气氛的。
+ */
+const CENTER_FADE = 80;
+
 export default function LoginBackdrop() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -255,6 +272,16 @@ export default function LoginBackdrop() {
 
     /* ---------------- 画 ---------------- */
 
+    /**
+     * 横向离正文列中线多远（px）→ 这一笔画多淡。0 = 不画，1 = 正常亮度。
+     * 小人传**精灵中心**（x + 8 格），亮点传方块中心。
+     */
+    const centerFactor = (xCenter: number): number => {
+      const halfCol = Math.min(224, Math.max(cssW - 48, 0) / 2);
+      const dist = Math.abs(xCenter - cssW / 2);
+      return Math.min(1, Math.max(0, (dist - halfCol) / CENTER_FADE));
+    };
+
     const paintCells = (
       cells: readonly Cell[],
       color: string,
@@ -271,7 +298,7 @@ export default function LoginBackdrop() {
     const drawCharacter = (d: Drifter, bob: number) => {
       const u = snap(d.unit);
       const ch = CHARACTERS[d.family];
-      ctx.globalAlpha = d.alpha;
+      ctx.globalAlpha = d.alpha * centerFactor(d.x + d.unit * 8);
       paintCells(ch.body, TINT[d.family], d.x, bob, u);
       paintCells(ch.shade, darken(TINT[d.family], 0.4), d.x, bob, u);
       ctx.globalAlpha = 1;
@@ -293,8 +320,11 @@ export default function LoginBackdrop() {
     const drawSparks = (t: number) => {
       ctx.fillStyle = sparkColor;
       for (const s of sparks) {
-        /* 0.06–0.22 之间呼吸：太亮会像噪点，太暗就等于没有 */
-        ctx.globalAlpha = 0.06 + 0.16 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+        /* 0.06–0.22 之间呼吸：太亮会像噪点，太暗就等于没有。
+         * 再乘正文列的淡出系数 —— 亮点别飘进表单背后捣乱 */
+        ctx.globalAlpha =
+          (0.06 + 0.16 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase))) *
+          centerFactor(s.x + s.size / 2);
         ctx.fillRect(snap(s.x), snap(s.y), snap(s.size), snap(s.size));
       }
       ctx.globalAlpha = 1;

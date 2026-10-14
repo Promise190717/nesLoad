@@ -81,8 +81,8 @@ export default function CartridgeSprite({
           className="h-full w-[5px] shrink-0"
           style={{ backgroundColor: CONSOLE_TINT[consoleType] }}
         />
-        <span className="min-w-0 flex-1 truncate px-2 text-[10px] text-ink-950">{name}</span>
-        <span className="shrink-0 pr-1 font-pixel text-[6px] text-ink-800">
+        <span className="min-w-0 flex-1 truncate px-2 text-[12px] text-ink-950">{name}</span>
+        <span className="shrink-0 pr-1 font-pixel text-[12px] text-ink-800">
           {CONSOLE_LABEL[consoleType]}
         </span>
       </div>

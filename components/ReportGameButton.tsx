@@ -161,7 +161,7 @@ export default function ReportGameButton({
             <div className="flex flex-col gap-1">
               <h3 className="text-[12px] text-ink-200">{t('gamesPage.reportTitle')}</h3>
               {/* 报的是哪一款，写清楚 —— 免得用户是在别的游戏上遇到问题，报错了地方 */}
-              <p className="text-[10px] text-ink-500">{t('gamesPage.reportSubject', { name: gameName })}</p>
+              <p className="text-[12px] text-ink-500">{t('gamesPage.reportSubject', { name: gameName })}</p>
             </div>
 
             <textarea
@@ -172,16 +172,16 @@ export default function ReportGameButton({
               rows={5}
               disabled={state === 'sending'}
               placeholder={t('gamesPage.reportPlaceholder')}
-              className="pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[11px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none disabled:opacity-60"
+              className="pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[12px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none disabled:opacity-60"
             />
 
             <div className="flex items-center gap-3">
               {/* 计数走系统字体（同 FeedbackPanel）：font-pixel 里没有斜杠以外的排版符号 */}
-              <span className="text-[10px] text-ink-500">
+              <span className="text-[12px] text-ink-500">
                 {content.length}/{MAX_LENGTH}
               </span>
-              {error && <span className="text-[11px] text-danger">{error}</span>}
-              {state === 'ok' && <span className="text-[11px] text-ok">{t('gamesPage.reportOk')}</span>}
+              {error && <span className="text-[12px] text-danger">{error}</span>}
+              {state === 'ok' && <span className="text-[12px] text-ok">{t('gamesPage.reportOk')}</span>}
             </div>
 
             <div className="flex items-center justify-end gap-3">

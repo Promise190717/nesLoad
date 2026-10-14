@@ -129,16 +129,16 @@ export default function AdminReports() {
       <div className="mb-3 flex items-center gap-3">
         <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.reports.title')}</h2>
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
       </div>
 
       {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
-      {state === 'error' && <p className="text-[11px] text-danger">{t('admin.reports.failed')}</p>}
+      {state === 'error' && <p className="text-[12px] text-danger">{t('admin.reports.failed')}</p>}
       {state === 'ready' && items.length === 0 && (
-        <p className="text-[11px] text-ink-500">{t('admin.reports.empty')}</p>
+        <p className="text-[12px] text-ink-500">{t('admin.reports.empty')}</p>
       )}
 
       {items.length > 0 && (
@@ -154,30 +154,30 @@ export default function AdminReports() {
                   href={`/games/${item.gameId}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[10px] text-accent hover:underline"
+                  className="text-[12px] text-accent hover:underline"
                 >
                   {item.gameTitle}
                 </a>
                 {/* 正文可能多行 —— 系统字体 + 换行，不做 truncate */}
-                <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ink-200">
+                <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-ink-200">
                   {item.content}
                 </p>
               </div>
               <span
-                className={`pixel-edge pxw-2 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] ${
+                className={`pixel-edge pxw-2 pxc-500 shrink-0 px-1.5 py-0.5 text-[12px] ${
                   item.resolved ? 'bg-ok/20 text-ok' : 'bg-ink-700 text-ink-400'
                 }`}
               >
                 {t(item.resolved ? 'admin.reports.resolved' : 'admin.reports.unresolved')}
               </span>
-              <span className="w-[132px] shrink-0 text-right text-[10px] text-ink-500">
+              <span className="w-[132px] shrink-0 text-right text-[12px] text-ink-500">
                 {formatTime(item.createdAt, locale)}
               </span>
               <button
                 type="button"
                 disabled={busyId !== null}
                 onClick={() => void toggle(item)}
-                className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t(item.resolved ? 'admin.reports.markUnresolved' : 'admin.reports.markResolved')}
               </button>
@@ -191,7 +191,7 @@ export default function AdminReports() {
           type="button"
           disabled={moreState === 'loading'}
           onClick={loadMore}
-          className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+          className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
           {moreState === 'loading' ? t('feedback.loading') : t('admin.reports.loadMore')}
         </button>

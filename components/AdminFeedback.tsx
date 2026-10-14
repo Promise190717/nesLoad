@@ -122,16 +122,16 @@ export default function AdminFeedback() {
       <div className="mb-3 flex items-center gap-3">
         <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.feedback.title')}</h2>
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
       </div>
 
       {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
-      {state === 'error' && <p className="text-[11px] text-danger">{t('admin.feedback.failed')}</p>}
+      {state === 'error' && <p className="text-[12px] text-danger">{t('admin.feedback.failed')}</p>}
       {state === 'ready' && items.length === 0 && (
-        <p className="text-[11px] text-ink-500">{t('admin.feedback.empty')}</p>
+        <p className="text-[12px] text-ink-500">{t('admin.feedback.empty')}</p>
       )}
 
       {items.length > 0 && (
@@ -139,24 +139,24 @@ export default function AdminFeedback() {
           {items.map((item) => (
             <li key={item.id} className="flex items-start gap-3 py-2">
               {/* 正文可能带中文、可能多行 —— 系统字体 + 换行，不做 truncate */}
-              <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-ink-200">
+              <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-ink-200">
                 {item.content}
               </p>
               <span
-                className={`pixel-edge pxw-2 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] ${
+                className={`pixel-edge pxw-2 pxc-500 shrink-0 px-1.5 py-0.5 text-[12px] ${
                   item.resolved ? 'bg-ok/20 text-ok' : 'bg-ink-700 text-ink-400'
                 }`}
               >
                 {t(item.resolved ? 'admin.feedback.resolved' : 'admin.feedback.unresolved')}
               </span>
-              <span className="w-[132px] shrink-0 text-right text-[10px] text-ink-500">
+              <span className="w-[132px] shrink-0 text-right text-[12px] text-ink-500">
                 {formatTime(item.createdAt, locale)}
               </span>
               <button
                 type="button"
                 disabled={busyId !== null}
                 onClick={() => void toggle(item)}
-                className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t(item.resolved ? 'admin.feedback.markUnresolved' : 'admin.feedback.markResolved')}
               </button>
@@ -170,7 +170,7 @@ export default function AdminFeedback() {
           type="button"
           disabled={moreState === 'loading'}
           onClick={loadMore}
-          className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+          className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
           {moreState === 'loading' ? t('feedback.loading') : t('admin.feedback.loadMore')}
         </button>

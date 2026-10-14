@@ -47,7 +47,7 @@ const PAGE_SIZE = 10;
 const FIELD_CLASS =
   'pixel-edge pxw-2 pxc-500 w-full bg-ink-900 px-2 py-2 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none';
 
-const LABEL_CLASS = 'flex flex-col gap-1 text-[10px] text-ink-400';
+const LABEL_CLASS = 'flex flex-col gap-1 text-[12px] text-ink-400';
 
 async function fetchDevelopers(offset: number, keyword: string): Promise<DeveloperPage> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
@@ -325,7 +325,7 @@ export default function AdminDevelopers() {
             />
             <button
               type="submit"
-              className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('admin.search')}
             </button>
@@ -341,7 +341,7 @@ export default function AdminDevelopers() {
 
         {pageNotice && (
           <p
-            className={`mb-2 text-[11px] ${
+            className={`mb-2 text-[12px] ${
               pageNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
             }`}
           >
@@ -353,10 +353,10 @@ export default function AdminDevelopers() {
         {listPending && <AdminLoading label={t('feedback.loading')} />}
 
         {listLoaded && total === 0 && !keyword && (
-          <p className="text-[11px] text-ink-500">{t('admin.developers.empty')}</p>
+          <p className="text-[12px] text-ink-500">{t('admin.developers.empty')}</p>
         )}
         {listLoaded && total === 0 && keyword && (
-          <p className="text-[11px] text-ink-500">{t('admin.noMatch')}</p>
+          <p className="text-[12px] text-ink-500">{t('admin.noMatch')}</p>
         )}
 
         {list.length > 0 && (
@@ -381,11 +381,11 @@ export default function AdminDevelopers() {
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-[12px] text-ink-100">{developer.name}</span>
                   {developer.summary && (
-                    <span className="truncate text-[10px] text-ink-500">{developer.summary}</span>
+                    <span className="truncate text-[12px] text-ink-500">{developer.summary}</span>
                   )}
                 </span>
 
-                <span className="shrink-0 text-[10px] text-ink-500">
+                <span className="shrink-0 text-[12px] text-ink-500">
                   {t('admin.developers.gameCount', { count: developer.gameCount })}
                 </span>
 
@@ -393,21 +393,21 @@ export default function AdminDevelopers() {
                   href={localeHref(`/developers/${developer.id}`)}
                   target="_blank"
                   rel="noreferrer"
-                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-accent"
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
                   {t('admin.developers.view')}
                 </Link>
                 <button
                   type="button"
                   onClick={() => openEdit(developer)}
-                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-accent"
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
                   {t('admin.edit')}
                 </button>
                 <button
                   type="button"
                   onClick={() => void remove(developer)}
-                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-danger"
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-danger"
                 >
                   {t('admin.delete')}
                 </button>
@@ -422,18 +422,18 @@ export default function AdminDevelopers() {
               type="button"
               disabled={safePage <= 1}
               onClick={() => setPage(safePage - 1)}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.prev')}
             </button>
-            <span className="text-[10px] text-ink-500">
+            <span className="text-[12px] text-ink-500">
               {safePage} / {pageCount}
             </span>
             <button
               type="button"
               disabled={safePage >= pageCount}
               onClick={() => setPage(safePage + 1)}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.next')}
             </button>
@@ -507,7 +507,7 @@ export default function AdminDevelopers() {
                   }}
                   className={FIELD_CLASS}
                 />
-                <span className="text-[10px] text-ink-600">
+                <span className="text-[12px] text-ink-600">
                   {imageLabel
                     ? t('admin.developers.imageCurrent', { name: imageLabel })
                     : t('admin.developers.imageHint')}
@@ -570,7 +570,7 @@ export default function AdminDevelopers() {
                 </button>
                 {modalNotice && (
                   <span
-                    className={`text-[11px] ${
+                    className={`text-[12px] ${
                       modalNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
                     }`}
                   >

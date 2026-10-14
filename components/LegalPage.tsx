@@ -1,7 +1,10 @@
+'use client';
+
 import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
 import { SITE_NAME, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import { SUPPORT_EMAIL, legalDoc, otherLegalKind, type LegalKind } from '@/lib/legal';
+import BackLink from './BackLink';
 import TopBar from './TopBar';
 
 /**
@@ -10,8 +13,11 @@ import TopBar from './TopBar';
  * 为什么做成组件而不是各写一页：两页只有文案不同，版式（标题、章节、列表、页脚）
  * 完全一样；复制一份迟早会漂成两种版式。
  *
- * 这是**服务端组件**（没有 'use client'）：语言在服务端就读好了，页面是纯静态文本，
- * 不需要任何交互 —— 整个组件里没有一个 state、一个事件处理器。
+ * ⚠️ 2026-10-14 起它是**客户端组件**（`'use client'`）。原先这里是服务端组件，
+ * 因为整页没有 state、没有事件处理器 —— 但左上角那颗钮改成了**浏览器回退**
+ * （用户要求：「返回」就是返回上一页），回退只有 `useRouter` 做得到。
+ * 语言仍是服务端决定的（`locale` 由页面当 prop 传进来），所以加这一行**不会**
+ * 让语言闪一下；真正被推进客户端的只是这一页的静态文本。
  *
  * 和房间那一页的关系：这里**不画房间**。那间屋子是给游戏用的（满屏 CSS 场景 + canvas），
  * 把长文塞进去既难读又拖慢首屏。这两页只共用同一套设计令牌（`ink-*` 会跟着主题翻转、
@@ -39,16 +45,21 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
   }).format(new Date(doc.updated));
 
   /*
-   * 页脚与左上角那几个落点都要带语言前缀，不然中文页点一下就掉回英文。
+   * 页脚那几个落点都要带语言前缀，不然中文页点一下就掉回英文。
    *
-   * 2026-10-13 起它指的是**那间屋子**（`/room`，原来就是 `/`）—— 这一页左上角那颗和
-   * 页脚那颗都是 `legal.back`（「返回游戏屋」），落点得跟着屋子走，所以变量名从
-   * `home` 改成了 `room`。首页（`/`）是另一件事，这一页不需要它。
+   * 2026-10-13 起它指的是**那间屋子**（`/room`，原来就是 `/`）—— 这一页**页脚**那颗
+   * 「返回游戏屋」走的就是它，落点得跟着屋子走，所以变量名从 `home` 改成了 `room`。
+   * 首页（`/`）是另一件事，这一页不需要它。
+   *
+   * ⚠️ **左上角那颗钮 2026-10-14 起不用这个变量了**：用户要求它「就是返回上一页」，
+   *    改走 `BackLink`（浏览器回退），文案统一成 `common.back`（「返回」）——
+   *    回退不承诺落点，就不能再写「返回游戏屋」。这里传的 `href` 只是**兜底**：
+   *    直接打开这一页（分享链接 / 爬虫）时 history 里没有上一站，退到 `/room`。
    */
   const room = localePath(locale, '/room');
 
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
+    <main className="wall min-h-screen px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-3xl">
         {/* 顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库。版式同 GamesShell，给它一个下边距 */}
         <div className="mb-6">
@@ -56,23 +67,32 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
         </div>
 
         {/*
-          左上角回房间。**不用 target="_blank"**：这里是文档页，点回去就是回到游戏，
-          当前标签页往前走一步最自然（房间那侧才是新标签 —— 从房间点过来时，
-          正在跑的游戏不该被顶掉，见 ConsoleScene 那颗钮的注释）。
+          左上角「返回」（2026-10-14 改）。**行为是浏览器回退**，不是跳固定地址 ——
+          用户要的就是「返回上一页」：从房间那行链接进来就回房间，从下一页进来就回下一页。
+
+          用的就是内容页左上那颗同一套 `BackLink`（`/games`、详情页、开发商页左边都是它）：
+          外壳仍是 `<a href>` 的**真链接**骨架，只有普通左键点击被接管成 `router.back()`，
+          中键 / ctrl+click / 爬虫照样当它是一条到 `room` 的链接 —— 法务页要能被整段读走，
+          返回也得是可达的。文案跟着行为走，用 `common.back`（「返回」）而不是
+          「返回游戏屋」：回退不承诺落点，别写一个承诺。
+
+          **不用 target="_blank"**：这里是文档页，点回去就是回到上一站，当前标签页往前走一步
+          最自然（房间那侧才是新标签 —— 从房间点过来时，正在跑的游戏不该被顶掉，
+          见 ConsoleScene 那颗钮的注释）。
         */}
-        <Link
+        <BackLink
           href={room}
-          className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+          className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
         >
           <span aria-hidden="true">←</span>
-          <span>{t('legal.back')}</span>
-        </Link>
+          <span>{t('common.back')}</span>
+        </BackLink>
 
         <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
-          <span className="font-pixel text-[10px] tracking-wider text-accent">{doc.label}</span>
+          <span className="font-pixel text-[12px] tracking-wider text-accent">{doc.label}</span>
           <h1 className="mt-3 text-[22px] leading-snug font-semibold text-ink-100">{doc.title}</h1>
           <p className="mt-2 text-[13px] leading-6 text-ink-400">{doc.intro}</p>
-          <p className="mt-3 text-[11px] text-ink-500">{t('legal.updated', { date: updated })}</p>
+          <p className="mt-3 text-[12px] text-ink-500">{t('legal.updated', { date: updated })}</p>
         </header>
 
         <article>
@@ -102,7 +122,7 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
         </article>
 
         <footer className="mt-12 border-t border-ink-800 pt-6">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
             {/* 两页互链：读完隐私政策顺手就能翻到条款 */}
             <Link
               href={localePath(locale, `/${other}`)}
@@ -110,8 +130,14 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
             >
               {t(other === 'privacy' ? 'legal.privacy' : 'legal.terms')}
             </Link>
+            {/*
+              页脚这颗**仍是真链接**（不是回退）：落脚点就是那间屋子，所以文案照旧写死落点
+              「返回游戏屋」—— 借 `gamesPage.backHome`（内容页页脚那颗「回到房间」也是它，
+              见 GamesShell）。原先它和左上角那颗共用一个 `legal.back`，2026-10-14 左上角
+              改成回退并统一到 `common.back` 之后，这一颗单独留下来了。
+            */}
             <Link href={room} className="text-ink-400 transition-colors hover:text-accent">
-              {t('legal.back')}
+              {t('gamesPage.backHome')}
             </Link>
             {/*
               游戏列表也放一条。**这一条主要是给爬虫的**：房间右上角那一行
@@ -128,7 +154,7 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
             </Link>
           </div>
 
-          <p className="mt-4 text-[11px] text-ink-500">
+          <p className="mt-4 text-[12px] text-ink-500">
             {t('legal.contact')}{' '}
             <a href={`mailto:${SUPPORT_EMAIL}`} className="text-ink-400 transition-colors hover:text-accent">
               {SUPPORT_EMAIL}
@@ -136,7 +162,7 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
           </p>
 
           {/* 站名放最后一行，和页眉那行小标签一起把这两页锚回品牌上 */}
-          <p className="mt-2 text-[11px] text-ink-600">{SITE_NAME[locale]}</p>
+          <p className="mt-2 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
         </footer>
       </div>
     </main>

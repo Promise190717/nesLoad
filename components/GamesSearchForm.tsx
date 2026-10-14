@@ -101,7 +101,7 @@ export default function GamesSearchForm({
       <button
         type="submit"
         disabled={pending}
-        className="pixel-edge pxw-2 pxc-500 flex h-[34px] shrink-0 items-center bg-ink-700 px-4 text-[11px] text-ink-200 transition-colors hover:text-accent disabled:cursor-wait disabled:opacity-60"
+        className="pixel-edge pxw-2 pxc-500 flex h-[34px] shrink-0 items-center bg-ink-700 px-4 text-[12px] text-ink-200 transition-colors hover:text-accent disabled:cursor-wait disabled:opacity-60"
       >
         {pending ? t('gamesPage.searchLoading') : t('gamesPage.searchSubmit')}
       </button>
@@ -118,7 +118,7 @@ export default function GamesSearchForm({
         <Link
           /* 只剥关键词、机种保留；page=1 不写参数，与 gamesHref 的形态一致 */
           href={localePath(locale, '/games') + (consoleType ? `?console=${consoleType}` : '')}
-          className="text-[11px] text-ink-400 transition-colors hover:text-accent"
+          className="text-[12px] text-ink-400 transition-colors hover:text-accent"
         >
           {t('gamesPage.searchClear')}
         </Link>

@@ -264,7 +264,7 @@ export default async function DeveloperDetailPage({
           <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-ink-800 pt-5">
             {facts.map((fact) => (
               <div key={fact.label} className="contents">
-                <dt className="text-[11px] text-ink-500">{fact.label}</dt>
+                <dt className="text-[12px] text-ink-500">{fact.label}</dt>
                 <dd className="text-[12px] text-ink-200">{fact.value}</dd>
               </div>
             ))}
@@ -292,15 +292,15 @@ export default async function DeveloperDetailPage({
               <Link
                 href={developerHref(locale, id, page - 1)}
                 rel="prev"
-                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.prev')}
               </Link>
             ) : (
-              <span className="px-3 py-1.5 text-[11px] text-ink-700">{t('gamesPage.prev')}</span>
+              <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
             )}
 
-            <span className="font-pixel text-[10px] text-ink-500">
+            <span className="font-pixel text-[12px] text-ink-500">
               {page} / {pageCount}
             </span>
 
@@ -308,12 +308,12 @@ export default async function DeveloperDetailPage({
               <Link
                 href={developerHref(locale, id, page + 1)}
                 rel="next"
-                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.next')}
               </Link>
             ) : (
-              <span className="px-3 py-1.5 text-[11px] text-ink-700">{t('gamesPage.next')}</span>
+              <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
             )}
           </nav>
         )}

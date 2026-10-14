@@ -165,7 +165,7 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/` | 首页落地页：Hero（标题 + 搜索框（**铺满整行 100%**）+ 「进入小屋 / 浏览全部游戏」两个入口）→ 按机种浏览（四张卡，带现读的游戏数）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
+| `/` | 首页落地页：Hero（标题 + 搜索框（**铺满整行 100%**）+ 「进入小屋 / 浏览全部游戏」两个入口）→ 按机种浏览（四张卡，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
 | `/room` | 那间屋子（2026-10-13 之前它就是 `/`）：电视机 + 桌子 + 窗，拖入 ROM 即玩；也是 `?id=` / `?room=` 两条深链的落点。 |
 
 - **为什么拆**：原来 `/` 既是门面又是屋子，两个身份要的东西是冲突的 —— 门面要一页能被搜索引擎整段读走的正文，屋子要满屏 CSS 场景 + canvas。原来那一页整页只有 canvas，唯一可读的文字是 `seo.heading` 那三句 sr-only —— 一个没有正文的站在搜索结果里等于不存在。
@@ -187,11 +187,11 @@ pnpm dev
 | 挂在哪些页面 | 怎么挂 |
 | --- | --- |
 | `/`（落地页） | `app/[locale]/page.tsx` 里直接 `<TopBar />` |
-| `/games`、`/games/[id]`、`/games/[id]/download`、`/developers`、`/developers/[id]` | `GamesShell`（默认就带） |
+| `/games`、`/games/[id]`、`/games/[id]/download`、`/developers`、`/developers/[id]`、`/consoles`、`/consoles/[type]` | `GamesShell`（默认就带） |
 | `/privacy`、`/terms` | `LegalPage` |
 
-- ⚠️ **三个 404 页显式传 `showTopBar={false}`**（`app/not-found.tsx`、`app/[locale]/games/[id]/not-found.tsx`、`app/[locale]/developers/[id]/not-found.tsx`）—— 用户要求 404 不带顶栏。**加新调用方时先想清楚它是不是 404。**
-- **那三个 404 页同时传 `showHomeLink`**（`GamesShell` 的开关，2026-10-13 加）：不挂顶栏，所以左上角那行右边补一颗「首页」文字链接，让迷路的人有一条回落地页的路。**别的内容页不要传** —— 顶栏里已经有一颗了。（404 页的**页脚**里也有一颗「首页」，那是给爬虫的互链集合，两处并存是有意的。）
+- ⚠️ **四个 404 页显式传 `showTopBar={false}`**（`app/not-found.tsx`、`app/[locale]/games/[id]/not-found.tsx`、`app/[locale]/developers/[id]/not-found.tsx`、`app/[locale]/consoles/[id]/not-found.tsx`）—— 用户要求 404 不带顶栏。**加新调用方时先想清楚它是不是 404。**
+- **那四个 404 页同时传 `showHomeLink`**（`GamesShell` 的开关，2026-10-13 加）：不挂顶栏，所以左上角那行右边补一颗「首页」文字链接，让迷路的人有一条回落地页的路。**别的内容页不要传** —— 顶栏里已经有一颗了。（404 页的**页脚**里也有一颗「首页」，那是给爬虫的互链集合，两处并存是有意的。）
 - ⚠️ **`/room`、`/login`、`/account` 都没有顶栏**：房间自己那行 `.top-links` 就是它；`/login` 与 `/account` 本身就是账号相关的页面，铺一排入口是重复。
 - **语言切换是自绘下拉**（`components/LocaleSwitcher.tsx`），样式类（`.locale-menu` / `.locale-trigger` / `.locale-options`…）和房间那一个**共用同一份 CSS**，选项列表共用 `lib/i18n.ts` 的 **`LOCALE_OPTIONS`**（2026-10-13 从 ConsoleScene 上移，避免两处各写一份）。**代码是两份**（房间那个和「电视机大小」弹层共用一个「点外面收起」的 effect、还要参与小屏抽屉排序；这个自给自足），取舍写在 `LocaleSwitcher.tsx` 的文件头。
 - **账号那一格**：未登录 → 链接到 `/login?next=<当前页>`；已登录 → 显示用户名，点进 `/account`。⚠️ 首屏那一次「我是谁」还没回来时**整格不渲染**（连分隔线一起），否则已登录用户会看见「登录」被换成自己的名字、闪一下。
@@ -207,8 +207,9 @@ pnpm dev
 - **已登录的人访问 `/login` 会被服务端直接送走**（去 `next` 或 `/room`）：在服务端判，连「先画一帧表单再跳走」都不会有。只验签名、不查库复核封禁，取舍同 `/account` 的守卫。
 - ⚠️ **这一页是 `noindex, follow`**：一张表单没有可索引的正文，收录进去只会是「和首页抢同一个词的空壳」。**因此不进 `sitemap.ts`。**
 - 左上角那颗返回走**浏览器回退**（`BackLink`），兜底落点是 `/`（落地页）。
-- **背景是 canvas 画的像素装饰**（`components/LoginBackdrop.tsx`，2026-10-13 加）：三个**通用**像素小人（NES / SFC / 街机三色）在背景里慢慢飘 + 琥珀微光 + 一片闪烁像素。整层**透明**、`fixed z-0`，底色仍由 `main` 的 `bg-ink-950` 出（深浅主题自动跟着走，canvas 里的颜色也按 `data-theme` 重读）；正文外面套一层 `.login-scrim`（`globals.css`）做「中间实、两侧透」的遮罩保证可读。
+- **背景是 canvas 画的像素装饰**（`components/LoginBackdrop.tsx`，2026-10-13 加）：三个**通用**像素小人（NES / SFC / 街机三色）在背景里慢慢飘 + 琥珀微光 + 一片闪烁像素。整层**透明**、`fixed z-0`，底色由 `main` 的 `wall` 类出（2026-10-14 起前台统一用房间背景墙同款，深浅主题自动跟着走，canvas 里的颜色也按 `data-theme` 重读）；**正文列的可读性由 canvas 自己兜** —— 小人 / 亮点飘进正文列那一竖条会淡出（`CENTER_FADE`），原来的 `.login-scrim` 遮罩已撤（平色和墙对不上）。
   ⚠️ **30fps 封顶**，`prefers-reduced-motion` 时只画一帧、不跑 rAF —— 纯装饰，别让它常驻 60Hz。刻意不画任何具体游戏角色（版权）。
+- **注册账号 = 邮箱**（2026-10-14 起）：注册走 `lib/email.ts` 的校验（格式 / 别名 / 临时域，**前后端共用同一份**，前端 `AuthForm` 先挡一道、服务端 `/api/user/register` 兜底）。挡的是：`+` 别名、Gmail 加点别名、临时 / 匿名转发邮箱域名（`DISPOSABLE_DOMAINS`，**会过时**，见文件内注释）。存库前 **trim + 小写**——`app_users.username` 列现在存的是邮箱。⚠️ **登录完全不校验邮箱**（用户明确要求）：老账号的用户名可能不是邮箱，登录按字符串原样查库。
 
 **人机验证（Cloudflare Turnstile，2026-10-13 加）** —— 挂在登录 / 注册表单上（屋里那个账号浮层和 `/login` 是同一张表单，所以两处一起有）：
 
@@ -272,6 +273,23 @@ pnpm dev
 - 后台 `app/admin/(panel)/developers` 新增一个 tab 管开发商（增删改、logo 上传走 R2、删除前检查是否被游戏占用）；游戏表单里「开发商」从文本输入改成了**下拉**（选项来自 `/api/admin/developers/options`）。
 - 开发商页面也进 `sitemap.xml`，详情页 `notFound()` 落到 `app/[locale]/developers/[id]/not-found.tsx`（带 noindex）。
 - 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 24 小时** —— 这一页每次渲染要打两次 D1（COUNT + SELECT），缓存把它省掉。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚一天才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
+
+### 机种（公开页面）
+
+2026-10-14 加的**机种库**，用户要的是「机种专题页 + 机种下面的所有游戏」。结构和开发商那套同构，但有一个本质区别：
+
+- ⚠️ **`consoles` 表的主键是 `console_type` 本身**（`nes` / `snes` / `gba` / `arcade`），不是 uuid —— 机种是代码里的枚举（`components/CartridgeSprite.tsx` 的 `CONSOLE_TYPES`），加机种是改代码的事（要同步核心 / 卡带 / 筛选条好几处）。所以地址是好看的 `/consoles/nes`，而且 `games.console_type` 天生就是关联，不需要回填外键。
+- ⚠️ **这张表是机种「资料的扩展」，不是机种的「清单」**：某一行被删了（后台的「重置资料」），那个机种的游戏一根毫毛都不少，前台页面对照 `CONSOLE_TYPES` 退回内置默认（`CONSOLE_LABEL` 的 NES / SFC / GBA / ARC 丝印词）照常渲染 —— **机种专题页永远不会 404**（404 页只接「不在枚举里」的地址）。这也是后台**没有「名下有游戏不许删」拦截**的原因。
+
+| 路由 | 是什么 |
+| --- | --- |
+| `/consoles` | 机种列表：**固定四张卡**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认。 |
+| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，30 分钟）。 |
+
+- 首页「按机种浏览」的四张卡指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
+- 预填数据：`scripts/add-consoles.mjs`（**结构迁移**：建表 + 预填占位行，幂等、可反复跑）+ `scripts/seed-consoles.mjs`（**一次性内容快照**：四个机种的完整双语资料 + R2 机图，会**覆盖后台的人工编辑**，跑过就别再跑）。
+- 后台 `app/admin/(panel)/consoles` 一个 tab 管资料（**没有添加 / 搜索 / 翻页** —— 条目固定四个，只有编辑与重置；接口 `PATCH /api/admin/consoles/[type]` 是 upsert，资料行不存在时顺带创建）。
+- 机种页面也进 `sitemap.xml`（只列**有资料行**的机种）。
 
 ### 给 AI 的站点政策
 
@@ -515,6 +533,8 @@ app/
                       一个是 /room?id=<id> 回房间开玩，一个是进下载页）
     developers/     开发商列表 /developers、详情 /developers/[id]
                     （公开页面，见「开发商 / 厂商」一节）
+    consoles/       机种列表 /consoles、专题页 /consoles/[type]
+                    （公开页面，见「机种」一节）
   admin/          后台（**不在 [locale] 下**：不做语言前缀，语言由 cookie 定）
   api/            接口（**刻意不挂 middleware**，见 middleware.ts 顶部注释）
   sitemap.ts      sitemap.xml（每条地址出中英两份并互指 hreflang）
@@ -542,6 +562,7 @@ components/
   UserPanel.tsx      屋里那个账号浮层（外壳 + 已登录那一屏；表单本体在 AuthForm）
   GameCardGrid.tsx   游戏卡片网格（/games 与开发商详情页共用，含入场错峰动效）
   AdminDevelopers.tsx 后台「开发商管理」tab：增删改、logo 上传、游戏数量
+  AdminConsoles.tsx  后台「机种库」tab：固定四行，只有编辑 / 重置资料（见「机种」一节）
   RomDownloadGate.tsx 下载页那颗按钮：点一下等 6 秒才真的开始下
   ServiceWorkerRegistrar.tsx 注册 public/sw.js（不渲染任何东西，只在生产环境生效）
   I18nProvider.tsx   语言上下文

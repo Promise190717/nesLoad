@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { LOCALES, localePath } from '@/lib/i18n';
+import { listConsoleStubs } from '@/lib/server/consoles';
 import { listDeveloperStubs } from '@/lib/server/developers';
 import { listGameStubs } from '@/lib/server/games';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -13,7 +14,8 @@ import { resolveSiteOrigin } from '@/lib/site';
  *   · `/privacy` / `/terms` 两页法务文档；
  *   · `/games` 游戏列表（含 `?console=<机种>` 那四份机种筛选，2026-10-13 加）；
  *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）；
- *   · `/developers` 开发商列表 + 每家的 `/developers/<id>`（2026-10-12 加，同样现取）。
+ *   · `/developers` 开发商列表 + 每家的 `/developers/<id>`（2026-10-12 加，同样现取）；
+ *   · `/consoles` 机种列表 + 每个机种的 `/consoles/<type>`（2026-10-14 加，同样现取）。
  * 游戏库 / 存档 / 联机 / 键位那些面板全是屏幕上的浮层，没有各自的 URL，
  * 所以不在这里 —— 别为了「看起来完整」往里塞不存在的路径，那是会被判成软 404 的。
  *
@@ -105,6 +107,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     console.error('[sitemap] 读取开发商列表失败，本次略过开发商地址', error);
   }
 
+  // 机种同理（2026-10-14 加）：迁移没跑过（表还没建）也只少这几条
+  let consoles: { type: string; createdAt: number }[] = [];
+  try {
+    consoles = await listConsoleStubs();
+  } catch (error) {
+    console.error('[sitemap] 读取机种列表失败，本次略过机种地址', error);
+  }
+
   return [
     ...entries(origin, '/', { changeFrequency: 'weekly', priority: 1 }),
     /*
@@ -141,6 +151,22 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...developers.flatMap((developer) =>
       entries(origin, `/developers/${developer.id}`, {
         lastModified: new Date(developer.createdAt),
+        changeFrequency: 'monthly',
+        priority: 0.6,
+      })
+    ),
+    /*
+     * 机种（2026-10-14 加）：列表 0.7、每个专题页 0.6 —— 和开发商那两条同一个档位
+     * （内容入口，指向一款款具体游戏）。⚠️ 只列 `consoles` 表里有资料行的机种：
+     * 静态那几条之外，sitemap 不猜「代码里有、库里还没有」的东西 —— 等后台把资料
+     * 填上（或迁移脚本预填之后）它们自然出现。
+     */
+    ...(consoles.length > 0
+      ? entries(origin, '/consoles', { changeFrequency: 'weekly', priority: 0.7 })
+      : []),
+    ...consoles.flatMap((console) =>
+      entries(origin, `/consoles/${console.type}`, {
+        lastModified: new Date(console.createdAt),
         changeFrequency: 'monthly',
         priority: 0.6,
       })

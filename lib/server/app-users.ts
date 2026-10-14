@@ -138,6 +138,10 @@ function toAppUser(row: AppUserRow): AppUser {
 /**
  * 校验用户名。
  *
+ * ⚠️ **2026-10-14 起注册已不走这里**：注册账号改收邮箱（`lib/email.ts` 的
+ *    `validateEmail`，见 app/api/user/register/route.ts）。这个函数保留着 ——
+ *    万一以后要恢复用户名注册 / 出后台建号功能，规则还在这儿。
+ *
  * 返回错误键（给前端查 i18n），**通过返回 null**。不抛异常 —— 调用方（route handler）
  * 要把这个键原样回给前端，抛了还得 catch 一次。
  */

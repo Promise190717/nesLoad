@@ -337,7 +337,7 @@ export default function GameComments({
           没人评过（count = 0）时整块不出现，只留标题。
         */}
         {total > 0 && (
-          <span className="flex items-baseline gap-1.5 text-[10px] text-ink-500">
+          <span className="flex items-baseline gap-1.5 text-[12px] text-ink-500">
             {/*
               这一颗单独给了 **13px**（原来是跟着父级 10px）：2026-10-13 用户要求
               「增大星星的大小」，它是「均分」的标记物、和发表框/列表那两处是一套，
@@ -360,7 +360,7 @@ export default function GameComments({
       {notice && (
         <p
           role="status"
-          className={`mt-3 text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}
+          className={`mt-3 text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}
         >
           {notice.text}
         </p>
@@ -379,7 +379,7 @@ export default function GameComments({
             悬停 / 键盘聚焦都给预览高亮（`hoverRating`），离开就回到已选值。
           */}
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-[10px] text-ink-500">{t('comments.ratingLabel')}</span>
+            <span className="text-[12px] text-ink-500">{t('comments.ratingLabel')}</span>
             <span
               role="group"
               aria-label={t('comments.ratingLabel')}
@@ -421,7 +421,7 @@ export default function GameComments({
               })}
             </span>
             {rating > 0 && (
-              <span className="text-[10px] text-ink-500">
+              <span className="text-[12px] text-ink-500">
                 {t('comments.ratingValue', { n: rating })}
               </span>
             )}
@@ -434,11 +434,11 @@ export default function GameComments({
             rows={3}
             disabled={submitting}
             placeholder={t('comments.placeholder')}
-            className="pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[11px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none disabled:opacity-60"
+            className="pixel-edge pxw-2 pxc-500 w-full resize-none bg-ink-900 px-2 py-2 text-[12px] leading-relaxed text-ink-100 placeholder:text-ink-600 focus:outline-none disabled:opacity-60"
           />
           <div className="flex items-center gap-3">
             {/* 计数走系统字体（同 FeedbackPanel）：font-pixel 里没有斜杠以外的排版符号 */}
-            <span className="text-[10px] text-ink-500">
+            <span className="text-[12px] text-ink-500">
               {draft.length}/{MAX_LENGTH}
             </span>
             <button
@@ -451,7 +451,7 @@ export default function GameComments({
           </div>
         </form>
       ) : (
-        <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-400">
+        <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-400">
           {t('comments.signInLead')}
           <Link href={signInHref} className="text-accent transition-colors hover:underline">
             {t('comments.signIn')} →
@@ -461,11 +461,11 @@ export default function GameComments({
 
       {/* 列表 */}
       <div className="mt-6">
-        {state === 'loading' && <p className="text-[11px] text-ink-500">{t('comments.loading')}</p>}
+        {state === 'loading' && <p className="text-[12px] text-ink-500">{t('comments.loading')}</p>}
 
         {state === 'error' && (
           <div className="flex items-center gap-3">
-            <p className="text-[11px] text-danger">{t('comments.loadFailed')}</p>
+            <p className="text-[12px] text-danger">{t('comments.loadFailed')}</p>
             {/* 重试 = 原地重来一次。失败的那次没进 in-flight 表，所以会真的重发 */}
             <button
               type="button"
@@ -479,7 +479,7 @@ export default function GameComments({
                   })
                   .catch(() => setState('error'));
               }}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-2.5 py-1 text-[10px] text-ink-300 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-2.5 py-1 text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
               {t('comments.retry')}
             </button>
@@ -487,7 +487,7 @@ export default function GameComments({
         )}
 
         {state === 'ready' && items.length === 0 && (
-          <p className="text-[11px] text-ink-500">{t('comments.empty')}</p>
+          <p className="text-[12px] text-ink-500">{t('comments.empty')}</p>
         )}
 
         {items.length > 0 && (
@@ -497,7 +497,7 @@ export default function GameComments({
                 <CommentAvatar url={comment.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="text-[11px] text-ink-200">{comment.username}</span>
+                    <span className="text-[12px] text-ink-200">{comment.username}</span>
                     {/*
                       这一条的星。`repeat` 夹一下上下界，脏数据（理论上进不来）也不会
                       把那一行撑破。实心走强调色、空心走灰 —— 两端分开画所以是两层。
@@ -511,7 +511,7 @@ export default function GameComments({
                       </span>
                     </span>
                     <span className="sr-only">{t('comments.ratingValue', { n: comment.rating })}</span>
-                    <span className="text-[10px] text-ink-500">
+                    <span className="text-[12px] text-ink-500">
                       {formatTime(comment.createdAt, locale)}
                     </span>
                     {/*
@@ -525,7 +525,7 @@ export default function GameComments({
                             type="button"
                             disabled={deletingId === comment.id}
                             onClick={() => void remove(comment.id)}
-                            className="text-[10px] text-danger transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+                            className="text-[12px] text-danger transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {t('comments.deleteConfirm')}
                           </button>
@@ -533,7 +533,7 @@ export default function GameComments({
                             type="button"
                             disabled={deletingId === comment.id}
                             onClick={() => setPendingDelete(null)}
-                            className="text-[10px] text-ink-500 transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                            className="text-[12px] text-ink-500 transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {t('comments.cancel')}
                           </button>
@@ -542,7 +542,7 @@ export default function GameComments({
                         <button
                           type="button"
                           onClick={() => setPendingDelete(comment.id)}
-                          className="text-[10px] text-ink-500 transition-colors hover:text-danger"
+                          className="text-[12px] text-ink-500 transition-colors hover:text-danger"
                         >
                           {t('comments.delete')}
                         </button>
@@ -567,7 +567,7 @@ export default function GameComments({
             type="button"
             disabled={loadingMore}
             onClick={() => void loadMore()}
-            className="pixel-edge pxw-2 pxc-500 mt-5 bg-ink-800 px-4 py-1.5 text-[11px] text-ink-300 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="pixel-edge pxw-2 pxc-500 mt-5 bg-ink-800 px-4 py-1.5 text-[12px] text-ink-300 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loadingMore ? t('comments.loading') : t('comments.loadMore')}
           </button>

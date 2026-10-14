@@ -289,7 +289,7 @@ export default function AdminUsers() {
       <div className="mb-3 flex items-center gap-3">
         <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.users.title')}</h2>
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
@@ -299,12 +299,12 @@ export default function AdminUsers() {
         这一行说明是**必须的**：光看「用户」两个字，谁都会以为这是后台账号。
         写清楚「前台的、和后台账号无关」，省得有人在这里找自己的管理员账号在哪。
       */}
-      <p className="mb-3 text-[10px] leading-relaxed text-ink-500">{t('admin.users.hint')}</p>
+      <p className="mb-3 text-[12px] leading-relaxed text-ink-500">{t('admin.users.hint')}</p>
 
       {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
-      {state === 'error' && <p className="text-[11px] text-danger">{t('admin.users.failed')}</p>}
+      {state === 'error' && <p className="text-[12px] text-danger">{t('admin.users.failed')}</p>}
       {state === 'ready' && items.length === 0 && (
-        <p className="text-[11px] text-ink-500">{t('admin.users.empty')}</p>
+        <p className="text-[12px] text-ink-500">{t('admin.users.empty')}</p>
       )}
 
       {items.length > 0 && (
@@ -320,7 +320,7 @@ export default function AdminUsers() {
 
                 {/* 封禁标记。正常的不显示 —— 一排绿标签只会让「谁被封了」更难扫出来 */}
                 {row.banned && (
-                  <span className="pixel-edge pxw-2 pxc-danger shrink-0 bg-danger/20 px-1.5 py-0.5 text-[10px] text-danger">
+                  <span className="pixel-edge pxw-2 pxc-danger shrink-0 bg-danger/20 px-1.5 py-0.5 text-[12px] text-danger">
                     {t('admin.users.statusBanned')}
                   </span>
                 )}
@@ -329,13 +329,13 @@ export default function AdminUsers() {
                     非会员不用一颗灰章占地方（和个人中心那颗不一样：那是本人的页面，
                     要让「普通用户」也是个明确的说法） */}
                 {row.vip && (
-                  <span className="pixel-edge pxw-2 pxc-accent shrink-0 bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
+                  <span className="pixel-edge pxw-2 pxc-accent shrink-0 bg-accent/15 px-1.5 py-0.5 text-[12px] text-accent">
                     {t('admin.users.vipUntil', { time: formatTime(row.vipExpiresAt ?? 0, locale) })}
                   </span>
                 )}
 
                 {/* 三块数据的条数 —— 扫一眼就知道这个号是空注册还是真在用 */}
-                <span className="shrink-0 font-pixel text-[8px] text-ink-400">
+                <span className="shrink-0 font-pixel text-[12px] text-ink-400">
                   {t('admin.users.stats', {
                     history: String(row.historyCount),
                     saves: String(row.saveCount),
@@ -344,10 +344,10 @@ export default function AdminUsers() {
                 </span>
 
                 {/* 注册时间 / 最近登录。两个都摆，一列文字最长也就 130px */}
-                <span className="shrink-0 text-[10px] text-ink-500">
+                <span className="shrink-0 text-[12px] text-ink-500">
                   {t('admin.users.registered', { time: formatTime(row.createdAt, locale) })}
                 </span>
-                <span className="shrink-0 text-[10px] text-ink-500">
+                <span className="shrink-0 text-[12px] text-ink-500">
                   {row.lastLoginAt === null
                     ? t('admin.users.neverLoggedIn')
                     : t('admin.users.lastLogin', { time: formatTime(row.lastLoginAt, locale) })}
@@ -364,7 +364,7 @@ export default function AdminUsers() {
                     onClick={() =>
                       vipEditingId === row.id ? setVipEditingId(null) : openVipEditor(row)
                     }
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {t(vipEditingId === row.id ? 'admin.users.vipClose' : 'admin.users.vipSetup')}
                   </button>
@@ -373,7 +373,7 @@ export default function AdminUsers() {
                     type="button"
                     disabled={busyId !== null}
                     onClick={() => void toggleBanned(row)}
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {t(row.banned ? 'admin.users.unban' : 'admin.users.ban')}
                   </button>
@@ -390,7 +390,7 @@ export default function AdminUsers() {
                       if (confirming) void confirmDelete(row);
                       else requestDelete(row);
                     }}
-                    className={`pixel-edge pxw-2 pxc-500 px-2.5 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`pixel-edge pxw-2 pxc-500 px-2.5 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                       confirming
                         ? 'bg-danger text-ink-950 hover:bg-danger/80'
                         : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
@@ -408,21 +408,21 @@ export default function AdminUsers() {
                 {vipEditingId === row.id && (
                   <div className="flex w-full flex-wrap items-center gap-2 bg-ink-900/60 px-2 py-2">
                     <label className="flex items-center gap-2">
-                      <span className="text-[10px] text-ink-400">
+                      <span className="text-[12px] text-ink-400">
                         {t('admin.users.vipExpiresLabel')}
                       </span>
                       <input
                         type="date"
                         value={vipDraft}
                         onChange={(e) => setVipDraft(e.target.value)}
-                        className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-2 py-1 text-[11px] text-ink-100 focus:outline-none"
+                        className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-2 py-1 text-[12px] text-ink-100 focus:outline-none"
                       />
                     </label>
                     <button
                       type="button"
                       disabled={busyId !== null}
                       onClick={() => void saveVip(row)}
-                      className="pixel-edge pxw-2 pxc-500 bg-accent px-2.5 py-1 text-[10px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="pixel-edge pxw-2 pxc-500 bg-accent px-2.5 py-1 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {t('admin.users.vipSave')}
                     </button>
@@ -431,7 +431,7 @@ export default function AdminUsers() {
                         type="button"
                         disabled={busyId !== null}
                         onClick={() => void clearVip(row)}
-                        className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+                        className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {t('admin.users.vipClear')}
                       </button>
@@ -449,7 +449,7 @@ export default function AdminUsers() {
           type="button"
           disabled={moreState === 'loading'}
           onClick={loadMore}
-          className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+          className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
           {moreState === 'loading' ? t('feedback.loading') : t('admin.feedback.loadMore')}
         </button>

@@ -97,17 +97,25 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --color-ink-950: #f1f1f4;
-  --color-ink-900: #e8e8ed;
-  --color-ink-850: #e0e0e7;
-  --color-ink-800: #d6d6df;
-  --color-ink-700: #c7c7d2;
-  --color-ink-600: #b2b2bf;
-  --color-ink-500: #8c8c9b;
-  --color-ink-400: #6d6d7a;
-  --color-ink-300: #4a4a55;
-  --color-ink-200: #33333c;
-  --color-ink-100: #16161c;
+  /*
+   * 浅色 ink 阶微暖（2026-10-14）：墙定成暖米之后，原来的冷蓝灰阶（#e8e8ed 那族）
+   * 压上去两族灰打架 —— 用户原话「灰色的主题色和这个黄色很不搭」。
+   * 色相从冷蓝（hue≈240）转到暖（hue≈45），但用户两次嫌黄：
+   * 第一版饱和拉满 → 掺 50% 中性灰；第二版仍「太黄」→ 再掺 50%（合计约 75% 中性）。
+   * 现在只留极薄一层暖底，明度台阶始终不动（对比度不受影响）。
+   * dark 主题的 ink 阶不动（那边墙本来就是冷黑蓝，同族）。
+   */
+  --color-ink-950: #f2f1ee;
+  --color-ink-900: #e9e8e4;
+  --color-ink-850: #e1e0dc;
+  --color-ink-800: #d7d5d1;
+  --color-ink-700: #c7c5c1;
+  --color-ink-600: #b1afa8;
+  --color-ink-500: #918f8d;
+  --color-ink-400: #716f6e;
+  --color-ink-300: #4f4d4d;
+  --color-ink-200: #353434;
+  --color-ink-100: #191819;
 
   --color-wood-950: #d5c5a8;
   --color-wood-900: #e1d4ba;
@@ -126,10 +134,17 @@
   --shadow-ground: rgba(0, 0, 0, 0.16);
   --vignette: rgba(120, 110, 90, 0.22);
 
-  /* 浅色下墙比地板（#e3e3ea）偏暖、略亮，两者才分得开 */
-  --wall-top: #f7f6f4;
-  --wall-bottom: #e9e6e1;
-  --wall-seam: rgba(0, 0, 0, 0.05);
+  /*
+   * 浅色墙走**暖米**—— 2026-10-14 用户明确「不要灰色背景」。墙和地板（#ddd5c6）、
+   * 木料（wood-*）、琥珀 accent（#a9761a）、「一张纸」（#bfae87）同属一个暖族。
+   * 走过的弯路别回退：冷灰两版（#f7f7fa/#ededf2、#f1f1f4 那族）被否；
+   * 第一版奶油色（#fbf7ec/#f1ead9）被嫌「太黄」→ 现在这版掺了白、只留薄薄一层暖。
+   * 亮度：墙比 ink-900 面板亮半档 —— 背景必须最亮，物件才浮得出来。
+   * 板缝用暖色黑，别用冷黑在米色上压出脏印。
+   */
+  --wall-top: #fbfaf7;
+  --wall-bottom: #f4f2ec;
+  --wall-seam: rgba(110, 90, 55, 0.05);
 
   --floor-seam: rgba(120, 100, 80, 0.22);
 }
@@ -340,6 +355,14 @@ body {
     var(--px-w, 3px) 0 0 0 var(--px-c, var(--color-ink-700));
 }
 
+/*
+ * 最细一档描边。个人中心的删除/清空/退出那批小钮在用（2026-10-14 用户连缩三次
+ * 还嫌大）—— 它们字小、padding 紧，2px 的描边画在盒子外反而成了体积的大头，
+ * 收到 1px 视觉上薄一圈，像素风不变。
+ */
+.pxw-1 {
+  --px-w: 1px;
+}
 .pxw-2 {
   --px-w: 2px;
 }
@@ -427,6 +450,24 @@ body {
   100% {
     transform: translateX(130%);
   }
+}
+
+/*
+ * 电视机 / 掌机的机身是「物件」，外壳不跟内容页的暖色走。
+ * 2026-10-14 浅色 ink 阶转暖后机身跟着发黄（机身用的正是 bg-ink-* / pxc-500），
+ * 这里在 `.tv-surface` 子树里把 ink 令牌局部换回转暖**之前**的冷灰原值 ——
+ * RetroTv / HandheldConsole 挂上这个类名就整体恢复，文字档（400 以下）不覆盖，
+ * 文字跟主题走是对的。dark 主题不需要：那边 ink 没动过。
+ * ⚠️ 别用这套值去改全局 —— 它们只是「机身自己的旧灰」，不是设计令牌。
+ */
+:root[data-theme='light'] .tv-surface {
+  --color-ink-950: #f1f1f4;
+  --color-ink-900: #e8e8ed;
+  --color-ink-850: #e0e0e7;
+  --color-ink-800: #d6d6df;
+  --color-ink-700: #c7c7d2;
+  --color-ink-600: #b2b2bf;
+  --color-ink-500: #8c8c9b;
 }
 
 /*
@@ -833,16 +874,17 @@ body {
  *
  * 所以中文比英文各抬 1px，**英文维持原设计尺寸不动** —— 靠
  * `<html data-locale>` 命中（切语言时由 I18nProvider 同步，见那边）。
- * 两档对应关系（元素上的工具类 → 中文值）：
- *   `.screen-hint-sm`  text-[11px] → 12px   「DRAG & DROP A ROM」那行主提示
- *   `.screen-hint-xs`  text-[10px] → 11px   副提示（怎么选文件 / 等房主 / 暂停副标题）
+ * 2026-10-13 起全站字号下限统一为 12px（所有 text-[Npx] / font-size 都 ≥ 12），
+ * 两档因此并成一档，这两条规则保留作兜底（防 utilities 又被写小）：
+ *   `.screen-hint-sm`  text-[12px] → 12px   「DRAG & DROP A ROM」那行主提示
+ *   `.screen-hint-xs`  text-[12px] → 12px   副提示（怎么选文件 / 等房主 / 暂停副标题）
  *
  * 这几条是**未分层**的，优先级高于 Tailwind 的 utilities 层，所以能压过元素上那两个
- * `text-[10px]` / `text-[11px]` 工具类（和 `.screen:fullscreen` 压过尺寸类同一个道理）。
+ * `text-[12px]` 工具类（和 `.screen:fullscreen` 压过尺寸类同一个道理）。
  * 工具类只设了 font-size、没设 line-height，所以这里改字号不会带出行高问题。
  * ------------------------------------------------------------------ */
 :root[data-locale='zh'] .screen-hint-xs {
-  font-size: 11px;
+  font-size: 12px;
 }
 :root[data-locale='zh'] .screen-hint-sm {
   font-size: 12px;
@@ -1341,7 +1383,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 5px 6px;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
   color: var(--color-ink-400);
   background: transparent;
@@ -1573,7 +1615,7 @@ body {
   cursor: pointer;
   background: transparent;
   color: var(--color-ink-300);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   transition: color 0.15s ease;
 }
@@ -1629,7 +1671,7 @@ body {
   white-space: nowrap;
   background: transparent;
   color: var(--color-ink-200);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -1762,8 +1804,11 @@ body {
 
   /*
    * 抽屉里的每一行默认**整宽**：`row + wrap` 之下，`flex-basis: 100%` 让每个条目
-   * 仍然各占一行（`flex-shrink: 0` 保证它不被挤成半行）。下面只有「语言」和「账号」
-   * 把 basis 压到一半 —— 于是这两个挤在同一行，其余照旧。
+   * 仍然各占一行（`flex-shrink: 0` 保证它不被挤成半行）。
+   *
+   * ⚠️ 2026-10-14 起**没有任何一行压过 basis** —— 原来「语言」和「账号」各占半行、
+   *    挤在同一行，账号挪到「游戏库」后面之后就不再相邻了，半宽也就撤了（见下面
+   *    `.locale-menu` / `.top-account` 那两条）。于是整份清单是一行一项、一条直线。
    *
    * ⚠️ 选择器**不能写成 `.entries > *`**：两个子容器（`.top-links` / `.rail`）是
    * `display: contents`，真正的 flex 项是它们的**子元素**（DOM 上是孙辈），
@@ -1888,12 +1933,13 @@ body {
   }
 
   /*
-   * 语言选择器：**和账号并排占半行**（2026-10-13 用户要求「用户和语言切换放在一行」）。
-   * `flex-basis: calc(50% - 6px)` 让两个各占一半、中间正好留出容器 `gap: 12px` 的一半。
-   * 下拉仍在它下面就地展开（宽度跟着这半行；`locale-options` 的 `min-width: 0` 兜着）。
+   * ⚠️ **不再和账号并排**（2026-10-14）：用户要求「登录放在游戏列表后面」，
+   * `.top-account` 的 `order` 挪到了 `.rail-games` 之后，两者不再相邻，
+   * 半宽就没有意义了（半宽会让语言那一行**左边空出半行**）。
+   * 于是这里不再压 basis，语言在下拉里独自占一整行 —— 见下面 `.top-account` 那条。
    */
   .entries .locale-menu {
-    flex: 0 0 calc(50% - 6px);
+    order: 1;
   }
   /*
    * 下拉在抽屉里改成**就地展开**（`position: static`）：抽屉自己就是个滚动容器
@@ -1946,36 +1992,39 @@ body {
    * 两个子容器已经是 `display: contents`，这些 `order` 作用在抽屉这个 flex 容器上，
    * 于是两处的条目交错排成一份：
    *
-   *   语言 + 账号（同一行） / 首页 ── 主题 / 简洁 / 游戏库 / 联机 / 按键设置 ── 按键说明 / 留言本 ── 隐私 / 条款
+   *   语言 / 首页 ── 主题 / 简洁 / 电视机大小 / 游戏库 / **账号** / 联机 / 按键设置
+   *   ── 按键说明 / 留言本 ── 隐私 / 条款
    *
-   * **语言和账号被特意排成同一行**（2026-10-13 用户要求）：`order` 让它们相邻，
-   * 半宽的 basis（见上面 `.locale-menu` 那条）让它们挤进同一行；首页紧随其后、独占一行。
+   * **账号 2026-10-14 挪到「游戏库」后面**（用户要求「登录放在游戏列表后面」）：
+   * 原先它和语言**并排同一行**（`order: 2` + 半宽 basis），现在排到 `.rail-games` 之后，
+   * 语言也恢复整行（见上面 `.locale-menu` 那条）。
+   * ⚠️ 抽屉里「游戏列表」是 `.rail-games` 这一行 —— `.top-games` 那条被 `display: none`
+   *    藏掉了（和游戏库重复，见上面那段），所以账号跟的是 `rail-games` 的位置。
    * 主题打头的那一串是**房间自己的操作**，最后两条是法务页。
-   * ⚠️ 改这里的数字要连着一块改，别留下两个都归 5 的（那时按 DOM 顺序排，会飘）。
+   * ⚠️ 改这里的数字要连着一块改，别留下两个一样的（那时按 DOM 顺序排，会飘）。
    */
   .entries .locale-menu {
     order: 1;
   }
-  .entries .top-account {
-    order: 2;
-    /* 和「语言」并排：半宽（见上面 `.locale-menu` 那条注释） */
-    flex: 0 0 calc(50% - 6px);
-  }
   .entries .top-home {
-    order: 3;
+    order: 2;
   }
   .entries .rail-theme {
-    order: 4;
+    order: 3;
   }
   /* 简洁模式：和「主题」一样是**房间自己的操作**，紧挨着它排 */
   .entries .rail-simple {
-    order: 5;
+    order: 4;
   }
   /* 「电视机大小」：同样是**房间自己的操作**（就地生效、不收抽屉），挨着简洁模式排 */
   .entries .rail-tvsize {
-    order: 6;
+    order: 5;
   }
   .entries .rail-games {
+    order: 6;
+  }
+  /* 账号：紧跟在「游戏库」之后（2026-10-14 用户要求） */
+  .entries .top-account {
     order: 7;
   }
   .entries .rail-netplay {
@@ -2206,30 +2255,17 @@ body {
   }
 }
 
-/* ------------------------------------------------------------------ *
- * 登录页背景（`/login`，2026-10-13 加）
+/*
+ * 登录页背景（`/login`，2026-10-13 加）：
+ * `components/LoginBackdrop.tsx` 一层 —— canvas 画的像素装饰（NES / SFC / 街机三个
+ * **通用**像素小人在背景里慢慢飘 + 琥珀微光 + 一片闪烁像素）。
  *
- * 那一页只有一张表单，`bg-ink-950` 铺满整屏太空 —— 于是分两层：
- *   1. `components/LoginBackdrop.tsx`：canvas 画的像素装饰 ——
- *      NES / SFC / 街机三个**通用**像素小人在背景里慢慢飘 + 琥珀微光 + 一片闪烁像素；
- *   2. `.login-scrim`（这一条）：垫在正文下面、压在装饰上面的**遮罩**，
- *      中间实、两侧透 —— 小人从两侧经过时正文照样读得清。
- *
- * ⚠️ 颜色用 `--color-ink-950`（就是页面底色本身），所以深浅主题自动跟着翻，
- *    组件那边一行都不用改。别在这儿写死颜色。
- * ⚠️ `inset-inline` 比内容列（`max-w-md` = 28rem）左右各再宽出 5rem —— 那一段是渐隐区，
- *    正好落在「正文列之外、屏幕之内」。
- * ------------------------------------------------------------------ */
-.login-scrim {
-  inset-inline: -5rem;
-  background: linear-gradient(
-    to right,
-    transparent 0,
-    var(--color-ink-950) 30%,
-    var(--color-ink-950) 70%,
-    transparent 100%
-  );
-}
+ * ⚠️ 原来还有一层 `.login-scrim`（中间实、两侧透的正文遮罩），2026-10-14 撤了：
+ *    它的底色是平的 `--color-ink-950`，页面背景换成 `.wall`（渐变 + 竖板缝）之后
+ *    这块平色补丁跟墙对不上，表单顶上能看出一条色差边。现在「正文列读得清」这件事
+ *    由 canvas 自己负责 —— 小人 / 亮点飘进正文列那一竖条时会淡出（见 LoginBackdrop
+ *    里的 `CENTER_GAP`），微光则照旧透出来。别再把 scrim 加回来。
+ */
 
 
 @media (prefers-reduced-motion: reduce) {

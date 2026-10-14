@@ -57,6 +57,7 @@ import {
 } from '@/lib/library';
 import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
 import { isSeason, nextSeason } from '@/lib/season';
+import type { Game } from '@/lib/server/games';
 import { DEFAULT_TV_SIZE, isTvSize, TV_SIZES, type TvSize } from '@/lib/tv-size';
 import { fetchCurrentUser } from './AuthForm';
 import { CONSOLE_LABEL } from './CartridgeSprite';
@@ -450,10 +451,11 @@ const GAME_QUERY_PARAM = 'id';
  * 校验只做「像个 id」这一层：库里是 `randomUUID()`，所以只接受字母数字和连字符、
  * 长度卡在 64 以内。不合规就当没有 —— 别拿一个明显不是 id 的串去打一次接口。
  *
- * ⚠️ 和 `?room=` 一样，**这一轮结束后要抹掉**（见 `clearGameId`）：留着的话用户按 F5
- * 会又自动把这一款重下一遍 —— 而他刚点了取消、或者游戏早就跑起来了，刷新再来一次
- * 不是他要的。注意抹的时机是「这一轮结束」，不是「读到就抹」：载入进行中按 F5
- * 仍然该重开同一款（那时候还没结束）。
+ * ⚠️ **`?id=` 读到后一直留在地址上，不抹**（2026-10-14 用户要求「游戏加载后不要
+ * 清除 url 上的 id 了」）—— 这个地址本来就该能分享 / 收藏 / F5 重开同一款。
+ * 原来那版「这一轮结束就抹」是 2026-10-12 的要求（怕刷新重下），现在立场反过来
+ * 了：重下同一款正是深链该有的行为（服务端 meta 也靠这个 id 出标题）。刷新会
+ * 重新走一遍取数 + 下载，那是深链语义的一部分，不是 bug。
  */
 function readGameId(): string | null {
   const raw = new URLSearchParams(window.location.search).get(GAME_QUERY_PARAM)?.trim() ?? '';
@@ -461,23 +463,25 @@ function readGameId(): string | null {
 }
 
 /**
- * 把 `?id=` 从地址栏抹掉（走 `replaceState`，不留历史记录、不触发任何请求）。
+ * `/room` 页面（服务端）递进来的**深链那一款的现成数据**。
  *
- * 2026-10-12 用户要求：**取消**和**载入完成**时都要抹，否则刷新页面会又自动把这一款
- * 重下一遍 —— 用户以为自己已经退出这一款了。和 `clearInviteCode` 同一套路。
+ * 三种取值的含义（刻意用 `undefined` / `null` / 对象三态，见 `app/[locale]/room/page.tsx`）：
+ * - **`undefined`（没传）**：服务端没拿到 —— 地址上没有 `?id=`，或者服务端查询抛了异常。
+ *   前者本来就没有深链；后者走下面保留的 `GET /api/games/<id>` 那条老路兜底。
+ * - **`null`**：有 id 但库里查无此游戏（后台删了 / 链接是编的）—— 直接弹「找不到」，
+ *   不用再打一次接口去确认同一件事。
+ * - **`Game`**：服务端 meta 那一趟已经查出来了（页面用 React `cache()` 复用同一笔查询，
+ *   数据库**没有**因此多打），弹窗第一帧就有封面和名字，深链取数那段请求整个省掉。
  *
- * 和 `?room=` 的区别只在**时机**：房间码是「读到就抹」（一次性的握手，留着会反复弹确认框），
- * `?id=` 是「这一轮结束才抹」。别的一律不动 —— 只摘自己那一个参数，
- * 联机那条 `?room=` 之类还在地址里的东西原样留着。
+ * 类型用服务端的 `Game` 而不是 `LibraryGame`：前者多一个 `developerId`，是后者的
+ * 超集，赋给 `deepLinkGame` 那个 state 天然兼容（多出来的字段运行时被 `romFromGame`
+ * 挑字段时忽略，不写脏任何东西）。
  */
-function clearGameId() {
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has(GAME_QUERY_PARAM)) return;
-  url.searchParams.delete(GAME_QUERY_PARAM);
-  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-}
-
-export default function ConsoleScene() {
+export default function ConsoleScene({
+  serverGame,
+}: {
+  serverGame?: Game | null;
+}) {
   /*
    * `href` 解构成 `localeHref`：这个名字在站内链接里出现几十次，
    * 叫 `href` 会和每个 `<Link href=…>` 的属性撞在一起，读起来分不清谁是谁。
@@ -1538,17 +1542,17 @@ export default function ConsoleScene() {
   }, [controller, activeId, loadFile]);
 
   /**
-   * 收起深链那颗弹窗（`deepLinkOpen` + `deepLinkGame`），**并把地址栏上的 `?id=` 一起摘掉**。
+   * 收起深链那颗弹窗（`deepLinkOpen` + `deepLinkGame`）。
    *
-   * 两件事必须绑在一起：只把弹窗收起来、参数还挂在地址上，用户按一下 F5 就又自动
-   * 把这一款重下一遍（他自己以为已经退出了）—— 这正是 2026-10-12 用户要求抹掉参数的原因。
+   * ⚠️ **只收弹窗，地址栏的 `?id=` 不动**（2026-10-14 用户要求，原 2026-10-12 的
+   * 「结束时抹参数」已撤）：这个地址要留着分享 / 刷新重开同一款。副作用是刷新
+   * 会重新取数 + 重下 ROM —— 那是深链语义的一部分（见 `readGameId` 的注释）。
    *
    * 幂等，所以调用点可以有好几处（取数失败 / 取消 / 整包到手 / `finally` / 防重入早退），
-   * 谁先到谁抹，后来的都是空操作。`clearGameId` 自己会判断有没有这个参数，
-   * 从游戏库 / 历史那条路进来（地址上本来就没有 `?id=`）调它也是空操作。
+   * 谁先到谁收，后来的都是空操作。从游戏库 / 历史那条路进来（没有深链弹窗）调它
+   * 也是空操作。
    */
   const closeDeepLink = useCallback(() => {
-    clearGameId();
     setDeepLinkOpen(false);
     setDeepLinkGame(null);
   }, []);
@@ -1607,9 +1611,9 @@ export default function ConsoleScene() {
         const file = new File([blob], rom.romName, { type: 'application/octet-stream' });
         setLibraryOpen(false);
         /*
-         * 深链那颗独立弹窗一起收掉，**顺带把地址栏的 `?id=` 摘掉** —— 这就是用户说的
-         * 「载入完成」那个时机：游戏已经跑起来了，刷新页面不该再自动重下一遍。
-         * （不是从深链进来的话，弹窗本来就是 null、地址上也没这个参数，整个是空操作。）
+         * 深链那颗独立弹窗一起收掉。⚠️ 地址栏的 `?id=` **故意留着**（2026-10-14
+         * 用户要求不清了）—— 这个地址要能分享 / 收藏，刷新重开同一款是深链语义。
+         * （不是从深链进来的话，弹窗本来就是 null，整个是空操作。）
          */
         closeDeepLink();
         await loadFile(file);
@@ -2096,22 +2100,40 @@ export default function ConsoleScene() {
     loadRemoteGameRef.current = loadRemoteGame;
   }, [loadRemoteGame]);
 
+  /*
+   * 服务端递进来的深链数据（`serverGame` prop）。照 `loadRemoteGameRef` 同一个理由走 ref：
+   * 下面的深链 effect 依赖数组刻意只有 `closeDeepLink`（挂载时跑一次），而 props 每次
+   * 渲染都可能是新对象 —— 直接进依赖会把「跑一次」变成「跑很多次」，深链就重复下载了。
+   */
+  const serverGameRef = useRef(serverGame);
+  useEffect(() => {
+    serverGameRef.current = serverGame;
+  });
+
   /**
    * `/room?id=<游戏 id>` —— 游戏详情页那颗「开始游戏」点过来就是这个地址。
    *
    * 流程：读地址栏 → **立刻立起 `deepLinkOpen` 那颗独立弹窗**（里面先转 loading）
-   * → 打 `/api/games/<id>` 拿这一款 → 到了就填进去（封面 + 名字 + 下载进度 + 取消）
+   * → 拿这一款的数据 → 到了就填进去（封面 + 名字 + 下载进度 + 取消）
    * 并照游戏库那套载入（`loadRemoteGame`：下载进度、取消、写历史全都自动带上），
    * 没有就在房间顶上弹一句「找不到这个游戏」、弹窗一并收掉。
+   *
+   * 「拿数据」有两条路（2026-10-14 起，用户要求「服务端已经获取过游戏数据了，
+   * 弹窗里面应该能直接拿到，不用客户端再调一次」）：
+   * ① **首选：服务端递进来的 `serverGame`**（`/room` 页面把 meta 那一趟查到的结果
+   *    直接当 props 递下来，见 `serverGameRef` 那段）—— 数据在挂载那一刻就在手上，
+   *    弹窗开起来就是封面和名字，取数请求整个省掉；
+   * ② **兜底：`GET /api/games/<id>`** —— `serverGame` 是 `undefined`（服务端查询抛了
+   *    异常）时才走，行为和 2026-10-12 原版完全一致。地址上没有 `?id=` 时整个 effect
+   *    早退，两条路都不走。
    *
    * ⚠️ **弹窗不能等数据**（2026-10-12 用户要求，原话「判断有id弹窗就出现 加载中loading动画」）：
    * 一开始是先 fetch、数据回来才开窗，于是从详情页点「开始游戏」过来的头几百毫秒是
    * 一间什么也没发生的房间 —— 看着像点了没反应。现在「有 id」本身就立刻开窗。
    *
-   * ⚠️ **参数读到先留着、等这一轮结束再抹**（`clearGameId`，包在 `closeDeepLink` 里）：
-   * 载入进行中按 F5 仍然该重开同一款，所以读到的那一刻**不动它**；等取数失败 / 取消 /
-   * 整包下完时（`closeDeepLink` 的各个调用点）才摘掉 —— 那时候用户已经「离开这一款」了，
-   * 参数留着只会让刷新又自动重下一遍（2026-10-12 用户要求）。
+   * ⚠️ **参数读到就留着、永不抹**（2026-10-14 用户要求「加载后不要清除 url 上的 id」；
+   * 原 2026-10-12 那版「这一轮结束再抹」已撤）：载入进行中按 F5 重开同一款、
+   * 载入完成后按 F5 也重开同一款 —— 地址要能分享 / 收藏，服务端 meta 还靠它出标题。
    *
    * 库里没有这一款（后台删了、或者链接是从别处抄来的）时只弹一句提示、不载入 ——
    * 这是用户明确要求的那条「没有提示找不到」。⚠️ 这时**必须 `closeDeepLink()`**：
@@ -2140,6 +2162,36 @@ export default function ConsoleScene() {
     void Promise.resolve().then(() => {
       if (alive) setDeepLinkOpen(true);
     });
+
+    /*
+     * 路 ①：服务端已经把这一款查好了，直接用，不打接口（2026-10-14 用户要求
+     * 「服务端已经获取过游戏数据了，弹窗里面应该能直接拿到，不用客户端再调一次」）。
+     *
+     * 一样推到微任务（理由同上，也让「弹窗先立起来」和「数据填进去」在同一次绘制前
+     * 都落定）—— 于是从详情页点过来，弹窗出现的第一帧就是封面和名字，没有 loading 骨架。
+     * `null` = 服务端确认库里没有，走下面 404 分支的等价物：收弹窗 + 弹「找不到」，
+     * 不用再打一次接口去确认同一件事。这条路上没有取数请求，`deepLinkAbortRef`
+     * 不用立 —— `cancelDeepLink` 里的 `cancelRemoteLoad()` 已覆盖 ROM 那段下载的取消。
+     */
+    const serverGame = serverGameRef.current;
+    if (serverGame !== undefined) {
+      void Promise.resolve().then(() => {
+        if (!alive) return;
+        if (!serverGame) {
+          closeDeepLink();
+          setToast({ key: 'deepLink.notFound', kind: 'danger' });
+          return;
+        }
+        setDeepLinkGame(serverGame);
+        void loadRemoteGameRef.current(serverGame);
+      });
+      return () => {
+        alive = false;
+      };
+    }
+
+    /* 路 ②：服务端没给（查询抛了异常）—— 打接口兜底，2026-10-12 的老路原样保留。
+       用的还是 effect 顶部立好的那个 controller（path ① 早退，它空转无害）。 */
 
     void (async () => {
       try {
@@ -2715,7 +2767,8 @@ export default function ConsoleScene() {
        * 深链那颗弹窗：Esc 不只是「收起来」，还要**把这一轮真掐掉**。
        * 只收不掐的话，用户以为关掉了，实际上请求还在后台飞、下完还会自己开始游戏
        * —— 那是个看不见的下载，比不关更糟。整个动作就是弹窗里那颗「取消」
-       * （`cancelDeepLink`：取数那段 + ROM 那两段都 abort，再抹掉地址上的 `?id=`）。
+       * （`cancelDeepLink`：取数那段 + ROM 那两段都 abort；地址上的 `?id=` 保留 ——
+       * 用户要的就是刷新还能重开同一款）。
        */
       if (deepLinkOpen) cancelDeepLink();
       setLegendOpen(false);
@@ -3232,7 +3285,8 @@ export default function ConsoleScene() {
         {/*
           首页（2026-10-13 加）。用户要求「除首页外，每个页面都有一颗回首页的入口」，
           房间这一页的入口就是右上角这行（内容页那排见 `components/TopBar.tsx`）。
-          排在语言之后、账号之前 —— 语言和首页都是「站点级」的东西，再往后才是账号 / 游戏库。
+          排在语言之后 —— 语言和首页都是「站点级」的东西，再往后才是游戏库 / 账号
+          （账号 2026-10-14 移到「游戏列表」**后面**，见下面那段）。
 
           和「游戏列表」那条同样带 `roomBusy` 拦截：回首页是同页跳转，会把整间屋子
           （正在跑的游戏 / 联机房间）卸载掉 —— 屋里有活时先弹确认，空屋子直接走。
@@ -3247,7 +3301,7 @@ export default function ConsoleScene() {
             e.preventDefault();
             setLeaveOpen(true);
           }}
-          className="top-home text-[11px] text-ink-300 transition-colors hover:text-accent"
+          className="top-home text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
           <span className="row-icon">
             <HomeIcon size={16} />
@@ -3256,8 +3310,28 @@ export default function ConsoleScene() {
         </Link>
         <span aria-hidden className="top-sep h-[10px] w-px bg-ink-500" />
 
+        <Link
+          href={localeHref('/games')}
+          /* 房间里正有活（插着卡带 / 开着联机房）就先弹一层确认 —— 同页跳转会卸载整个房间。
+             空房间不拦：不调 `preventDefault`，`<Link>` 自己就跳走了。 */
+          onClick={(e) => {
+            if (!roomBusy) return;
+            e.preventDefault();
+            setLeaveOpen(true);
+          }}
+          className="top-games text-[12px] text-ink-300 transition-colors hover:text-accent"
+        >
+          <span className="row-icon">
+            <StoreIcon size={16} />
+          </span>
+          {t('topLinks.games')}
+        </Link>
+
         {/*
-          账号入口（2026-10-13 用户要求加在「游戏列表」左侧）。
+          账号入口。**2026-10-14 用户要求挪到「游戏列表」后面**（原来它在「游戏列表」
+          左侧、「首页」和「游戏列表」之间）—— 这一行现在的顺序是
+          语言 → 首页 → 游戏列表 → 账号 → 隐私 → 条款；内容页顶栏（`TopBar`）
+          同一天也调成了同一个组序。
 
           **两种形态**，按登录态切换：
             · 未登录 → `<button>`，点开屋里那个账号面板（`userOpen`），不导航；
@@ -3285,9 +3359,10 @@ export default function ConsoleScene() {
           `max-w-[9rem] truncate`：用户名最长 20 字，直接铺开会把这行链接撑宽、
           顶到电视机上；截断，`title` 里留全名。
 
-          `.top-account` 是给小屏抽屉排顺序用的（`.entries .top-account` 的 `order: 2`，见
-          globals.css），别删。`.row-icon` 是抽屉里要用的：那一行也得和别的行一样
+          `.top-account` 是给小屏抽屉排顺序用的（`.entries .top-account` 的 `order`，
+          见 globals.css），别删。`.row-icon` 是抽屉里要用的：那一行也得和别的行一样
           「左边图标、右边文案」（大屏这行是纯文字，图标 `display: none`）。 */}
+        {!userLoading && <span aria-hidden className="top-sep h-[10px] w-px bg-ink-500" />}
         {!userLoading &&
           (user ? (
             <Link
@@ -3298,7 +3373,7 @@ export default function ConsoleScene() {
                 e.preventDefault();
                 setLeaveOpen(true);
               }}
-              className="top-account max-w-[9rem] truncate text-[11px] text-ink-300 transition-colors hover:text-accent"
+              className="top-account max-w-[9rem] truncate text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
               <span className="row-icon">
                 <UserIcon size={16} />
@@ -3309,7 +3384,7 @@ export default function ConsoleScene() {
             <button
               type="button"
               onClick={() => setUserOpen(true)}
-              className="top-account text-[11px] text-ink-300 transition-colors hover:text-accent"
+              className="top-account text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
               <span className="row-icon">
                 <UserIcon size={16} />
@@ -3317,29 +3392,12 @@ export default function ConsoleScene() {
               {t('user.signIn')}
             </button>
           ))}
-        {!userLoading && <span aria-hidden className="top-sep h-[10px] w-px bg-ink-500" />}
-        <Link
-          href={localeHref('/games')}
-          /* 房间里正有活（插着卡带 / 开着联机房）就先弹一层确认 —— 同页跳转会卸载整个房间。
-             空房间不拦：不调 `preventDefault`，`<Link>` 自己就跳走了。 */
-          onClick={(e) => {
-            if (!roomBusy) return;
-            e.preventDefault();
-            setLeaveOpen(true);
-          }}
-          className="top-games text-[11px] text-ink-300 transition-colors hover:text-accent"
-        >
-          <span className="row-icon">
-            <StoreIcon size={16} />
-          </span>
-          {t('topLinks.games')}
-        </Link>
         <span aria-hidden className="top-sep h-[10px] w-px bg-ink-500" />
         <Link
           href={localeHref('/privacy')}
           target="_blank"
           rel="noopener noreferrer"
-          className="top-privacy text-[11px] text-ink-300 transition-colors hover:text-accent"
+          className="top-privacy text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
           <span className="row-icon">
             <ShieldIcon size={16} />
@@ -3351,7 +3409,7 @@ export default function ConsoleScene() {
           href={localeHref('/terms')}
           target="_blank"
           rel="noopener noreferrer"
-          className="top-terms text-[11px] text-ink-300 transition-colors hover:text-accent"
+          className="top-terms text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
           <span className="row-icon">
             <ScrollIcon size={16} />
@@ -3612,7 +3670,7 @@ export default function ConsoleScene() {
             用 font-pixel 的英文/数字（`123ms`），和面板里那一处读数同一套。
           */}
           {netplayState.status === 'connected' && netplayState.rtt !== null && (
-            <span className="rail-rtt absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[9px] text-accent">
+            <span className="rail-rtt absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[12px] text-accent">
               {Math.round(netplayState.rtt)}ms
             </span>
           )}
@@ -4011,14 +4069,14 @@ export default function ConsoleScene() {
               <span className="text-[12px] text-ink-200">{t('saves.title')}</span>
               {/* 计数走 font-pixel：全是数字，没有掉字形的问题。只数本机那组 ——
                   云端那份有 20MB/份的硬上限，条数上限本来就是另一个维度 */}
-              <span className="ml-auto font-pixel text-[8px] text-ink-400">
+              <span className="ml-auto font-pixel text-[12px] text-ink-400">
                 {String(saves.length).padStart(2, '0')}/{String(MAX_SAVES).padStart(2, '0')}
               </span>
               <button
                 type="button"
                 aria-label={t('saves.close')}
                 onClick={() => setSaveOpen(false)}
-                className="pixel-edge pxw-2 pxc-500 flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+                className="pixel-edge pxw-2 pxc-500 flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
               >
                 ×
               </button>
@@ -4040,7 +4098,7 @@ export default function ConsoleScene() {
                     「没有本机存档」本身不值得占一行） */}
                 {saves.length > 0 && (
                   <>
-                    <div className="border-b-2 border-ink-900 bg-ink-850/60 px-4 py-1.5 text-[10px] text-ink-400">
+                    <div className="border-b-2 border-ink-900 bg-ink-850/60 px-4 py-1.5 text-[12px] text-ink-400">
                       {t('saves.groupLocal')}
                     </div>
                     <div className="flex flex-col">
@@ -4053,7 +4111,7 @@ export default function ConsoleScene() {
                           className="flex items-center justify-between gap-4 border-b-2 border-ink-900 px-4 py-3 text-left text-[12px] text-ink-200 transition-colors last:border-b-0 enabled:hover:bg-ink-700 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
                         >
                           <span>{formatTime(slot.createdAt, locale)}</span>
-                          <span className="shrink-0 text-[11px] opacity-60">{t('saves.load')}</span>
+                          <span className="shrink-0 text-[12px] opacity-60">{t('saves.load')}</span>
                         </button>
                       ))}
                     </div>
@@ -4066,7 +4124,7 @@ export default function ConsoleScene() {
                     两个字紧贴着右边那个删除 ✕，想读档很容易点到删除 */}
                 {cloudSaves.length > 0 && (
                   <>
-                    <div className="border-b-2 border-ink-900 bg-ink-850/60 px-4 py-1.5 text-[10px] text-ink-400">
+                    <div className="border-b-2 border-ink-900 bg-ink-850/60 px-4 py-1.5 text-[12px] text-ink-400">
                       {t('saves.groupCloud')}
                     </div>
                     <div className="flex flex-col">
@@ -4094,7 +4152,7 @@ export default function ConsoleScene() {
                               </svg>
                             </span>
                             {/* 读取中这行的「加载」文字换成转圈 —— 外层 span 留着占位，布局不跳 */}
-                            <span className="flex shrink-0 items-center text-[11px] opacity-60">
+                            <span className="flex shrink-0 items-center text-[12px] opacity-60">
                               {loadingCloudId === slot.id ? (
                                 <svg
                                   viewBox="0 0 24 24"
@@ -4128,7 +4186,7 @@ export default function ConsoleScene() {
                             aria-label={t('saves.deleteCloud')}
                             title={t('saves.deleteCloud')}
                             onClick={() => void removeCloudSlot(slot.id)}
-                            className="pixel-edge pxw-1 pxc-500 flex h-[16px] w-[16px] shrink-0 items-center justify-center bg-ink-700 text-[9px] leading-none text-ink-300 transition-colors enabled:hover:bg-danger enabled:hover:text-ink-950 disabled:cursor-not-allowed disabled:opacity-35"
+                            className="pixel-edge pxw-1 pxc-500 flex h-[16px] w-[16px] shrink-0 items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-300 transition-colors enabled:hover:bg-danger enabled:hover:text-ink-950 disabled:cursor-not-allowed disabled:opacity-35"
                           >
                             ×
                           </button>
@@ -4194,17 +4252,18 @@ export default function ConsoleScene() {
         封面 + 名字 + 进度 + 取消，说的和面板底部那条状态栏是同一件事。
 
         ⚠️ **开窗的判据是 `deepLinkOpen` 而不是 `deepLinkGame`**：有 id 就立刻开窗、
-        里面先转 loading（`deepLinkGame` 还是 null 的那几百毫秒），数据到了再填进封面和
-        名字 —— 这样从详情页点「开始游戏」的反馈是**立刻**的（2026-10-12 用户要求）。
-        所以下面每一处用 `deepLinkGame` 的地方都得先过一遍空值。
+        数据随后填进去 —— 走服务端预取（`serverGame`）这条路时两者在同一次绘制前就都
+        落定了，弹窗第一帧就是封面和名字；只有接口兜底那条路才看得到 loading 骨架
+        （`deepLinkGame` 还是 null 的那几百毫秒）。所以下面每一处用 `deepLinkGame`
+        的地方都得先过一遍空值。
 
         ⚠️ **不给点背景关闭**：这一笔下载是有实体的（几十 MB 正在飞），
         点一下外面就关掉、下载却还在跑，比关不掉更糟。要退出只有两条路：
         等它下完（弹窗自己收掉、画面交给屏幕），或者点「取消」（= 把两段请求都 abort）。
         Esc 走的也是取消（见上面那条 effect）。
 
-        两条路都会经 `closeDeepLink` —— 收弹窗的同时**把地址栏上的 `?id=` 一起摘掉**，
-        否则用户以为退出了，按一下 F5 又自动把这款重下一遍。
+        两条路都会经 `closeDeepLink` —— 只收弹窗，**地址栏的 `?id=` 留着**
+        （2026-10-14 用户要求不清了：地址要能分享 / 刷新重开同一款）。
       */}
       {deepLinkOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
@@ -4248,7 +4307,7 @@ export default function ConsoleScene() {
                 ) : (
                   <span className="block h-[15px] w-2/3 bg-ink-700" />
                 )}
-                <p className="mt-1 h-[10px] font-pixel text-[7px] text-ink-400">
+                <p className="mt-1 h-[10px] font-pixel text-[12px] text-ink-400">
                   {deepLinkGame ? CONSOLE_LABEL[deepLinkGame.consoleType] : null}
                 </p>
 
@@ -4256,7 +4315,7 @@ export default function ConsoleScene() {
                   两段不一样的文案：数据还没到说「载入中…」（这时候还没开始下 ROM，
                   说「正在下载 ROM」是句假话），数据到了才是 `deepLink.loading`。
                 */}
-                <p className="mt-3 text-[11px] text-ink-300">
+                <p className="mt-3 text-[12px] text-ink-300">
                   {deepLinkGame ? t('deepLink.loading') : t('games.loading')}
                 </p>
                 <span className="relative mt-2 block h-[6px] w-full overflow-hidden bg-ink-900">
@@ -4272,13 +4331,13 @@ export default function ConsoleScene() {
 
                 <div className="mt-2 flex items-center gap-2">
                   {/* 固定宽度：百分数从 9% 跳到 100% 时右边那颗钮不许跟着挪 */}
-                  <span className="w-[34px] shrink-0 text-[10px] text-ink-500">
+                  <span className="w-[34px] shrink-0 text-[12px] text-ink-500">
                     {libraryProgress === null ? '' : `${Math.round(libraryProgress * 100)}%`}
                   </span>
                   <button
                     type="button"
                     onClick={cancelDeepLink}
-                    className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[24px] shrink-0 items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors hover:bg-danger hover:text-ink-950"
+                    className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[24px] shrink-0 items-center bg-ink-700 px-3 text-[12px] text-ink-200 transition-colors hover:bg-danger hover:text-ink-950"
                   >
                     {t('games.cancel')}
                   </button>
@@ -4286,7 +4345,7 @@ export default function ConsoleScene() {
               </div>
             </div>
 
-            <p className="border-t-2 border-ink-900 bg-ink-850 px-4 py-2 text-[10px] text-ink-400">
+            <p className="border-t-2 border-ink-900 bg-ink-850 px-4 py-2 text-[12px] text-ink-400">
               {t('deepLink.hint')}
             </p>
           </div>
@@ -4380,7 +4439,7 @@ export default function ConsoleScene() {
                 type="button"
                 aria-label={t('legend.close')}
                 onClick={() => setLegendOpen(false)}
-                className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+                className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
               >
                 ×
               </button>
@@ -4391,7 +4450,7 @@ export default function ConsoleScene() {
               而 Press Start 2P 没有箭头字形，那几个会掉回系统字体、和旁边的
               `J`、`Enter` 混排出两种字形。
             */}
-            <div className="flex flex-col gap-2 p-4 text-[11px] leading-relaxed text-ink-300">
+            <div className="flex flex-col gap-2 p-4 text-[12px] leading-relaxed text-ink-300">
               <p>{playerLegend(bindings.p1, 1, t)}</p>
               <p>{playerLegend(bindings.p2, 2, t)}</p>
               {/* 手柄不列键位 —— 它是固定的标准布局，改不了，见 lib/gamepad.ts */}
@@ -4417,7 +4476,7 @@ export default function ConsoleScene() {
                   /* 和首次访问那条同一个道理：指引一开，别的提示得让路 */
                   window.dispatchEvent(new Event(TOUR_OPEN_EVENT));
                 }}
-                className="pixel-edge pxw-2 pxc-500 mt-1 self-start bg-ink-700 px-3 py-1.5 text-[11px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
+                className="pixel-edge pxw-2 pxc-500 mt-1 self-start bg-ink-700 px-3 py-1.5 text-[12px] text-ink-100 transition-colors hover:bg-ink-600 hover:text-accent"
               >
                 {t('tour.replay')}
               </button>

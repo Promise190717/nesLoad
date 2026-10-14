@@ -169,7 +169,7 @@ export default function FavoriteButton({ gameId, count }: { gameId: string; coun
         <span
           aria-hidden="true"
           title={t('gamesPage.favoriteCount', { n: total })}
-          className="text-[10px] opacity-70"
+          className="text-[12px] opacity-70"
         >
           {total}
         </span>
@@ -182,7 +182,7 @@ export default function FavoriteButton({ gameId, count }: { gameId: string; coun
       {notice && (
         <span
           role="status"
-          className="absolute left-0 top-full z-10 mt-2 w-max max-w-[260px] bg-ink-950/95 px-2 py-1 text-[10px] leading-relaxed text-ink-200 pixel-edge pxw-2 pxc-600"
+          className="absolute left-0 top-full z-10 mt-2 w-max max-w-[260px] bg-ink-950/95 px-2 py-1 text-[12px] leading-relaxed text-ink-200 pixel-edge pxw-2 pxc-600"
         >
           {notice}
         </span>

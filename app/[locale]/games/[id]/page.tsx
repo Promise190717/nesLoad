@@ -458,7 +458,7 @@ export default async function GameDetailPage({
           <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-ink-800 pt-5">
             {facts.map((fact) => (
               <div key={fact.label} className="contents">
-                <dt className="text-[11px] text-ink-500">{fact.label}</dt>
+                <dt className="text-[12px] text-ink-500">{fact.label}</dt>
                 <dd className="text-[12px] text-ink-200">{fact.value}</dd>
               </div>
             ))}

@@ -96,7 +96,7 @@ export default function GamesShell({
   const allGames = backToAllHref ?? localePath(locale, '/games');
 
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
+    <main className="wall min-h-screen px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-5xl">
         {/*
           顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库，**和房间右上角那一行同一个口径**。
@@ -138,7 +138,7 @@ export default function GamesShell({
           {back.mode === 'history' ? (
             <BackLink
               href={back.href}
-              className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+              className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
             >
               <span aria-hidden="true">←</span>
               <span>{t(back.label)}</span>
@@ -146,7 +146,7 @@ export default function GamesShell({
           ) : (
             <Link
               href={back.href}
-              className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+              className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
             >
               <span aria-hidden="true">←</span>
               <span>{t(back.label)}</span>
@@ -154,14 +154,14 @@ export default function GamesShell({
           )}
 
           {showHomeLink && (
-            <Link href={home} className="text-[11px] text-ink-400 transition-colors hover:text-accent">
+            <Link href={home} className="text-[12px] text-ink-400 transition-colors hover:text-accent">
               {t('common.home')}
             </Link>
           )}
         </div>
 
         <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
-          <span className="font-pixel text-[10px] tracking-wider text-accent">{label}</span>
+          <span className="font-pixel text-[12px] tracking-wider text-accent">{label}</span>
           <h1 className="mt-3 text-[22px] leading-snug font-semibold text-ink-100">{title}</h1>
           {intro && <p className="mt-2 text-[13px] leading-6 text-ink-400">{intro}</p>}
         </header>
@@ -174,7 +174,7 @@ export default function GamesShell({
           在窄窗口下会整块藏掉 —— 内容页得有一条不依赖房间的路径通到法务两页。
         */}
         <footer className="mt-12 border-t border-ink-800 pt-6">
-          <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+          <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
             <Link href={home} className="text-ink-400 transition-colors hover:text-accent">
               {t('common.home')}
             </Link>
@@ -197,6 +197,16 @@ export default function GamesShell({
             >
               {t('developersPage.backToDevelopers')}
             </Link>
+            {/*
+              「全部机种」（2026-10-14 加）。和上面那条「全部开发商」同一个角色：
+              机种专题页（`/consoles/<type>`）靠这条内链被爬虫从每个内容页上发现。
+            */}
+            <Link
+              href={localePath(locale, '/consoles')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {t('consolesPage.backToConsoles')}
+            </Link>
             <Link
               href={localePath(locale, '/privacy')}
               className="text-ink-400 transition-colors hover:text-accent"
@@ -211,7 +221,7 @@ export default function GamesShell({
             </Link>
           </nav>
 
-          <p className="mt-4 text-[11px] text-ink-600">{SITE_NAME[locale]}</p>
+          <p className="mt-4 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
         </footer>
       </div>
     </main>

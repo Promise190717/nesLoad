@@ -89,9 +89,9 @@ export default function GameCardGrid({
                   className="h-full w-full object-cover"
                 />
               </span>
-              <span className="mt-2 block">
+              <span className="mt-2 block px-1">
                 <span className="block truncate text-[12px] text-ink-100">{text.title}</span>
-                <span className="mt-0.5 block truncate text-[10px] text-ink-500">{meta}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-ink-500">{meta}</span>
               </span>
             </Link>
           </li>

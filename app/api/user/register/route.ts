@@ -11,11 +11,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import {
-  registerAppUser,
-  validatePassword,
-  validateUsername,
-} from '@/lib/server/app-users';
+import { validateEmail } from '@/lib/email';
+import { registerAppUser, validatePassword } from '@/lib/server/app-users';
 import { USER_SESSION_COOKIE, USER_SESSION_TTL_MS, signUserSession } from '@/lib/server/app-session';
 import { clientIp, verifyTurnstile } from '@/lib/server/turnstile';
 
@@ -43,17 +40,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'captcha-failed' }, { status: 403 });
   }
 
-  const usernameError = validateUsername(body.username);
-  if (usernameError) {
-    // 校验错误码原样给前端，由它查 i18n（`user.error.username-<code>`）
-    return NextResponse.json({ error: `username-${usernameError}` }, { status: 400 });
+  /*
+   * 注册账号 = 邮箱（2026-10-14 起）。**存库前先 trim + 小写**：
+   * 邮箱按不区分大小写对待（`Foo@x.com` 和 `foo@x.com` 是同一个账号），
+   * 登录侧拿的是用户输入的原样，不归一化的话会「注册了 A 登录时输 a 登不上」。
+   * 规则本体在 `lib/email.ts`（格式 / 别名 / 临时域，前后端共用同一份）。
+   * ⚠️ 老账号的用户名不是邮箱 —— **登录完全不经过这套校验**（用户要求「登录的时候不管」）。
+   */
+  const email = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+  const emailError = validateEmail(email);
+  if (emailError) {
+    // 校验错误码原样给前端，由它查 i18n（`user.error.email-<code>`）
+    return NextResponse.json({ error: `email-${emailError}` }, { status: 400 });
   }
   const passwordError = validatePassword(body.password);
   if (passwordError) {
     return NextResponse.json({ error: `password-${passwordError}` }, { status: 400 });
   }
 
-  const username = (body.username as string).trim();
+  const username = email;
   const password = body.password as string;
 
   try {

@@ -183,7 +183,7 @@ export default function NetplayPanel({
             type="button"
             aria-label={t('netplay.close')}
             onClick={onClose}
-            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
           >
             ×
           </button>
@@ -200,7 +200,7 @@ export default function NetplayPanel({
                   disabled={busy}
                   aria-pressed={mode === value}
                   onClick={() => onModeChange(value)}
-                  className={`pixel-edge pxw-2 pxc-500 block flex-1 py-1.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                  className={`pixel-edge pxw-2 pxc-500 block flex-1 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                     mode === value
                       ? 'bg-accent text-ink-950'
                       : 'bg-ink-700 text-ink-200 enabled:hover:bg-ink-600 enabled:hover:text-accent'
@@ -230,7 +230,7 @@ export default function NetplayPanel({
           */}
           {!inRoom && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-[10px] text-ink-500">{t('netplay.quality')}</span>
+              <span className="text-[12px] text-ink-500">{t('netplay.quality')}</span>
               <div className="flex gap-1">
                 {QUALITY_ORDER.map((value) => (
                   <button
@@ -239,7 +239,7 @@ export default function NetplayPanel({
                     disabled={busy}
                     aria-pressed={quality === value}
                     onClick={() => onQualityChange(value)}
-                    className={`pixel-edge pxw-2 pxc-500 block flex-1 py-1.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+                    className={`pixel-edge pxw-2 pxc-500 block flex-1 py-1.5 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
                       quality === value
                         ? 'bg-accent text-ink-950'
                         : 'bg-ink-700 text-ink-200 enabled:hover:bg-ink-600 enabled:hover:text-accent'
@@ -249,7 +249,7 @@ export default function NetplayPanel({
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] leading-relaxed text-ink-500">
+              <p className="text-[12px] leading-relaxed text-ink-500">
                 {t('netplay.qualityHint')}
               </p>
             </div>
@@ -268,7 +268,7 @@ export default function NetplayPanel({
 
               <div className="flex items-center gap-2">
                 <span className="h-[2px] flex-1 bg-ink-900" />
-                <span className="text-[10px] text-ink-500">{t('netplay.or')}</span>
+                <span className="text-[12px] text-ink-500">{t('netplay.or')}</span>
                 <span className="h-[2px] flex-1 bg-ink-900" />
               </div>
 
@@ -294,14 +294,14 @@ export default function NetplayPanel({
                 </button>
               </div>
 
-              <p className="text-[11px] leading-relaxed text-ink-500">{t('netplay.hint')}</p>
+              <p className="text-[12px] leading-relaxed text-ink-500">{t('netplay.hint')}</p>
             </>
           )}
 
           {inRoom && (
             <>
               <div className="flex flex-col items-center gap-1 border-b-2 border-ink-900 pb-4">
-                <span className="text-[10px] text-ink-500">{t('netplay.roomCode')}</span>
+                <span className="text-[12px] text-ink-500">{t('netplay.roomCode')}</span>
                 <span className="font-pixel text-[22px] tracking-[0.3em] text-accent">
                   {state.code}
                 </span>
@@ -314,14 +314,14 @@ export default function NetplayPanel({
                   <button
                     type="button"
                     onClick={() => void copyCode()}
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[10px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
+                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[12px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
                   >
                     {copied === 'code' ? t('netplay.copied') : t('netplay.copy')}
                   </button>
                   <button
                     type="button"
                     onClick={() => void copyShareLink()}
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[10px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
+                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[12px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
                   >
                     {copied === 'link' ? t('netplay.shareCopied') : t('netplay.share')}
                   </button>
@@ -345,7 +345,7 @@ export default function NetplayPanel({
                       : t('netplay.waiting')}
                 </span>
                 {state.status === 'connected' && state.rtt !== null && (
-                  <span className="ml-auto font-pixel text-[9px] text-ink-400">
+                  <span className="ml-auto font-pixel text-[12px] text-ink-400">
                     {Math.round(state.rtt)}ms
                   </span>
                 )}
@@ -359,7 +359,7 @@ export default function NetplayPanel({
                 <div className="flex items-center gap-2 text-[12px]">
                   {state.remotePlaying && state.remoteGame ? (
                     <>
-                      <span className="text-[10px] text-ink-500">{t('netplay.hostPlaying')}</span>
+                      <span className="text-[12px] text-ink-500">{t('netplay.hostPlaying')}</span>
                       <span className="min-w-0 flex-1 truncate text-ink-200">
                         {state.remoteGame.name}
                       </span>
@@ -369,7 +369,7 @@ export default function NetplayPanel({
                         用户打开面板想看「连上没有 / 在玩什么」的时候，也该看到这件事。
                       */}
                       {state.remotePaused && (
-                        <span className="shrink-0 border border-ink-500 px-1.5 py-[1px] text-[10px] text-accent">
+                        <span className="shrink-0 border border-ink-500 px-1.5 py-[1px] text-[12px] text-accent">
                           {t('netplay.paused')}
                         </span>
                       )}
@@ -380,7 +380,7 @@ export default function NetplayPanel({
                 </div>
               )}
 
-              <p className="text-[11px] leading-relaxed text-ink-500">
+              <p className="text-[12px] leading-relaxed text-ink-500">
                 {state.role === 'host' ? t('netplay.youAreHost') : t('netplay.youAreGuest')}
               </p>
 
@@ -395,7 +395,7 @@ export default function NetplayPanel({
             </>
           )}
 
-          {errorText && <p className="text-[11px] text-danger">{errorText}</p>}
+          {errorText && <p className="text-[12px] text-danger">{errorText}</p>}
         </div>
       </div>
     </div>

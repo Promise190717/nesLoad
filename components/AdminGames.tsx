@@ -98,7 +98,7 @@ function languageLabel(value: string | null): string | null {
 const FIELD_CLASS =
   'pixel-edge pxw-2 pxc-500 w-full bg-ink-900 px-2 py-2 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none';
 
-const LABEL_CLASS = 'flex flex-col gap-1 text-[10px] text-ink-400';
+const LABEL_CLASS = 'flex flex-col gap-1 text-[12px] text-ink-400';
 
 /**
  * 拉取**一页**列表。抽成模块级函数，便于 effect 与增删改后共用。
@@ -673,7 +673,7 @@ export default function AdminGames() {
             />
             <button
               type="submit"
-              className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('admin.search')}
             </button>
@@ -689,7 +689,7 @@ export default function AdminGames() {
 
         {pageNotice && (
           <p
-            className={`mb-2 text-[11px] ${
+            className={`mb-2 text-[12px] ${
               pageNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
             }`}
           >
@@ -701,12 +701,12 @@ export default function AdminGames() {
         {listPending && <AdminLoading label={t('feedback.loading')} />}
 
         {listLoaded && total === 0 && !keyword && (
-          <p className="text-[11px] text-ink-500">{t('admin.list.empty')}</p>
+          <p className="text-[12px] text-ink-500">{t('admin.list.empty')}</p>
         )}
 
         {/* 库里有东西、只是没搜到 —— 和「库是空的」分开说，否则会以为库坏了 */}
         {listLoaded && total === 0 && keyword && (
-          <p className="text-[11px] text-ink-500">{t('admin.noMatch')}</p>
+          <p className="text-[12px] text-ink-500">{t('admin.noMatch')}</p>
         )}
 
         {games.length > 0 && (
@@ -728,13 +728,13 @@ export default function AdminGames() {
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-[12px] text-ink-100">{game.title}</span>
                   {game.description && (
-                    <span className="truncate text-[10px] text-ink-500">{game.description}</span>
+                    <span className="truncate text-[12px] text-ink-500">{game.description}</span>
                   )}
                 </span>
-                <span className="shrink-0 font-pixel text-[9px] text-accent">
+                <span className="shrink-0 font-pixel text-[12px] text-accent">
                   {CONSOLE_LABEL[game.consoleType]}
                 </span>
-                <span className="w-[150px] shrink-0 truncate text-right text-[10px] text-ink-500">
+                <span className="w-[150px] shrink-0 truncate text-right text-[12px] text-ink-500">
                   {[game.year, game.developer, languageLabel(game.language), game.series]
                     .filter(Boolean)
                     .join(' · ')}
@@ -742,14 +742,14 @@ export default function AdminGames() {
                 <button
                   type="button"
                   onClick={() => openEdit(game)}
-                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-accent"
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
                   {t('admin.edit')}
                 </button>
                 <button
                   type="button"
                   onClick={() => void remove(game)}
-                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[10px] text-ink-200 transition-colors hover:text-danger"
+                  className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-danger"
                 >
                   {t('admin.delete')}
                 </button>
@@ -764,18 +764,18 @@ export default function AdminGames() {
               type="button"
               disabled={safePage <= 1}
               onClick={() => setPage(safePage - 1)}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.prev')}
             </button>
-            <span className="text-[10px] text-ink-500">
+            <span className="text-[12px] text-ink-500">
               {safePage} / {pageCount}
             </span>
             <button
               type="button"
               disabled={safePage >= pageCount}
               onClick={() => setPage(safePage + 1)}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.next')}
             </button>
@@ -828,14 +828,14 @@ export default function AdminGames() {
                     type="button"
                     onClick={() => void autofill()}
                     disabled={scraping}
-                    className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[11px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+                    className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {scraping ? t('admin.scrape.loading') : t('admin.scrape.button')}
                   </button>
                 </div>
                 {scrapeNotice && (
                   <p
-                    className={`mt-1 text-[10px] ${
+                    className={`mt-1 text-[12px] ${
                       scrapeNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
                     }`}
                   >
@@ -934,7 +934,7 @@ export default function AdminGames() {
                     </option>
                   ))}
                 </select>
-                <span className="text-[10px] text-ink-600">
+                <span className="text-[12px] text-ink-600">
                   {t('admin.developers.addHint')}{' '}
                   <Link
                     href="/admin/developers"
@@ -944,7 +944,7 @@ export default function AdminGames() {
                   </Link>
                 </span>
                 {unlinkedDeveloper && (
-                  <span className="text-[10px] text-danger">
+                  <span className="text-[12px] text-danger">
                     {t('admin.developers.unlinked', { name: unlinkedDeveloper })}
                   </span>
                 )}
@@ -996,7 +996,7 @@ export default function AdminGames() {
               </label>
 
               {isEditing ? (
-                <p className="text-[10px] text-ink-500 sm:col-span-2">
+                <p className="text-[12px] text-ink-500 sm:col-span-2">
                   {t('admin.files.locked')}
                 </p>
               ) : (
@@ -1025,9 +1025,9 @@ export default function AdminGames() {
                         onChange={(e) => setImage(e.target.files?.[0] ?? null)}
                         className={FIELD_CLASS}
                       />
-                      <span className="text-[10px] text-ink-600">{t('admin.drop.image')}</span>
+                      <span className="text-[12px] text-ink-600">{t('admin.drop.image')}</span>
                       {image && (
-                        <span className="truncate text-[10px] text-ink-400">{image.name}</span>
+                        <span className="truncate text-[12px] text-ink-400">{image.name}</span>
                       )}
                     </div>
                   </label>
@@ -1052,8 +1052,8 @@ export default function AdminGames() {
                         onChange={(e) => void onRomChange(e)}
                         className={FIELD_CLASS}
                       />
-                      <span className="text-[10px] text-ink-600">{t('admin.drop.rom')}</span>
-                      {rom && <span className="truncate text-[10px] text-ink-400">{rom.name}</span>}
+                      <span className="text-[12px] text-ink-600">{t('admin.drop.rom')}</span>
+                      {rom && <span className="truncate text-[12px] text-ink-400">{rom.name}</span>}
                     </div>
                   </label>
                 </>
@@ -1083,7 +1083,7 @@ export default function AdminGames() {
                 </button>
                 {modalNotice && (
                   <span
-                    className={`text-[11px] ${
+                    className={`text-[12px] ${
                       modalNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
                     }`}
                   >

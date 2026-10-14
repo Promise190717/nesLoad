@@ -89,7 +89,7 @@ export default function UserPanel({ user, loading, onAuthed, onSignedOut, onClos
             type="button"
             aria-label={t('user.close')}
             onClick={onClose}
-            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
           >
             ×
           </button>
@@ -112,9 +112,9 @@ export default function UserPanel({ user, loading, onAuthed, onSignedOut, onClos
               三块数据的说明。**不给列表入口** —— 那些都在各自的地方（见文件头注释）。
               写这几句是为了让用户知道「登录之后多了什么」，而不是让他在这里点。
             */}
-            <p className="text-[11px] leading-relaxed text-ink-400">{t('user.cloudHint')}</p>
+            <p className="text-[12px] leading-relaxed text-ink-400">{t('user.cloudHint')}</p>
 
-            {error && <span className="text-[11px] text-danger">{error}</span>}
+            {error && <span className="text-[12px] text-danger">{error}</span>}
 
             {/*
               个人中心入口（2026-10-13 加）。**只能是链接**（不是按钮）——
@@ -127,7 +127,7 @@ export default function UserPanel({ user, loading, onAuthed, onSignedOut, onClos
             */}
             <Link
               href={localeHref('/account')}
-              className="pixel-edge pxw-2 pxc-500 self-start bg-ink-700 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 self-start bg-ink-700 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('account.title')}
             </Link>
@@ -136,7 +136,7 @@ export default function UserPanel({ user, loading, onAuthed, onSignedOut, onClos
               type="button"
               disabled={busy}
               onClick={() => void signOut()}
-              className="pixel-edge pxw-2 pxc-500 self-start bg-ink-700 px-3 py-1.5 text-[11px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 self-start bg-ink-700 px-3 py-1.5 text-[12px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('user.signOut')}
             </button>

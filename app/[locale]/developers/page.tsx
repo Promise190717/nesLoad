@@ -164,12 +164,12 @@ export default async function DevelopersPage({
 
                 <span className="w-full truncate text-[12px] text-ink-100">{text.name}</span>
 
-                <span className="font-pixel text-[9px] text-accent">
+                <span className="font-pixel text-[12px] text-accent">
                   {developer.gameCount}
                 </span>
 
                 {text.summary && (
-                  <span className="line-clamp-2 text-[10px] leading-4 text-ink-500">
+                  <span className="line-clamp-2 text-[12px] leading-4 text-ink-500">
                     {text.summary}
                   </span>
                 )}
@@ -186,16 +186,16 @@ export default async function DevelopersPage({
             <Link
               href={developersHref(locale, page - 1)}
               rel="prev"
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.prev')}
             </Link>
           ) : (
             // 首页那个「上一页」整块不画而不是渲染成灰按钮：指向自己的死链比少一个链接更糟
-            <span className="px-3 py-1.5 text-[11px] text-ink-700">{t('gamesPage.prev')}</span>
+            <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
           )}
 
-          <span className="font-pixel text-[10px] text-ink-500">
+          <span className="font-pixel text-[12px] text-ink-500">
             {page} / {pageCount}
           </span>
 
@@ -203,12 +203,12 @@ export default async function DevelopersPage({
             <Link
               href={developersHref(locale, page + 1)}
               rel="next"
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.next')}
             </Link>
           ) : (
-            <span className="px-3 py-1.5 text-[11px] text-ink-700">{t('gamesPage.next')}</span>
+            <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
           )}
         </nav>
       )}

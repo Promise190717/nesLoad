@@ -115,7 +115,7 @@ export default async function GameDownloadPage({
             文件名直接写出来：街机的 ROM 是 romset（名字必须和驱动一致），
             下载前让人确认一下拿到的是什么，比下完再发现对不上强。
           */}
-          <span className="mt-1 block truncate font-mono text-[11px] text-ink-500">
+          <span className="mt-1 block truncate font-mono text-[12px] text-ink-500">
             {game.romName}
           </span>
         </span>

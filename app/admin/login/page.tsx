@@ -55,7 +55,7 @@ export default function AdminLoginPage() {
         <h1 className="mb-4 text-[13px] text-ink-200">{t('admin.login.title')}</h1>
 
         <div className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-[10px] text-ink-400">
+          <label className="flex flex-col gap-1 text-[12px] text-ink-400">
             {t('admin.login.username')}
             <input
               value={username}
@@ -65,7 +65,7 @@ export default function AdminLoginPage() {
             />
           </label>
 
-          <label className="flex flex-col gap-1 text-[10px] text-ink-400">
+          <label className="flex flex-col gap-1 text-[12px] text-ink-400">
             {t('admin.login.password')}
             <input
               type="password"
@@ -85,7 +85,7 @@ export default function AdminLoginPage() {
           >
             {busy ? t('admin.login.submitting') : t('admin.login.submit')}
           </button>
-          {error && <span className="text-[11px] text-danger">{error}</span>}
+          {error && <span className="text-[12px] text-danger">{error}</span>}
         </div>
       </form>
     </div>

@@ -393,7 +393,7 @@ export default async function GamesPage({
               key={type ?? 'all'}
               href={gamesHref(locale, 1, keyword, type)}
               aria-current={active ? 'true' : undefined}
-              className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[11px] transition-colors ${
+              className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[12px] transition-colors ${
                 active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
               }`}
             >
@@ -434,20 +434,20 @@ export default async function GamesPage({
             <Link
               href={gamesHref(locale, page - 1, keyword, consoleType)}
               rel="prev"
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.prev')}
             </Link>
           ) : (
             // 首页那个「上一页」不渲染成灰按钮而是**整块不画**：爬虫顺着链接走，
             // 一个指向自己的死链比少一个链接更糟
-            <span className="px-3 py-1.5 text-[11px] text-ink-700">
+            <span className="px-3 py-1.5 text-[12px] text-ink-700">
               {t('gamesPage.prev')}
             </span>
           )}
 
           {/* 纯数字，和别处一样不进文案表（见 README「多语言」那条） */}
-          <span className="font-pixel text-[10px] text-ink-500">
+          <span className="font-pixel text-[12px] text-ink-500">
             {page} / {pageCount}
           </span>
 
@@ -455,12 +455,12 @@ export default async function GamesPage({
             <Link
               href={gamesHref(locale, page + 1, keyword, consoleType)}
               rel="next"
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.next')}
             </Link>
           ) : (
-            <span className="px-3 py-1.5 text-[11px] text-ink-700">
+            <span className="px-3 py-1.5 text-[12px] text-ink-700">
               {t('gamesPage.next')}
             </span>
           )}

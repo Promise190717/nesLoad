@@ -14,6 +14,10 @@ import LocaleSwitcher from './LocaleSwitcher';
  * 三样东西和房间右上角那一行（`ConsoleScene` 的 `.top-links`）是同一个口径 ——
  * 人在屋里屋外看到的「怎么切语言、怎么登录、怎么去游戏列表」应该是同一套。
  *
+ * **顺序（2026-10-14 起）**：语言 → 首页 → 游戏库 → 账号。原来账号夹在首页和游戏库
+ * 之间，当天用户要求「登录放在游戏列表后面」，两处一起调成了现在这个组序
+ * （房间那行是 语言 → 首页 → 游戏列表 → 账号 → 隐私 → 条款）。
+ *
  * ⚠️ **哪些页面有它**：`/`、`/games*`、`/developers*`、`/privacy`、`/terms`。
  *    **没有**的是 —— `/room`（房间自己那行 `.top-links` 就是它）、
  *    `/login` 与 `/account`（这两页自己就是账号相关的页面，顶栏会重复）、
@@ -72,18 +76,32 @@ export default function TopBar() {
         顶栏是内容页唯一常驻的导航，放这一处就覆盖了 `/games*`、`/developers*`、
         `/privacy`、`/terms`（房间那页有它自己那行 `.top-links`，首页自己不需要）。
 
-        排在语言之后：语言切换和它都是「站点级」的东西，再往后才是账号 / 游戏库。
+        排在语言之后：语言切换和它都是「站点级」的东西，再往后才是游戏库 / 账号。
       */}
       <span aria-hidden className="h-[10px] w-px bg-ink-500" />
       <Link
         href={localeHref('/')}
-        className="text-[11px] text-ink-300 transition-colors hover:text-accent"
+        className="text-[12px] text-ink-300 transition-colors hover:text-accent"
       >
         {t('common.home')}
       </Link>
 
+      <span aria-hidden className="h-[10px] w-px bg-ink-500" />
       {/*
-        账号那一格。
+        游戏库。文案借 `topLinks.games`（房间那行、法务页页脚用的是同一个键）——
+        同一个落点（`/games`）在站里只该有一个名字。
+      */}
+      <Link
+        href={localeHref('/games')}
+        className="text-[12px] text-ink-300 transition-colors hover:text-accent"
+      >
+        {t('topLinks.games')}
+      </Link>
+
+      {/*
+        账号那一格（2026-10-14 用户要求挪到「游戏库」**后面**：组顺序为
+        语言 → 首页 → 游戏库 → 账号）。原先它排在首页和游戏库之间。
+
         ⚠️ **`loading` 期间整格不渲染**（连分隔线一起）—— 首屏还不知道「我是谁」，
            先画成未登录的话，已登录用户会看见它先写「登录」再「啪」地换成自己的名字。
            那几十毫秒宁可空着，比闪一下好。房间那行也是这个处理。
@@ -95,32 +113,20 @@ export default function TopBar() {
             <Link
               href={localeHref('/account')}
               title={t('user.openSignedIn', { name: user.username })}
-              className="max-w-[9rem] truncate text-[11px] text-ink-300 transition-colors hover:text-accent"
+              className="max-w-[9rem] truncate text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
               {user.username}
             </Link>
           ) : (
             <Link
               href={signInHref}
-              className="text-[11px] text-ink-300 transition-colors hover:text-accent"
+              className="text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
               {t('user.signIn')}
             </Link>
           )}
         </>
       )}
-
-      <span aria-hidden className="h-[10px] w-px bg-ink-500" />
-      {/*
-        游戏库。文案借 `topLinks.games`（房间那行、法务页页脚用的是同一个键）——
-        同一个落点（`/games`）在站里只该有一个名字。
-      */}
-      <Link
-        href={localeHref('/games')}
-        className="text-[11px] text-ink-300 transition-colors hover:text-accent"
-      >
-        {t('topLinks.games')}
-      </Link>
     </nav>
   );
 }

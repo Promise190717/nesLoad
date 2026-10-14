@@ -81,6 +81,37 @@ CREATE INDEX IF NOT EXISTS idx_developers_created_at ON developers (created_at D
 --    那个脚本做三件事（幂等、只增不删）：建这张表 → 给 games 补 developer_id 列 →
 --    把 games 里现存的 developer 取值去重写进 developers，再回填每条游戏的 developer_id。
 
+-- 机种库（2026-10-14 加，用户要的「机种专题页」——和 developers 同一套做法）
+--
+-- ⚠️ **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade'），不是 UUID：
+--   机种是代码里定死的枚举（`ConsoleType`，见 lib/emulator.ts），加机种要改核心 / 卡带
+--   好几处，不是后台能随手加的东西。拿类型当主键换来两样好处：
+--   · 地址好看且稳定 —— 专题页是 `/consoles/nes` 而不是一串 uuid；
+--   · games.console_type 本来就存着这些值，**天生就是外键**，不需要回填。
+--
+-- ⚠️ 这张表是机种**资料的扩展**，不是机种的**清单**：某一行被删了，那个机种的
+--   游戏一根毫毛都不少（games.console_type 还在），前台页面对照 `CONSOLE_TYPES`
+--   会退回代码里的默认名字（NES / SFC / GBA / ARC）照常渲染。所以后台删除 =
+--   「清掉资料恢复默认」，不做「名下有游戏不许删」那套拦截。
+--
+-- name / name_en / summary / … 的双语规则与 developers 完全一致：
+-- 没有后缀 = 中文原文，`_en` = 英文（空了回退中文）。
+CREATE TABLE IF NOT EXISTS consoles (
+  console_type  TEXT PRIMARY KEY,       -- nes / snes / gba / arcade（= ConsoleType）
+  name          TEXT NOT NULL,          -- 展示名（必填，中文原文）
+  name_en       TEXT,                   -- 展示名英文（可空）
+  image_url     TEXT,                   -- 机图 / 图片公网 URL（可选）
+  summary       TEXT,                   -- 简介（一句话，可选，中文原文）
+  summary_en    TEXT,                   -- 简介英文（可空）
+  description   TEXT,                   -- 介绍（整段，可选，中文原文）
+  description_en TEXT,                  -- 介绍英文（可空）
+  release_year  INTEGER,                -- 发售年份（可选）
+  created_at    INTEGER NOT NULL
+);
+
+-- 列表按创建时间（预填的四个机种同一批写入，顺序无意义；展示顺序是界面的事）
+CREATE INDEX IF NOT EXISTS idx_consoles_created_at ON consoles (created_at DESC);
+
 -- 后台管理员账号
 --
 -- ⚠️ **这张表是「管理员」表，不是前台用户表**（2026-10-13 起两者彻底分开）。

@@ -8,9 +8,11 @@ import { useI18n } from './I18nProvider';
 /**
  * 左侧那几个 tab。`href` 同时是**路由**和**高亮依据** —— 加了新页就往这里加一条。
  *
- * 五条的顺序＝日常使用频率：游戏列表（默认页）→ 开发商库 → 留言本 → 游戏反馈 → 用户。
+ * 六条的顺序＝日常使用频率：游戏列表（默认页）→ 开发商库 → 机种库 → 留言本 → 游戏反馈 → 用户。
  * 开发商（2026-10-12 加的「厂商库」）排在留言本前面，因为它和游戏列表是**同一件事的两半**：
  * 添加游戏时那个开发商下拉框，读的就是这个库里新建的条目。
+ * 机种库（2026-10-14 加）**紧跟开发商** —— 两者是同一类「资料库」tab：条目在前台有自己的
+ * 展示页、后台只维护资料。区别是机种清单是代码定死的四个，那边没有「添加」（见 AdminConsoles）。
  * 游戏反馈（2026-10-13 加，配合详情页那颗「反馈问题」）**紧跟留言本** ——
  * 两条都是「看用户写了什么、处理完打个勾」，放在一起顺手；它排在留言本后面是因为
  * 量更小、而且只跟**某一款游戏**有关（见 db/schema.sql 里 `game_reports` 的注释）。
@@ -20,6 +22,7 @@ import { useI18n } from './I18nProvider';
 const TABS = [
   { href: '/admin/games', key: 'admin.nav.games' },
   { href: '/admin/developers', key: 'admin.nav.developers' },
+  { href: '/admin/consoles', key: 'admin.nav.consoles' },
   { href: '/admin/feedback', key: 'admin.nav.feedback' },
   { href: '/admin/reports', key: 'admin.nav.reports' },
   { href: '/admin/users', key: 'admin.nav.users' },
@@ -64,11 +67,11 @@ export default function AdminShell({
       <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
         <header className="flex items-center gap-3">
           <h1 className="text-[14px] text-ink-200">{t('admin.title')}</h1>
-          <span className="text-[11px] text-ink-500">{username}</span>
+          <span className="text-[12px] text-ink-500">{username}</span>
           <button
             type="button"
             onClick={() => void logout()}
-            className="pixel-edge pxw-2 pxc-500 ml-auto bg-ink-800 px-3 py-1.5 text-[11px] text-ink-300 transition-colors hover:text-danger"
+            className="pixel-edge pxw-2 pxc-500 ml-auto bg-ink-800 px-3 py-1.5 text-[12px] text-ink-300 transition-colors hover:text-danger"
           >
             {t('admin.logout')}
           </button>
@@ -89,7 +92,7 @@ export default function AdminShell({
                   key={tab.href}
                   href={tab.href}
                   aria-current={active ? 'page' : undefined}
-                  className={`pixel-edge pxw-2 pxc-600 block px-3 py-2 text-[11px] transition-colors ${
+                  className={`pixel-edge pxw-2 pxc-600 block px-3 py-2 text-[12px] transition-colors ${
                     active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-300 hover:text-accent'
                   }`}
                 >

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import BackLink from '@/components/BackLink';
+import LocaleSwitcher from '@/components/LocaleSwitcher';
 import LoginBackdrop from '@/components/LoginBackdrop';
 import LoginPanel from '@/components/LoginPanel';
 import {
@@ -126,43 +127,53 @@ export default async function LoginPage({
   const t = (key: MessageKey) => translate(locale, key);
 
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
+    <main className="wall relative flex min-h-screen flex-col justify-center px-6 py-6 sm:py-12">
       {/*
         背景装饰（2026-10-13 加）：canvas 画的像素小人在底下慢慢飘。
         ⚠️ 它是 `fixed` + `z-0` 的一层，**压在这张 `main` 的底色之上、正文之下** ——
         所以下面那层内容要 `relative z-10` 才压得住它（见 `components/LoginBackdrop.tsx`）。
       */}
       <LoginBackdrop />
+      {/*
+        语言切换 + 首页（2026-10-14）。这一页**仍然不挂顶栏**（用户明确要求，见文件头
+        那段），但语言切换是站点级的东西，不该因为登录页没顶栏就切不了。
+        外层 `absolute` 钉在页面顶部（不参与下面 `justify-center` 的垂直居中），
+        **内层套一个和正文列同宽的 `max-w-md` 右对齐** —— 右缘和表单对齐，
+        和首页顶栏「对齐内容容器」是同一个口径（2026-10-14 用户反馈：直接
+        `right-6` 钉视口边缘太靠边了）。顺序和 TopBar 一致（语言在首页之前）。
+        落点是当前页的另一种语言地址（`useI18n()` 的 `altHref`，含 `?next=`，
+        和内容页同一套）。上下偏移对齐 `main` 自己的 `py-6`（sm:py-12）。
+      */}
+      <div className="absolute inset-x-6 top-6 z-10 sm:top-12">
+        <div className="mx-auto flex w-full max-w-md items-center justify-end gap-3">
+          <LocaleSwitcher />
+          <span aria-hidden className="h-[10px] w-px bg-ink-500" />
+          <Link
+            href={localePath(locale, '/')}
+            className="text-[12px] text-ink-300 transition-colors hover:text-accent"
+          >
+            {t('common.home')}
+          </Link>
+        </div>
+      </div>
+      {/*
+        内容列垂直居中（2026-10-13）：`main` 改成 flex 列 + `justify-center`。
+        `py` 保留，矮窗口时当最小留白。
+      */}
       <div className="relative z-10 mx-auto w-full max-w-md">
-        {/*
-          中间实、两侧透的遮罩（`.login-scrim`，样式在 globals.css）：
-          小人是往两侧过的，但窄屏 / 矮屏上难免压到正文 —— 垫这一层保证读得清。
-        */}
-        <div className="login-scrim pointer-events-none absolute inset-y-0 -z-10" />
         {/*
           返回走**浏览器回退**（`BackLink`）：从 `/games?q=…` 点顶栏那颗登录过来的，
           返回该回到那个带参数的地址，而不是一个写死的落点。
           兜底（直开 / 爬虫）是首页 —— 这一页不是房间，把人送回落地页最合适。
         */}
-        {/*
-          左上返回 + 右上首页（2026-10-13 加）。这一页**刻意不挂顶栏**（用户明确要求，
-          见文件头那段），所以没有内容页那排入口 —— 回首页那颗单独放在这儿，
-          和别的页面「右上角有一颗首页」保持一致。
-        */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center">
           <BackLink
             href={localePath(locale, '/')}
-            className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+            className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
           >
             <span aria-hidden="true">←</span>
             <span>{t('common.back')}</span>
           </BackLink>
-          <Link
-            href={localePath(locale, '/')}
-            className="text-[11px] text-ink-400 transition-colors hover:text-accent"
-          >
-            {t('common.home')}
-          </Link>
         </div>
 
         <header className="mt-4 text-center sm:mt-8">

@@ -212,7 +212,8 @@ const en = {
   'home.consoles.title': 'Browse by console',
   'home.consoles.lead': 'NES, SNES / SFC, GBA and arcade — pick one to see its games.',
   'home.consoles.count': '{count} games',
-  'home.consoles.all': 'See every game',
+  /* 2026-10-14 改：原来写「See every game」（指向 /games），现在机种有了自己的专题页，这里指向 /consoles */
+  'home.consoles.all': 'All consoles',
   'home.latest.title': 'Latest additions',
   'home.latest.lead': 'The newest games on the site.',
   'home.latest.viewAll': 'All games',
@@ -249,6 +250,9 @@ const en = {
   'home.faq.q6': 'Can I play with a friend?',
   'home.faq.a6':
     'Of course! Grab a friend and start a room for a match.',
+  'home.faq.q7': 'Does it support game controllers?',
+  'home.faq.a7':
+    'Yes — plug in a USB or Bluetooth controller and the emulator picks it up through your browser. Button mapping follows each core\'s defaults; on a phone you use the on-screen buttons.',
 
   /*
    * 首屏那段**看不见的正文**（ConsoleScene 里用 sr-only 渲染）。
@@ -321,6 +325,17 @@ const en = {
     '{count} developers behind the games in the online library. Open one to see every title we have from that studio.',
   'seo.developer.title': '{name} — Games from this developer',
   'seo.developer.description':
+    'Every {name} game in the online library ({count}), playable in your browser or downloadable as a ROM file.',
+
+  /*
+   * 机种两页（2026-10-14 加的）。`consoles` 是列表页、`console` 是单页，
+   * 和 developers / developer 同一套命名。`{count}` 同样是现读的条数。
+   */
+  'seo.consoles.title': 'Browse by console — Play NES, SNES, GBA & Arcade games online',
+  'seo.consoles.description':
+    'Every console in the online library ({count} games in total). Pick one to see all of its games, playable in your browser.',
+  'seo.console.title': '{name} games — Play online',
+  'seo.console.description':
     'Every {name} game in the online library ({count}), playable in your browser or downloadable as a ROM file.',
 
   'theme.toDark': 'Switch to night mode',
@@ -698,6 +713,13 @@ const en = {
    * ⚠️ 登录模式**不设 placeholder**（登录的人不需要知道规则）—— 见 AuthForm 里那两个 input。
    */
   'user.usernameHint': '3–20 characters: letters, digits, _ - .',
+  /*
+   * 注册账号 = 邮箱（2026-10-14 起）：注册模式的标签 / placeholder 换用这一对；
+   * 登录模式**仍是** `user.username`（老账号可能是普通用户名，登录不校验邮箱）。
+   * 上面的 `user.usernameHint` 因此闲置了 —— 别删，将来若恢复用户名注册还要用。
+   */
+  'user.emailLabel': 'Email',
+  'user.emailHint': 'Your email. No + aliases, no temp mail.',
   'user.passwordHint': 'At least 6 characters, no spaces.',
   'user.signIn': 'Sign in',
   'user.signUp': 'Create account',
@@ -738,6 +760,14 @@ const en = {
   'user.error.usernameTooShort': 'Username is too short (at least 3 characters).',
   'user.error.usernameTooLong': 'Username is too long (at most 20 characters).',
   'user.error.usernameTaken': 'That username is taken — pick another.',
+  /*
+   * 注册邮箱校验（2026-10-14 加）。规则本体在 `lib/email.ts`（前后端共用同一份）；
+   * 服务端回 `email-invalid` / `email-alias` / `email-temp` 三个码。
+   * ⚠️ **登录不校验邮箱**（用户明确要求）—— 老账号的用户名可能根本不是邮箱。
+   */
+  'user.error.emailInvalid': 'Enter a valid email address.',
+  'user.error.emailAlias': 'Alias emails (like name+tag@… or Gmail with dots) are not allowed.',
+  'user.error.emailTemp': 'Disposable email providers are not allowed — use your regular mailbox.',
   'user.error.passwordInvalid': 'Enter a password.',
   'user.error.passwordTooShort': 'Password is too short (at least 6 characters).',
   'user.error.passwordTooLong': 'Password is too long (at most 72 characters).',
@@ -836,6 +866,11 @@ const en = {
 
   'account.savesEmpty': 'No cloud save states yet.',
   'account.savesCount': '{count} save states in total',
+  /*
+   * 树视图里每个游戏行右侧的存档份数（点开游戏行才看到具体存档）。
+   */
+  'account.savesGroupCount': '{count} save state(s)',
+  'account.viewGame': 'View {name}',
   /*
    * 每款游戏的上限说明。`{max}` 从 lib/saves.ts 的 MAX_SAVES 传进来（本地云端一致），
    * **不要在文案里写死 5** —— 那个数改了这里就会说谎。
@@ -1022,7 +1057,13 @@ const en = {
   'legal.terms': 'Terms of Service',
   /* 两页顶部那行「最后更新」。日期由页面按语言格式化后传进来 */
   'legal.updated': 'Last updated {date}',
-  'legal.back': 'Back to the game room',
+  /*
+   * ⚠️ `legal.back` 原先是「Back to the game room」（2026-10-14 用户要求改文案 + 改行为）：
+   *    左上那颗钮现在是**浏览器回退**（`BackLink`），不再承诺回那间屋子，所以文案走
+   *    `common.back`（「返回」）—— 和内容页左上那颗统一。这一条**已删除**，别再加回来。
+   *    页脚那颗「返回游戏屋」的**真链接**仍在，落点 `/room`，文字也仍是那两个字的「返回游戏屋」，
+   *    写在 `gamesPage.backHome`（见 lib/legal.ts 那一页的用法）。见 components/LegalPage.tsx。
+   */
   /* 页脚那个小标题，后面跟着邮箱 */
   'legal.contact': 'Contact us:',
 
@@ -1056,9 +1097,10 @@ const en = {
   'admin.login.error': 'Wrong username or password',
   'admin.login.failed': 'Sign-in failed — try again',
   'admin.logout': 'Sign out',
-  /* 后台左侧那几个 tab —— 游戏列表 / 开发商库 / 留言本 / 用户，2026-10-13 起是四条 */
+  /* 后台左侧那几个 tab —— 游戏列表 / 开发商库 / 机种库 / 留言本 / 用户，2026-10-14 起是五条 */
   'admin.nav.games': 'Games',
   'admin.nav.developers': 'Developers',
+  'admin.nav.consoles': 'Consoles',
   'admin.nav.feedback': 'Guestbook',
   'admin.nav.reports': 'Game reports',
   'admin.nav.users': 'Users',
@@ -1163,6 +1205,36 @@ const en = {
   'admin.developers.field.nameEn': 'Name (EN)',
   'admin.developers.field.summaryEn': 'Summary (EN)',
   'admin.developers.field.descriptionEn': 'About (EN)',
+
+  /*
+   * 机种库（2026-10-14 加）。和开发商库的关键区别：**条目是代码里的固定四个**
+   * （nes / snes / gba / arcade），所以没有「添加 / 搜索 / 翻页」，只有编辑与重置。
+   * 「重置」= 删掉那一行资料，前台对该机种退回代码里的默认名字（不是删除机种本身）。
+   */
+  'admin.consoles.title': 'Consoles',
+  'admin.consoles.editTitle': 'Edit console',
+  'admin.consoles.view': 'View',
+  'admin.consoles.gameCount': '{count} games',
+  /* 还没在后台填过资料的机种（consoles 表里没有那一行） */
+  'admin.consoles.unfilled': 'Profile not filled in yet — the public page uses built-in defaults.',
+  'admin.consoles.reset': 'Reset profile',
+  'admin.consoles.badReleased': 'Release year must be a whole number.',
+  'admin.consoles.nameRequired': 'Name is required.',
+  'admin.consoles.saved': 'Saved.',
+  'admin.consoles.failed': 'Request failed.',
+  'admin.consoles.deleteConfirm':
+    'Reset “{name}”? Its profile (name, image, description) is removed and the public page falls back to the built-in defaults. The games themselves are not touched.',
+  'admin.consoles.field.name': 'Name',
+  'admin.consoles.field.image': 'Console image',
+  'admin.consoles.imageHint':
+    'Optional. Without one the public page falls back to the cartridge label (NES / SFC / GBA / ARC).',
+  'admin.consoles.imageCurrent': 'Current: {name}. Leave empty to keep it.',
+  'admin.consoles.field.released': 'Release year',
+  'admin.consoles.field.summary': 'Summary',
+  'admin.consoles.field.description': 'About',
+  'admin.consoles.field.nameEn': 'Name (EN)',
+  'admin.consoles.field.summaryEn': 'Summary (EN)',
+  'admin.consoles.field.descriptionEn': 'About (EN)',
 
   /* 留言本（房间地板上那本）。后台只管「解决没有」——正文不给改，理由见那条接口的注释。 */
   'admin.feedback.title': 'Guestbook',
@@ -1307,6 +1379,10 @@ const en = {
   'gamesPage.searchEmpty': 'No games match “{keyword}”. Try a shorter word, or the game title.',
   'gamesPage.prev': 'Prev',
   'gamesPage.next': 'Next',
+  /*
+   * 页脚那颗「回到房间」（`/room` 那间屋子）。**内容页页脚**用它，**法务两页页脚**
+   * 也从 2026-10-14 起用它（原来那边是 `legal.back`，见下面 legal 那段的注释）。
+   */
   'gamesPage.backHome': 'Back to the room',
   'gamesPage.backToGames': 'All games',
   /*
@@ -1460,6 +1536,24 @@ const en = {
   'developersPage.notFoundTitle': 'Developer not found',
   'developersPage.notFound': 'This developer is not in the library (any more).',
 
+  /*
+   * 机种两页（2026-10-14 加的，用户要的「机种专题页」）。结构照抄 developersPage：
+   * 列表页 heading / intro，单页 gamesHeading / gamesEmpty / 资料表字段 / 404。
+   * ⚠️ 没有写 `consolesPage.empty`：机种清单是代码里的固定四项（CONSOLE_TYPES），
+   *    列表页**永远**有四张卡可画，不存在「一条都没有」的空态。
+   */
+  'consolesPage.heading': 'Consoles',
+  'consolesPage.intro':
+    'The consoles in the library — {count} games in total. Open one to see every title it runs.',
+  'consolesPage.gameCount': '{count} games',
+  'consolesPage.gamesHeading': 'Games on {name}',
+  'consolesPage.gamesEmpty': 'There is no game for this console in the library yet.',
+  'consolesPage.field.released': 'Released',
+  /* 页脚与面包屑里那条「全部机种」（真链接），与 developersPage.backToDevelopers 同一角色 */
+  'consolesPage.backToConsoles': 'All consoles',
+  'consolesPage.notFoundTitle': 'Console not found',
+  'consolesPage.notFound': 'This console is not part of the site (any more).',
+
   'download.heading': 'Download the ROM',
   'download.hint': 'Click the button below — the download starts 6 seconds later.',
   'download.button': 'Start download',
@@ -1516,7 +1610,8 @@ const zh: Record<MessageKey, string> = {
   'home.consoles.title': '按机种浏览',
   'home.consoles.lead': 'NES、SFC、GBA、街机 —— 点一个看它有哪些游戏。',
   'home.consoles.count': '{count} 款游戏',
-  'home.consoles.all': '查看全部游戏',
+  /* 2026-10-14 改：原来写「查看全部游戏」（指向 /games），现在机种有了自己的专题页，这里指向 /consoles */
+  'home.consoles.all': '全部机种',
   'home.latest.title': '最新收录',
   'home.latest.lead': '最近新上的几款。',
   'home.latest.viewAll': '全部游戏',
@@ -1524,7 +1619,7 @@ const zh: Record<MessageKey, string> = {
   'home.developers.lead': '这几家开发商在库里的游戏最多。',
   'home.developers.viewAll': '全部开发商',
   'home.empty': '游戏库现在还是空的 —— 进小屋把 ROM 拖到电视上就能开玩。',
-  /* 折叠问答六条，见上面英文那份的注释（只写真的实现了的事） */
+  /* 折叠问答七条，见上面英文那份的注释（只写真的实现了的事） */
   'home.faq.title': '常见问题',
   'home.faq.q1': '免费吗？',
   'home.faq.a1':
@@ -1543,6 +1638,9 @@ const zh: Record<MessageKey, string> = {
   'home.faq.q6': '能和朋友一起玩吗？',
   'home.faq.a6':
     '当然！快喊上小伙伴，开个房间一起联机对战吧。',
+  'home.faq.q7': '支持手柄吗？',
+  'home.faq.a7':
+    '支持。用 USB 或蓝牙连上手柄，浏览器识别后模拟器核心会直接读到；按键映射以各核心默认为准。手机上用屏幕上的虚拟按键。',
 
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':
@@ -1573,6 +1671,17 @@ const zh: Record<MessageKey, string> = {
     '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
   'seo.developer.title': '{name} —— 这家开发商的游戏',
   'seo.developer.description':
+    '{name} 在在线游戏库里的全部游戏（{count} 款），可以直接在浏览器里玩，也可以下载 ROM 文件。',
+
+  /*
+   * 机种两页（2026-10-14 加的）。`consoles` 是列表页、`console` 是单页，
+   * 和 developers / developer 同一套命名。`{count}` 同样是现读的条数。
+   */
+  'seo.consoles.title': '按机种浏览 —— 在线玩 NES / SFC / GBA / 街机游戏',
+  'seo.consoles.description':
+    '在线游戏库里的每个机种（共 {count} 款游戏）。挑一个机种，看它名下的全部游戏，直接在浏览器里开玩。',
+  'seo.console.title': '{name} 游戏 —— 在线玩',
+  'seo.console.description':
     '{name} 在在线游戏库里的全部游戏（{count} 款），可以直接在浏览器里玩，也可以下载 ROM 文件。',
 
   'theme.toDark': '切换到夜晚模式',
@@ -1766,8 +1875,11 @@ const zh: Record<MessageKey, string> = {
   'user.tabRegister': '注册',
   'user.username': '用户名',
   'user.password': '密码',
-  /* 规则提示当 placeholder 用，见英文表里那一段的说明（登录模式不设 placeholder） */
+  /* 规则提示当 placeholder 用，见英文表里那一段的说明（登录模式不设 placeholder）。
+   * 2026-10-14 起注册走邮箱（user.emailLabel / user.emailHint），usernameHint 闲置。 */
   'user.usernameHint': '3–20 个字符：字母、数字、_ - .',
+  'user.emailLabel': '邮箱',
+  'user.emailHint': '用邮箱注册，不支持别名和临时邮箱。',
   'user.passwordHint': '至少 6 位，不能有空格。',
   'user.signIn': '登录',
   'user.signUp': '注册',
@@ -1791,6 +1903,10 @@ const zh: Record<MessageKey, string> = {
   'user.error.usernameTooShort': '用户名太短了（至少 3 个字符）。',
   'user.error.usernameTooLong': '用户名太长了（最多 20 个字符）。',
   'user.error.usernameTaken': '这个用户名已经被占用了，换一个。',
+  /* 注册邮箱校验（2026-10-14 加），见英文表里那一段的说明 */
+  'user.error.emailInvalid': '邮箱格式不对，请检查一下。',
+  'user.error.emailAlias': '不支持别名邮箱（如 name+tag@… 或 Gmail 加点那种）。',
+  'user.error.emailTemp': '不支持临时邮箱注册，请用你的常用邮箱。',
   'user.error.passwordInvalid': '请填写密码。',
   'user.error.passwordTooShort': '密码太短了（至少 6 位）。',
   'user.error.passwordTooLong': '密码太长了（最多 72 位）。',
@@ -1840,6 +1956,8 @@ const zh: Record<MessageKey, string> = {
 
   'account.savesEmpty': '还没有云端存档。',
   'account.savesCount': '共 {count} 份存档',
+  'account.savesGroupCount': '{count} 份存档',
+  'account.viewGame': '查看《{name}》',
   'account.savesHint':
     '每款游戏最多保留 {max} 份存档，再存会顶掉最早的那份。本机和云端的上限一致。',
   'account.saveDeleted': '存档已删除。',
@@ -1960,7 +2078,7 @@ const zh: Record<MessageKey, string> = {
   'legal.privacy': '隐私政策',
   'legal.terms': '服务条款',
   'legal.updated': '最后更新 {date}',
-  'legal.back': '返回游戏屋',
+  /* `legal.back`（「返回游戏屋」）已删除，见英文表里那一段的说明 */
   'legal.contact': '联系我们：',
 
   'tour.title': '操作指引',
@@ -1987,6 +2105,7 @@ const zh: Record<MessageKey, string> = {
   'admin.logout': '退出登录',
   'admin.nav.games': '游戏列表',
   'admin.nav.developers': '开发商',
+  'admin.nav.consoles': '机种库',
   'admin.nav.feedback': '留言本',
   'admin.nav.reports': '游戏反馈',
   'admin.nav.users': '用户',
@@ -2073,6 +2192,35 @@ const zh: Record<MessageKey, string> = {
   'admin.developers.field.nameEn': '名字 (EN)',
   'admin.developers.field.summaryEn': '简介 (EN)',
   'admin.developers.field.descriptionEn': '介绍 (EN)',
+
+  /*
+   * 机种库（2026-10-14 加）。和开发商库的关键区别：**条目是代码里的固定四个**
+   * （nes / snes / gba / arcade），所以没有「添加 / 搜索 / 翻页」，只有编辑与重置。
+   * 「重置」= 删掉那一行资料，前台对该机种退回代码里的默认名字（不是删除机种本身）。
+   */
+  'admin.consoles.title': '机种库',
+  'admin.consoles.editTitle': '编辑机种',
+  'admin.consoles.view': '查看',
+  'admin.consoles.gameCount': '{count} 款游戏',
+  /* 还没在后台填过资料的机种（consoles 表里没有那一行） */
+  'admin.consoles.unfilled': '还没填资料 —— 前台先用内置默认信息。',
+  'admin.consoles.reset': '重置资料',
+  'admin.consoles.badReleased': '发售年份必须是整数。',
+  'admin.consoles.nameRequired': '请填写机种名字。',
+  'admin.consoles.saved': '已保存。',
+  'admin.consoles.failed': '请求失败。',
+  'admin.consoles.deleteConfirm':
+    '重置「{name}」？它的资料（名字 / 图片 / 介绍）会被清掉，前台退回内置默认信息。游戏本身不受影响。',
+  'admin.consoles.field.name': '名字',
+  'admin.consoles.field.image': '机图 / 图片',
+  'admin.consoles.imageHint': '选填。没有图时前台用卡带丝印词（NES / SFC / GBA / ARC）占位。',
+  'admin.consoles.imageCurrent': '当前：{name}。留空表示不换。',
+  'admin.consoles.field.released': '发售年份',
+  'admin.consoles.field.summary': '简介',
+  'admin.consoles.field.description': '介绍',
+  'admin.consoles.field.nameEn': '名字 (EN)',
+  'admin.consoles.field.summaryEn': '简介 (EN)',
+  'admin.consoles.field.descriptionEn': '介绍 (EN)',
 
   'admin.feedback.title': '留言本',
   'admin.feedback.empty': '还没有留言。',
@@ -2162,6 +2310,11 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.searchEmpty': '没有匹配「{keyword}」的游戏，换个短一点的词，或者直接搜游戏名。',
   'gamesPage.prev': '上一页',
   'gamesPage.next': '下一页',
+  /*
+   * 页脚那颗「回到房间」。内容页页脚用它，**法务两页页脚也从 2026-10-14 起用它**
+   * （在此之前那边写的是「返回游戏屋」、占用的是已删除的 `legal.back`）。
+   * 两处都是回 `/room` 那间屋子，共用一条就行。
+   */
   'gamesPage.backHome': '回到房间',
   'gamesPage.backToGames': '全部游戏',
   /* `gamesPage.backToGame` 已删除，统一到 `common.back`，见英文表里那一段的说明 */
@@ -2247,6 +2400,22 @@ const zh: Record<MessageKey, string> = {
   'developersPage.backToDevelopers': '全部开发商',
   'developersPage.notFoundTitle': '找不到这个开发商',
   'developersPage.notFound': '这个开发商已经不在库里了。',
+
+  /*
+   * 机种两页（2026-10-14 加的，用户要的「机种专题页」）。结构照抄 developersPage。
+   * ⚠️ 没有写 `consolesPage.empty`：机种清单是代码里的固定四项（CONSOLE_TYPES），
+   *    列表页**永远**有四张卡可画，不存在「一条都没有」的空态。
+   */
+  'consolesPage.heading': '机种',
+  'consolesPage.intro': '游戏库里的机种 —— 共收录 {count} 款游戏。点一个看它名下的全部游戏。',
+  'consolesPage.gameCount': '{count} 款游戏',
+  'consolesPage.gamesHeading': '{name} 上的游戏',
+  'consolesPage.gamesEmpty': '库里还没有这个机种的游戏。',
+  'consolesPage.field.released': '发售年份',
+  /* 页脚与面包屑里那条「全部机种」（真链接），与 developersPage.backToDevelopers 同一角色 */
+  'consolesPage.backToConsoles': '全部机种',
+  'consolesPage.notFoundTitle': '找不到这个机种',
+  'consolesPage.notFound': '这个机种不属于本站（或已被移除）。',
 
   'download.heading': '下载 ROM',
   'download.hint': '点下面的按钮，6 秒后开始下载。',

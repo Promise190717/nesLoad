@@ -257,7 +257,7 @@ export default function KeyBindingsPanel({
             type="button"
             aria-label={t('keybind.close')}
             onClick={onClose}
-            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
           >
             ×
           </button>
@@ -274,7 +274,7 @@ export default function KeyBindingsPanel({
           */}
           <div className="flex gap-2">
             {lockedPlayer ? (
-              <span className="pixel-edge pxw-2 pxc-500 flex-1 bg-accent py-1.5 text-center text-[11px] text-ink-950">
+              <span className="pixel-edge pxw-2 pxc-500 flex-1 bg-accent py-1.5 text-center text-[12px] text-ink-950">
                 {t('keybind.mine')}
               </span>
             ) : (
@@ -288,7 +288,7 @@ export default function KeyBindingsPanel({
                     setCapturing(null);
                     setNotice(null);
                   }}
-                  className={`pixel-edge pxw-2 pxc-500 flex-1 py-1.5 text-[11px] transition-colors ${
+                  className={`pixel-edge pxw-2 pxc-500 flex-1 py-1.5 text-[12px] transition-colors ${
                     player === which
                       ? 'bg-accent text-ink-950'
                       : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
@@ -314,7 +314,7 @@ export default function KeyBindingsPanel({
               const label = codeLabel(table[button]);
               return (
                 <div key={button} className="flex items-center gap-2">
-                  <span className="w-[54px] shrink-0 text-[11px] text-ink-400">
+                  <span className="w-[54px] shrink-0 text-[12px] text-ink-400">
                     {name}
                   </span>
                   <button
@@ -324,7 +324,7 @@ export default function KeyBindingsPanel({
                       setCapturing(button);
                       setNotice(null);
                     }}
-                    className={`pixel-edge pxw-2 pxc-500 min-w-0 flex-1 truncate px-2 py-1 text-[11px] transition-colors ${
+                    className={`pixel-edge pxw-2 pxc-500 min-w-0 flex-1 truncate px-2 py-1 text-[12px] transition-colors ${
                       active
                         ? 'blink bg-accent/20 text-accent'
                         : 'bg-ink-900 text-ink-100 hover:bg-ink-700 hover:text-accent'
@@ -338,7 +338,7 @@ export default function KeyBindingsPanel({
           </div>
 
           {notice && (
-            <p className="text-[11px] text-danger">
+            <p className="text-[12px] text-danger">
               {t(notice.key, {
                 button: notice.button ? buttonLabel(notice.button, t) : '',
                 player: notice.player ?? '',
@@ -347,7 +347,7 @@ export default function KeyBindingsPanel({
             </p>
           )}
 
-          <p className="text-[11px] leading-relaxed text-ink-500">{t(hint)}</p>
+          <p className="text-[12px] leading-relaxed text-ink-500">{t(hint)}</p>
 
           {/*
             重载卡带 = 「改完键位要重新插一次卡带」这件事的一键版。

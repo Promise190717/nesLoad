@@ -256,7 +256,7 @@ export default function RetroTv({
         桌面 / 底座 / 墙上那两件（窗户、画）都挂在这一层的盒子上，所以它们跟着一起对齐。
       */}
       <div
-        className={`relative w-[var(--tv-w)] bg-ink-700 pixel-edge pxw-6 ${hot ? 'pxc-accent' : 'pxc-500'}`}
+        className={`tv-surface relative w-[var(--tv-w)] bg-ink-700 pixel-edge pxw-6 ${hot ? 'pxc-accent' : 'pxc-500'}`}
       >
         {/*
           机身顶沿：一条凹进去的散热缝。
@@ -279,7 +279,7 @@ export default function RetroTv({
             且内容只有 ASCII，没有掉字形的问题，所以不进 i18n 文案表。
             pointer-events-none：纯装饰，别让它成为拖拽的落点 / relatedTarget。
           */}
-          <span className="pointer-events-none relative ml-auto font-pixel text-[9px] tracking-[0.1em] text-ink-500">
+          <span className="pointer-events-none relative ml-auto font-pixel text-[12px] tracking-[0.1em] text-ink-500">
             BETA v{packageJson.version}
           </span>
         </div>
@@ -345,7 +345,7 @@ export default function RetroTv({
         <div className="flex items-center gap-5 border-t-2 border-ink-800 bg-ink-700 px-5 py-2.5">
           <div className="flex shrink-0 items-center gap-2">
             <span className={`h-3 w-3 ${pwrClass}`} />
-            <span className="font-pixel text-[9px] text-ink-500">PWR</span>
+            <span className="font-pixel text-[12px] text-ink-500">PWR</span>
           </div>
 
           {/*
@@ -362,7 +362,7 @@ export default function RetroTv({
             而用户说过音量「不明显」，所以这里主动提高对比。
           */}
           <div className="flex shrink-0 items-center gap-2">
-            <span className="font-pixel text-[9px] text-ink-300">VOL</span>
+            <span className="font-pixel text-[12px] text-ink-300">VOL</span>
             <div className="flex items-center gap-[8px]">
               <VolBtn
                 label="−"
@@ -575,7 +575,7 @@ function EjectGlyph() {
  *     危险动作不靠 hover 才看得出来。
  *
  * 尺寸走「窄 + 矮」：宽度由父级格子的写死列宽（52px）定，高度只由这里的
- * `py-1 text-[10px]` 撑出来。2026-10-10 从 `py-1.5 text-[11px]` 收下来过 ——
+ * `py-1 text-[12px]` 撑出来。2026-10-10 从 `py-1.5 text-[12px]` 收下来过 ——
  * 用户要求这一排整体小一点，5 个钮一起占的宽度/高度都跟着降。
  * 字号不能再往下了：10px 的中文「弹出 / 重载」已经贴着实心笔画，再小就糊。
  * ⚠️ 图标 + 文字同排，`whitespace-nowrap` 挡住中文在格子被压窄时折行。
@@ -590,7 +590,7 @@ function PanelBtn({
   return (
     <button
       type="button"
-      className={`panel-key flex items-center justify-center gap-1 whitespace-nowrap bg-ink-600 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+      className={`panel-key flex items-center justify-center gap-1 whitespace-nowrap bg-ink-600 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         active
           ? 'panel-key-on bg-accent/15 text-accent'
           : danger

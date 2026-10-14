@@ -236,7 +236,7 @@ export default function ConsoleScreen({
         !crtOff &&
         (waitingForHost ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="screen-hint-xs font-pixel text-[10px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+            <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
               {t('screen.waitingHost')}
             </span>
           </div>
@@ -258,10 +258,10 @@ export default function ConsoleScreen({
                   <span className="flex flex-col items-center gap-[14px]">
                     {variant === 'desktop' ? (
                       <>
-                        <span className="screen-hint-sm font-pixel text-[11px] text-crt-ink-200">
+                        <span className="screen-hint-sm font-pixel text-[12px] text-crt-ink-200">
                           {t('screen.tapLoad')}
                         </span>
-                        <span className="screen-hint-xs font-pixel text-[10px] text-crt-ink-200">
+                        <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200">
                           {t('screen.orLibrary')}
                         </span>
                       </>
@@ -271,10 +271,10 @@ export default function ConsoleScreen({
                         点屏幕打开的就是游戏库本身，所以不再提「选文件」。
                       */
                       <>
-                        <span className="screen-hint-sm font-pixel text-[11px] text-crt-ink-200">
+                        <span className="screen-hint-sm font-pixel text-[12px] text-crt-ink-200">
                           {t('screen.mobileLibrary')}
                         </span>
-                        <span className="screen-hint-xs font-pixel text-[10px] text-crt-ink-200">
+                        <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200">
                           {t('screen.mobileTap')}
                         </span>
                       </>
@@ -320,7 +320,7 @@ export default function ConsoleScreen({
             {t('screen.paused')}
           </span>
           {/* 两句话分的是「谁按的」：本机暂停指到面板上，房主暂停只说明在等谁 */}
-          <span className="screen-hint-xs font-pixel text-[10px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+          <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
             {paused ? t('screen.resumeOnPanel') : t('screen.waitHostResume')}
           </span>
         </div>
@@ -346,7 +346,7 @@ export default function ConsoleScreen({
             )}
           </div>
           {/* 百分数全是数字，font-pixel 没有掉字形的问题；宽度写死，位数变化时不抖 */}
-          <span className="w-[34px] shrink-0 font-pixel text-[9px] text-crt-ink-300">
+          <span className="w-[34px] shrink-0 font-pixel text-[12px] text-crt-ink-300">
             {loadPct === null ? '' : `${loadPct}%`}
           </span>
         </div>
@@ -402,7 +402,7 @@ export default function ConsoleScreen({
         <button
           type="button"
           onClick={onExitFullscreen}
-          className="fs-exit pixel-edge pxw-2 absolute right-6 top-6 z-40 items-center bg-crt-950/85 px-4 py-3 font-pixel text-[11px] text-crt-ink-200 hover:text-crt-accent"
+          className="fs-exit pixel-edge pxw-2 absolute right-6 top-6 z-40 items-center bg-crt-950/85 px-4 py-3 font-pixel text-[12px] text-crt-ink-200 hover:text-crt-accent"
         >
           EXIT FULLSCREEN
         </button>

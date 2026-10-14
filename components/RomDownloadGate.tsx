@@ -126,7 +126,7 @@ export default function RomDownloadGate({
         —— 文案 `download.manual` / `download.manualLink` 是随它一起从 i18n 删掉的，得一并加回来。
       */}
 
-      <p className="mt-6 text-[11px] leading-6 text-ink-600">{t('download.rights')}</p>
+      <p className="mt-6 text-[12px] leading-6 text-ink-600">{t('download.rights')}</p>
     </div>
   );
 }

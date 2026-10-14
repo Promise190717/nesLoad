@@ -235,7 +235,7 @@ export default function HandheldConsole({
      * 由控制区的 `mt-auto` 收走（见下面那段）。于是「机身沾满剩下的区域」和
      * 「操作键沉到底部」是同一件事的两面。
      */
-    <div className="relative flex w-full flex-1 flex-col">
+    <div className="tv-surface relative flex w-full flex-1 flex-col">
       <div className="flex flex-1 flex-col bg-ink-700 pixel-edge pxw-6 pxc-500">
         {/*
           顶沿。桌面那台电视机这里是一条散热缝 + 版本铭牌；掌机上收成一行：
@@ -258,7 +258,7 @@ export default function HandheldConsole({
           {/* `mr-auto` 把灯顶到最左；右边空着留给页面右上角那颗菜单钮 */}
           <span className="relative mr-auto flex items-center gap-2">
             <span className={`h-2.5 w-2.5 ${pwrClass}`} />
-            <span className="font-pixel text-[8px] text-ink-500">PWR</span>
+            <span className="font-pixel text-[12px] text-ink-500">PWR</span>
           </span>
         </div>
 
@@ -549,7 +549,7 @@ function PillBtn({
       onPointerCancel={() => onPress(button, false)}
       onPointerLeave={() => onPress(button, false)}
       onContextMenu={(e) => e.preventDefault()}
-      className="pixel-edge pxw-2 touch-none select-none bg-ink-600 px-3 py-1.5 font-pixel text-[9px] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
+      className="pixel-edge pxw-2 touch-none select-none bg-ink-600 px-3 py-1.5 font-pixel text-[12px] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
     >
       {label}
     </button>
@@ -574,7 +574,7 @@ function PanelBtn({
   return (
     <button
       type="button"
-      className={`pixel-edge pxw-2 bg-ink-600 py-1 text-[10px] text-ink-100 transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+      className={`pixel-edge pxw-2 bg-ink-600 py-1 text-[12px] text-ink-100 transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         danger
           ? 'pxc-500 enabled:hover:bg-ink-500 enabled:hover:text-danger'
           : 'pxc-500 enabled:hover:bg-ink-500 enabled:hover:text-accent'

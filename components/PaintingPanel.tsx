@@ -103,7 +103,7 @@ export default function PaintingPanel({
           <p className="font-pixel text-[12px] leading-[1.8] break-words text-[#3b3327]">
             {title}
           </p>
-          <p className="font-pixel mt-2 text-[10px] leading-[1.7] break-words text-[#6b5c3c]">
+          <p className="font-pixel mt-2 text-[12px] leading-[1.7] break-words text-[#6b5c3c]">
             {artist}
           </p>
 

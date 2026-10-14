@@ -661,7 +661,7 @@ export default function GameLibraryPanel({
                 type="button"
                 aria-pressed={tab === value}
                 onClick={() => setTab(value)}
-                className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-3 text-[11px] transition-colors ${
+                className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-3 text-[12px] transition-colors ${
                   tab === value
                     ? 'bg-accent text-ink-950'
                     : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
@@ -675,7 +675,7 @@ export default function GameLibraryPanel({
             type="button"
             aria-label={t('games.close')}
             onClick={onClose}
-            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[10px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+            className="pixel-edge pxw-2 pxc-500 ml-auto flex h-[18px] w-[18px] items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
           >
             ×
           </button>
@@ -702,7 +702,7 @@ export default function GameLibraryPanel({
                     // 换了机种就是换了一份结果集，回到第一页（同 applySearch）
                     setPage(1);
                   }}
-                  className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-2 text-[10px] transition-colors ${
+                  className={`pixel-edge pxw-2 pxc-500 flex h-[24px] items-center px-2 text-[12px] transition-colors ${
                     consoleFilter === value
                       ? 'bg-accent text-ink-950'
                       : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
@@ -725,11 +725,11 @@ export default function GameLibraryPanel({
                 value={searchDraft}
                 onChange={(e) => setSearchDraft(e.target.value)}
                 placeholder={t('games.searchPlaceholder')}
-                className="pixel-edge pxw-2 pxc-500 h-[24px] min-w-0 flex-1 bg-ink-900 px-2 text-[11px] text-ink-100 placeholder:text-ink-600 focus:outline-none"
+                className="pixel-edge pxw-2 pxc-500 h-[24px] min-w-0 flex-1 bg-ink-900 px-2 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none"
               />
               <button
                 type="submit"
-                className="pixel-edge pxw-2 pxc-500 flex h-[24px] shrink-0 items-center bg-ink-700 px-2.5 text-[11px] text-ink-200 transition-colors hover:text-accent"
+                className="pixel-edge pxw-2 pxc-500 flex h-[24px] shrink-0 items-center bg-ink-700 px-2.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('games.search')}
               </button>
@@ -741,7 +741,7 @@ export default function GameLibraryPanel({
               不用为它单起一块容器。
             */}
             {slowHint && (
-              <p className="w-full text-[11px] leading-relaxed text-ink-400">{slowHint}</p>
+              <p className="w-full text-[12px] leading-relaxed text-ink-400">{slowHint}</p>
             )}
           </div>
         )}
@@ -839,13 +839,13 @@ export default function GameLibraryPanel({
                               语言没有数据时只留机种那一个 —— 不留空框。
                             */}
                             <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
-                              <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
+                              <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
                                 {CONSOLE_LABEL[game.consoleType]}
                               </span>
                               {tag && (
                                 <span
                                   className={`bg-ink-950/85 px-1 py-0.5 text-accent ${
-                                    tag.pixel ? 'font-pixel text-[8px]' : 'text-[9px]'
+                                    tag.pixel ? 'font-pixel text-[12px]' : 'text-[12px]'
                                   }`}
                                 >
                                   {tag.text}
@@ -871,10 +871,10 @@ export default function GameLibraryPanel({
                             )}
                           </div>
                           <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
-                            <span className="truncate text-[11px] text-ink-100">{text.title}</span>
+                            <span className="truncate text-[12px] text-ink-100">{text.title}</span>
                             {/* 元数据行**始终显示 meta**：不能用「正在载入…」把它换掉 ——
                                 文字换来换去会让卡片高度/内容跳动，进度全部交给封面里那条进度条 */}
-                            <span className="truncate text-[10px] text-ink-500">{meta}</span>
+                            <span className="truncate text-[12px] text-ink-500">{meta}</span>
                           </div>
                         </button>
 
@@ -917,7 +917,7 @@ export default function GameLibraryPanel({
                             和「纸上那句祝福」是同一个取舍：单个非 ASCII 字形落回系统字体，
                             比换成 `*` 这样的 ASCII 替身看得懂。
                           */}
-                          <span className="text-[11px]">
+                          <span className="text-[12px]">
                             {favoriteSet.has(game.id) ? '★' : '☆'}
                           </span>
                         </button>
@@ -995,13 +995,13 @@ export default function GameLibraryPanel({
                               className="h-full w-full object-cover"
                             />
                             <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
-                              <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
+                              <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
                                 {CONSOLE_LABEL[game.consoleType]}
                               </span>
                               {tag && (
                                 <span
                                   className={`bg-ink-950/85 px-1 py-0.5 text-accent ${
-                                    tag.pixel ? 'font-pixel text-[8px]' : 'text-[9px]'
+                                    tag.pixel ? 'font-pixel text-[12px]' : 'text-[12px]'
                                   }`}
                                 >
                                   {tag.text}
@@ -1022,13 +1022,13 @@ export default function GameLibraryPanel({
                             )}
                           </div>
                           <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
-                            <span className="truncate text-[11px] text-ink-100">{text.title}</span>
+                            <span className="truncate text-[12px] text-ink-100">{text.title}</span>
                             {/*
                               收藏 tab 这一行的第二格放**收藏时间**而不是 `meta`：
                               这个列表是按收藏时间排的（服务端 ORDER BY created_at DESC），
                               用户在这里想看的也是「什么时候收的」。想认机种看右上角角标。
                             */}
-                            <span className="truncate text-[10px] text-ink-500">
+                            <span className="truncate text-[12px] text-ink-500">
                               {formatTime(game.favoritedAt, locale)}
                             </span>
                           </div>
@@ -1044,7 +1044,7 @@ export default function GameLibraryPanel({
                           }}
                           className="absolute left-0 top-0 z-10 flex h-[20px] w-[20px] items-center justify-center bg-ink-950/85 leading-none text-accent transition-colors hover:bg-ink-950 hover:text-danger"
                         >
-                          <span className="text-[11px]">★</span>
+                          <span className="text-[12px]">★</span>
                         </button>
                       </div>
                     </li>
@@ -1092,7 +1092,7 @@ export default function GameLibraryPanel({
                       </span>
                     )}
                     {/* 机种标签全是 ASCII（NES / SFC / ARC），走 font-pixel 不掉字形 */}
-                    <span className="shrink-0 font-pixel text-[8px] text-ink-500">
+                    <span className="shrink-0 font-pixel text-[12px] text-ink-500">
                       {CONSOLE_LABEL[cartridge.console]}
                     </span>
                     {/* 游戏标题可能很长（含中文），系统字体 + truncate */}
@@ -1103,7 +1103,7 @@ export default function GameLibraryPanel({
                     >
                       {cartridge.name}
                     </span>
-                    <span className="shrink-0 text-[11px] text-ink-500">
+                    <span className="shrink-0 text-[12px] text-ink-500">
                       {formatTime(cartridge.lastPlayedAt, locale)}
                     </span>
                   </button>
@@ -1111,7 +1111,7 @@ export default function GameLibraryPanel({
                     type="button"
                     aria-label={t('library.removeLabel', { name: cartridge.name })}
                     onClick={() => onRemoveCartridge(cartridge.id)}
-                    className="pixel-edge pxw-2 pxc-500 flex h-[16px] w-[18px] shrink-0 items-center justify-center bg-ink-800 text-[9px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
+                    className="pixel-edge pxw-2 pxc-500 flex h-[16px] w-[18px] shrink-0 items-center justify-center bg-ink-800 text-[12px] leading-none text-ink-100 hover:bg-danger hover:text-ink-950"
                   >
                     ×
                   </button>
@@ -1137,7 +1137,7 @@ export default function GameLibraryPanel({
               这样「在动」这件事全站是同一套语言。
             */}
             {listLoading && (
-              <span className="mr-auto flex items-center gap-2 text-[10px] text-ink-400">
+              <span className="mr-auto flex items-center gap-2 text-[12px] text-ink-400">
                 <span className="relative h-[6px] w-14 shrink-0 overflow-hidden bg-ink-900">
                   <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent/70" />
                 </span>
@@ -1148,19 +1148,19 @@ export default function GameLibraryPanel({
               type="button"
               disabled={listLoading || safePage <= 1}
               onClick={() => goToPage(safePage - 1)}
-              className="pixel-edge pxw-2 pxc-500 flex h-[24px] items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 flex h-[24px] items-center bg-ink-700 px-3 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('games.prev')}
             </button>
             {/* 纯数字，和后台那份一样不进文案表 */}
-            <span className="text-[10px] text-ink-500">
+            <span className="text-[12px] text-ink-500">
               {safePage} / {pageCount}
             </span>
             <button
               type="button"
               disabled={listLoading || safePage >= pageCount}
               onClick={() => goToPage(safePage + 1)}
-              className="pixel-edge pxw-2 pxc-500 flex h-[24px] items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 flex h-[24px] items-center bg-ink-700 px-3 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('games.next')}
             </button>
@@ -1183,7 +1183,7 @@ export default function GameLibraryPanel({
         */}
         {downloadingTitle !== null && (
           <div className="flex items-center gap-3 border-t-2 border-ink-900 bg-ink-850 px-4 py-2">
-            <span className="min-w-0 flex-1 truncate text-[11px] text-ink-200">
+            <span className="min-w-0 flex-1 truncate text-[12px] text-ink-200">
               {t('games.loadingRom', { name: downloadingTitle })}
             </span>
             <span className="relative h-[6px] w-32 shrink-0 overflow-hidden bg-ink-900">
@@ -1198,14 +1198,14 @@ export default function GameLibraryPanel({
             </span>
             {/* 固定宽度：百分数从 9% 跳到 100% 时后面的按钮不许跟着挪 */}
             {progress !== null && (
-              <span className="w-[34px] shrink-0 text-right text-[10px] text-ink-500">
+              <span className="w-[34px] shrink-0 text-right text-[12px] text-ink-500">
                 {Math.round(progress * 100)}%
               </span>
             )}
             <button
               type="button"
               onClick={onCancelLoad}
-              className="pixel-edge pxw-2 pxc-500 flex h-[24px] shrink-0 items-center bg-ink-700 px-3 text-[10px] text-ink-200 transition-colors hover:bg-danger hover:text-ink-950"
+              className="pixel-edge pxw-2 pxc-500 flex h-[24px] shrink-0 items-center bg-ink-700 px-3 text-[12px] text-ink-200 transition-colors hover:bg-danger hover:text-ink-950"
             >
               {t('games.cancel')}
             </button>

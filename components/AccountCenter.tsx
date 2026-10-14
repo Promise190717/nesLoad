@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTopLoader } from 'nextjs-toploader';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
+import type { AccountTab } from '@/lib/account-tabs';
 import type { ConsoleType } from '@/lib/emulator';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { MAX_CARTRIDGES } from '@/lib/library';
@@ -19,9 +20,14 @@ import { useI18n } from './I18nProvider';
  * 五个 tab：
  *   · 收藏 —— 复用游戏库那份卡片网格（认封面），点卡片开**游戏详情页**（不是直接开玩）
  *   · 历史 —— 云端游戏历史（最近玩过的 N 款），可逐条删、可一键清空
- *   · 存档 —— 跨游戏总览（哪款游戏、什么时候存的、多大），可逐份删、可一键清空
+ *   · 存档 —— 树视图（2026-10-14 从平铺改过来）：一层游戏、点开才见该游戏下的具体存档，
+ *            可逐份删、可一键清空
  *   · 资料 —— 换头像 / 改性别（2026-10-13 把密码从这里拆出去了）
  *   · 密码 —— 改密码单独一页（原先挤在资料里，是那一页最长的一段）
+ *
+ * ⚠️ **tab 走 URL**（2026-10-14 加，用户要求「刷新别永远回到收藏」）：当前 tab 写在
+ *    `?tab=` 上（`/account?tab=saves`），服务端解析后当 `initialTab` 传进来；
+ *    切换用 `history.replaceState` 同步地址 —— 不触发导航、不重拉数据。
  *
  * ⚠️ **为什么点收藏卡片是跳详情页而不是在屋里开玩**：这一页是「管理」，用户正在做的事
  *    是「整理我的收藏」。而屋里那套载入（`loadRemoteGame`）需要那个房间的上下文
@@ -118,7 +124,8 @@ interface SaveOverviewItem {
   consoleType: ConsoleType;
 }
 
-type Tab = 'favorites' | 'history' | 'saves' | 'profile' | 'password';
+/** tab id 的出处 / `?tab=` 解析在 lib/account-tabs.ts（page.tsx 服务端也要用）。 */
+type Tab = AccountTab;
 type LoadState = 'loading' | 'ready' | 'error';
 type Notice = { tone: 'ok' | 'error'; text: string };
 
@@ -152,9 +159,24 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export default function AccountCenter() {
+export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
   const { t, locale, href: localeHref } = useI18n();
-  const [tab, setTab] = useState<Tab>('favorites');
+  /** 初始 tab 来自 URL（服务端解析好传进来），刷新后停在原 tab 而不是永远回到收藏。 */
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'favorites');
+
+  /*
+   * 切 tab 时把状态写进地址栏（`?tab=saves` 这类）。用 `history.replaceState`
+   * 而不是 `router.replace` —— 后者是一次真导航，服务端组件会重渲染、页头资料重拉，
+   * 换个 tab 没必要付这个代价；replaceState 只改地址，React 状态照旧，可分享可刷新。
+   * 也不进历史栈：浏览器后退 = 离开这一页，而不是在 tab 之间倒带。
+   */
+  const switchTab = (value: Tab) => {
+    setTab(value);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', value);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+  };
 
   /**
    * 资料（首屏就拉 —— 它也要用来画页头那个用户名 / 头像）。
@@ -220,7 +242,7 @@ export default function AccountCenter() {
   };
 
   return (
-    <main className="min-h-screen bg-ink-950 px-6 py-6 sm:py-12">
+    <main className="wall min-h-screen px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-4xl">
         {/*
           左上「返回」（浏览器回退，兜底去 `/room`，与内容页那颗 BackLink 同一套）+
@@ -230,14 +252,14 @@ export default function AccountCenter() {
         <div className="flex items-center justify-between gap-4">
           <BackLink
             href={localeHref('/room')}
-            className="inline-flex items-center gap-2 text-[11px] text-ink-400 transition-colors hover:text-accent"
+            className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
           >
             <span aria-hidden="true">←</span>
             <span>{t('common.back')}</span>
           </BackLink>
           <Link
             href={localeHref('/')}
-            className="text-[11px] text-ink-400 transition-colors hover:text-accent"
+            className="text-[12px] text-ink-400 transition-colors hover:text-accent"
           >
             {t('common.home')}
           </Link>
@@ -259,11 +281,11 @@ export default function AccountCenter() {
               </h1>
               {user &&
                 (user.vip ? (
-                  <span className="vip-shine pixel-edge pxw-2 pxc-accent shrink-0 bg-accent/15 px-1.5 py-0.5 text-[10px] leading-none text-accent">
+                  <span className="vip-shine pixel-edge pxw-2 pxc-accent shrink-0 bg-accent/15 px-1.5 py-0.5 text-[12px] leading-none text-accent">
                     {t('account.vipBadge')}
                   </span>
                 ) : (
-                  <span className="pixel-edge pxw-2 pxc-700 shrink-0 bg-ink-800 px-1.5 py-0.5 text-[10px] leading-none text-ink-400">
+                  <span className="pixel-edge pxw-2 pxc-700 shrink-0 bg-ink-800 px-1.5 py-0.5 text-[12px] leading-none text-ink-400">
                     {t('account.nonVipBadge')}
                   </span>
                 ))}
@@ -314,12 +336,12 @@ export default function AccountCenter() {
                 type="button"
                 disabled={signingOut}
                 onClick={() => void signOut()}
-                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[11px] text-ink-300 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+                className="pixel-edge pxw-1 pxc-500 bg-ink-800 px-1.5 py-0.5 text-[10px] text-ink-300 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('user.signOut')}
               </button>
               {/* 退出失败**必须说出来**：cookie 没清掉，用户还以为退出成功了 */}
-              {signOutError && <span className="text-[10px] text-danger">{t('account.failed')}</span>}
+              {signOutError && <span className="text-[12px] text-danger">{t('account.failed')}</span>}
             </div>
           )}
         </header>
@@ -331,8 +353,8 @@ export default function AccountCenter() {
               key={value}
               type="button"
               aria-pressed={tab === value}
-              onClick={() => setTab(value)}
-              className={`pixel-edge pxw-2 pxc-500 flex h-[26px] items-center px-3 text-[11px] transition-colors ${
+              onClick={() => switchTab(value)}
+              className={`pixel-edge pxw-2 pxc-500 flex h-[26px] items-center px-3 text-[12px] transition-colors ${
                 tab === value
                   ? 'bg-accent text-ink-950'
                   : 'bg-ink-800 text-ink-300 hover:bg-ink-700 hover:text-ink-100'
@@ -452,7 +474,7 @@ function LoadingDot() {
 function FavoritesSkeleton({ label }: { label: string }) {
   return (
     <div aria-busy="true" aria-live="polite" className="flex flex-col gap-4">
-      <p role="status" className="flex items-center gap-2 text-[11px] text-ink-400">
+      <p role="status" className="flex items-center gap-2 text-[12px] text-ink-400">
         <LoadingDot />
         {label}
       </p>
@@ -481,14 +503,14 @@ function FavoritesSkeleton({ label }: { label: string }) {
 function ListRowSkeleton({ label }: { label: string }) {
   return (
     <div aria-busy="true" aria-live="polite" className="flex flex-col gap-4">
-      <p role="status" className="flex items-center gap-2 text-[11px] text-ink-400">
+      <p role="status" className="flex items-center gap-2 text-[12px] text-ink-400">
         <LoadingDot />
         {label}
       </p>
       <ul aria-hidden="true" className="flex flex-col divide-y-2 divide-ink-800">
         {Array.from({ length: 6 }, (_, i) => (
           <li key={i} className="flex items-center gap-3 py-2.5">
-            <span className="h-[38px] w-[28px] shrink-0 animate-pulse bg-ink-800" />
+            <span className="h-[52px] w-[38px] shrink-0 animate-pulse bg-ink-800" />
             <span className="min-w-0 flex-1">
               <span className="block h-[10px] w-2/5 animate-pulse bg-ink-800" />
               <span className="mt-1 block h-[8px] w-3/5 animate-pulse bg-ink-800" />
@@ -602,14 +624,14 @@ function FavoritesTab() {
                   loading="lazy"
                   className="h-full w-full object-cover"
                 />
-                <span className="absolute right-0 top-0 bg-ink-950/85 px-1 py-0.5 font-pixel text-[8px] text-accent">
+                <span className="absolute right-0 top-0 bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
                   {CONSOLE_LABEL[item.consoleType]}
                 </span>
               </div>
               <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
-                <span className="truncate text-[11px] text-ink-100">{text.title}</span>
+                <span className="truncate text-[12px] text-ink-100">{text.title}</span>
                 {/* 第二格放收藏时间（服务端按它倒序），和游戏库面板的收藏 tab 一致 */}
-                <span className="truncate text-[10px] text-ink-500">
+                <span className="truncate text-[12px] text-ink-500">
                   {formatTime(item.favoritedAt, locale)}
                 </span>
               </div>
@@ -633,7 +655,7 @@ function FavoritesTab() {
               }}
               className="absolute left-0 top-0 z-10 flex h-[20px] w-[20px] items-center justify-center bg-ink-950/85 leading-none text-accent transition-colors hover:bg-ink-950 hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <span className="text-[11px]">★</span>
+              <span className="text-[12px]">★</span>
             </button>
           </div>
         </li>
@@ -745,7 +767,7 @@ function HistoryTab() {
     return (
       <>
         {notice && (
-          <p className={`mb-3 text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <p className={`mb-3 text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </p>
         )}
@@ -757,11 +779,11 @@ function HistoryTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <span className="text-[11px] text-ink-400">
+        <span className="text-[12px] text-ink-400">
           {t('account.historyCount', { count: items.length })}
         </span>
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
@@ -773,7 +795,7 @@ function HistoryTab() {
             if (confirmingClear) void clearAll();
             else setConfirmingClear(true);
           }}
-          className={`pixel-edge pxw-2 pxc-500 ml-auto shrink-0 px-3 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+          className={`pixel-edge pxw-1 pxc-500 ml-auto shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
             confirmingClear
               ? 'bg-danger text-ink-950 hover:bg-danger/80'
               : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
@@ -787,10 +809,13 @@ function HistoryTab() {
         {items.map((item) => {
           const confirming = confirmingId === item.id;
           return (
-            <li key={item.id} className="flex items-center gap-3 py-2.5">
+            <li
+              key={item.id}
+              className="-mx-2 flex items-center gap-3 px-2 py-2.5 transition-colors hover:bg-ink-850"
+            >
               {/* 封面缩略图（同存档那行），点它 / 点标题去详情页 */}
               <Link href={localeHref(`/games/${item.id}`)} className="shrink-0">
-                <span className="block h-[38px] w-[28px] overflow-hidden bg-ink-900">
+                <span className="block h-[52px] w-[38px] overflow-hidden bg-ink-900">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={item.imageUrl}
@@ -801,7 +826,7 @@ function HistoryTab() {
                 </span>
               </Link>
 
-              <span className="shrink-0 font-pixel text-[8px] text-ink-500">
+              <span className="shrink-0 font-pixel text-[12px] text-ink-500">
                 {CONSOLE_LABEL[item.console]}
               </span>
 
@@ -812,7 +837,7 @@ function HistoryTab() {
                 >
                   {locale === 'zh' ? item.name : item.nameEn || item.name}
                 </Link>
-                <span className="block truncate text-[10px] text-ink-500">
+                <span className="block truncate text-[12px] text-ink-500">
                   {formatTime(item.playedAt, locale)}
                 </span>
               </span>
@@ -821,7 +846,7 @@ function HistoryTab() {
                 type="button"
                 disabled={busyId !== null}
                 onClick={() => (confirming ? void confirmDelete(item) : requestDelete(item))}
-                className={`pixel-edge pxw-2 pxc-500 shrink-0 px-2.5 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`pixel-edge pxw-1 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                   confirming
                     ? 'bg-danger text-ink-950 hover:bg-danger/80'
                     : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
@@ -839,7 +864,7 @@ function HistoryTab() {
         ⚠️ 这里用前台可导的 `MAX_CARTRIDGES`（lib/library.ts），**不是**服务端的 `MAX_HISTORY`
         （在 lib/server/user-data.ts，客户端不能 import 它）。两者数值一致、注释里互相点名。
       */}
-      <p className="text-[10px] leading-relaxed text-ink-500">
+      <p className="text-[12px] leading-relaxed text-ink-500">
         {t('account.historyHint', { max: MAX_CARTRIDGES })}
       </p>
     </div>
@@ -861,6 +886,8 @@ function SavesTab() {
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const requestId = useRef(0);
+  /** 树视图：当前展开的是哪些游戏（gameId 集合）。点游戏行切换，默认全部收起。 */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   /* 首屏拉一次。setState 一律放 .then/.catch（理由同 FavoritesTab 那个 effect）。 */
   useEffect(() => {
@@ -927,6 +954,35 @@ function SavesTab() {
     }
   };
 
+  /*
+   * 树视图：把平铺的存档按游戏聚成组。顺序沿用服务端那份（按存档时间倒序），
+   * 所以「最近存过档的游戏」排最前；组内第一份就是该游戏最新的一份。
+   * 删掉某游戏的最后一份后，组会随 `items` 更新自动消失。
+   */
+  const groups = useMemo(() => {
+    const byGame = new Map<string, SaveOverviewItem[]>();
+    for (const item of items) {
+      const list = byGame.get(item.gameId);
+      if (list) list.push(item);
+      else byGame.set(item.gameId, [item]);
+    }
+    return Array.from(byGame.entries()).map(([gameId, saves]) => ({
+      gameId,
+      saves,
+      /** 组头取第一份：封面 / 机种 / 标题三样在组内所有份上都一样 */
+      head: saves[0],
+    }));
+  }, [items]);
+
+  const toggleGroup = (gameId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(gameId)) next.delete(gameId);
+      else next.add(gameId);
+      return next;
+    });
+  };
+
   if (state === 'loading') {
     return <ListRowSkeleton label={t('account.savesLoading')} />;
   }
@@ -937,7 +993,7 @@ function SavesTab() {
     return (
       <>
         {notice && (
-          <p className={`mb-3 text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <p className={`mb-3 text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </p>
         )}
@@ -949,11 +1005,11 @@ function SavesTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <span className="text-[11px] text-ink-400">
+        <span className="text-[12px] text-ink-400">
           {t('account.savesCount', { count: items.length })}
         </span>
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
@@ -965,7 +1021,7 @@ function SavesTab() {
             if (confirmingClear) void clearAll();
             else setConfirmingClear(true);
           }}
-          className={`pixel-edge pxw-2 pxc-500 ml-auto shrink-0 px-3 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+          className={`pixel-edge pxw-1 pxc-500 ml-auto shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
             confirmingClear
               ? 'bg-danger text-ink-950 hover:bg-danger/80'
               : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
@@ -975,53 +1031,98 @@ function SavesTab() {
         </button>
       </div>
 
+      {/*
+        树视图：一层是游戏（点行展开 / 收起），二层才是具体存档。
+        游戏行的封面 / 机种 / 标题取该组第一份（组内这些字段全一样）。
+      */}
       <ul className="flex flex-col divide-y-2 divide-ink-800">
-        {items.map((item) => {
-          const confirming = confirmingId === item.id;
+        {groups.map(({ gameId, saves, head }) => {
+          const open = expanded.has(gameId);
+          const title = locale === 'zh' ? head.gameTitle : head.gameTitleEn || head.gameTitle;
           return (
-            <li key={item.id} className="flex items-center gap-3 py-2.5">
-              {/* 封面缩略图（同历史那行），点它 / 点标题去详情页 */}
-              <Link href={localeHref(`/games/${item.gameId}`)} className="shrink-0">
-                <span className="block h-[38px] w-[28px] overflow-hidden bg-ink-900">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={item.imageUrl}
-                    alt=""
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                  />
-                </span>
-              </Link>
-
-              <span className="shrink-0 font-pixel text-[8px] text-ink-500">
-                {CONSOLE_LABEL[item.consoleType]}
-              </span>
-
-              <span className="min-w-0 flex-1">
-                <Link
-                  href={localeHref(`/games/${item.gameId}`)}
-                  className="block truncate text-[12px] text-ink-100 transition-colors hover:text-accent"
+            <li key={gameId}>
+              <div className="-mx-2 flex items-center gap-3 px-2 py-2.5 transition-colors hover:bg-ink-850">
+                {/* 游戏行本体是一颗切换钮：点它展开这组存档 */}
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => toggleGroup(gameId)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
-                  {locale === 'zh' ? item.gameTitle : item.gameTitleEn || item.gameTitle}
-                </Link>
-                {/* 大小 + 时间。两条信息挤一行，用中点分开 */}
-                <span className="block truncate text-[10px] text-ink-500">
-                  {formatBytes(item.size)} · {formatTime(item.createdAt, locale)}
-                </span>
-              </span>
+                  <span className="block h-[52px] w-[38px] shrink-0 overflow-hidden bg-ink-900">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={head.imageUrl}
+                      alt=""
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  </span>
 
-              <button
-                type="button"
-                disabled={busyId !== null}
-                onClick={() => (confirming ? void confirmDelete(item) : requestDelete(item))}
-                className={`pixel-edge pxw-2 pxc-500 shrink-0 px-2.5 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                  confirming
-                    ? 'bg-danger text-ink-950 hover:bg-danger/80'
-                    : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
-                }`}
-              >
-                {t(confirming ? 'account.confirmDelete' : 'account.delete')}
-              </button>
+                  <span className="shrink-0 font-pixel text-[12px] text-ink-500">
+                    {CONSOLE_LABEL[head.consoleType]}
+                  </span>
+
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] text-ink-100">{title}</span>
+                    <span className="block truncate text-[12px] text-ink-500">
+                      {t('account.savesGroupCount', { count: saves.length })}
+                    </span>
+                  </span>
+
+                  {/* 展开 / 收起的箭头。像素风里用纯文本三角，不引图标 */}
+                  <span aria-hidden="true" className="shrink-0 text-[10px] text-ink-500">
+                    {open ? '▼' : '▶'}
+                  </span>
+                </button>
+
+                {/*
+                  游戏详情页入口保留（树收起来之后仍能跳过去看这款游戏）。
+                  它是切换钮的**兄弟**而不是子元素 —— `<button>` 里不能嵌 `<a>`，
+                  套路同收藏 tab 那颗星标。
+                */}
+                <Link
+                  href={localeHref(`/games/${gameId}`)}
+                  aria-label={t('account.viewGame', { name: title })}
+                  title={t('account.viewGame', { name: title })}
+                  className="shrink-0 px-1 text-[16px] leading-none text-ink-500 transition-colors hover:text-accent"
+                >
+                  ↗
+                </Link>
+              </div>
+
+              {/* 二层：这款游戏下的所有存档。往右缩进 + 一条竖线，跟一层拉开关系 */}
+              {open && (
+                <ul className="mb-2 ml-[14px] flex flex-col divide-y-2 divide-ink-800 border-l-2 border-ink-700 pl-3">
+                  {saves.map((item) => {
+                    const confirming = confirmingId === item.id;
+                    return (
+                      <li
+                        key={item.id}
+                        className="-mx-2 flex items-center gap-3 px-2 py-2 transition-colors hover:bg-ink-850"
+                      >
+                        {/* 时间是这份存档的身份（一份存档=存的那一刻），大小跟在后面 */}
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-ink-300">
+                          {formatTime(item.createdAt, locale)} · {formatBytes(item.size)}
+                        </span>
+
+                        <button
+                          type="button"
+                          disabled={busyId !== null}
+                          onClick={() => (confirming ? void confirmDelete(item) : requestDelete(item))}
+                          className={`pixel-edge pxw-1 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                            confirming
+                              ? 'bg-danger text-ink-950 hover:bg-danger/80'
+                              : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
+                          }`}
+                        >
+                          {t(confirming ? 'account.confirmDelete' : 'account.delete')}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </li>
           );
         })}
@@ -1031,7 +1132,7 @@ function SavesTab() {
         上限说明。这一页是**总览**，用户会好奇「为什么只能存这么多」——
         答案在 lib/saves.ts 的 MAX_SAVES（每款 5 份，本地云端一致）。
       */}
-      <p className="text-[10px] leading-relaxed text-ink-500">
+      <p className="text-[12px] leading-relaxed text-ink-500">
         {t('account.savesHint', { max: MAX_SAVES })}
       </p>
     </div>
@@ -1167,7 +1268,7 @@ function AvatarForm({
               type="button"
               disabled={busy}
               onClick={() => inputRef.current?.click()}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1.5 text-[11px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1.5 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? t('account.uploading') : t('account.chooseImage')}
             </button>
@@ -1176,15 +1277,15 @@ function AvatarForm({
                 type="button"
                 disabled={busy}
                 onClick={() => void clear()}
-                className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1.5 text-[11px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+                className="pixel-edge pxw-1 pxc-500 bg-ink-700 px-1.5 py-0.5 text-[10px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {t('account.clearAvatar')}
               </button>
             )}
           </div>
-          <p className="text-[10px] leading-relaxed text-ink-500">{t('account.avatarHint')}</p>
+          <p className="text-[12px] leading-relaxed text-ink-500">{t('account.avatarHint')}</p>
           {notice && (
-            <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+            <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
               {notice.text}
             </span>
           )}
@@ -1240,7 +1341,7 @@ function GenderForm({
             disabled={busy}
             aria-pressed={current === value}
             onClick={() => void save(value)}
-            className={`pixel-edge pxw-2 pxc-500 flex h-[26px] items-center px-3 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`pixel-edge pxw-2 pxc-500 flex h-[26px] items-center px-3 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
               current === value
                 ? 'bg-accent text-ink-950'
                 : 'bg-ink-800 text-ink-300 enabled:hover:bg-ink-700 enabled:hover:text-ink-100'
@@ -1250,12 +1351,12 @@ function GenderForm({
           </button>
         ))}
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
       </div>
-      <p className="text-[10px] leading-relaxed text-ink-500">{t('account.genderHint')}</p>
+      <p className="text-[12px] leading-relaxed text-ink-500">{t('account.genderHint')}</p>
     </section>
   );
 }
@@ -1340,7 +1441,7 @@ function PasswordTab() {
       */}
       <form onSubmit={submit} className="flex max-w-[360px] flex-col gap-2">
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] text-ink-400">{t('account.oldPassword')}</span>
+          <span className="text-[12px] text-ink-400">{t('account.oldPassword')}</span>
           <input
             type="password"
             value={oldPassword}
@@ -1350,7 +1451,7 @@ function PasswordTab() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] text-ink-400">{t('account.newPassword')}</span>
+          <span className="text-[12px] text-ink-400">{t('account.newPassword')}</span>
           {/*
             新口令**顺手吃掉空白字符**（2026-10-13 用户要求「移除空格输入」，与注册页一致）。
             服务端也会回 `password-has-space`（见 lib/server/app-users.ts），这里先过滤一道。
@@ -1367,7 +1468,7 @@ function PasswordTab() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] text-ink-400">{t('account.confirmPassword')}</span>
+          <span className="text-[12px] text-ink-400">{t('account.confirmPassword')}</span>
           {/* 确认框同样过滤 —— 否则这里多敲一个空格就和上面那个「永远对不上」 */}
           <input
             type="password"
@@ -1379,7 +1480,7 @@ function PasswordTab() {
         </label>
 
         {notice && (
-          <span className={`text-[11px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
           </span>
         )}
@@ -1387,13 +1488,13 @@ function PasswordTab() {
         <button
           type="submit"
           disabled={busy}
-          className="pixel-edge pxw-2 pxc-500 mt-1 self-start bg-accent px-3 py-1.5 text-[11px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
+          className="pixel-edge pxw-2 pxc-500 mt-1 self-start bg-accent px-3 py-1.5 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? t('account.saving') : t('account.savePassword')}
         </button>
       </form>
-      <p className="text-[10px] leading-relaxed text-ink-500">{t('account.passwordHint')}</p>
-      <p className="text-[10px] leading-relaxed text-ink-500">{t('account.passwordTabHint')}</p>
+      <p className="text-[12px] leading-relaxed text-ink-500">{t('account.passwordHint')}</p>
+      <p className="text-[12px] leading-relaxed text-ink-500">{t('account.passwordTabHint')}</p>
     </div>
   );
 }
