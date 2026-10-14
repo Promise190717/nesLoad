@@ -38,6 +38,8 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * ⚠️ 机种自己的资料**不缓存**（后台改完刷新就看到）；名下游戏列表走
  *    `listGamesByConsoleCached`（12 小时 TTL，和 `/games`、开发商详情页一致）。
+ *    「x款游戏」也取自那次的 total（countGamesCached）—— 2026-10-14 起不再用
+ *    资料行上的 gameCount，那个子查询是每请求全表 COUNT（详见 generateMetadata）。
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -90,8 +92,14 @@ export async function generateMetadata({
   const text: LocalizedConsoleText = row
     ? localizeConsole(row, locale)
     : { name: CONSOLE_LABEL[id], summary: null, description: null };
-  // 条数：有资料行走行上顺带算出来的 gameCount，没有就用游戏列表那次查询的 total
-  const count = row ? row.gameCount : games.total;
+  /*
+   * 条数：**一律用游戏列表那次查询的 total**（`countGamesCached`，12 小时缓存）。
+   * 2026-10-14 之前这里优先用资料行上「顺带」算出来的 gameCount —— 但那个子查询
+   * 没有 console_type 索引、getConsole 又不缓存，等于每个请求全表 COUNT 一遍
+   * （见 lib/server/consoles.ts）。改用 total 后这条全表扫描消失，
+   * 代价是后台加/删游戏后这个数字最多晚 12 小时更新 —— 和列表本身同一口径。
+   */
+  const count = games.total;
 
   const title = translate(locale, 'seo.console.title', { name: text.name });
   const description = translate(locale, 'seo.console.description', {
@@ -198,8 +206,8 @@ export default async function ConsoleDetailPage({
   // 越界（这个机种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
   if (page > pageCount) redirect(consoleHref(locale, id, pageCount));
 
-  // 游戏数：资料行上顺带算出来的（和列表那次查询一致），壳上没有就用列表的 total
-  const gameCount = row ? row.gameCount : data.total;
+  // 游戏数：走列表那次查询的 total（countGamesCached，12 小时缓存），理由见 generateMetadata
+  const gameCount = data.total;
 
   const facts: { label: string; value: string }[] = [
     ...(consoleRow.releaseYear

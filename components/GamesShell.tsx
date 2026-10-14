@@ -29,6 +29,8 @@ export default function GamesShell({
   intro,
   back,
   backToAllHref,
+  showHeader = true,
+  fill = false,
   showAllGamesLink = true,
   showTopBar = true,
   showHomeLink = false,
@@ -58,6 +60,26 @@ export default function GamesShell({
   backToAllHref?: string;
   /** 页脚那一行是否出现「全部游戏」。列表页自己就是，不必自指 */
   showAllGamesLink?: boolean;
+  /**
+   * 中间那块**页头**（`label` 小标签 + `<h1>` 标题 + `intro`）出不出现，默认出。
+   *
+   * ⚠️ 目前**只有 `/play` 传 `false`**（2026-10-14）：那一页的名字 / 资料摆在右侧
+   * 那一列里（封面 + 名字），顶上再来一个大标题就是同一句话说两遍。它自己的
+   * `<h1>` 在 `PlayScene` 里（sr-only）—— **所以那一页仍然有 h1**，不是漏写。
+   * 传 `false` 时 `label` / `title` / `intro` 都不渲染（调用方仍要按类型传）。
+   */
+  showHeader?: boolean;
+  /**
+   * 内容是否要**撑满剩余高度**（默认不要，内容多高就是多高）。
+   *
+   * ⚠️ 目前**只有 `/play` 传 `true`**（2026-10-14）：那一页中间是固定 4:3 的屏幕，
+   * 要「游戏区域吃满剩下的纵向空间、屏幕在里头上下居中、页脚压到视口最底部」——
+   * 普通内容页没这个需求，别顺手打开（短页面会把页脚顶到视口底部，观感就变了）。
+   *
+   * 打开之后：外层 `max-w-5xl` 那一栏变成 `flex-col` + `min-h-[100vh - 上下页边距]`，
+   * `children` 套一层 `flex-1`，于是页脚自然落到最底；`children` 自己拿 `flex-1` 撑高。
+   */
+  fill?: boolean;
   /**
    * 顶部那行**顶栏**（语言 / 账号 / 游戏库，2026-10-13 加）出不出现，默认出。
    *
@@ -97,7 +119,16 @@ export default function GamesShell({
 
   return (
     <main className="wall min-h-screen px-6 py-6 sm:py-12">
-      <div className="mx-auto w-full max-w-5xl">
+      {/*
+        `fill` 打开时这一栏自己也要是个「至少撑满一屏」的 flex 列：
+        `min-h` 那两个值就是扣掉 `<main>` 的上下页边距（`py-6` = 3rem、
+        `sm:py-12` = 6rem），否则页脚到不了视口最底。
+      */}
+      <div
+        className={`mx-auto w-full max-w-5xl ${
+          fill ? 'flex min-h-[calc(100vh-3rem)] flex-col sm:min-h-[calc(100vh-6rem)]' : ''
+        }`}
+      >
         {/*
           顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库，**和房间右上角那一行同一个口径**。
           它自己占一行、靠右；下面那颗返回链接紧跟着，所以这里给它一个下边距
@@ -160,13 +191,16 @@ export default function GamesShell({
           )}
         </div>
 
-        <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
-          <span className="font-pixel text-[12px] tracking-wider text-accent">{label}</span>
-          <h1 className="mt-3 text-[22px] leading-snug font-semibold text-ink-100">{title}</h1>
-          {intro && <p className="mt-2 text-[13px] leading-6 text-ink-400">{intro}</p>}
-        </header>
+        {showHeader && (
+          <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
+            <span className="font-pixel text-[12px] tracking-wider text-accent">{label}</span>
+            <h1 className="mt-3 text-[22px] leading-snug font-semibold text-ink-100">{title}</h1>
+            {intro && <p className="mt-2 text-[13px] leading-6 text-ink-400">{intro}</p>}
+          </header>
+        )}
 
-        {children}
+        {/* `fill` 时套一层 `flex-1`：页脚被顶到最底，内容自己吃满剩下的高度 */}
+        {fill ? <div className="flex flex-1 flex-col">{children}</div> : children}
 
         {/*
           页脚互链。**对爬虫比对人有用**：这几页是靠 sitemap 之外的内链互相发现的，

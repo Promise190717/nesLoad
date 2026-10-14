@@ -469,6 +469,12 @@ export function VolBtn({
  * 全部 `shapeRendering="crispEdges"` 硬边渲染，跟满屋子的像素边一个脾气；
  * `fill` 走 currentColor —— hover 变 accent / 弹出那颗变 danger 时图标跟着走，
  * 不用再维护一份彩色版本。
+ *
+ * ⚠️ 尺寸钉死 10。2026-10-14 试过跟文字一起收到 9px，用户当场否掉（「图标不用缩小」），
+ * 已改回 —— 除了「用户就要这个大小」，10 也是像素网格的整数倍：符号里的方块多是
+ * 1–2 单位宽，10px 下正好落在整物理像素上。9px 是 0.9 倍非整数缩放，crispEdges 会把
+ * 若干 1×1 碎块（RefreshGlyph 那圈折线圆上最多）取整粘掉。**要改就重画 viewBox，
+ * 别调 width。**
  */
 function PanelGlyph({ children }: { children: ReactNode }) {
   return (
@@ -568,16 +574,21 @@ function EjectGlyph() {
  *     globals.css；⚠️ 描边全在这条 box-shadow 里，**别再叠 pixel-edge**，
  *     两个类都设 box-shadow 会互相顶掉。原先是描边 + 底部键唇，
  *     2026-10-13 用户嫌那道底部投影发白，已去掉 —— 别加回来）。
- *   · 每颗键前面一枚 10px 像素功能符（上面那组 Glyph），文字仍是 10px 中文。
+ *   · 每颗键前面一枚像素功能符（上面那组 Glyph），文字是中文双字。
  *   · 「暂停中」那颗亮 accent（`.panel-key-on` 描边换 accent），一眼看出
  *     现在是暂停态而不是没按下去 —— 和右侧那列开关钮（accent 底）同一个语义。
  *   · 「弹出」默认文字就带一档 danger（danger/70），hover 才全红 ——
  *     危险动作不靠 hover 才看得出来。
  *
  * 尺寸走「窄 + 矮」：宽度由父级格子的写死列宽（52px）定，高度只由这里的
- * `py-1 text-[12px]` 撑出来。2026-10-10 从 `py-1.5 text-[12px]` 收下来过 ——
+ * `py-1 text-[11px]` 撑出来。2026-10-10 从 `py-1.5 text-[12px]` 收下来过 ——
  * 用户要求这一排整体小一点，5 个钮一起占的宽度/高度都跟着降。
- * 字号不能再往下了：10px 的中文「弹出 / 重载」已经贴着实心笔画，再小就糊。
+ * ⚠️ 2026-10-14：文字 12px → 11px（用户要求「只缩小文字」）。
+ * 只动文字、**没动格子的 52px 列宽、py-1 和那枚 10px 图标** —— 图标那次一起缩到 9px
+ * 被用户当场否了（见 PanelGlyph 的注释）。所以收完这一档，字会显得比图标小一点，
+ * 是用户要的效果，不是没调匀。
+ * 字号不能再往下了：11px 的中文「弹出 / 重载」已经贴着实心笔画，再小就糊
+ * （10px 那版是 2026-10-10 的实测底线）。
  * ⚠️ 图标 + 文字同排，`whitespace-nowrap` 挡住中文在格子被压窄时折行。
  */
 function PanelBtn({
@@ -590,7 +601,7 @@ function PanelBtn({
   return (
     <button
       type="button"
-      className={`panel-key flex items-center justify-center gap-1 whitespace-nowrap bg-ink-600 py-1 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+      className={`panel-key flex items-center justify-center gap-1 whitespace-nowrap bg-ink-600 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         active
           ? 'panel-key-on bg-accent/15 text-accent'
           : danger

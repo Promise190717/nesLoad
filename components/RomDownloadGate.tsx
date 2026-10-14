@@ -84,7 +84,7 @@ export default function RomDownloadGate({
               setSeconds(DELAY_SECONDS);
               setPhase('waiting');
             }}
-            className="pixel-edge pxw-3 pxc-600 bg-accent px-6 py-3 text-[13px] text-ink-950 transition-colors hover:bg-accent/80"
+            className="pixel-edge pxw-3 pxc-600 bg-accent px-4 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
           >
             {t('download.button')}
           </button>
@@ -95,7 +95,7 @@ export default function RomDownloadGate({
             <button
               type="button"
               disabled
-              className="pixel-edge pxw-3 pxc-600 cursor-not-allowed bg-ink-800 px-6 py-3 text-[13px] text-ink-400"
+              className="pixel-edge pxw-3 pxc-600 cursor-not-allowed bg-ink-800 px-4 py-2 text-[12px] text-ink-400"
             >
               {t('download.waiting', { seconds })}
             </button>
@@ -127,6 +127,12 @@ export default function RomDownloadGate({
       */}
 
       <p className="mt-6 text-[12px] leading-6 text-ink-600">{t('download.rights')}</p>
+
+      {/*
+        免责声明（2026-10-14 用户要求）：ROM 来自第三方、仅供学习备份、版权归原权利方。
+        独立一条而不是并进上面那句 —— rights 是「使用者的义务」，这条是「本站的立场」。
+      */}
+      <p className="mt-3 text-[12px] leading-6 text-ink-600">{t('download.disclaimer')}</p>
     </div>
   );
 }

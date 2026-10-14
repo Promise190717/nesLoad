@@ -15,7 +15,7 @@ import { NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import {
   insertDeveloper,
-  listDevelopers,
+  listAdminDevelopersPage,
   MAX_PAGE_SIZE,
   normalizeWebsite,
 } from '@/lib/server/developers';
@@ -65,12 +65,13 @@ export async function GET(request: Request) {
   if (denied) return denied;
 
   const params = new URL(request.url).searchParams;
-  const offset = intParam(params.get('offset'), 0);
+  const cursor = params.get('cursor');
   const limit = Math.min(intParam(params.get('limit'), 10) || 10, MAX_PAGE_SIZE);
   const keyword = params.get('q')?.trim() ?? '';
 
   try {
-    return NextResponse.json(await listDevelopers(offset, limit, { keyword }));
+    // 游标翻页、没有 total —— 理由与形状见 /api/admin/games 那边的 GET 注释。
+    return NextResponse.json(await listAdminDevelopersPage(cursor, limit, { keyword }));
   } catch (error) {
     console.error('[admin] 开发商列表读取失败', error);
     return fail('list-failed', (error as Error).message, 500);

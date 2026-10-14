@@ -1,14 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type MouseEvent as ReactMouseEvent,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AdminLoading from './AdminLoading';
@@ -32,11 +24,12 @@ interface AdminDeveloper {
   gameCount: number;
 }
 
+/** `/api/admin/developers` 分页响应（游标翻页，2026-10-14 起）。没有 total —— 后台用不到。 */
 interface DeveloperPage {
   developers: AdminDeveloper[];
-  total: number;
-  offset: number;
-  limit: number;
+  /** 往后翻的游标；null = 后面没有了。回传给下一次请求的 `cursor` 参数。 */
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 type Notice = { tone: 'ok' | 'error'; text: string };
@@ -49,8 +42,10 @@ const FIELD_CLASS =
 
 const LABEL_CLASS = 'flex flex-col gap-1 text-[12px] text-ink-400';
 
-async function fetchDevelopers(offset: number, keyword: string): Promise<DeveloperPage> {
-  const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
+/** 游标翻页，见 AdminGames 里 fetchGames 的说明（两边同一套形状）。 */
+async function fetchDevelopers(cursor: string | null, keyword: string): Promise<DeveloperPage> {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) params.set('cursor', cursor);
   if (keyword) params.set('q', keyword);
 
   const res = await fetch(`/api/admin/developers?${params}`);
@@ -59,9 +54,8 @@ async function fetchDevelopers(offset: number, keyword: string): Promise<Develop
   const data = (await res.json()) as Partial<DeveloperPage>;
   return {
     developers: data.developers ?? [],
-    total: data.total ?? 0,
-    offset: data.offset ?? offset,
-    limit: data.limit ?? PAGE_SIZE,
+    nextCursor: data.nextCursor ?? null,
+    hasMore: data.hasMore ?? false,
   };
 }
 
@@ -89,13 +83,20 @@ export default function AdminDevelopers() {
   const router = useRouter();
 
   const [list, setList] = useState<AdminDeveloper[]>([]);
-  const [total, setTotal] = useState(0);
+  /** 「下一页还有没有」。游标翻页没有总数，下一页按钮的禁用态全看它。 */
+  const [hasMore, setHasMore] = useState(false);
   const [listLoaded, setListLoaded] = useState(false);
   /** 当前是否有一条列表请求在飞：翻页 / 搜索 / 增删改后的重拉都点亮加载行。 */
   const [listPending, setListPending] = useState(true);
   const [searchDraft, setSearchDraft] = useState('');
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
+  /*
+   * 游标栈（2026-10-14 从 offset 翻页改过来），形状与 AdminGames 里那份同一套：
+   * 下标 = 页码-1，`cursorHistory[0]` 恒为 null；「上一页」从栈里拿回入口重新请求，
+   * 不做反向游标查询。每页被重新拉取时它存的 `nextCursor` 都会被覆盖。
+   */
+  const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([null]);
   const [pageNotice, setPageNotice] = useState<Notice | null>(null);
   const [listVersion, setListVersion] = useState(0);
   /** 请求序号：翻页快了会撞上乱序响应，慢的旧响应不许覆盖新的。 */
@@ -121,14 +122,26 @@ export default function AdminDevelopers() {
   const imageRef = useRef<HTMLInputElement>(null);
 
   const isEditing = editingId !== null;
-  const listQuery = useMemo(() => ({ offset: (page - 1) * PAGE_SIZE }), [page]);
+  /** 本页的入口游标（从栈里取；第一页恒为 null）。effect 的唯一翻页开关。 */
+  const cursor = cursorHistory[page - 1] ?? null;
+  /** 本页响应里的「下一页入口」。翻下一页前先看它还在不在。 */
+  const nextCursor = cursorHistory[page] ?? null;
   const reloadList = useCallback(() => setListVersion((n) => n + 1), []);
+
+  /** 翻下一页。`nextCursor` 在就一定存在栈里（写入发生在上一页响应到达时）。 */
+  const goNext = useCallback(() => {
+    if (!hasMore || !nextCursor) return;
+    setPage((p) => p + 1);
+  }, [hasMore, nextCursor]);
+
+  /** 翻上一页：从栈里拿回上一页当时用的入口游标，重新请求。 */
+  const goPrev = useCallback(() => setPage((p) => Math.max(1, p - 1)), []);
 
   // 每次翻页 / 搜索 / 增删改都重拉当前页。setState 一律走 .then/.catch —— 直接在
   // effect 体里同步 setState 会被 react-hooks/set-state-in-effect 拦下。
+  // effect 依赖里有 page：成功回调要往 cursorHistory[page] 写下一页的入口。
   useEffect(() => {
     const requestId = ++listRequestId.current;
-    const { offset } = listQuery;
 
     /*
      * 先点亮「载入中」。effect 体内同步 setState 会被 react-hooks/set-state-in-effect
@@ -140,25 +153,30 @@ export default function AdminDevelopers() {
       setListPending(true);
     });
 
-    fetchDevelopers(offset, keyword)
+    fetchDevelopers(cursor, keyword)
       .then((data) => {
         if (listRequestId.current !== requestId) return;
         setList(data.developers);
-        setTotal(data.total);
-        // 服务端会把越界的 offset 夹回最后一页（例如刚把最后一页删空），跟着它走
-        setPage(Math.floor(data.offset / PAGE_SIZE) + 1);
+        setHasMore(data.hasMore);
+        // 把「下一页的入口」存进栈里（下标 = 当前页码）。已有同值就不动，省一次渲染
+        setCursorHistory((prev) => {
+          if (prev[page] === data.nextCursor) return prev;
+          const copy = [...prev];
+          copy[page] = data.nextCursor;
+          return copy;
+        });
       })
       .catch(() => {
         if (listRequestId.current !== requestId) return;
         setList([]);
-        setTotal(0);
+        setHasMore(false);
       })
       .finally(() => {
         if (listRequestId.current !== requestId) return;
         setListLoaded(true);
         setListPending(false);
       });
-  }, [listQuery, keyword, listVersion]);
+  }, [cursor, page, keyword, listVersion]);
 
   // 弹窗打开时支持 Esc 关闭
   useEffect(() => {
@@ -173,11 +191,14 @@ export default function AdminDevelopers() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen]);
 
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-
+  /*
+   * 游标翻页没有 total，「共 Y 页」算不出来（2026-10-14 用户拍板选 A）——
+   * 分页条只显示「第 X 页」，下一页按钮的禁用态由 hasMore 决定，越界无从谈起。
+   */
   const applySearch = () => {
     setKeyword(searchDraft.trim());
+    // 关键词变了，旧关键词翻过的游标全部作废 —— 清栈，从第一页重来
+    setCursorHistory([null]);
     setPage(1);
   };
 
@@ -352,10 +373,10 @@ export default function AdminDevelopers() {
         {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
         {listPending && <AdminLoading label={t('feedback.loading')} />}
 
-        {listLoaded && total === 0 && !keyword && (
+        {listLoaded && list.length === 0 && !keyword && (
           <p className="text-[12px] text-ink-500">{t('admin.developers.empty')}</p>
         )}
-        {listLoaded && total === 0 && keyword && (
+        {listLoaded && list.length === 0 && keyword && (
           <p className="text-[12px] text-ink-500">{t('admin.noMatch')}</p>
         )}
 
@@ -416,23 +437,21 @@ export default function AdminDevelopers() {
           </ul>
         )}
 
-        {pageCount > 1 && (
+        {(page > 1 || hasMore) && (
           <div className="mt-3 flex items-center justify-end gap-3">
             <button
               type="button"
-              disabled={safePage <= 1}
-              onClick={() => setPage(safePage - 1)}
+              disabled={page <= 1}
+              onClick={goPrev}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.prev')}
             </button>
-            <span className="text-[12px] text-ink-500">
-              {safePage} / {pageCount}
-            </span>
+            <span className="text-[12px] text-ink-500">{t('admin.currentPage', { page })}</span>
             <button
               type="button"
-              disabled={safePage >= pageCount}
-              onClick={() => setPage(safePage + 1)}
+              disabled={!hasMore || !nextCursor}
+              onClick={goNext}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.next')}

@@ -106,12 +106,26 @@ interface ConsoleScreenProps {
    */
   variant: 'desktop' | 'mobile';
   /** 点屏幕。桌面端 = 选本地 ROM 文件；移动端 = 打开在线游戏库 */
-  onTap: () => void;
+  onTap?: () => void;
   /**
    * 退出全屏。**不传就不画那个退出口** —— 移动端没有全屏入口（右侧那颗钮在移动端隐藏），
    * 屏幕上也就没有退出的必要。
    */
   onExitFullscreen?: () => void;
+  /**
+   * 屏幕自己的尺寸类。
+   *
+   * 默认就是电视机那套（`--tv-*` 三档，见文件头）；`/play` 那页不跟电视机档位走
+   * —— 它要的是「随左栏宽度自适应的 4:3」—— 所以开放成参数。
+   * ⚠️ 仍然只是 class：别改成内联 style，`.screen:fullscreen` 那条未分层规则压不住内联。
+   */
+  frameClassName?: string;
+  /**
+   * 不画待机提示（那两行字 + 待机光标）。
+   *
+   * `/play` 那页的黑区有自己的一套（游戏信息 / 下载进度 / 取消），两套叠在一起会打架。
+   */
+  hideHint?: boolean;
 }
 
 export default function ConsoleScreen({
@@ -130,6 +144,8 @@ export default function ConsoleScreen({
   variant,
   onTap,
   onExitFullscreen,
+  frameClassName = 'h-[var(--tv-screen-h)] w-[var(--tv-screen-w)]',
+  hideHint = false,
 }: ConsoleScreenProps) {
   const { t } = useI18n();
   const { hasPicture, waitingForHost, showPaused } = deriveScreenState({
@@ -172,7 +188,7 @@ export default function ConsoleScreen({
     <div
       ref={screenRef}
       data-tour="screen"
-      className="screen crt relative h-[var(--tv-screen-h)] w-[var(--tv-screen-w)] overflow-hidden bg-black"
+      className={`screen crt relative overflow-hidden bg-black ${frameClassName}`}
     >
       {/*
         canvas 必须始终留在 DOM 里，但没画面时要把它藏起来：
@@ -234,6 +250,7 @@ export default function ConsoleScreen({
       {!hasPicture &&
         !loading &&
         !crtOff &&
+        !hideHint &&
         (waitingForHost ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">

@@ -159,16 +159,20 @@ pnpm dev
 
 > 那两页的正文**必须与本站实际行为一致**，别照抄别的站的模板：这里没有账号系统、没有广告、没接第三方统计，也没有服务端记录游玩行为。涉及第三方的那一节（Google Fonts / jsDelivr / Cloudflare / 联机中继）是逐条核对代码写出来的，改那几处要回来同步。
 
-### 首页 / 房间（`/` 与 `/room`）
+### 首页 / 房间 / 联机开局（`/`、`/room` 与 `/play`）
 
 2026-10-13 拆开的：**`/` 是落地页**（内容型首页），**`/room` 才是那间像素屋子**。
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/` | 首页落地页：Hero（标题 + 搜索框（**铺满整行 100%**）+ 「进入小屋 / 浏览全部游戏」两个入口）→ 按机种浏览（**十二张卡，`CONSOLE_TYPES` 现读**，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
+| `/` | 首页落地页：Hero（标题 + 「进入小屋 / 浏览全部游戏」两个入口 + **房间号输入 + 加入房间**（GET 表单，零 JS，跳 `/play?room=<码>`）+ 搜索框（**铺满整行 100%**））→ 按机种浏览（**十二张卡，`CONSOLE_TYPES` 现读**，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
 | `/room` | 那间屋子（2026-10-13 之前它就是 `/`）：电视机 + 桌子 + 窗，拖入 ROM 即玩；也是 `?id=` / `?room=` 两条深链的落点。 |
+| `/play` | **联机开局页**（2026-10-14 加）：左边一块屏幕（外框是站上那套像素描边）、右边一列 —— 顶上这一款的封面 + 名字 / 机种 / 年份 / 开发商，中间一张平铺的「说明 + 控件」操作表（暂停 / 重载 / 弹出 / 音量 / 显示 / 全屏），底下一颗「编辑」开按键设置。**开局要做的选择摆在屏幕里**（没画面时那层叠层）：单人 / 创建房间 / 加入 + 链路 + 画质，进了房换成房间码 / 分享 / 连接状态 / 离开，载入中换进度条 + 取消。外壳走 `GamesShell`（`showHeader={false}` + `fill`），所以 `.wall` 背景 / 顶栏 / 返回 / 页脚和内容页一致，页脚压在视口最底部。入口是详情页动作区那颗「联机游戏」。 |
 
 - **为什么拆**：原来 `/` 既是门面又是屋子，两个身份要的东西是冲突的 —— 门面要一页能被搜索引擎整段读走的正文，屋子要满屏 CSS 场景 + canvas。原来那一页整页只有 canvas，唯一可读的文字是 `seo.heading` 那三句 sr-only —— 一个没有正文的站在搜索结果里等于不存在。
+- **`/play` 与 `/room` 是「同一套引擎、两种壳」**：加载 ROM / 核心 / BIOS、键盘转发、联机推流两边共用同一批 lib（`EmulatorController` / `NetplayController` / `lib/http.ts` / `lib/bios.ts`），屏幕那块直接复用 `ConsoleScreen`（它为此多了 `frameClassName` / `hideHint` 两个可选 prop）。差别只在功能面：`/play` 没有存档 / 读档 / 历史 / 云端 / 拖本地文件 / 彩蛋 —— 用户要的是**干净**（只放该有的东西），⚠️ 但视觉必须是站上那一套（`pixel-edge` 描边、同一批设计令牌），别在那一页另搞一套细边风格。⚠️ 也别把两边的引擎侧逻辑抄成两份。
+- `/play` 的外壳是 `GamesShell`，为此给它加了两个可选 prop：`showHeader`（默认 `true`，`/play` 传 `false` —— 名字与资料在右列顶上，顶上再来个 `<h1>` 就重复了；h1 由 `PlayScene` 出一颗 sr-only 的）和 `fill`（默认 `false`，`/play` 传 `true` —— 内容 `flex-1` 吃满剩余高度，页脚因此压在视口最底）。**两个都只有 `/play` 在用**，别顺手给别的页打开。
+- ⚠️ **两页的 `?id=` 语义刻意不同**：`/room?id=` 进来自动下载并开玩；`/play?id=` **不自动载入** —— 用户要的是「先进房间设置，点开始才加载」，`?id=` 只把这一款摆在黑区里（游戏名 + 机种），等右侧按下「开始」才下 ROM。
 - **首页刻意不写 `generateMetadata`**：`/` 的标题 / 说明 / canonical 就是根布局那三样（`meta.title` / `meta.description` / `alternatesFor(locale, '/')`），首页的 `title.default` 本来就是给它准备的。子页面（`/room`、`/games`…）才各写各的。`/room` 有自己的一套（`seo.room.*` + `alternatesFor(locale, '/room')`），少了它就会被当成首页的重复内容。
 - 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 12 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 12 小时**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 已统一成 12 小时（列表页原来是 30 分钟）。⚠️ 此前这里写的「24 小时」是笔误 —— 代码里 `HOME_REVALIDATE_SECONDS = 43200` 一直是 12 小时。
 - ⚠️ **首页没有 `export const revalidate`，那不是漏写**：根布局（`app/layout.tsx`）要读 cookie / 请求头决定语言，整个应用因此走动态渲染 —— 页面级 `revalidate` 对路由缓存**不起作用**。首页真正在用的 Next 缓存是上面那三个 `unstable_cache`（数据层，「页-侧」缓存，不下沉到 `listGamesPage` / `countGamesByConsole`）。
@@ -228,10 +232,10 @@ pnpm dev
 | 路由 | 是什么 |
 | --- | --- |
 | `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`?page=N` 翻页（真 URL，爬虫顺得下去）。带搜索框（`?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **12 小时缓存**（见下）。 |
-| `/games/[id]` | 单款游戏的资料页：封面、标题、机种 / 年份 / 开发者 / 系列 / 语言、说明，加三个按钮。带 `VideoGame` + `BreadcrumbList` 结构化数据。 |
+| `/games/[id]` | 单款游戏的资料页：封面、标题、机种 / 年份 / 开发者 / 系列 / 语言、说明，加**四颗**主按钮（2026-10-14 加的「联机游戏」见下）。带 `VideoGame` + `BreadcrumbList` 结构化数据。 |
 | `/games/[id]/download` | 下载页：点「开始下载」**等 6 秒**才真的开始下（用户要求）。**只有这一颗按钮**，没有别的下载入口。 |
 
-- 详情页那三个按钮：**开始游戏** → `/room?id=<id>`（回房间，见下）、**下载 ROM** → 下载页、**分享游戏** → 把这一页的地址复制进剪贴板（`components/ShareGameButton.tsx`）。前两个都是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走；第三个不跳转，才是 `<button>`。
+- 详情页动作区：第一层四颗实体钮 —— **开始游戏** → `/room?id=<id>`（回房间，唯一带强调色）、**联机游戏** → `/play?id=<id>`（2026-10-14 加，简洁开局页，见上）、**收藏**、**下载 ROM** → 下载页。第二层两枚无描边「图标 + 文字」链接：**分享游戏**（把这一页的地址复制进剪贴板，`components/ShareGameButton.tsx`）、**反馈问题**。除分享与反馈之外全是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走。
 - 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/games.ts` 的 `listGamesPageCached`），**TTL 12 小时**（2026-10-14 从 30 分钟拉长 —— 用户为压 D1 的 `rows_read` 额度拍板）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **房间的在线库弹窗（`/api/games`）2026-10-14 起也走同一套缓存**（在那之前它实时查库）；**后台列表（`/api/admin/games`）仍然走不缓存的 `listGamesPage`**，那边必须立刻看到刚上传的游戏。副作用：**后台上传的新游戏最多晚 12 小时才出现在列表页和在线库弹窗上**（后台自己那张列表不受影响）。
 - 详情页 / 下载页的 meta description 会**把后台填的那句「说明」放在最前面**（截到 100 字），后面接一句通用的「能玩、能下载」。没填说明就只用通用那句 —— **不编造**剧情 / 发行商那类信息。
 - 游戏不存在时两页都 `notFound()`，落到 `app/[locale]/games/[id]/not-found.tsx`（一页盖住两条路由），带 `noindex`。
@@ -522,8 +526,8 @@ services:
 
 | | 地址 |
 | --- | --- |
-| 英文（默认，**不占前缀**） | `/`、`/room`、`/games`、`/games/<id>`、`/login`、`/privacy`… |
-| 中文 | `/zh`、`/zh/room`、`/zh/games`、`/zh/games/<id>`、`/zh/login`、`/zh/privacy`… |
+| 英文（默认，**不占前缀**） | `/`、`/room`、`/play`、`/games`、`/games/<id>`、`/login`、`/privacy`… |
+| 中文 | `/zh`、`/zh/room`、`/zh/play`、`/zh/games`、`/zh/games/<id>`、`/zh/login`、`/zh/privacy`… |
 
 前台所有页面都住在 `app/[locale]/` 下，语言从路由参数 `params.locale` 拿（`readLocaleParam()`），不再靠 cookie 猜。**前缀的搬运全在 `middleware.ts`**：
 

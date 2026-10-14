@@ -193,6 +193,7 @@ ${aboutZh(site, origin).join('\n')}
 
 - [首页](${origin}/)：复古游戏落地页（按机种 / 开发商浏览 + 常见问题）
 - [房间](${origin}/room)：像素房间 + 电视机，从在线游戏库挑一盘或拖入 ROM 即玩
+- [联机开局](${origin}/play)：简洁版开局页。左边一块屏幕、右边一列控件，可单人直接玩，也可开一间 1 对 1 房间并把房间码分享出去
 - [首页（中文）](${origin}/zh)：同一页的中文地址，站内其余页面同理（\`/games\` ↔ \`/zh/games\`）
 - [隐私政策](${origin}/privacy)
 - [服务条款](${origin}/terms)
@@ -254,6 +255,8 @@ no exceptions. Companion files: /ai.txt (machine-readable), /robots.txt, /sitema
 - [Home](${origin}/) — landing page: browse by console / developer, FAQ
 - [Room](${origin}/room) — the pixel room with the CRT; pick a game from the online library or
   drop in your own ROM file
+- [Play](${origin}/play) — a stripped-down start page: one screen on the left, a column of controls
+  on the right. Play solo, or open a 1v1 room and share the room code
 - [Home (Chinese)](${origin}/zh) — same page in Chinese; every other page follows the same pattern
   (\`/games\` ↔ \`/zh/games\`)
 - [Privacy policy](${origin}/privacy)

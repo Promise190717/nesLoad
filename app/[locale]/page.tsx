@@ -233,6 +233,54 @@ export default async function HomePage({
             </Link>
           </div>
 
+          {/*
+            加入房间（2026-10-14 用户要求）：房间号 + 一颗钮 → `/play?room=<码>`。
+
+            放在两个入口的正下方，因为它是**同一类东西** —— 「怎么开这一局」，
+            只是这一条得先拿到一个带外传来的房间码（那间房的房主念给你的，或者
+            他直接把链接发给你）。下面「或 → 搜索」是另一类（找游戏），所以这里
+            不并进那一组，免得把「找」和「玩」混成一排。
+
+            **零 JS**：就是一个 GET 表单，提交后浏览器自己跳到 `/play?room=<码>`，
+            和上面那个搜索框同一个套路（可分享、可被爬、无 JS 也能用）。
+            `/play` 那边读到 `?room=` 只**预填 + 自动选「加入」**、不自动连
+            （见 PlayScene 里那段注释），所以从这里提交不会「一进去就默默进错房」。
+
+            ⚠️ `name="room"` 是**写死的**：那个参数名在 `lib/netplay.ts` 里叫
+            `ROOM_QUERY_PARAM`，但那是个 `'use client'` 模块 —— 服务端组件 import 它
+            拿到的是客户端引用而不是字符串，写进属性只会得到一坨垃圾。同理 `maxLength`
+            对齐那边的 `CODE_LENGTH`（4）。改那边记得同步这一处。
+            ⚠️ 大小写只靠 CSS 的 `uppercase` 显示，提交出去的值保持原样 —— 不用 JS 转，
+            因为两边（PlayScene 读 `?room=`、netplay.join）本来就会再 normalize 一次。
+          */}
+          <form
+            action={localePath(locale, '/play')}
+            method="get"
+            className="mt-4 flex flex-wrap items-center justify-center gap-2"
+          >
+            <label htmlFor="home-room" className="sr-only">
+              {t('netplay.roomCode')}
+            </label>
+            <input
+              id="home-room"
+              name="room"
+              type="text"
+              required
+              maxLength={4}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              placeholder={t('netplay.codePlaceholder')}
+              className="pixel-edge pxw-2 pxc-500 h-[38px] w-[128px] bg-ink-900 px-3 text-center font-pixel text-[13px] tracking-[0.25em] text-ink-100 uppercase placeholder:text-ink-600 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="pixel-edge pxw-2 pxc-500 flex h-[38px] shrink-0 items-center bg-ink-800 px-5 text-[12px] text-ink-200 transition-colors hover:text-accent"
+            >
+              {t('netplay.join')}
+            </button>
+          </form>
+
           <p className="mt-8 font-pixel text-[12px] text-ink-700">{t('home.hero.or')}</p>
 
           {/*

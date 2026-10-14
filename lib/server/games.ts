@@ -243,9 +243,91 @@ export async function countGames(filter: GamePageQuery = {}): Promise<number> {
   return Number(rows[0]?.total ?? 0);
 }
 
+/** 游标 = `created_at:id`。id 是 UUID、不含冒号，按第一个冒号切就够（comments.ts 同款）。 */
+function encodeGameCursor(game: Pick<Game, 'createdAt' | 'id'>): string {
+  return `${game.createdAt}:${game.id}`;
+}
+
+function decodeGameCursor(raw: string | null | undefined): { createdAt: number; id: string } | null {
+  if (!raw) return null;
+  const at = raw.indexOf(':');
+  if (at <= 0) return null;
+  const createdAt = Number(raw.slice(0, at));
+  const id = raw.slice(at + 1);
+  if (!Number.isFinite(createdAt) || !id) return null;
+  return { createdAt, id };
+}
+
+/** `listAdminGamesPage` 的返回。没有 total —— 后台分页控件不需要它（2026-10-14 用户拍板）。 */
+export interface AdminGamePage {
+  games: Game[];
+  /** 往后翻的游标；null = 后面没有了。 */
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 /**
- * 分页读取。后台列表（`/api/admin/games`）直接调它；前台那几条列表路径走
- * `listGamesPageCached` 那一族（内部最终还是调这里）。
+ * 后台列表的**游标翻页** —— 没有 COUNT、没有 OFFSET。
+ *
+ * 为什么后台单独一套（2026-10-14 用户拍板）：后台**刻意不缓存**（传完要立刻看到），
+ * offset 那套「每次都数一遍全表」的成本在这条路径上最疼；而后台的分页控件恰好是
+ * 「上一页 / 下一页」式、不需要跳页 —— 正是游标的舒适区。排序键与 `listGamesPage`
+ * 同一套（`created_at DESC, id DESC`），游标 = 上一页最后一行的位置，条件写成
+ * `(created_at < ?) OR (created_at = ? AND id < ?)` —— 同毫秒的并列行靠 id 兜底，
+ * 不会整组跳过。
+ *
+ * ⚠️ 游标对删除**免疫**：它描述的是「位置」不是「序号」，游标指向的那行被删了，
+ * 查询照样从那之后取 —— `listGamesPage` 里那套「末页删空就夹回一页」的兜底
+ * 在这条路上根本不需要。
+ *
+ * ⚠️ 多取一条（`limit + 1`）判断 hasMore，不发 COUNT（照 comments.ts 的路数）。
+ */
+export async function listAdminGamesPage(
+  cursor: string | null,
+  limit: number,
+  { keyword = '' }: GamePageQuery = {}
+): Promise<AdminGamePage> {
+  const decoded = decodeGameCursor(cursor);
+  const needle = keyword.trim();
+
+  const conditions: string[] = [];
+  /** 绑定值，按占位符编号顺序排（关键词必须第 1 个，理由同 buildGamesWhere）。 */
+  const params: unknown[] = [];
+
+  if (needle) {
+    conditions.push(SEARCH_CONDITION);
+    params.push(`%${needle}%`);
+  }
+  if (decoded) {
+    conditions.push(
+      `(created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND id < ?${params.length + 2}))`
+    );
+    params.push(decoded.createdAt, decoded.id);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = await query<GameRow>(
+    `SELECT * FROM games ${where}
+      ORDER BY created_at DESC, id DESC LIMIT ?${params.length + 1}`,
+    [...params, limit + 1]
+  );
+
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit).map(toGame);
+  const last = items[items.length - 1];
+
+  return {
+    games: items,
+    hasMore,
+    nextCursor: hasMore && last ? encodeGameCursor(last) : null,
+  };
+}
+
+/**
+ * 分页读取（offset 式）。**前台**那几条列表路径走 `listGamesPageCached` 那一族
+ * （内部最终还是调这里）；后台列表 2026-10-14 起改走 `listAdminGamesPage`（游标式，
+ * 不再经过这里）。
  *
  * 排序键**不能只是 `created_at DESC`**：它是毫秒时间戳，批量 / 并发上传时很容易撞上
  * 同值，而 SQLite 对并列行不保证跨查询的顺序稳定 —— 那会出现「某条在第 1 页和第 2 页
@@ -264,8 +346,9 @@ export async function countGames(filter: GamePageQuery = {}): Promise<number> {
  * 只有这一页确实空了（`rows.length === 0`）才回退到上一页，一次退到位。
  *
  * `total` 是**可选入参**（2026-10-14 加）：前台那几条路径会传进来一份走
- * `countGamesCached` 的值，省掉这里再数一遍全表；不传就自己数 —— 后台那几条
- * 「必须立刻看到刚改的数据」的路径走这条。
+ * `countGamesCached` 的值，省掉这里再数一遍全表；不传就自己数。（后台列表同日起
+ * 改走 `listAdminGamesPage` 游标式，现在已没有「必须实时」的调用方 —— 这个口子
+ * 留作无缓存兜底。）
  */
 export async function listGamesPage(
   offset: number,
@@ -349,10 +432,11 @@ export const HOME_REVALIDATE_SECONDS = 43200;
  * ⚠️ **2026-10-14 起在线库弹窗也走这里**（用户拍板「前台的列表都加缓存」）。在那之前
  *    它调的是无缓存的 `listGamesPage`，立场是「传完游戏要立刻能在弹窗里看到」；现在这个
  *    代价变成「新传的游戏最多晚 12 小时才出现在弹窗里」，用户明确接受。
- *    **后台列表（`/api/admin/games`）仍然走无缓存的 `listGamesPage`** —— 那边必须实时。
+ *    **后台列表（`/api/admin/games`）2026-10-14 起改走 `listAdminGamesPage`（游标式）**，
+ *    同样无缓存、必须实时 —— 而且连 COUNT 都不发（见那个函数的注释）。
  *
- * ⚠️ 为什么不直接在 `listGamesPage` 里加缓存：那个函数被前台和后台共用，后台那几条
- * **必须立刻看到刚上传的数据**（传完一款游戏，列表里却要等半天才出现，那是 bug 不是缓存）。
+ * ⚠️ 为什么不直接在 `listGamesPage` 里加缓存：那个函数是前台那几条列表路径的底座，
+ * 后台的列表另有 `listAdminGamesPage`（同样无缓存、必须实时），别把两套搅在一起。
  * 所以缓存是**页面这一侧的策略**，不该下沉到数据层。
  *
  * 参数刻意都是**扁平的基本类型**（offset / limit / keyword / consoleType），而不是收一个

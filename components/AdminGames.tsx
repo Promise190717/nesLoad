@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -52,14 +51,12 @@ interface DeveloperOption {
   name: string;
 }
 
-/** `/api/admin/games` 分页响应。 */
+/** `/api/admin/games` 分页响应（游标翻页，2026-10-14 起）。没有 total —— 后台用不到。 */
 interface GamePage {
   games: AdminGame[];
-  /** 匹配当前关键词的总条数（不是本页条数），用来算总页数。 */
-  total: number;
-  /** 服务端夹回有效范围后的 offset —— 以它为准，别用请求时那个。 */
-  offset: number;
-  limit: number;
+  /** 往后翻的游标；null = 后面没有了。回传给下一次请求的 `cursor` 参数。 */
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 type Notice = { tone: 'ok' | 'error'; text: string };
@@ -108,11 +105,15 @@ const LABEL_CLASS = 'flex flex-col gap-1 text-[12px] text-ink-400';
 /**
  * 拉取**一页**列表。抽成模块级函数，便于 effect 与增删改后共用。
  *
+ * 游标翻页：`cursor` 是上一页响应里的 `nextCursor`（null = 第一页）。服务端按
+ * `created_at DESC, id DESC` 取「这个位置之后的 limit 条」，不发 COUNT。
+ *
  * 搜索词一起带给接口：分页之后本地就没有全量数据了，过滤只能落在服务端
  * （否则搜出来的东西会随翻页变，等于没搜）。
  */
-async function fetchGames(offset: number, keyword: string): Promise<GamePage> {
-  const params = new URLSearchParams({ offset: String(offset), limit: String(PAGE_SIZE) });
+async function fetchGames(cursor: string | null, keyword: string): Promise<GamePage> {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) params.set('cursor', cursor);
   if (keyword) params.set('q', keyword);
 
   const res = await fetch(`/api/admin/games?${params}`);
@@ -121,10 +122,8 @@ async function fetchGames(offset: number, keyword: string): Promise<GamePage> {
   const data = (await res.json()) as Partial<GamePage>;
   return {
     games: data.games ?? [],
-    total: data.total ?? 0,
-    // 老服务端（没走分页的那版）不会给 offset，退回请求值即可
-    offset: data.offset ?? offset,
-    limit: data.limit ?? PAGE_SIZE,
+    nextCursor: data.nextCursor ?? null,
+    hasMore: data.hasMore ?? false,
   };
 }
 
@@ -176,19 +175,17 @@ function imageUrlFromDrop(data: DataTransfer): string | null {
  * 2026-10-10 拆成了两个 tab，各自一个路由。
  */
 /**
- * 本页要拉取的 offset。抽成 memo 的「一个对象」而不是 effect 里现算 `(page-1)*PAGE_SIZE`，
- * 是为了让 effect 的依赖写得直白：它变 = 页码变。
+ * 2026-10-14 起改为游标翻页，`useListQuery`（offset = (page-1)*PAGE_SIZE）没了：
+ * 每页的入口是上一页存下的游标，见组件里 `cursorHistory` 那段。
  */
-function useListQuery(page: number) {
-  return useMemo(() => ({ offset: (page - 1) * PAGE_SIZE }), [page]);
-}
 
 export default function AdminGames() {
   const { t } = useI18n();
   const router = useRouter();
 
   const [games, setGames] = useState<AdminGame[]>([]);
-  const [total, setTotal] = useState(0);
+  /** 「下一页还有没有」。游标翻页没有总数，下一页按钮的禁用态全看它。 */
+  const [hasMore, setHasMore] = useState(false);
   const [listLoaded, setListLoaded] = useState(false);
   /** 当前是否有一条列表请求在飞：翻页 / 搜索 / 增删改后的重拉都点亮加载行。 */
   const [listPending, setListPending] = useState(true);
@@ -196,6 +193,16 @@ export default function AdminGames() {
   // 真正生效的搜索词：点「搜索」或回车才从 draft 提交过来，避免边打字边过滤
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
+  /*
+   * 游标栈（2026-10-14 从 offset 翻页改过来）。下标 = 页码-1：`cursorHistory[0]`
+   * 恒为 null（第一页没有入口游标），第 n 页的入口是第 n-1 页响应里的 `nextCursor`。
+   *
+   * 「上一页」不用做反向游标查询 —— 前端是客户端组件，翻过的游标存栈里，
+   * 往回走直接 pop 出来重新请求就行（服务器仍然按同方向取「这个位置之后」）。
+   * 每次某页被（重新）拉取，它存下的 `nextCursor` 都会被覆盖 —— 删除、上传之后
+   * 栈里过期的入口会在下一次路过时自动修正。
+   */
+  const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([null]);
   const [pageNotice, setPageNotice] = useState<Notice | null>(null);
   /** 增删改之后 +1，用来触发重新拉当前页（effect 的唯一刷新开关）。 */
   const [listVersion, setListVersion] = useState(0);
@@ -262,11 +269,22 @@ export default function AdminGames() {
 
   const isEditing = editingId !== null;
 
-  /** 本页要拉的 offset（随页码变）。 */
-  const listQuery = useListQuery(page);
+  /** 本页的入口游标（从栈里取；第一页恒为 null）。effect 的唯一翻页开关。 */
+  const cursor = cursorHistory[page - 1] ?? null;
+  /** 本页响应里的「下一页入口」。翻下一页前先看它还在不在。 */
+  const nextCursor = cursorHistory[page] ?? null;
 
   /** 增删改后重新拉一遍当前页（同一条路径给「上传完跳回第一页」用）。 */
   const reloadList = useCallback(() => setListVersion((n) => n + 1), []);
+
+  /** 翻下一页。`nextCursor` 在就一定存在栈里（写入发生在上一页响应到达时）。 */
+  const goNext = useCallback(() => {
+    if (!hasMore || !nextCursor) return;
+    setPage((p) => p + 1);
+  }, [hasMore, nextCursor]);
+
+  /** 翻上一页：从栈里拿回上一页当时用的入口游标，重新请求。 */
+  const goPrev = useCallback(() => setPage((p) => Math.max(1, p - 1)), []);
 
   /**
    * 「从列表导入」跑完之后叫这里：新条目按 created_at 倒序排在最前面，
@@ -283,7 +301,8 @@ export default function AdminGames() {
    * setState 走 .then/.catch 回调 —— 直接在 effect 体里同步 setState 会被
    * react-hooks/set-state-in-effect 拦下。
    *
-   * `listQuery` 是 memo 出来的，它变 = 页码变；`listVersion` 只在增删改时递增。
+   * `cursor` 变 = 翻页（或跳回第一页）；`listVersion` 只在增删改时递增。
+   * effect 依赖里有 `page`：成功回调要往 `cursorHistory[page]` 写下一页的入口。
    */
   useEffect(() => {
     /*
@@ -292,7 +311,6 @@ export default function AdminGames() {
      * effect 重新执行时，两个请求的清理都等于「本轮请求被取消」，分不开谁是谁。
      */
     const requestId = ++listRequestId.current;
-    const { offset } = listQuery;
 
     /*
      * 先点亮「载入中」。effect 体内同步 setState 会被 react-hooks/set-state-in-effect
@@ -304,25 +322,30 @@ export default function AdminGames() {
       setListPending(true);
     });
 
-    fetchGames(offset, keyword)
+    fetchGames(cursor, keyword)
       .then((data) => {
         if (listRequestId.current !== requestId) return;
         setGames(data.games);
-        setTotal(data.total);
-        // 服务端会把越界的 offset 夹回最后一页（例如刚把最后一页删空了），跟着它走
-        setPage(Math.floor(data.offset / PAGE_SIZE) + 1);
+        setHasMore(data.hasMore);
+        // 把「下一页的入口」存进栈里（下标 = 当前页码）。已有同值就不动，省一次渲染
+        setCursorHistory((prev) => {
+          if (prev[page] === data.nextCursor) return prev;
+          const copy = [...prev];
+          copy[page] = data.nextCursor;
+          return copy;
+        });
       })
       .catch(() => {
         if (listRequestId.current !== requestId) return;
         setGames([]);
-        setTotal(0);
+        setHasMore(false);
       })
       .finally(() => {
         if (listRequestId.current !== requestId) return;
         setListLoaded(true);
         setListPending(false);
       });
-  }, [listQuery, keyword, listVersion]);
+  }, [cursor, page, keyword, listVersion]);
 
   // 弹窗打开时支持 Esc 关闭
   useEffect(() => {
@@ -361,15 +384,13 @@ export default function AdminGames() {
   }, []);
 
   /*
-   * 总页数由 total 算。`safePage` 只用来画「第几页 / 共几页」和按钮禁用态 ——
-   * 越界不用在这里夹：服务端会把 offset 夹回最后一页，上面 setPage 已经跟上了。
-   * 保留 Math.min 是为了两种极端下文字也不至于显示「3 / 2」：刚好删空最后一页的那一帧。
+   * 游标翻页没有 total，「共 Y 页」算不出来（2026-10-14 用户拍板选 A）——
+   * 分页条只显示「第 X 页」，下一页按钮的禁用态由 `hasMore` 决定，越界无从谈起。
    */
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-
   const applySearch = () => {
     setKeyword(searchDraft.trim());
+    // 关键词变了，旧关键词翻过的游标全部作废 —— 清栈，从第一页重来
+    setCursorHistory([null]);
     setPage(1);
   };
 
@@ -794,12 +815,12 @@ export default function AdminGames() {
         {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
         {listPending && <AdminLoading label={t('feedback.loading')} />}
 
-        {listLoaded && total === 0 && !keyword && (
+        {listLoaded && games.length === 0 && !keyword && (
           <p className="text-[12px] text-ink-500">{t('admin.list.empty')}</p>
         )}
 
         {/* 库里有东西、只是没搜到 —— 和「库是空的」分开说，否则会以为库坏了 */}
-        {listLoaded && total === 0 && keyword && (
+        {listLoaded && games.length === 0 && keyword && (
           <p className="text-[12px] text-ink-500">{t('admin.noMatch')}</p>
         )}
 
@@ -852,23 +873,21 @@ export default function AdminGames() {
           </ul>
         )}
 
-        {pageCount > 1 && (
+        {(page > 1 || hasMore) && (
           <div className="mt-3 flex items-center justify-end gap-3">
             <button
               type="button"
-              disabled={safePage <= 1}
-              onClick={() => setPage(safePage - 1)}
+              disabled={page <= 1}
+              onClick={goPrev}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.prev')}
             </button>
-            <span className="text-[12px] text-ink-500">
-              {safePage} / {pageCount}
-            </span>
+            <span className="text-[12px] text-ink-500">{t('admin.currentPage', { page })}</span>
             <button
               type="button"
-              disabled={safePage >= pageCount}
-              onClick={() => setPage(safePage + 1)}
+              disabled={!hasMore || !nextCursor}
+              onClick={goNext}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               {t('admin.next')}

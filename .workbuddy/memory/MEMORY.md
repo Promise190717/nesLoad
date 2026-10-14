@@ -38,7 +38,13 @@
 
 ## 路由 / 缓存 / SEO
 
-- 真路由：`/games`（15/页，`?page=N`+`?q=`+`?console=`，非规范 307）· `/games/[id]` · `/games/[id]/download` · `/consoles` · `/consoles/[type]` · `/privacy` · `/terms` · `/developers` · `/developers/[id]`；404 一页盖详情+下载。
+- 真路由：`/games`（15/页，`?page=N`+`?q=`+`?console=`，非规范 307）· `/games/[id]` · `/games/[id]/download` · `/consoles` · `/consoles/[type]` · `/privacy` · `/terms` · `/developers` · `/developers/[id]` · **`/play`**（2026-10-14 加的联机开局页，见下）；404 一页盖详情+下载。
+- ⭐ **`/play` = `/room` 的另一个壳**（2026-10-14）：`components/PlayScene.tsx` + `app/[locale]/play/page.tsx`。**引擎侧只有一份**：两边共用 `EmulatorController` / `NetplayController` / `lib/http.ts`（`readBodyWithProgress`+`isAbortError`，从 ConsoleScene 抽出来的）/ `lib/bios.ts`，屏幕直接复用 `ConsoleScreen`（为它加了 `frameClassName` / `hideHint` / `onTap` 可选 prop）。功能面只有房间的子集（无存档/历史/云端/拖本地文件/彩蛋/抽屉）。
+- `/play` 布局（2026-10-14 二稿）：**左一块屏幕 + 右一列**。右边顶上 = 这一款的封面+名字/机种/年份/开发商（照抄 `/consoles/<机种>` 的资料块），中间 = 平铺的「说明+控件」操作表（暂停/重载/弹出/音量/显示/全屏，`ul.divide-y`），底下单一颗「编辑」开 `KeyBindingsPanel`。**开局要做的选择（单人/创建/加入 + 链路 + 画质）摆在屏幕里那层叠层上**，进房换房间码/分享/状态/离开，载入中换进度条+取消。
+- ⚠️⚠️ **`/play` 视觉必须和网站整体一致**（用户在 2026-10-14 明确纠正过一次）：描边就用 `pixel-edge pxw-* pxc-*`，屏幕里那层用 `crt-*`（底永远黑）。「不要 room 的样式」指的是**别搬房间的布景/电视机/抽屉/键帽**，不是另搞一套 1px 细边 —— 我第一版那么写被退了。
+- `/play` 外壳 = `GamesShell`（`showHeader={false}` + `fill`，**这两个 prop 只有它用**）。`showHeader=false` 时 h1 由 PlayScene 出 sr-only 的那颗；`fill` 让内容 `flex-1` 吃满，页脚压到视口最底。屏宽上限 `min(100%, calc((100vh - 320px) * 4/3))`，⚠️ **别给 `.screen` 挂 max-h**（和 aspect-ratio 打架，canvas 被压扁）。
+- ⚠️ **`?id=` 语义两页不同**：`/room?id=` 自动下载开玩；**`/play?id=` 不自动载入**（用户要求「先进房间设置，点开始才加载」）。入口 = 详情页动作区那颗「联机游戏」（`gamesPage.playOnline`）+ **首页 Hero 的房间号表单**（`<form action=/play method=get name=room>`，零 JS，2026-10-14 加；⚠️ `name="room"`/`maxLength=4` 是写死的，`ROOM_QUERY_PARAM`/`CODE_LENGTH` 在 `'use client'` 的 netplay.ts 里取不到）。sitemap 给 0.6。
+- ⚠️ `ConsoleScreen` 2026-10-14 多了三个**可选** prop（默认值 = 原行为，room/掌机不受影响）：`frameClassName`（尺寸类，play 页传 `aspect-[4/3] w-full`）、`hideHint`（不画待机提示）、`onTap` 改为可选。
 - ⚠️ **缓存唯一出口 = `lib/server/cache.ts` 的 `cached()`**：开发模式（`NODE_ENV !== 'production'`）**直接透传查库**，只有线上才吃 `unstable_cache`。要「同请求内只查一次」用 React 的 `cache()` 自己包，不是一回事。
 - ⚠️⚠️ **缓存条目不随部署失效**（落在 `.next/cache`）。改数据 / 改查询形态 **必须把键尾版本号 +1**；返回 `Record<ConsoleType, X>` 的地方**必须运行时补键**（老条目少键 ⇒ 页面印 `undefined`）。
 - 首页三区块 = **12 小时**（`HOME_REVALIDATE_SECONDS`），和 `/games` 的 30 分钟**分开两份**：`listLatestGamesCached`（键 `games:latest`，别拿 `listGamesPageCached` 顶替）/ `countGamesByConsoleCached` / `listTopDevelopersCached`（`developers.ts` 有等值手抄）。

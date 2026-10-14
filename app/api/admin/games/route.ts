@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { CONSOLE_TYPES } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { findGameDuplicate, insertGame, listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
+import { findGameDuplicate, insertGame, listAdminGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
@@ -52,24 +52,26 @@ function intParam(value: string | null, fallback: number): number {
 }
 
 /**
- * 分页返回列表。
+ * 分页返回列表（**游标翻页**，2026-10-14 从 offset 改过来）。
  *
- * 参数：`offset`（跳过几条）、`limit`（本页条数，默认 10）、`q`（可选关键词）。
+ * 参数：`cursor`（上一页返回的 nextCursor；不传 = 第一页）、`limit`（默认 10）、`q`（可选关键词）。
+ * 返回 `{ games, nextCursor, hasMore }` —— **没有 total**：后台的分页控件是「上一页 / 下一页」式、
+ * 用不到总数，而省掉它等于每次少数一遍全表（这条路径刻意不缓存，是全站唯一每次付全价的）。
  *
- * 搜索做在服务端：以前是全量拉回来在浏览器里 filter，一旦改成按页取数，本地 filter
- * 就只能筛当页那几条 —— 翻页会换一批结果，等于没搜。所以关键词随查询一起下发。
+ * 搜索做在服务端：一旦按页取数，本地 filter 就只能筛当页那几条 —— 翻页会换一批结果，
+ * 等于没搜。所以关键词随查询一起下发。
  */
 export async function GET(request: Request) {
   const denied = await assertAdmin();
   if (denied) return denied;
 
   const params = new URL(request.url).searchParams;
-  const offset = intParam(params.get('offset'), 0);
+  const cursor = params.get('cursor');
   const limit = Math.min(intParam(params.get('limit'), 10) || 10, MAX_PAGE_SIZE);
   const keyword = params.get('q')?.trim() ?? '';
 
   try {
-    return NextResponse.json(await listGamesPage(offset, limit, { keyword }));
+    return NextResponse.json(await listAdminGamesPage(cursor, limit, { keyword }));
   } catch (error) {
     console.error('[admin] 列表读取失败', error);
     return fail('list-failed', (error as Error).message, 500);

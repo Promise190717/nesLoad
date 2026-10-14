@@ -51,7 +51,11 @@ export interface Console {
   descriptionEn: string | null;
   releaseYear: number | null;
   createdAt: number;
-  /** 名下游戏数（相关子查询，和 developers.gameCount 同一套）。 */
+  /**
+   * 名下游戏数（相关子查询，和 developers.gameCount 同一套）。
+   * ⚠️ 只有 `listConsoles`（带缓存）会真算；`getConsole` 恒为 0 —— 专题页的
+   *    数字走 `countGamesCached`，别再读这里（见 getConsole 注释）。
+   */
   gameCount: number;
 }
 
@@ -132,16 +136,19 @@ export const listConsolesCached = cached(
 );
 
 /**
- * 按机种标识取一条资料（带游戏数）。机种专题页在用。
+ * 按机种标识取一条资料。机种专题页在用。
  *
  * ⚠️ **不缓存** —— 和 developers 的 getDeveloper 同一条理由：后台改完资料刷新就该看到。
  * 查不到（这个机种还没填过资料）返回 null，调用方自己退回默认渲染。
+ *
+ * ⚠️ **2026-10-14 起不再顺带算 game_count**：那个相关子查询要按 `games.console_type`
+ *    过滤，而这一列**没有索引**、本函数又不缓存 —— 专题页每个请求都得全表 COUNT 一遍
+ *    （本函数曾以「行上顺带算」为卖点，实际是全站最贵的一次 COUNT）。页面已改用
+ *    `countGamesCached` 那份缓存总数（见专题页 generateMetadata），调用方不要再读
+ *    返回值里的 `gameCount`（恒为 0）。`listConsoles` 那边带缓存，子查询照留。
  */
 export async function getConsole(type: string): Promise<Console | null> {
-  const rows = await query<ConsoleRow & { game_count: number }>(
-    `SELECT consoles.*, ${GAME_COUNT} FROM consoles WHERE console_type = ?`,
-    [type]
-  );
+  const rows = await query<ConsoleRow>(`SELECT * FROM consoles WHERE console_type = ?`, [type]);
   return rows[0] ? toConsole(rows[0]) : null;
 }
 

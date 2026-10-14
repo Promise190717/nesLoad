@@ -7,6 +7,7 @@ import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
 import FavoriteButton from '@/components/FavoriteButton';
 import GameComments from '@/components/GameComments';
 import GamesShell from '@/components/GamesShell';
+import { PlayersIcon } from '@/components/icons';
 import ReportGameButton from '@/components/ReportGameButton';
 import ShareGameButton from '@/components/ShareGameButton';
 import {
@@ -357,7 +358,11 @@ export default async function GameDetailPage({
             是没有主次** —— 五颗等大等重，眼睛没有落点；而且它们干的是五件不同量级的事，
             却被画成了同一种东西。
 
-            第一层 · **主行动**（三颗，有描边的实体钮，同一档高度）
+            第一层 · **主行动**（2026-10-14 起四颗，有描边的实体钮，同一档高度）
+              第四颗「联机游戏」是当天加的（去 `/play`，见那颗钮自己的注释）。
+              原来的备注是「别再塞第 4 颗」，作废 —— 但**顺序**仍然有意：
+              先「开始游戏」（唯一带强调色的），紧跟「联机游戏」（同样是「玩」这件事，
+              只是换个地方），再是收藏、下载这两颗「把这盘带子怎么处置」的。
               尺寸 = 站内**紧凑钮**那一档：`py-2` + `12px` 字（同 AdminGames /
               GameLibraryPanel 里那批钮）。2026-10-13 用户说「上面三个按钮的尺寸缩小点」，
               从原来的 `py-2.5` + `13px` 降下来 —— 原来那档比全站任何一颗钮都大一号，
@@ -419,6 +424,25 @@ export default async function GameDetailPage({
                 ▸
               </span>
               {t('gamesPage.play')}
+            </Link>
+            {/*
+              「联机游戏」—— 去的是 `/play?id=`（2026-10-14 用户要求加的第二颗）。
+
+              为什么不是把联机塞进「开始游戏」里面：那一页要的是一块**干净的黑屏**
+              （左边画面、右边控件），而房间那边是满屏像素屋 —— 两种意图不该猜。
+              两颗都是 `<Link>`（真地址，能新标签打开 / 被复制），不是 `<button>`。
+
+              它刻意**不带 accent**：这一页只有「开始游戏」配强调色（它才是主行动），
+              联机走的是和「下载 ROM」同一档的灰钮。图标用 `PlayersIcon`（16px svg，
+              和下面第二层那两枚同一个尺寸档）——这一颗是「两个人一起玩」，
+              用文字符号表不出来。
+            */}
+            <Link
+              href={localePath(locale, `/play?id=${game.id}`)}
+              className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
+            >
+              <PlayersIcon size={16} />
+              {t('gamesPage.playOnline')}
             </Link>
             <FavoriteButton gameId={game.id} count={favoriteCount} />
             <Link

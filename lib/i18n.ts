@@ -616,6 +616,34 @@ const en = {
     'Could not connect to the other player. The browser console has the exact reason.',
 
   /*
+   * `/play` —— 从游戏详情那颗「联机游戏」进来的那一页（2026-10-14 加）。
+   *
+   * 它和 `/room` 是**同一套引擎、两种壳**：房间是「满屏像素屋 + 抽屉」，
+   * `/play` 是「左边一块黑屏 + 右边一列控件」，一页把「怎么开这一局」摆清楚。
+   * 文案刻意短 —— 这一页要的就是简洁。
+   *
+   * ⚠️ 联机那部分的词**一个都没抄在这里**：房间码 / 分享 / 链路 / 画质 / 状态行
+   *    全部复用上面的 `netplay.*`。两页说的是同一件事，各存一份迟早漂成两种说法。
+   */
+  'seo.play.title': 'Play Room — Load a Game and Play Online',
+  'seo.play.description':
+    'One screen to start a game: play solo, or open a 1v1 room and share the code. NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive and arcade titles.',
+  'play.modeSolo': 'Solo',
+  'play.start': 'Start',
+  'play.cancel': 'Cancel',
+  'play.downloading': 'Downloading the ROM…',
+  'play.booting': 'Starting the core…',
+  'play.loadFail': 'This cartridge failed to load.',
+  'play.notFound': 'That game could not be found.',
+  'play.fullscreen': 'Fullscreen',
+  /* 右侧操作表上那个音量行的说明词（音量档位本身复用 `volume.*`） */
+  'play.volume': 'Volume',
+  /* 操作表底部那颗钮。**只写「编辑」**，具体编辑什么靠 tooltip（`keybind.open`）说 */
+  'play.edit': 'Edit',
+  'play.hint': 'Esc leaves fullscreen. Nothing else here uses the keyboard.',
+  'gamesPage.playOnline': 'Play online',
+
+  /*
    * 自定义按键面板。同样浮在房间上、不进屏幕。
    * 钮名走街机叫法（A B C X Y Z），由 `KeyBindingsPanel` 的 BUTTON_LABELS 直接给出
    * —— 它们是手柄上的丝印、不进文案表。只有「开始 / 投币」是词，跟着语言走。
@@ -1226,6 +1254,8 @@ const en = {
   'admin.search': 'Search',
   'admin.prev': 'Prev',
   'admin.next': 'Next',
+  // 游标翻页后没有总数可算（2026-10-14），分页条只显示当前页码。
+  'admin.currentPage': 'Page {page}',
 
   /*
    * 开发商库（2026-10-12 用户要的「游戏厂商库」）。口径统一叫**开发商** ——
@@ -1620,6 +1650,12 @@ const en = {
   /* 兜底那条「没有反应？直接下载」2026-10-12 按用户要求去掉了（它绕开 6 秒缓冲），
      所以 `download.manual` / `download.manualLink` 两条文案跟着删了。 */
   'download.rights': 'Only download ROM files you are legally allowed to use.',
+  /*
+   * 免责声明（2026-10-14 用户要求加上）：说明 ROM 来自第三方、本站只做分享，
+   * 版权归原权利人。挂在下载页按钮下方，和 download.rights 是两条、别合并。
+   */
+  'download.disclaimer':
+    'Disclaimer: all ROM files on this page are collected from third parties and are for personal study and backup purposes only. All copyrights belong to their original publishers; if any content infringes your rights, please contact us for removal.',
   /* 房间页那条 `?id=` 深链（`/room?id=`）：从详情页点「开始游戏」过来，但库里已经没有这条了 */
   'deepLink.notFound': 'That game could not be found — it may have been removed.',
   /*
@@ -1879,6 +1915,23 @@ const zh: Record<MessageKey, string> = {
   // 加入者专用：房间已有一对在玩（本站只支持 1 对 1，第三个人会被房主请出去）
   'netplay.errRoomFull': '房间已满，本游戏只支持 1 对 1。',
   'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
+
+  // `/play`（联机游戏页）。和英文侧同一套说明：短，联机词汇一律复用上面的 netplay.*
+  'seo.play.title': '开玩 —— 载入游戏、在线联机',
+  'seo.play.description':
+    '一块屏幕开局：单人直接玩，也可以开一间 1v1 房间把房间码分享出去。支持 NES、SFC、GB、GBA、MD 与街机。',
+  'play.modeSolo': '单人',
+  'play.start': '开始',
+  'play.cancel': '取消',
+  'play.downloading': '正在下载游戏文件…',
+  'play.booting': '正在启动核心…',
+  'play.loadFail': '这盘游戏载入失败。',
+  'play.notFound': '找不到这个游戏。',
+  'play.fullscreen': '全屏',
+  'play.volume': '音量',
+  'play.edit': '编辑',
+  'play.hint': 'Esc 退出全屏，其余操作都在右侧。',
+  'gamesPage.playOnline': '联机游戏',
 
   // 按钮 tooltip 叫「按键设置」，面板标题仍叫「自定义按键」—— 刻意不同名（理由见英文侧注释）
   'keybind.title': '自定义按键',
@@ -2251,6 +2304,8 @@ const zh: Record<MessageKey, string> = {
   'admin.search': '搜索',
   'admin.prev': '上一页',
   'admin.next': '下一页',
+  // 游标翻页后没有总数可算（2026-10-14），分页条只显示当前页码。
+  'admin.currentPage': '第 {page} 页',
 
   /* 开发商库，见上面英文那份的注释 */
   'admin.developers.title': '开发商',
@@ -2513,6 +2568,9 @@ const zh: Record<MessageKey, string> = {
   'download.started': '已开始下载，请查看浏览器的下载目录。',
   /* 见上面 en 那份的说明：兜底那条「直接下载」连同它的文案一起删了 */
   'download.rights': '请只下载你有权使用的 ROM 文件。',
+  /* 免责声明，见上面 en 那份的说明 */
+  'download.disclaimer':
+    '免责声明：本页面所有 ROM 文件均收集自第三方，仅供个人学习与备份研究使用，请在下载后 24 小时内自行删除；相关版权归原权利方所有，如有侵权请联系我们删除。',
 
   'deepLink.notFound': '找不到这个游戏，可能已经被移除。',
   /* 深链载入中那颗独立弹窗，见英文表里同一条上面的说明 */

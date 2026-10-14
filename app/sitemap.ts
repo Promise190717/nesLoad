@@ -10,7 +10,8 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * 本站可收录的地址分六类：
  *   · 首页落地页（`/`，2026-10-13 起）—— Hero + 按机种 / 开发商浏览 + FAQ；
- *   · 房间那一页（`/room`，2026-10-13 从 `/` 挪过来的）—— 唯一的「应用」页；
+ *   · 两页「应用」：房间（`/room`，2026-10-13 从 `/` 挪过来的）与简洁开局页
+ *     （`/play`，2026-10-14 加）；
  *   · `/privacy` / `/terms` 两页法务文档；
  *   · `/games` 游戏列表（含 `?console=<机种>` 那四份机种筛选，2026-10-13 加）；
  *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）；
@@ -123,6 +124,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
      * （满屏 CSS 场景 + canvas），价值在于「用户点进来能用」，不在于「被搜到」。
      */
     ...entries(origin, '/room', { changeFrequency: 'weekly', priority: 0.8 }),
+    /*
+     * `/play`（2026-10-14 加）同属「应用页」，但比 `/room` 再低一档（0.6）：
+     * 它是从详情页分出来的一条**次级入口**（联机开局的简洁版），正文比 `/room` 还少。
+     * 收录它的理由是它的 canonical 指自己、分享链接又常常带 `?id=`，总得有个正式地址；
+     * 但没必要和 `/room` 争同一个「在线玩」的意图。
+     */
+    ...entries(origin, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
     ...entries(origin, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*
      * 详情页给 0.8、下载页给 0.6：详情页是「内容」，下载页是「动作」。

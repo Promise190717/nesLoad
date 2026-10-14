@@ -146,6 +146,76 @@ export async function countDevelopers({ keyword = '' }: DeveloperPageQuery = {})
   return Number(rows[0]?.total ?? 0);
 }
 
+/** 游标 = `created_at:id`。id 是 UUID、不含冒号，按第一个冒号切就够（games.ts / comments.ts 同款）。 */
+function encodeDeveloperCursor(developer: Pick<Developer, 'createdAt' | 'id'>): string {
+  return `${developer.createdAt}:${developer.id}`;
+}
+
+function decodeDeveloperCursor(raw: string | null | undefined): { createdAt: number; id: string } | null {
+  if (!raw) return null;
+  const at = raw.indexOf(':');
+  if (at <= 0) return null;
+  const createdAt = Number(raw.slice(0, at));
+  const id = raw.slice(at + 1);
+  if (!Number.isFinite(createdAt) || !id) return null;
+  return { createdAt, id };
+}
+
+/** `listAdminDevelopersPage` 的返回。没有 total —— 理由同 games.ts 的 AdminGamePage。 */
+export interface AdminDeveloperPage {
+  developers: Developer[];
+  /** 往后翻的游标；null = 后面没有了。 */
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+/**
+ * 后台列表的**游标翻页** —— 理由与形状同 games.ts 的 `listAdminGamesPage`
+ * （2026-10-14 用户拍板：后台改游标、总数去掉）。搜索条件与 `listDevelopers`
+ * 同一份 `SEARCH_CONDITION`，关键词仍是第 1 个绑定参数。
+ */
+export async function listAdminDevelopersPage(
+  cursor: string | null,
+  limit: number,
+  { keyword = '' }: DeveloperPageQuery = {}
+): Promise<AdminDeveloperPage> {
+  const decoded = decodeDeveloperCursor(cursor);
+  const needle = keyword.trim();
+
+  const conditions: string[] = [];
+  /** 绑定值，按占位符编号顺序排（关键词必须第 1 个，理由见 SEARCH_CONDITION 注释）。 */
+  const params: unknown[] = [];
+
+  if (needle) {
+    conditions.push(SEARCH_CONDITION);
+    params.push(`%${needle}%`);
+  }
+  if (decoded) {
+    conditions.push(
+      `(created_at < ?${params.length + 1} OR (created_at = ?${params.length + 1} AND id < ?${params.length + 2}))`
+    );
+    params.push(decoded.createdAt, decoded.id);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = await query<DeveloperRow & { game_count: number }>(
+    `SELECT developers.*, ${GAME_COUNT} FROM developers ${where}
+      ORDER BY created_at DESC, id DESC LIMIT ?${params.length + 1}`,
+    [...params, limit + 1]
+  );
+
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit).map(toDeveloper);
+  const last = items[items.length - 1];
+
+  return {
+    developers: items,
+    hasMore,
+    nextCursor: hasMore && last ? encodeDeveloperCursor(last) : null,
+  };
+}
+
 /**
  * 分页读取开发商列表，顺带给出每个名下的游戏数。
  *
@@ -155,8 +225,9 @@ export async function countDevelopers({ keyword = '' }: DeveloperPageQuery = {})
  *
  * 越界同样**夹回最后一页**并把夹过的 offset 返回，调用方以返回值为准（和 listGamesPage 一套）。
  *
- * ⚠️ **公开列表页请用 `listDevelopersCached`**（带 12 小时缓存，见下）；本函数保持无缓存，
- *    留给后台那几条「必须立刻看到刚改的数据」的路径。
+ * ⚠️ **公开列表页请用 `listDevelopersCached`**（带 12 小时缓存，见下）。本函数保持无缓存；
+ *    后台列表 2026-10-14 起改走 `listAdminDevelopersPage`（游标式），现在已没有
+ *    「必须实时」的调用方 —— 这个函数只剩前台缓存层在用，留着是无缓存的兜底。
  */
 export async function listDevelopers(
   offset: number,
@@ -168,7 +239,7 @@ export async function listDevelopers(
   const where = needle ? `WHERE ${SEARCH_CONDITION}` : '';
   const params = needle ? [`%${needle}%`] : [];
 
-  // 传了就用（前台走 countDevelopersCached 那份，省一次全表 COUNT），没传就自己数（后台路径）。
+  // 传了就用（前台走 countDevelopersCached 那份，省一次全表 COUNT）。
   const resolvedTotal = total ?? (await countDevelopers(filter));
 
   const lastOffset = Math.max(0, Math.ceil(resolvedTotal / limit) - 1) * limit;
@@ -217,8 +288,9 @@ export const countDevelopersCached = cached(
 /**
  * 带缓存的列表读取 —— **只给 `/developers` 列表页用**，别处的调用方继续用 `listDevelopers`。
  *
- * 后台那几条路径（`/api/admin/developers` 的列表、增删改之后的复核）**必须**走未缓存的那份：
- * 刚改完的名字、刚建好的开发商，后台一刷新就该看到 —— 那是 bug 不是缓存。所以缓存是
+ * 后台那几条路径（`/api/admin/developers` 的列表走 `listAdminDevelopersPage`、增删改之后的
+ * 复核走未缓存的函数）**必须实时**：刚改完的名字、刚建好的开发商，后台一刷新就该看到 ——
+ * 那是 bug 不是缓存。所以缓存是
  * **页面这一侧的策略**，不下沉进 `listDevelopers`（和 `listGamesPageCached` 同一条规矩）。
  *
  * 参数刻意都是**扁平的基本类型**（offset / limit / keyword），而不是收一个 `DeveloperPageQuery`
