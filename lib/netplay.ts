@@ -1,6 +1,7 @@
 'use client';
 
 import type { MessageAction, Room, TurnServerConfig } from '@trystero-p2p/mqtt';
+import { isConsoleType } from './consoles';
 import type { ConsoleType } from './emulator';
 
 /**
@@ -272,17 +273,20 @@ export interface RemoteGame {
 /**
  * 把会话消息里的 `c` 字段还原成机种。
  *
- * 必须**逐个认**，不能像原先那样只分 snes / 其余一律 nes：机种现在有四个
- * （nes / snes / gba / arcade），而移动端掌机的面键是**按机种长**的（NES 两颗、
- * SFC 四颗、GBA 四颗含肩键、街机六颗 —— 见 HandheldConsole 的 FACE_ROWS）。
- * 街机被误判成 nes 的话，加入者手上只有两颗面键，拳皇那种六键游戏直接没法玩；
- * GBA 被误判成 nes 则少掉 L / R 两颗肩键。
+ * 必须**逐个认**，不能像原先那样只分 snes / 其余一律 nes：机种现在有十二个，
+ * 而移动端掌机的面键是**按机种长**的（NES 两颗、SFC 四颗、MD 三颗、街机六颗 ——
+ * 见 `HandheldConsole` 的 `FACE_ROWS`）。街机被误判成 nes 的话，加入者手上只有两颗
+ * 面键，拳皇那种六键游戏直接没法玩；GBA 被误判成 nes 则少掉 L / R 两颗肩键。
+ *
+ * 判据走 `lib/consoles.ts` 的登记表而不是手写一串比较 —— 2026-10-14 加机种时
+ * 这里曾是「漏了不报错」的地方之一：新机种会被静默降成 nes，表现是
+ * 「加入者按了键房主那边没反应」，极难查。
  *
  * 认不出（老版本客户端不发 `c`、或者发了脏值）一律落到 `nes`：它是**按钮最少**的那套，
  * 少给一颗最多是不方便，多给一颗会让人以为按了没反应。
  */
 function readConsole(raw: unknown): ConsoleType {
-  return raw === 'snes' || raw === 'gba' || raw === 'arcade' ? raw : 'nes';
+  return typeof raw === 'string' && isConsoleType(raw) ? raw : 'nes';
 }
 
 export interface NetplayState {

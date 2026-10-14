@@ -2,9 +2,9 @@
  * 机种库（consoles 表）的读写。
  *
  * 和 developers.ts 同一套做法，但有一个本质区别（见 db/schema.sql 那段说明）：
- * **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade'，代码里的 `ConsoleType`
- * 枚举），不是 UUID。这张表是机种**资料的扩展**，不是机种的**清单** ——
- * 机种的清单住在 `components/CartridgeSprite.tsx` 的 `CONSOLE_TYPES` 里（加机种是改代码的事）。
+ * **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade' 等十二个，代码里的
+ * `ConsoleType` 枚举），不是 UUID。这张表是机种**资料的扩展**，不是机种的**清单** ——
+ * 机种的清单住在 `lib/consoles.ts` 的 `CONSOLE_TYPES` 里（加机种是改代码的事）。
  * 某一行被删了，前台页面对照 `CONSOLE_TYPES` 退回默认渲染，游戏一根毫毛都不少
  * （`games.console_type` 存的本来就是这些枚举值，天生就是关联）。
  *
@@ -17,7 +17,7 @@
  * 取值规则和 developers 一致：`localizeConsole` 在渲染时选，英文空值回退中文。
  */
 
-import { unstable_cache } from 'next/cache';
+import { cached } from './cache';
 import { query } from './d1';
 import type { Locale } from '@/lib/i18n';
 
@@ -38,7 +38,7 @@ export interface ConsoleRow {
 
 /** 对外结构（camelCase，供 API / 前端）。 */
 export interface Console {
-  /** 机种标识 = `ConsoleType`（'nes' / 'snes' / 'gba' / 'arcade'），同时也是 URL 里那段 */
+  /** 机种标识 = `ConsoleType`（十二个之一），同时也是 URL 里那段 */
   type: string;
   name: string;
   nameEn: string | null;
@@ -113,18 +113,21 @@ export async function listConsoles(): Promise<Console[]> {
 }
 
 /**
- * 机种列表页（`/consoles`）那份缓存的时长（秒）= 24 小时。
+ * 机种列表页（`/consoles`）那份缓存的时长（秒）= 12 小时。
  *
- * 和 developers 那边同一个理由：这一页给爬虫和过路访客看，内容只有后台改资料时才变，
- * 每个访客都打一趟 D1 不划算。缓存键里没有语言（`Console` 两种语言都带，
- * 选哪份由页面调 `localizeConsole`）。
+ * 缓存键里没有语言（`Console` 两种语言都带），用哪份由页面调 `localizeConsole` 决定。
  */
-export const CONSOLES_PAGE_REVALIDATE_SECONDS = 86400;
+export const CONSOLES_PAGE_REVALIDATE_SECONDS = 43200;
 
-/** `listConsoles` 的缓存版 —— **只给前台那几页用**；后台必须走未缓存的这份。 */
-export const listConsolesCached = unstable_cache(
+/**
+ * `listConsoles` 的缓存版 —— **只给前台用**；后台必须走未缓存的那份。
+ *
+ * ⚠️ 改完机种资料要把键尾的版本号 +1：缓存条目不随部署失效，不换键前台要等一个 TTL
+ *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2）。
+ */
+export const listConsolesCached = cached(
   async () => listConsoles(),
-  ['consoles:list', 'v1'],
+  ['consoles:list', 'v2'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
 

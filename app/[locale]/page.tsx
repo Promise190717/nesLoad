@@ -62,6 +62,8 @@ type SearchParams = Record<string, string | string[] | undefined>;
 const LATEST_COUNT = 12;
 /** 「按开发商浏览」取 8：两行正好排满（sm 起一行 4 个）。 */
 const DEVELOPER_COUNT = 8;
+/** 「按机种浏览」最多几张卡：8 是这个网格的两整行（`grid-cols-2 sm:grid-cols-4`）。 */
+const HOME_CONSOLE_COUNT = 8;
 
 /**
  * 房间页那三个参数（`?id=` 深链、`?room=` 邀请码）—— 它们从前挂在 `/` 上。
@@ -171,6 +173,17 @@ export default async function HomePage({
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>
     translate(locale, key, { site: SITE_NAME[locale], ...vars });
 
+  /*
+   * 首页这块按游戏数从多到少取前 8 个。
+   *
+   * ⚠️ 不按「有没有游戏」过滤 —— 空机种也照列（2026-10-14 按 `count > 0` 滤过一次，
+   *    结果只剩 4 张卡）。想看全部机种走「全部机种」→ `/consoles`。
+   * ⚠️ 先摊成新数组再 `sort`：`CONSOLE_TYPES` 是 readonly，原地排会污染其它页面的顺序。
+   */
+  const homeConsoles = [...CONSOLE_TYPES]
+    .sort((a, b) => counts[b] - counts[a])
+    .slice(0, HOME_CONSOLE_COUNT);
+
   const chip =
     'pixel-edge pxw-2 pxc-700 flex h-full flex-col items-center justify-center gap-2 bg-ink-900 p-4 text-center transition-colors hover:bg-ink-800';
 
@@ -272,7 +285,7 @@ export default async function HomePage({
           右上角那条「全部机种」去 `/consoles` —— 机种有了自己的资料表和列表页，
           不再借用 `/games?console=` 那个筛选地址；列表页的机种筛选**留着没动**，
           `/games` 那边照常能用）。
-          ⚠️ 卡片数量是**现读的**（`countGamesByConsoleCached`）：写死会在增减游戏后变成假话。
+          ⚠️ 张数现读（`countGamesByConsoleCached`）；列哪几个由上面 `homeConsoles` 定。
         */}
         <Section
           title={t('home.consoles.title')}
@@ -281,7 +294,7 @@ export default async function HomePage({
           linkLabel={t('home.consoles.all')}
         >
           <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {CONSOLE_TYPES.map((type, index) => (
+            {homeConsoles.map((type, index) => (
               /*
                * 入场动效和 `/games` 的卡片、开发商卡片共用一套（`.card-in` +
                * lib/card-stagger.ts 的错峰参数）—— 同一个站里几处网格的出场节奏
@@ -289,7 +302,7 @@ export default async function HomePage({
                */
               <li key={type} className="card-in" style={{ animationDelay: `${cardDelayMs(index)}ms` }}>
                 <Link href={localePath(locale, `/consoles/${type}`)} className={chip}>
-                  {/* 机种标签是那四个丝印词（NES / SFC / GBA / ARC），不进文案表 */}
+                  {/* 机种标签是丝印词（NES / SFC / GBA / ARC 这类），不进文案表 */}
                   <span className="font-pixel text-[18px] text-accent">{CONSOLE_LABEL[type]}</span>
                   <span className="text-[12px] text-ink-400">
                     {t('home.consoles.count', { count: counts[type] })}

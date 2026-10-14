@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
-import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/components/CartridgeSprite';
+import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
+import { isConsoleType } from '@/lib/consoles';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
 import {
@@ -56,10 +57,11 @@ const loadGames = cache(
   }
 );
 
-/** 这段地址是不是一个真机种。枚举之外的（`/consoles/foo`）交给 notFound。 */
-function isConsoleType(value: string): value is (typeof CONSOLE_TYPES)[number] {
-  return (CONSOLE_TYPES as readonly string[]).includes(value);
-}
+/*
+ * 这段地址是不是一个真机种，判据是 `lib/consoles.ts` 的 `isConsoleType` 那份登记表
+ * （枚举之外的 `/consoles/foo` 交给 notFound）。2026-10-14 之前这里手写过一个同款函数，
+ * 和后台接口那份是两处 —— 加机种时漏掉任何一处都会让专题页 404。
+ */
 
 /**
  * 第几页的地址。**语言前缀在这里加**（`lib/pager.ts` 的 `pageHref` 只认裸路径）。

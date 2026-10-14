@@ -18,14 +18,12 @@
  */
 
 import { NextResponse } from 'next/server';
-import type { ConsoleType } from '@/lib/emulator';
+import { CONSOLE_TYPES } from '@/lib/consoles';
 import { listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 
 export const runtime = 'nodejs';
 // 走 D1 实时读，别让构建期把它静态化了（构建时并没有数据库凭据）
 export const dynamic = 'force-dynamic';
-
-const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 /** 不传 limit 时的每页条数，和前台 GameLibraryPanel 的 `PAGE_SIZE` 对齐。 */
 const DEFAULT_LIMIT = 15;

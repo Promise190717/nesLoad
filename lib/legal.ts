@@ -113,7 +113,7 @@ function privacy(locale: Locale): LegalDoc {
           body: ['以下内容仅保存于浏览器本地，不会上传至服务器：'],
           bullets: [
             '界面偏好设置与自定义按键。',
-            '本机存档、导入的街机 BIOS 文件与游戏库载入记录。',
+            '本机存档、街机 BIOS 文件与游戏库载入记录。',
             '清除浏览器数据或使用无痕窗口即可删除，且无法恢复。',
           ],
         },
@@ -213,7 +213,7 @@ function privacy(locale: Locale): LegalDoc {
         body: ['The following is kept only in your browser and is not uploaded to our servers:'],
         bullets: [
           'Interface preferences and custom key bindings.',
-          'Local save states, an imported arcade BIOS file, and the library load history.',
+          'Local save states, an arcade BIOS file, and the library load history.',
           'Removed by clearing browser data or using a private window; deleted data cannot be recovered.',
         ],
       },

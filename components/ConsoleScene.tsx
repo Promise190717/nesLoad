@@ -11,7 +11,14 @@ import {
   type DragEvent,
 } from 'react';
 import { getAudioTrack } from '@/lib/audio-tap';
-import { getBios, getBiosInfo, isNeoGeoBios, putBios, type BiosInfo } from '@/lib/bios';
+import {
+  ensureBios,
+  getBiosInfo,
+  isNeoGeoBios,
+  looksLikeNeoGeoRomset,
+  putBios,
+  type BiosInfo,
+} from '@/lib/bios';
 import { chiptuneUrl } from '@/lib/chiptune';
 import { readMobileFlag } from '@/lib/device';
 import {
@@ -611,11 +618,13 @@ export default function ConsoleScene({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   /**
-   * 已装上的街机 BIOS（Neo Geo 的 neogeo.zip），null 表示没装。
+   * 已装上的街机 BIOS（Neo Geo 的 neogeo.zip），null 表示没有。
    *
-   * **只当一个布尔用**（装过没有），决定 loadFile 要不要去翻一次 IndexedDB；
-   * 真正递给模拟器的那份由 loadFile 现取（`getBios()`），
-   * 免得把一个几 MB 的 File 长期挂在 React state 上。
+   * **只当状态用** —— 页脚那行拿它显示「BIOS 已装」；真正递给模拟器的那份由 loadFile
+   * 现取（`ensureBios()`），免得把一个几 MB 的 File 长期挂在 React state 上。
+   *
+   * ⚠️ 它**不再**决定「要不要去翻一次 IndexedDB」：那份兜底已经挪进 `ensureBios()`
+   * （本地没有就自动装站点自带的那份）。所以这里的 null 只代表「本地和站点两份都没有」。
    */
   const [bios, setBios] = useState<BiosInfo | null>(null);
 
@@ -626,6 +635,22 @@ export default function ConsoleScene({
    * 「为什么拖进去没反应」的通道 —— 它挂在「按键说明」那个弹窗里。存 null 表示没这回事。
    */
   const [archiveHint, setArchiveHint] = useState<'7z' | 'rar' | null>(null);
+
+  /**
+   * 刚拖进来的这盘街机卡带**看着像 Neo Geo 游戏**，而 BIOS 本地和站点两份都没拿到。
+   *
+   * ⚠️ 正常情况下这条**不会亮**：`ensureBios()` 会把站点自带的那份
+   * （`public/bios/neogeo.zip`）自动装上。只有「自建部署没放文件」或「用户手动删过」
+   * 才轮得到它 —— 那时它就是唯一还能告诉用户「为什么拖进去没反应」的东西。
+   *
+   * 为什么需要它：Neo Geo 缺 BIOS 的失败是**完全静默**的 —— 核心不抛异常
+   * （`Nostalgist.launch` 正常返回）、`loadFile` 的 catch 分支走不到、屏幕照旧出雪花。
+   * 所以「拖入那一刻按 romset 内容猜」是唯一能拿到信号的时机，判据见 `lib/bios.ts`。
+   *
+   * 和 `archiveHint` 共用同一个展示通道（「按键说明」弹窗），但两者可以同时成立
+   * （拖进来一个 `.7z` 的 Neo Geo 包），所以是**两个独立的 state**，不是联合类型。
+   */
+  const [biosHint, setBiosHint] = useState(false);
 
   const [fileOver, setFileOver] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -1380,6 +1405,7 @@ export default function ConsoleScene({
       );
       // 每次拖入都重置上一条格式提示 —— 它说的是「刚才那个文件」，不是历史状态
       setArchiveHint(null);
+      setBiosHint(false);
 
       // 房主正在出画面时不接受本地载入：屏幕上已经有画面了，再插一盘只会打架。
       // 用 netplay.current 而不是 state，省得把 netplayState 拖进依赖、让这个
@@ -1417,8 +1443,35 @@ export default function ConsoleScene({
       // 载入失败时要靠它决定页脚给不给 BIOS 提示，所以在 try 里先认一次机种。
       // （loadRom 内部还会再认一次 —— 只读文件头，不值得为省这一次把签名搅乱。）
       let consoleType: ConsoleType | null = null;
+      // 街机要递给核心的那份 BIOS。在上面那个 try 里备齐，loadRom 那一步只负责用。
+      let biosFile: File | null = null;
       try {
         consoleType = await detectConsole(file);
+
+        /*
+         * 街机：先把 BIOS 备齐 —— 本地存过就用本地那份，没存过就自动把站点自带的那份
+         * （`public/bios/neogeo.zip`）装进 IndexedDB。用户这边是零操作。
+         *
+         * 这一步同时承担「装上」和「取出来」，所以从站点那份装成功时，页脚那个 `bios`
+         * state 也得跟着同步 —— 它是页脚那行状态的唯一来源。
+         *
+         * 两条都拿不到（自建部署没放文件、或者用户手动删过），才退回去认这盘是不是
+         * Neo Geo 游戏：认出来就把提示挂进「按键说明」弹窗，让「拖进去没反应」有个解释。
+         *
+         * **只能在这一刻认**：Neo Geo 缺 BIOS 的失败在运行时没有任何信号 ——
+         * 核心不抛异常，下面的 catch 分支永远走不到（见 `biosHint` 的注释）。
+         *
+         * 非街机机种整个跳过：NES / SFC / GBA 不需要 BIOS，也就不必白读一次存储。
+         */
+        if (consoleType === 'arcade') {
+          biosFile = await ensureBios();
+          if (biosFile) {
+            // 可能刚从站点那份装上 —— 本地那份不必重设（`bios` 已经是它了）
+            if (!bios) setBios(await getBiosInfo());
+          } else {
+            setBiosHint(await looksLikeNeoGeoRomset(file));
+          }
+        }
         /*
          * 每 1% 才更新一次 state：几 MB 的核心包会有几百个 chunk，
          * 每个都 setState 会把整个场景重渲染几百次。
@@ -1439,11 +1492,13 @@ export default function ConsoleScene({
             setLoading({ ratio: pct >= 100 ? null : loaded / total });
           },
           /*
-           * 街机要带上 BIOS（Neo Geo 的 neogeo.zip）。没装就是 null，照常启动 ——
-           * CPS1 / CPS2 那类本来就不需要，缺了只是 Neo Geo 游戏会静默失败。
-           * 先用 state 短路一下，没装过就不必去翻一次 IndexedDB。
+           * 街机要带上 BIOS（Neo Geo 的 neogeo.zip）—— 上面 `ensureBios()` 已经备好了。
+           * 没拿到就是 null，照常启动：CPS1 / CPS2 那类本来就不需要，
+           * 缺了只是 Neo Geo 游戏会静默失败（那种情况上面已经把 `biosHint` 挂上了）。
+           *
+           * 非街机机种恒为 null —— `loadRom` 内部也只认街机那条分支，传了会被忽略。
            */
-          bios ? await getBios() : null
+          biosFile
         );
         const loaded = controller.rom;
         setRom(loaded);
@@ -3730,10 +3785,23 @@ export default function ConsoleScene({
           onClick={() => setLegendOpen(true)}
           title={t('legend.open')}
           aria-label={t('legend.open')}
-          className="rail-legend pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+          className="rail-legend pixel-edge pxw-2 relative bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
         >
           <HelpIcon size={16} />
           <span className="row-label">{t('legend.open')}</span>
+          {/*
+            有待看的提示时点一颗灯。
+            载入失败是**静默**的（屏幕里什么都不说），提示又只写在弹窗里 ——
+            不点这一下用户根本不会去翻。7z / rar 那条（`archiveHint`）本来也有这个毛病，
+            这次一起受益。
+            用 `accent` 而不是 `danger`：这不是错误状态，是「有事要说」。
+          */}
+          {(archiveHint || biosHint) && (
+            <span
+              aria-hidden
+              className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent"
+            />
+          )}
         </button>
 
         {/*
@@ -4462,6 +4530,13 @@ export default function ConsoleScene({
                 按钮上写的字和这里原来那句一模一样，不需要再说明一遍。
               */}
               {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
+              {/*
+                Neo Geo 缺 BIOS。判据是**猜**的（`looksLikeNeoGeoRomset` 按 rom 名认），
+                所以文案写的是「看着像…需要」，别改成断言。
+                只有**本地和站点自带那两份都没拿到**时才会亮 —— 正常情况下 `ensureBios()`
+                会自动把站点那份装上，这条根本不会出现（见 loadFile 里那段）。
+              */}
+              {biosHint && <p>{t('legend.needBios')}</p>}
 
               {/*
                 重看操作指引。**先关自己再开指引** —— 两个弹窗的层级不一样

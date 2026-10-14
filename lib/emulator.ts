@@ -21,7 +21,27 @@ import { unwrapRom } from './unwrap';
  */
 installAudioTap();
 
-export type ConsoleType = 'nes' | 'snes' | 'gba' | 'arcade';
+/**
+ * 站内机种枚举。**加了机种要同步的地方**列在 `lib/consoles.ts` 顶部那张清单里。
+ *
+ * 2026-10-14 从四个扩到十二个：GB / GBC / MD / GG / SMS / 32X / WonderSwan /
+ * Neo Geo Pocket。挑的都是「核心在我们用的那个 WASM 构建里现成有」的机种 ——
+ * 做法、以及为什么 NDS / N64 / 土星 / Jaguar 上不了（那个构建里根本没编），
+ * 记在 `README.md` 的「机种」一节。
+ */
+export type ConsoleType =
+  | 'nes'
+  | 'snes'
+  | 'gb'
+  | 'gbc'
+  | 'gba'
+  | 'md'
+  | 'gg'
+  | 'sms'
+  | '32x'
+  | 'ws'
+  | 'ngp'
+  | 'arcade';
 
 export interface LoadedRom {
   name: string;
@@ -77,7 +97,38 @@ export class UnsupportedRomError extends Error {
 const CORE_MAP: Record<ConsoleType, string> = {
   nes: 'fceumm',
   snes: 'snes9x',
+  /*
+   * GB / GBC 也用 `mgba`：mGBA 本来就是「GBA + GB + GBC 三合一」的核心，
+   * Nostalgist 自己的 `systemCoreMap` 里 `gb` / `gbc` / `gba` 三个键**都指向 mgba**
+   * （见 node_modules/nostalgist/dist/nostalgist.js 的 systemCoreMap）。
+   * 所以扩这两台**不需要任何新核心文件** —— 它是这批机种里最便宜的一档。
+   */
+  gb: 'mgba',
+  gbc: 'mgba',
   gba: 'mgba',
+  /*
+   * 世嘉三台共用一个核心：Genesis Plus GX 一套吃 MD / Master System / Game Gear
+   * （还能吃 SG-1000）。**这是本批里性价比最高的一步**：一个核心换三台机种。
+   *
+   * ⚠️ 它认的 MD 卡带是「按文件头」而不是按扩展名 —— 所以下面 `EXTENSION_MAP`
+   * 刻意**没收 `.bin`**（那个扩展名太泛，PS1 光盘镜像也叫 bin，猜成 MD 只会把
+   * 「不认识」变成「静默失败」）。真·MD 的 `.bin` 靠 0x100 处的 `SEGA` 文件头认出来。
+   */
+  md: 'genesis_plus_gx',
+  gg: 'genesis_plus_gx',
+  sms: 'genesis_plus_gx',
+  /*
+   * 32X 单独一个核心：picodrive 是那个构建里唯一支持 32X 的
+   * （Genesis Plus GX 不支持 —— 它管 MD / GG / SMS，不管 32X 那套附加硬件）。
+   */
+  '32x': 'picodrive',
+  /*
+   * 万代 WonderSwan / WS Color 与 SNK Neo Geo Pocket / NGPC 各一个核心，
+   * 都是 Mednafen 系（Beetle）。两台都是「彩色机型共用同一档」——
+   * 不另开 `wsc` / `ngpc` 两个机种：库里同一个系列的游戏没必要按机型再切一刀。
+   */
+  ws: 'mednafen_wswan',
+  ngp: 'mednafen_ngp',
   arcade: 'fbneo',
 };
 
@@ -103,23 +154,57 @@ export const SCREEN_WIDTH = 720;
 export const SCREEN_HEIGHT = 540;
 
 /**
- * 街机核心的**本站路径**（`public/cores/`）。
+ * 核心的**本站路径**（`public/cores/`）。
  *
- * NES / SFC 的核心仍由 Nostalgist 从 jsdelivr 拉（一直正常，不动它）；只有街机改走本地。
- * `fbneo` / `fbalpha2012_cps1` 两个核心都是从 Nostalgist 用的**同一个构建**里取出来的
- * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2` 的 `retroarch/<core>_libretro.zip`），
- * 所以核心本身没换，换掉的只是「运行时去哪儿拿这几十 MB」。
+ * 2026-10-14 之后：**除了 NES / SFC，全部机种的核心都走本地**。
+ * NES / SFC 一直是从 jsdelivr 拉的、从来没出过问题，所以不动它们；
+ * 其余十个（gba / gb / gbc / md / gg / sms / 32x / ws / ngp / arcade）都在这里，
+ * 因为核心包是整个项目里**唯一在运行时才去下载的东西**，而 jsdelivr 在国内经常
+ * 连不上或被限速 —— 拉不动就是「拖进去毫无反应」，用户看不出是网络问题。
+ * 放进 `public/` 之后这一段就再没有网络变量了（代价是仓库多了几十 MB，
+ * 见 `README.md` 的「已知限制」）。
  *
- * 走本地的理由：核心包是整个项目里**唯一在运行时才去下载**的东西
- * （fbneo 解出来 36 MB 的 wasm、fbalpha2012_cps1 是 3.4 MB），而 jsdelivr 在国内经常
- * 连不上或被限速 —— 拉不动就是「拖进去毫无反应」。放进 `public/` 之后这一段就再没有网络变量了。
+ * 凭什么可以这么干：这些核心都取自 Nostalgist 用的**同一个构建**
+ * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2` 的
+ * `retroarch/<core>_libretro.zip`），所以核心本身没换，换掉的只是「运行时去哪儿拿」。
  *
  * 文件名必须和核心名严格对上：`<core>_libretro.js` / `<core>_libretro.wasm`。
- * 以后再加核心，同样从上面那个仓库的 `retroarch/<core>_libretro.zip` 里解出来放这儿。
+ * 以后再加核心，同样从上面那个仓库的 `retroarch/<core>_libretro.zip` 里解出来放这儿
+ * —— ⚠️ `.js` 和 `.wasm` **两个都要放**，少一个就是 404，表现是「拖进去毫无反应」
+ * （Next 会把 404 页面当成核心 js 喂给核心加载器）。
  */
 const LOCAL_CORE_DIR = '/cores';
 
-/** 扩展名 → 机种。仅在文件头识别失败时作为回退。 */
+/**
+ * 哪些机种的核心走本地（见上面 `LOCAL_CORE_DIR`）。只有 NES / SFC 例外 ——
+ * 理由同样是「它们一直正常，不动」。
+ */
+const LOCAL_CORE_CONSOLES = new Set<ConsoleType>([
+  'gba',
+  'gb',
+  'gbc',
+  'md',
+  'gg',
+  'sms',
+  '32x',
+  'ws',
+  'ngp',
+  'arcade',
+]);
+
+/**
+ * 扩展名 → 机种。**仅在文件头识别失败时作为回退。**
+ *
+ * ⚠️ 几个刻意的取舍：
+ *   · **不收 `.bin`** —— 它太泛（PS1 光盘镜像、各种裸 dump 都叫 bin），猜成 MD 只会把
+ *     「机种不认识」变成「核心静默失败」，反而更难查。真·MD 的 `.bin` 靠 0x100 处的
+ *     `SEGA` 文件头认出来（那张固定字符串指纹表在 `detectConsole` 里）。
+ *   · **不收 `.wsc` / `.ngc` 之类的彩色机型专属扩展名**：粉彩机型和原机型共用一个机种
+ *     档位（见 `CORE_MAP` 的注释），所以它们和 `.ws` / `.ngp` 落到同一档就行 ——
+ *     下面照样列出来，是因为下载站确实会这么命名。
+ *   · `zip` → 街机是**兜底**（真 romset 就是 zip）：注意 `detectConsole` 里
+ *     「拆一层」跑在这张表**之前**，所以「zip 里装一盘 NES」不会被这里误伤。
+ */
 const EXTENSION_MAP: Record<string, ConsoleType> = {
   nes: 'nes',
   fds: 'nes',
@@ -130,7 +215,19 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
   swc: 'snes',
   fig: 'snes',
   bs: 'snes',
+  gb: 'gb',
+  gbc: 'gbc',
   gba: 'gba',
+  md: 'md',
+  gen: 'md',
+  smd: 'md',
+  gg: 'gg',
+  sms: 'sms',
+  '32x': '32x',
+  ws: 'ws',
+  wsc: 'ws',
+  ngp: 'ngp',
+  ngc: 'ngp',
   zip: 'arcade',
 };
 
@@ -227,6 +324,76 @@ function looksLikeGba(bytes: Uint8Array, size: number): boolean {
   return bytes[0xb2] === 0x96;
 }
 
+/**
+ * GB / GBC 的指纹：**0x104 起是任天堂的图形 logo**（`CE ED 66 66 CC 0D 00 0B …`，
+ * 那 48 字节本身就是版权图，卡带校验也靠它）。取头 4 个字节就够 ——
+ * 这串组合在游戏数据里撞上的概率可以忽略。
+ *
+ * 分 GB / GBC 靠 **0x143 的 CGB 标志**：`0x80` = 彩色增强但兼容黑白机，
+ * `0xC0` = 只能用彩机跑。两者都算 GBC（装进哪个档位对玩家没差别，
+ * 反正背后是同一个 mgba，认的是「这盘能不能开彩色」）。
+ *
+ * ⚠️ 它必须排在 `looksLikeGba` **之前**：GBC 卡带常有 1–2 MB，够得着 GBA 那条
+ * `size >= 0x30000` 的门槛，而 GBA 的判据只是 0xB2 一个字节
+ * —— 彩机 ROM 的 0xB2 是普通游戏数据，256 分之一会正好是 0x96。
+ */
+const GB_MIN_SIZE = 0x8000; // 32 KiB，最小的 GB 卡带
+const GB_MAX_SIZE = 8 * 1024 * 1024;
+
+function looksLikeGb(bytes: Uint8Array, size: number): 'gb' | 'gbc' | null {
+  if (size < GB_MIN_SIZE || size > GB_MAX_SIZE) return null;
+  if (
+    bytes[0x104] !== 0xce ||
+    bytes[0x105] !== 0xed ||
+    bytes[0x106] !== 0x66 ||
+    bytes[0x107] !== 0x66
+  ) {
+    return null;
+  }
+  const cgbFlag = bytes[0x143];
+  return cgbFlag === 0x80 || cgbFlag === 0xc0 ? 'gbc' : 'gb';
+}
+
+/**
+ * 世嘉 16 位（MD / 32X）：**0x100 起是主机名那行固定字符串**。
+ *
+ *   32X 的游戏写 `SEGA 32X`，MD 写 `SEGA GENESIS` / `SEGA MEGA DRIVE`（都是 `SEGA ` 开头）。
+ * 所以**先认 32X 再认 MD** —— `SEGA 32X` 同样以 `SEGA` 开头，顺序反了 32X 会被吞成 MD。
+ *
+ * 拿 4 个 ASCII 字符当指纹够稳：ROM 数据里正好在那个偏移写出 `SEGA` 的概率极低，
+ * 而且这条排在 SNES 那条启发式之前（理由见 `detectConsole`）。
+ */
+function segaGen16(bytes: Uint8Array): '32x' | 'md' | null {
+  if (ascii(bytes, 0x100, 8) === 'SEGA 32X') return '32x';
+  if (ascii(bytes, 0x100, 4) === 'SEGA') return 'md';
+  return null;
+}
+
+/** 世嘉 8 位卡带那行签名（Master System / Game Gear 是同一套）。 */
+const SEGA_8BIT_SIGNATURE = 'TMR SEGA';
+
+/**
+ * Master System / Game Gear：**0x7FF0 起是 `TMR SEGA`**。
+ *
+ * ⚠️ 两台**光看文件头分不出来**（同一个世嘉 8 位家族、同款卡带容器），所以这里只回答
+ * 「这是世嘉 8 位卡带」，具体哪台交给**扩展名**（`.gg` / `.sms`）—— 扩展名也认不出时
+ * 落到 Master System（它名下的游戏多得多，猜错的那一边损失更小）。
+ */
+function looksLikeSega8Bit(bytes: Uint8Array): boolean {
+  return ascii(bytes, 0x7ff0, SEGA_8BIT_SIGNATURE.length) === SEGA_8BIT_SIGNATURE;
+}
+
+/**
+ * Neo Geo Pocket / NGPC：**0x00 起是 SNK 的版权行** `COPYRIGHT BY SNK CORPORATION`
+ * （28 字节，正好铺满 0x00–0x1B）。0x20 处还有一行 ` LICENSED BY SNK CORPORATION`，
+ * 但那行带前导空格、长度也不是整数段，所以只认第一行就够。
+ */
+const NGP_SIGNATURE = 'COPYRIGHT BY SNK CORPORATION';
+
+function looksLikeNgp(bytes: Uint8Array): boolean {
+  return ascii(bytes, 0, NGP_SIGNATURE.length) === NGP_SIGNATURE;
+}
+
 export function consoleFromExtension(fileName: string): ConsoleType | null {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   return EXTENSION_MAP[ext] ?? null;
@@ -235,6 +402,24 @@ export function consoleFromExtension(fileName: string): ConsoleType | null {
 /**
  * 识别 ROM 机种：优先看文件头 magic number，认不出再回退到扩展名。
  * 这样即便 ROM 被改过名，也不会挂错核心。
+ *
+ * ## 判定顺序是**刻意排的**，不是随手写的
+ *
+ *   1. iNES / NES 2.0 / FDS / UNIF —— 固定 magic；
+ *   2. `PK\x03\x04` → 街机 romset（真 romset 就是 zip）；
+ *   3. GB / GBC —— 任天堂 logo，**必须在 GBA 之前**（理由见 `looksLikeGb`）；
+ *   4. GBA —— 0xB2 那个固定值；
+ *   5. 世嘉 16 位（MD / 32X）—— 0x100 的主机名；
+ *   6. Neo Geo Pocket —— 0x00 的 SNK 版权行；
+ *   7. 世嘉 8 位（SMS / GG）—— 0x7FF0 的 `TMR SEGA`；
+ *   8. **SNES 放最后** —— 它是这一串里**唯一靠启发式**（校验和互为反码 + 大小取模）
+ *      的一条，撞上别的东西的概率不为零，所以让所有固定字符串指纹先过一遍；
+ *   9. 全都认不出 → 扩展名回退（`EXTENSION_MAP`）。
+ *
+ * WonderSwan **没有固定指纹**（ROM 头就是几条跳转指令加校验和，不像上面那些有
+ * 版权串可认），所以它只能靠扩展名（`.ws` / `.wsc`）—— 这是本表里唯一一台
+ * 「必须带对扩展名」的机种，刻意不做弱判据：把别的 ROM 猜成 WonderSwan，
+ * 换来的是核心静默失败，比「认不出」更难查。
  */
 export async function detectConsole(file: File): Promise<ConsoleType | null> {
   const head = new Uint8Array(await file.slice(0, 0x10000).arrayBuffer());
@@ -259,8 +444,22 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
     return 'arcade';
   }
 
-  // GBA 在 SNES 之前：见 looksLikeGba 的注释（大小可能撞上 SNES 那条取模）
+  // 任天堂掌机一系：GB / GBC 在 GBA 之前（见 looksLikeGb）
+  const gb = looksLikeGb(head, file.size);
+  if (gb) return gb;
+
   if (looksLikeGba(head, file.size)) return 'gba';
+
+  const sega = segaGen16(head);
+  if (sega) return sega;
+
+  if (looksLikeNgp(head)) return 'ngp';
+
+  if (looksLikeSega8Bit(head)) {
+    /* 世嘉 8 位两台只能靠扩展名分 —— 见 looksLikeSega8Bit */
+    const ext = file.name.toLowerCase().split('.').pop() ?? '';
+    return ext === 'gg' ? 'gg' : 'sms';
+  }
 
   if (looksLikeSnes(head, file.size)) return 'snes';
 
@@ -432,7 +631,8 @@ export class EmulatorController {
    * （实现见 `watchCoreDownload`）。不传就完全按老样子走。
    *
    * `bios` 也是可选的，目前只有街机用得上：FBNeo 跑 Neo Geo 游戏时要去 system 目录
-   * 找 `neogeo.zip`，拿不到就直接不加载。这盘 BIOS 由用户自己拖进来（见 lib/bios.ts），
+   * 找 `neogeo.zip`，拿不到就直接不加载。这份 BIOS 由 `lib/bios.ts` 的 `ensureBios()`
+   * 负责备齐（站点自带一份在 `public/bios/`，用户自己拖一份可以覆盖），
    * 引擎只负责把它交给 Nostalgist —— 存哪儿、从哪儿取，不归引擎管。
    */
   async loadRom(
@@ -473,6 +673,13 @@ export class EmulatorController {
      * 街机不带 BIOS 时不拦 —— CPS1 / CPS2 那类本来就不需要，拦了反而把它们也挡住。
      * 只在 console 里说一句，因为 Neo Geo 游戏缺 BIOS 的失败是**完全静默**的
      * （核心不报错、界面照常出雪花），没有这句话就彻底没有排查入口。
+     *
+     * 走到这里 `bios` 还是 null，说明**本地和站点自带那两份都没拿到** ——
+     * `ConsoleScene` 在拖入那一刻已经用 `ensureBios()` 兜过一次了（见 `lib/bios.ts`）。
+     *
+     * 面向**用户**的那条提示不在这里：要判断「这盘是不是 Neo Geo」得读 romset 的中央目录，
+     * 而这里已经拿不到拖入那个时机了（`loadRom` 只管启动）。它在 `ConsoleScene` 里做
+     * （`biosHint`），判据在 `lib/bios.ts` 的 `looksLikeNeoGeoRomset`。
      */
     if (consoleType === 'arcade' && !bios) {
       console.warn(
@@ -486,10 +693,12 @@ export class EmulatorController {
      *
      * 三件事都可能变：
      *   - 核心：FBA 0.2.97.42（`fbalpha2012_cps1`）多出 9 个 FBNeo 没有的 hack 驱动；
-     *   - 名字：FBNeo / FBA 拿 zip 的文件名当驱动名，网上流通的 romset 经常被改过名；
-     *   - 内容：如果 zip 里 rom 的**名字**和驱动期望的对不上（内容是对的），
-     *     `resolveArcadeCore` 会把 zip 重打包一遍补上名字 —— 核心自己不校验 CRC，
-     *     只认名字，所以这是唯一能救「内容对、名字错」那类的办法。
+     *   - 名字：核心拿 zip 的**文件名**当驱动名，网上流通的 romset 经常被改过名；
+     *   - 内容：zip 里 rom 的名字和驱动期望的对不上（内容是对的）时，`resolveArcadeCore`
+     *     会把 zip 重打包一遍补上名字。
+     *     ⚠️ 这一步**只对老核心 `fbalpha2012_cps1` 有用**（它按名字取 rom）；
+     *     `fbneo` 的 libretro 核心是按 **CRC** 在 zip 里找 rom 的，重写名字对它无害也无用
+     *     —— 别再把「fbneo 跑不起来」归到名字上，来龙去脉见 `lib/arcade-core.ts` 顶部。
      *
      * 判定依据、两张表的来历、重打包的细节都在 `lib/arcade-core.ts` / `lib/zip.ts` 里。
      * NES / SFC 不掺和，照旧走 `CORE_MAP`。
@@ -533,23 +742,23 @@ export class EmulatorController {
     }
 
     /*
-     * 街机（fbneo / fbalpha2012_cps1）和 GBA（mgba）的核心都走本站静态文件
-     * （`public/cores/`）；NES / SFC 不传这两个 resolve，保持走 Nostalgist 的 CDN
-     * —— 那两条路一直正常，不动它们。
+     * 核心从哪儿来：**除了 NES / SFC，全部走本站静态文件**（`public/cores/`）。
      *
-     * GBA 为什么也走本地：和街机**同一条理由** —— jsdelivr 在国内不可靠
-     * （见上面 `LOCAL_CORE_DIR`）。**不是**因为 CDN 上没有 mgba，那个包是有的，
-     * 详见 `CORE_MAP` 上方那段更正。
+     * 为什么不统一：NES / SFC 一直从 jsdelivr 拉、从来没出过问题，动它只有风险没有收益；
+     * 而其余机种的核心一旦走 CDN，jsdelivr 在国内连不上或被限速时就表现成
+     * 「拖进去毫无反应」—— 用户看不出是网络问题。完整的因果见上面 `LOCAL_CORE_DIR`。
+     *
+     * ⚠️ 这里用的是 `consoleType` 而不是 `core` 来判断：GBA / GB / GBC 三个机种共用
+     * `mgba` 一个核心，街机那个 `core` 还是 `resolveArcadeCore()` 现挑出来的
+     * （`fbneo` / `fbalpha2012_cps1`），按机种判断才不会漏。
      *
      * 参数类型写 `unknown` 是刻意的：Nostalgist 把这两个回调的参数声明成
      * `NostalgistCoreDict | string`（那个类型没导出，我们引不到），而它实际传进来的
-     * **永远是核心名字符串** —— `updateCore()` 里是 `resolver(core, options)`，
-     * `core` 就是我们传的 `'fbneo'` / `'fbalpha2012_cps1'` / `'mgba'`。手写成 `string`
-     * 会踩逆变检查（`NostalgistCoreDict` 不能赋给 `string`）编译不过；改成让上下文推断，
-     * 模板串里又会出现对象类型、同样报错。`unknown` 两头都绕开。
+     * **永远是核心名字符串** —— `updateCore()` 里是 `resolver(core, options)`。
+     * 手写成 `string` 会踩逆变检查（`NostalgistCoreDict` 不能赋给 `string`）编译不过；
+     * 改成让上下文推断，模板串里又会出现对象类型、同样报错。`unknown` 两头都绕开。
      */
-    const useLocalCore = consoleType === 'arcade' || consoleType === 'gba';
-    const coreSource = useLocalCore
+    const coreSource = LOCAL_CORE_CONSOLES.has(consoleType)
       ? {
           resolveCoreJs: (name: unknown) => `${LOCAL_CORE_DIR}/${String(name)}_libretro.js`,
           resolveCoreWasm: (name: unknown) =>

@@ -12,7 +12,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
+import { isConsoleType } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { deleteConsole, getConsole, upsertConsole } from '@/lib/server/consoles';
 import { deleteObject, keyFromPublicUrl, publicUrl, uploadObject } from '@/lib/server/r2';
@@ -38,10 +38,11 @@ function asFile(value: FormDataEntryValue | null): File | null {
   return value instanceof File && value.size > 0 ? value : null;
 }
 
-/** 这段地址是不是一个真机种（枚举之外的一律 404）。 */
-function isConsoleType(value: string): value is (typeof CONSOLE_TYPES)[number] {
-  return (CONSOLE_TYPES as readonly string[]).includes(value);
-}
+/*
+ * 「这段地址是不是一个真机种」的判据在 `lib/consoles.ts` 的 `isConsoleType`
+ * （枚举之外的一律 404）。2026-10-14 之前这里有一份手抄的同款函数，
+ * 和 `/consoles/[type]` 页面那份是两处 —— 加机种时漏一处就会「前台能开、后台不给存」。
+ */
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const denied = await assertAdmin();

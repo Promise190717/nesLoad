@@ -1,8 +1,8 @@
 # nesLoad
 
-在浏览器里运行的 NES / SFC / GBA 卡带加载器。界面是一台极简像素风的电视机：把 ROM 文件拖到机身上（或点机身下沿的插卡口），卡带就会插进去开始运行。
+在浏览器里运行的复古游戏机，目前有**十二个机种**：NES / SFC / GB / GBC / GBA / 世嘉 MD / Game Gear / Master System / 世嘉 32X / WonderSwan / Neo Geo Pocket / 街机。界面是一台极简像素风的电视机：把 ROM 文件拖到机身上（或点机身下沿的插卡口），卡带就会插进去开始运行。
 
-模拟内核基于 [Nostalgist](https://nostalgist.js.org/)（封装 RetroArch 的 WASM 构建）。NES / SFC 的核心在运行时从 CDN 加载；**街机（FBNeo）和 GBA（mGBA）的核心随仓库放在 `public/cores/`**，从本站加载、不走 CDN（理由和街机一样：jsdelivr 在国内经常连不上或被限速；**不是因为 CDN 上没有 mgba**，那个包是有的）。**仓库内不包含任何 ROM**——`public/cores/` 里是开源的 WASM 核心构建，不是 ROM。
+模拟内核基于 [Nostalgist](https://nostalgist.js.org/)（封装 RetroArch 的 WASM 构建）。**只有 NES / SFC 的核心在运行时从 CDN 加载**；其余十个机种（GBA / GB / GBC / MD / GG / SMS / 32X / WS / NGP / 街机）的核心都随仓库放在 `public/cores/`，从本站加载、不走 CDN（一条理由：jsdelivr 在国内经常连不上或被限速，拉不动就表现成「拖进去毫无反应」；**不是因为 CDN 上没有这些包**，它们都在）。**仓库内不包含任何 ROM**——`public/cores/` 里是开源的 WASM 核心构建，不是 ROM。
 
 ## 技术栈
 
@@ -27,7 +27,7 @@ pnpm dev
 
 界面只有两个东西：**电视机**和机身下沿的**插卡口**。载入游戏有三种方式：
 
-1. 把 `.nes` / `.sfc` / `.gba` / 街机 `.zip` 文件直接拖到电视机上（街机的 `neogeo.zip` 也走这条路，见「支持的格式」）；
+1. 把 `.nes` / `.sfc` / `.gba` / 街机 `.zip` 文件直接拖到电视机上（街机的 `neogeo.zip` **站点已经自带一份**，不用你操心；想自己换一份也走这条路，见「支持的格式」）；
 2. 点机身下沿的插卡口，在文件选择框里挑；
 3. 点右上角的**游戏库**图标，从弹窗里挑：在线库直接下载，「历史」里是从游戏库点开过的那批（点一下重新下一遍）。
 
@@ -165,7 +165,7 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/` | 首页落地页：Hero（标题 + 搜索框（**铺满整行 100%**）+ 「进入小屋 / 浏览全部游戏」两个入口）→ 按机种浏览（四张卡，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
+| `/` | 首页落地页：Hero（标题 + 搜索框（**铺满整行 100%**）+ 「进入小屋 / 浏览全部游戏」两个入口）→ 按机种浏览（**十二张卡，`CONSOLE_TYPES` 现读**，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
 | `/room` | 那间屋子（2026-10-13 之前它就是 `/`）：电视机 + 桌子 + 窗，拖入 ROM 即玩；也是 `?id=` / `?room=` 两条深链的落点。 |
 
 - **为什么拆**：原来 `/` 既是门面又是屋子，两个身份要的东西是冲突的 —— 门面要一页能被搜索引擎整段读走的正文，屋子要满屏 CSS 场景 + canvas。原来那一页整页只有 canvas，唯一可读的文字是 `seo.heading` 那三句 sr-only —— 一个没有正文的站在搜索结果里等于不存在。
@@ -278,18 +278,44 @@ pnpm dev
 
 2026-10-14 加的**机种库**，用户要的是「机种专题页 + 机种下面的所有游戏」。结构和开发商那套同构，但有一个本质区别：
 
-- ⚠️ **`consoles` 表的主键是 `console_type` 本身**（`nes` / `snes` / `gba` / `arcade`），不是 uuid —— 机种是代码里的枚举（`components/CartridgeSprite.tsx` 的 `CONSOLE_TYPES`），加机种是改代码的事（要同步核心 / 卡带 / 筛选条好几处）。所以地址是好看的 `/consoles/nes`，而且 `games.console_type` 天生就是关联，不需要回填外键。
-- ⚠️ **这张表是机种「资料的扩展」，不是机种的「清单」**：某一行被删了（后台的「重置资料」），那个机种的游戏一根毫毛都不少，前台页面对照 `CONSOLE_TYPES` 退回内置默认（`CONSOLE_LABEL` 的 NES / SFC / GBA / ARC 丝印词）照常渲染 —— **机种专题页永远不会 404**（404 页只接「不在枚举里」的地址）。这也是后台**没有「名下有游戏不许删」拦截**的原因。
+- ⚠️ **`consoles` 表的主键是 `console_type` 本身**（`nes` / `snes` / `gb` / … / `arcade`，共十二个，见 `lib/consoles.ts` 的 `CONSOLE_TYPES`），不是 uuid —— 机种是代码里的枚举，加机种是改代码的事（要同步核心 / 卡带 / 筛选条好几处）。所以地址是好看的 `/consoles/nes`，而且 `games.console_type` 天生就是关联，不需要回填外键。
+- ⚠️ **这张表是机种「资料的扩展」，不是机种的「清单」**：某一行被删了（后台的「重置资料」），那个机种的游戏一根毫毛都不少，前台页面对照 `CONSOLE_TYPES` 退回内置默认（`CONSOLE_LABEL` 的丝印词）照常渲染 —— **机种专题页永远不会 404**（404 页只接「不在枚举里」的地址）。这也是后台**没有「名下有游戏不许删」拦截**的原因。
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/consoles` | 机种列表：**固定四张卡**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认。 |
+| `/consoles` | 机种列表：**卡片是按代码里的机种清单画出来的**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认。 |
 | `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，30 分钟）。 |
 
-- 首页「按机种浏览」的四张卡指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
-- 预填数据：`scripts/add-consoles.mjs`（**结构迁移**：建表 + 预填占位行，幂等、可反复跑）+ `scripts/seed-consoles.mjs`（**一次性内容快照**：四个机种的完整双语资料 + R2 机图，会**覆盖后台的人工编辑**，跑过就别再跑）。
-- 后台 `app/admin/(panel)/consoles` 一个 tab 管资料（**没有添加 / 搜索 / 翻页** —— 条目固定四个，只有编辑与重置；接口 `PATCH /api/admin/consoles/[type]` 是 upsert，资料行不存在时顺带创建）。
+- 首页「按机种浏览」的卡片指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
+- 预填数据：`scripts/add-consoles.mjs`（**结构迁移 + 占位资料**：建表 + 给缺资料的机种补默认行，幂等、可反复跑；**加了新机种就跑它一遍**）+ `scripts/seed-consoles.mjs`（**一次性内容快照**：最早那四个机种的完整双语资料 + R2 机图，会**覆盖后台的人工编辑**，跑过就别再跑）。
+- 后台 `app/admin/(panel)/consoles` 一个 tab 管资料（**没有添加 / 搜索 / 翻页** —— 条目跟随代码里的机种清单，只有编辑与重置；接口 `PATCH /api/admin/consoles/[type]` 是 upsert，资料行不存在时顺带创建）。
 - 机种页面也进 `sitemap.xml`（只列**有资料行**的机种）。
+
+#### 加机种要动的地方（2026-10-14 扩到十二个时踩过的坑）
+
+机种清单**只有一个来源**：`lib/consoles.ts`（`CONSOLE_LABEL` / `CONSOLE_TYPES` / `CONSOLE_TINT`）。`components/CartridgeSprite.tsx` 只是原样再导出，老 import 路径不用改；挪出组件的原因是 `lib/netplay.ts`、服务端页面、后台接口都要读它，而组件不该被 `lib/*` 依赖。
+
+改一处会**编译报错**提醒你的（`Record<ConsoleType, …>`）：`lib/emulator.ts` 的 `CORE_MAP`、`lib/server/games.ts` 的 `countGamesByConsole`、`components/HandheldConsole.tsx` 的 `FACE_ROWS`、上面那三个表。
+
+改一处**不会报错、必须自己记得**的：
+
+| 文件 | 是什么 |
+| --- | --- |
+| `lib/emulator.ts` | `EXTENSION_MAP`（扩展名回退）、`detectConsole`（文件头判据）、`LOCAL_CORE_CONSOLES`（核心走本地还是 CDN） |
+| `lib/unwrap.ts` | `ROM_EXTENSIONS`（zip 里装着这种 ROM 时要能拆一层） |
+| `lib/server/upstream.ts` | `toConsoleType`（上游页面文字 → 站内机种，批量导入在用）；⚠️ 短标识（`md` / `gg` / `ws`）必须按整词匹配 |
+| `scripts/add-consoles.mjs` | 默认资料行（跑一遍就把数据库补上） |
+| `lib/i18n.ts` | 那些列举机种的文案 —— **口径是「代表机型 + 等十余款机种 / and more」**，不是全列 |
+
+> **哪些机能加、哪些加不了**（2026-10-14 核过一遍）：上限由项目用的那个 WASM 构建
+> （[retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build) `v1.22.2`，共 90 个核心）
+> 决定。**加不了**的是构建里根本没编的：NDS、N64、世嘉土星、Atari Jaguar、PS1 之外的 3D 世代
+> （逐个核过，`desmume` / `melonds` / `mupen64plus` / `saturn` / `virtualjaguar` 全为 0）。
+> **能加但还没加**的：PC Engine（`mednafen_pce_fast`）、ColecoVision、Atari Lynx、Vectrex、
+> C64（`vice_x64` 一整套）、PC-88 / X1 等。**光盘机种**（PS1 / Sega CD / PCE CD）核心在，
+> 但要多文件镜像 + 一份 BIOS，而 `lib/bios.ts` 目前**全站只存一份 BIOS**（id 写死 `neogeo`），
+> 得先改成按机种分 key（`ensureBios()` 那套「站点自带一份 + 拖入时自动装」可以照搬）。
+
 
 ### 给 AI 的站点政策
 
@@ -311,20 +337,53 @@ pnpm dev
 
 - **NES**：`.nes` `.fds` `.unf` `.unif`
 - **SNES**：`.sfc` `.smc` `.swc` `.fig` `.bs`
+- **Game Boy / Game Boy Color**：`.gb` `.gbc`
 - **GBA**：`.gba`
+- **世嘉 MD**：`.md` `.gen` `.smd`（`.bin` **刻意不收**——见下文识别那一节）
+- **Game Gear / Master System**：`.gg` / `.sms`
+- **世嘉 32X**：`.32x`
+- **WonderSwan**：`.ws` `.wsc`；**Neo Geo Pocket**：`.ngp` `.ngc`
 - **街机**：`.zip`（romset）。**`.7z` / `.rar` 不支持**——FBNeo 只吃 zip，这两种连机种都认不出来（按键说明弹窗里会明说是格式问题）。
-- **压缩包**：NES / SNES 的 ROM **可以装在 zip 里**——`.zip` 里放一盘 `.nes` / `.smc` 能直接跑。更常见的是**扩展名被改过**的那种：文件名写 `.smc`、内容其实是 zip（下载站很爱这么打包），一样能认。判断依据是**压缩包内层条目的扩展名**，所以不会误伤街机 romset —— romset 里是 `p_1.3a` 这类名字，命中不了。规则见 `lib/unwrap.ts`。
+- **压缩包**：NES / SNES 的 ROM **可以装在 zip 里**——`.zip` 里放一盘 `.nes` / `.smc` 能直接跑（2026-10-14 起这批新机种的扩展名也一并支持）。更常见的是**扩展名被改过**的那种：文件名写 `.smc`、内容其实是 zip（下载站很爱这么打包），一样能认。判断依据是**压缩包内层条目的扩展名**，所以不会误伤街机 romset —— romset 里是 `p_1.3a` 这类名字，命中不了。规则见 `lib/unwrap.ts`。
 
-机种识别会优先读取文件头（iNES / UNIF / FDS 的 magic number、GBA 在 `0xB2` 处的固定值 `0x96`、SNES 校验和的启发式判断，以及 zip 的本地文件头 `PK\x03\x04`），只有识别不出来时才回退到扩展名。因此即使 ROM 被改过名，也能挂载到正确的核心。**压缩包会先拆一层再认**（见上），所以「zip 里装 NES ROM」不会再被误判成街机。
+机种识别会优先读取文件头，只有识别不出来时才回退到扩展名。因此即使 ROM 被改过名，也能挂载到正确的核心。**压缩包会先拆一层再认**（见上），所以「zip 里装 NES ROM」不会再被误判成街机。
 
-GBA 挂的是 **mGBA** 核心，核心文件随仓库放在 `public/cores/`（`mgba_libretro.js` + `.wasm`，约 3.4 MB），运行时从本站加载——理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有 mgba，那个包是有的。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/mgba_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`（和 FBNeo 那两个文件同一套规则）。⚠️ **加新核心时记得真把文件放进去**——2026-10-13 就是因为 `public/cores/` 里漏了这两个文件，GBA 一拖进去 `Nostalgist.launch` 直接抛错（`/cores/mgba_libretro.js` 是 404，404 页面被当成核心 js 喂给了加载器）。
+识别用的指纹，以及**判定顺序**（2026-10-14 扩机种时排过一遍，`lib/emulator.ts` 的 `detectConsole` 里逐条写着理由）：
+
+| 顺序 | 机种 | 判据 |
+| --- | --- | --- |
+| 1 | NES / FDS | iNES / NES 2.0 的 magic、`FDS`+`0x1A`、`UNIF` |
+| 2 | 街机 | zip 的本地文件头 `PK\x03\x04` |
+| 3 | GB / GBC | `0x104` 起的任天堂 logo，黑白 / 彩色看 `0x143` 的标志位。**必须排在 GBA 前**（GBC 卡带够得着 GBA 的大小门槛，而 GBA 的判据只是 `0xB2` 一个字节） |
+| 4 | GBA | `0xB2` 处的固定值 `0x96`（外加 192 KiB 的大小下限） |
+| 5 | 世嘉 MD / 32X | `0x100` 起的主机名（`SEGA 32X` 先认，否则会被 `SEGA` 吞成 MD） |
+| 6 | Neo Geo Pocket | `0x00` 起的 `COPYRIGHT BY SNK CORPORATION` |
+| 7 | Game Gear / Master System | `0x7FF0` 起的 `TMR SEGA`。⚠️ 两台**文件头完全一样**，具体哪台只能看扩展名（`.gg` / 别的都算 `sms`） |
+| 8 | SNES | 校验和互为反码 + 大小的启发式判断。**刻意放最后** —— 它是唯一一条不是固定字符串的判据 |
+| 9 | — | 全认不出就回退扩展名（`EXTENSION_MAP`） |
+
+⚠️ 两个刻意的取舍：**`.bin` 不收进扩展名表**（太泛，PS1 光盘镜像也叫 bin，猜成 MD 只会把「不认识」变成「静默失败」；真·MD 的 `.bin` 靠 `0x100` 的 `SEGA` 头认）；**WonderSwan 没有文件头判据**（它的 ROM 头就是跳转指令 + 校验和，没有版权串可认），所以只能带对 `.ws` / `.wsc` 扩展名。
+
+核心：**除了 NES / SFC（fceumm / snes9x）在运行时从 CDN 拉，其余十个机种的核心都随仓库放在 `public/cores/`**，运行时从本站加载 —— 理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有这些包。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
+
+| 机种 | 核心 | 说明 |
+| --- | --- | --- |
+| NES / SNES | `fceumm` / `snes9x` | 走 CDN（一直正常，没动） |
+| GBA / GB / GBC | `mgba` | **一个核心三台机**——mGBA 本身就兼容 GB / GBC，所以加 GB / GBC 没添任何新文件 |
+| MD / GG / SMS | `genesis_plus_gx` | 同样一个核心三台机（还能吃 SG-1000） |
+| 32X | `picodrive` | Genesis Plus GX 不管 32X，那个构建里只有 picodrive 支持 |
+| WonderSwan | `mednafen_wswan` | 彩色机型（WSC）共用这一档 |
+| Neo Geo Pocket | `mednafen_ngp` | 同上，NGPC 也走它 |
+| 街机 | `fbneo` / `fbalpha2012_cps1` | 哪个由 `lib/arcade-core.ts` 按 romset 现挑 |
+
+⚠️ **加新核心时记得真把 `.js` 和 `.wasm` 两个文件都放进去**——2026-10-13 就是因为 `public/cores/` 里漏了 mgba 那两个文件，GBA 一拖进去 `Nostalgist.launch` 直接抛错（`/cores/mgba_libretro.js` 是 404，404 页面被当成核心 js 喂给了加载器）。
 
 街机挂的是 **FBNeo** 核心——一套 romset 覆盖 CPS1 / CPS2 / Neo Geo 和大量 8-16 位基板，是「一个核心管一大片」的那个。核心文件随仓库放在 `public/cores/`（`fbneo_libretro.js` + `.wasm`，约 36 MB），运行时从本站加载。四点必须提前知道：
 
 - **romset 是版本锁死的**。zip 里的文件必须和 FBNeo 期望的版本对得上，对不上就直接不加载——表现和「格式不支持」一样是静默的（屏幕继续出雪花）。
 - **FBNeo 靠 zip 的「文件名」认驱动名**（去掉扩展名那一截，`kof98.zip` → `kof98`）。romset 被改过名——中文名、下载站加的 `(1)` 后缀——一样静默失败。启动时 `console` 会打出这次用的名字，名字里含非 ASCII 字符时还会额外提醒一句。
-- **Neo Geo 需要 BIOS**（`neogeo.zip`）：把这个文件**直接拖进页面**就装上了——和拖卡带是同一个动作，之后每次启动街机自动带上。识别**只看文件名**（`neogeo` 开头即可，`neogeo-bios.zip` 也算），所以别把它改成跟 neogeo 无关的名字。CPS1 / CPS2 那类（三国志、街霸、名将）**不需要** BIOS。仓库里不放 BIOS，得你自己准备。
-- **载入失败在界面上是静默的**（屏幕里不放任何文案，见下文），所以排查要看浏览器 `console` —— 那里有文件名、机种、核心名和 romset 名。不过按键说明弹窗里还会兜一句最可能的原因：压缩格式不对。**缺 `neogeo.zip` 和 romset 版本对不上这两种情况 2026-10-09 起界面上不再有任何提示**（原先那两行按用户要求删掉了），只能看 `console`。
+- **Neo Geo 需要 BIOS**（`neogeo.zip`）：**站点已经自带一份**（`public/bios/neogeo.zip`），第一次启动街机游戏时自动装进浏览器并一直用本地那份——用户这边是零操作。想换一份（比如 UniBIOS）也可以把这个文件**直接拖进页面**覆盖掉，和拖卡带是同一个动作。识别**只看文件名**（`neogeo` 开头即可，`neogeo-bios.zip` 也算），所以别把它改成跟 neogeo 无关的名字。CPS1 / CPS2 那类（三国志、街霸、名将）**不需要** BIOS。⚠️ 站点自带那份是 SNK 的版权物，放在 `public/` 里就等于进了 git 仓库。
+- **载入失败在界面上是静默的**（屏幕里不放任何文案，见下文），所以排查要看浏览器 `console` —— 那里有文件名、机种、核心名和 romset 名。不过「按键说明」弹窗里还会兜两句最可能的原因：**压缩格式不对**、以及**缺 `neogeo.zip`**（后者 2026-10-14 加，判据是 `looksLikeNeoGeoRomset` 按 rom 名猜的）。注意缺 BIOS 那条只在**本地和站点自带两份都没有**时才出现——正常情况下 `ensureBios()` 已经自动装好了。**romset 版本对不上仍然没有任何提示**，只能看 `console`。
 
 ## 存档
 
@@ -508,7 +567,7 @@ services:
 
 图标不是手画的 PNG，是 `scripts/generate-icons.mjs` 把 `app/icon.svg` 那张 16×16 像素画**整数倍放大**生成的（`node scripts/generate-icons.mjs`；用 Node 内置 zlib 手写 PNG，不引 sharp / resvg）。改图标要同时改 `app/icon.svg` 和脚本里那份 SHAPES，然后重跑。
 
-> **离线能做什么**：能打开上次访问过的页面（回退缓存），能玩你自己拖进来的 ROM —— 街机核心在 `public/cores/`，只要 HTTP 缓存还有效就照跑。**不能**拉 NES / SFC 核心（在 jsdelivr 上），也不能从在线游戏库下游戏。所以离线是「应急」，不是「完整离线版」。
+> **离线能做什么**：能打开上次访问过的页面（回退缓存），能玩你自己拖进来的 ROM —— 除 NES / SFC 之外十个机种的核心都在 `public/cores/`，只要 HTTP 缓存还有效就照跑。**不能**拉 NES / SFC 核心（在 jsdelivr 上），也不能从在线游戏库下游戏。所以离线是「应急」，不是「完整离线版」。
 
 > **`sw.js` 里刻意不缓存的东西**：`/api/*`（游戏库、留言本、后台接口，缓存它们会制造「看到别人数据」这类事故）、`/cores/`（next.config 已经给了 7 天 HTTP 缓存，而核心是**同名覆盖**的，进 CacheStorage 就再也刷不新）、图标（文件名不带 hash，同理）。**改 `sw.js` 必须改文件顶部的 `VERSION`**，否则老用户跑的还是旧逻辑。
 
@@ -562,7 +621,7 @@ components/
   UserPanel.tsx      屋里那个账号浮层（外壳 + 已登录那一屏；表单本体在 AuthForm）
   GameCardGrid.tsx   游戏卡片网格（/games 与开发商详情页共用，含入场错峰动效）
   AdminDevelopers.tsx 后台「开发商管理」tab：增删改、logo 上传、游戏数量
-  AdminConsoles.tsx  后台「机种库」tab：固定四行，只有编辑 / 重置资料（见「机种」一节）
+  AdminConsoles.tsx  后台「机种库」tab：每个机种一行，只有编辑 / 重置资料（见「机种」一节）
   RomDownloadGate.tsx 下载页那颗按钮：点一下等 6 秒才真的开始下
   ServiceWorkerRegistrar.tsx 注册 public/sw.js（不渲染任何东西，只在生产环境生效）
   I18nProvider.tsx   语言上下文
@@ -577,12 +636,15 @@ lib/
   db.ts           共用的 IndexedDB 连接与事务包装
   library.ts      载入历史（只存字符串：名字 / 封面 / 下载地址，上限 10 条）
   saves.ts        存档槽（每游戏 5 份，超出顶掉最早的）
-  bios.ts         街机 BIOS（Neo Geo 的 neogeo.zip，拖进页面即装上）
+  bios.ts         街机 BIOS（Neo Geo 的 neogeo.zip，站点自带一份 + 可手动拖入覆盖）
   legal.ts        法务文案（隐私政策 / 服务条款，中英各一份，自成一套 i18n）
   ai-policy.ts    AI 面向的站点政策正文（/llms.txt 与 /ai.txt 共用这一份）
   chiptune.ts     现场合成的 8-bit 小段，MP4 放不出来时的兜底音源
 public/
-  cores/          街机 + GBA 核心（fbneo / fbalpha2012_cps1 / mgba 的 .js + .wasm，约 43 MB）—— 从本站加载，不走 CDN
+  cores/          十个机种的核心（fbneo / fbalpha2012_cps1 / mgba / genesis_plus_gx / picodrive /
+                  mednafen_wswan / mednafen_ngp 的 .js + .wasm，约 56 MB）—— 从本站加载，不走 CDN
+  bios/           街机 BIOS（Neo Geo 的 neogeo.zip，约 1.3 MB）—— 同 cores 一起钉了长缓存；
+                  第一次跑街机游戏时自动装进浏览器，之后走本地那份（见 lib/bios.ts）
   audio/          地板那台 MP4 的音源（仓库不带 mp3，见该目录下的 README）
   icons/          PWA 图标（192 / 512 / maskable 512，由 scripts/generate-icons.mjs 生成）
   sw.js           Service Worker（缓存策略见该文件顶部那段注释）
@@ -590,7 +652,7 @@ public/
 
 ## 已知限制
 
-- **NES / SFC 首次运行需要联网**：核心由 Nostalgist 从 CDN 拉，首次启动要等十几秒（实测约 18 秒）。**街机 / GBA 的核心是本站文件**（`public/cores/`），不依赖网络。插卡带的这段时间**屏幕里**会显示进度条：拿得到核心的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条（核心进过 CacheStorage 之后基本就是后者）。
+- **NES / SFC 首次运行需要联网**：核心由 Nostalgist 从 CDN 拉，首次启动要等十几秒（实测约 18 秒）。**其余十个机种的核心是本站文件**（`public/cores/`，见「支持的格式」那张对照表），不依赖网络。插卡带的这段时间**屏幕里**会显示进度条：拿得到核心的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条（核心进过 CacheStorage 之后基本就是后者）。
 - 字体 Press Start 2P 通过 `<link>` 在运行时加载。这里刻意没用 `next/font`（它会在构建时下载字体，无网络环境下会让构建直接失败）；加载失败时优雅退化为等宽字体，不影响功能。
 - 存档和「历史」都放在 IndexedDB 里；拿不到 IndexedDB 时（隐私模式等）「历史」会空着、载入过的游戏也不留痕，此时点「存档」会自动降级为下载 `.state` 文件。历史只占几百字节一条（纯字符串），存档仍是 Blob。
 - ~~只支持桌面端~~：2026-10-13 起**取消了那个「请用桌面端」的提示**，窄窗口照画屋子 —— 尺寸链会自动收（屏幕取 `min(档位上限, 100vw − 360px)`，桌面 / 底座 / 吊灯线都跟着推出来），所以任何宽度下机身都不会再被 `main` 的 overflow 从两边切掉。窗口小于 900px 时那两处入口收进菜单抽屉，见上面「隐私政策与服务条款」。

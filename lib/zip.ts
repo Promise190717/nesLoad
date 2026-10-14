@@ -10,8 +10,16 @@
  * 不认的东西。而 zip 的每个条目在中央目录里**自带 CRC32**，搬运时一个字节都不用改，
  * 核心那边看到的还是同一份数据 —— 变的只有名字。
  *
- * 为什么能改名字就够：FBNeo / FBA 拿 zip 里的**文件名**去查驱动表，内容是靠名字定位的，
- * 它自己**不校验 CRC**。所以「内容对、名字不对」的 romset 只要把名字改对就能跑。
+ * 为什么能改名字就够：老核心（`fbalpha2012_cps1`）拿 zip 里的**文件名**去查驱动表，
+ * 内容是靠名字定位的 —— 那种情况下「内容对、名字不对」的 romset 只要把名字改对就能跑。
+ *
+ * ⚠️ **更正（2026-10-14）：`fbneo` 不是这样。** 实测 `public/cores/fbneo_libretro.wasm` 里有
+ * `Using ROM with known crc 0x%08x and name %s from archive %s`，对应
+ * `libretro/FBNeo` 的 `src/burner/libretro/libretro.cpp`：
+ * `int index = find_rom_by_crc(ri.nCrc, list, count, &real_rom_name);` —— 它是**先按 CRC
+ * 在 zip 里找**，名字完全不参与。所以重打包这一步真正服务的是老核心，
+ * 对 fbneo 无害但也无用（别因为「fbneo 跑不了」就往重写名字这条路上找原因）。
+ * 完整来龙去脉见 `lib/arcade-core.ts` 顶部那段。
  *
  * 支持范围：单卷、非加密、非 zip64。其余一律返回 `null`，调用方退回原文件 ——
  * 读不动就当没这回事，不能因为这里出错把原本能跑的弄挂。

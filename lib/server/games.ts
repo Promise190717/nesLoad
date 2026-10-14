@@ -20,7 +20,8 @@
  *    中文站反过来不做回退（原文是必填的 `title`，其余按原样）。
  */
 
-import { unstable_cache } from 'next/cache';
+import { cached } from './cache';
+import { CONSOLE_TYPES } from '@/lib/consoles';
 import type { ConsoleType } from '@/lib/emulator';
 import type { Locale } from '@/lib/i18n';
 import { query } from './d1';
@@ -278,18 +279,14 @@ export async function listGamesPage(
 export const GAMES_PAGE_REVALIDATE_SECONDS = 1800;
 
 /**
- * 首页那几个「由 D1 拼出来的区块」的缓存时长（秒）= 24 小时（2026-10-13 用户定）。
+ * 首页那几个「由 D1 拼出来的区块」的缓存时长（秒）= 12 小时。
  *
- * ⚠️ 和 `GAMES_PAGE_REVALIDATE_SECONDS`（30 分钟）**刻意不是同一个数**，也别拿哪边去
- *    统一：两者服务的是两种页面。`/games` 是「来找游戏」的货架，后台传完一款就该尽快
- *    看到；首页是**落地页** —— 它那三个区块（机种计数 / 最新 12 款 / 主力厂商）只是
- *    「这个站里有什么」的招牌，晚一天更新没有任何代价，而每个访客都打三趟 D1 有代价。
- *    共用的是底层那次查询（`listGamesPage`），缓存在页-侧各存各的（键前缀不同）。
- *
- * 这个数只写在这里，首页读常量；`lib/server/developers.ts` 里另有一份**等值的手抄**
- * （那个文件不许 import 本文件，见它的文件头那条单向依赖）。
+ * ⚠️ 刻意和 `GAMES_PAGE_REVALIDATE_SECONDS`（30 分钟）不是同一个数：`/games` 是货架，
+ *    传完游戏就该尽快看到；首页是落地页，晚半天更新没代价，而每个访客都打三趟 D1。
+ * ⚠️ 只在线上生效，开发模式走 `lib/server/cache.ts` 的 `cached` 直接查库。
+ * ⚠️ `developers.ts` 里有一份等值手抄（两个文件不许互相 import），改这里要一起改。
  */
-export const HOME_REVALIDATE_SECONDS = 86400;
+export const HOME_REVALIDATE_SECONDS = 43200;
 
 /**
  * 带缓存的列表读取 —— **只给 `/games` 列表页用**，别处的调用方继续用 `listGamesPage`。
@@ -314,7 +311,7 @@ export const HOME_REVALIDATE_SECONDS = 86400;
  * 也就是说中英文访客共用同一份缓存是**有意**的 —— 这也是「数据层不按语言裁剪」的原因
  * （见文件头那段）：数据层一裁剪，这份共用的缓存就只对一种语言正确了。
  */
-export const listGamesPageCached = unstable_cache(
+export const listGamesPageCached = cached(
   async (offset: number, limit: number, keyword: string, consoleType: ConsoleType | null) =>
     listGamesPage(offset, limit, { keyword, consoleType }),
   ['games:list'],
@@ -332,47 +329,71 @@ export const listGamesPageCached = unstable_cache(
  * 那几维摆出来只会让人以为首页也能翻页。将来首页真要能翻页，再照着 `listGamesPageCached`
  * 的形状加参数，并且**必须同步改缓存键** —— 键不变而语义变了，旧缓存会串味。
  */
-export const listLatestGamesCached = unstable_cache(
+export const listLatestGamesCached = cached(
   async (limit: number) => listGamesPage(0, limit, {}),
   ['games:latest'],
   { revalidate: HOME_REVALIDATE_SECONDS }
 );
 
 /**
- * 各机种各有几款游戏 —— 首页那个「按机种浏览」区块的四张卡片用。
+ * 各机种各有几款游戏 —— 首页那个「按机种浏览」区块的卡片、`/consoles` 列表页用。
  *
- * 一条 `GROUP BY` 就够（库里机种只有四种，行数恒等于「有游戏的机种数」）。
+ * 一条 `GROUP BY` 就够（行数恒等于「库里有游戏的机种数」，最多十二行）。
  *
  * ⚠️ **`GROUP BY` 只返回「库里出现过」的机种** —— 某一档一款都没有时那一行压根不存在，
- *    调用方拿到 `undefined` 就会在界面上渲染出一个空洞。所以下面先铺满四个 0 再填。
+ *    调用方拿到 `undefined` 就会在界面上渲染出一个空洞。所以下面先铺满十二个 0 再填。
  *    加机种要同步这个初始化对象（`ConsoleType` 联合类型会在编译期提醒你）。
  *
- * 排序不在这里定：**展示顺序是界面的事**（`components/CartridgeSprite.tsx` 的
- * `CONSOLE_TYPES`），这里只回答「各有多少」。
+ * 排序不在这里定：**展示顺序是界面的事**（`lib/consoles.ts` 的 `CONSOLE_TYPES`），
+ * 这里只回答「各有多少」。
  */
 export async function countGamesByConsole(): Promise<Record<ConsoleType, number>> {
   const rows = await query<{ console_type: ConsoleType; total: number }>(
     'SELECT console_type, COUNT(*) AS total FROM games GROUP BY console_type'
   );
 
-  const counts: Record<ConsoleType, number> = { nes: 0, snes: 0, gba: 0, arcade: 0 };
+  const counts: Record<ConsoleType, number> = {
+    nes: 0,
+    snes: 0,
+    gb: 0,
+    gbc: 0,
+    gba: 0,
+    md: 0,
+    gg: 0,
+    sms: 0,
+    '32x': 0,
+    ws: 0,
+    ngp: 0,
+    arcade: 0,
+  };
   for (const row of rows) counts[row.console_type] = Number(row.total);
   return counts;
 }
 
 /**
- * `countGamesByConsole` 的缓存版 —— **只给首页用**，理由和 `listLatestGamesCached` 一样：
- * 首页是给爬虫和过路访客看的招牌，内容变得很慢（只有后台上传游戏时才变），
- * 而每个访客都要打一次 D1 不划算。TTL 走首页的 24 小时（`HOME_REVALIDATE_SECONDS`）。
- *
- * ⚠️ 后台自己那张列表**不读它**（那边要立刻看到刚传的游戏），所以缓存留在这一层，
- *    别下沉到 `countGamesByConsole` 里 —— 和 `listLatestGamesCached` 同一条规矩。
+ * `countGamesByConsole` 的缓存版。**只给首页 / 机种列表页用** —— 后台要立刻看到刚传的游戏，
+ * 所以缓存留在这一层，别下沉进 `countGamesByConsole`。
  */
-export const countGamesByConsoleCached = unstable_cache(
+const countGamesByConsoleRaw = cached(
   async () => countGamesByConsole(),
-  ['games:console-counts'],
+  ['games:console-counts', 'v2'],
   { revalidate: HOME_REVALIDATE_SECONDS }
 );
+
+/**
+ * 各机种游戏数。先读缓存，再**补齐成完整的十二个键**才返回。
+ *
+ * ⚠️ 必须补：缓存条目能活几小时、且不随部署失效（落在 `.next/cache`），形态可能比当前代码老。
+ *    2026-10-14 加机种就是如此 —— 老条目只有四个键，`counts['gb']` 取到 `undefined`，
+ *    页面直接印出「undefined 款游戏」。补 0 之后调用方拿到的永远是完整记录，
+ *    `Record<ConsoleType, number>` 这个类型在运行时也才真的成立。以后加机种也不用改这里。
+ */
+export async function countGamesByConsoleCached(): Promise<Record<ConsoleType, number>> {
+  const raw = await countGamesByConsoleRaw();
+  const counts = {} as Record<ConsoleType, number>;
+  for (const type of CONSOLE_TYPES) counts[type] = raw[type] ?? 0;
+  return counts;
+}
 
 /**
  * 开发商详情页那段「他名下的游戏」—— 和列表页同一个 TTL、同一个理由（见上）。
@@ -385,7 +406,7 @@ export const countGamesByConsoleCached = unstable_cache(
  * ⚠️ 开发商**本身**（名字 / 简介 / 介绍）**没有缓存** —— 它只是一次单行查询，
  * 而且后台改完名字应当立刻在页面上看到。有缓存的是「这个开发商名下有哪些游戏」。
  */
-export const listGamesByDeveloperCached = unstable_cache(
+export const listGamesByDeveloperCached = cached(
   async (developerId: string, offset: number, limit: number) =>
     listGamesPage(offset, limit, { developerId }),
   ['games:by-developer'],
@@ -402,7 +423,7 @@ export const listGamesByDeveloperCached = unstable_cache(
  * 列表页也是 30 分钟，但键形状不该为了另一个页面而变），见 listGamesByDeveloperCached
  * 那段「为什么不加第四个参数」的说明。
  */
-export const listGamesByConsoleCached = unstable_cache(
+export const listGamesByConsoleCached = cached(
   async (consoleType: ConsoleType, offset: number, limit: number) =>
     listGamesPage(offset, limit, { consoleType }),
   ['games:by-console'],

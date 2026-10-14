@@ -17,7 +17,7 @@
  *    列表读取也走缓存，缓存键同样不含语言。
  */
 
-import { unstable_cache } from 'next/cache';
+import { cached } from './cache';
 import { query } from './d1';
 import type { Locale } from '@/lib/i18n';
 
@@ -180,13 +180,12 @@ export async function listDevelopers(
 }
 
 /**
- * 开发商列表页（`/developers`）那份缓存的时长（秒）= 24 小时（2026-10-13 用户要求）。
+ * 开发商列表页（`/developers`）那份缓存的时长（秒）= 12 小时。
  *
- * 和 `TOP_DEVELOPERS_REVALIDATE_SECONDS` **数值相同，但刻意各留一个常量** —— 两者服务的
- * 是两个页面（这里是列表页那个货架，那里是首页的招牌），将来谁想快一点 / 慢一点时，
- * 不必牵动另一个；名字也各自说清自己管哪儿。
+ * 和 `TOP_DEVELOPERS_REVALIDATE_SECONDS` 数值相同，但**刻意各留一个常量** ——
+ * 服务的是两个页面，将来谁想快一点 / 慢一点不必牵动另一个。
  */
-export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400;
+export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 43200;
 
 /**
  * 带缓存的列表读取 —— **只给 `/developers` 列表页用**，别处的调用方继续用 `listDevelopers`。
@@ -202,7 +201,7 @@ export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400;
  * 缓存键里**没有语言这一维** —— 这是有意的，也正是 `Developer` 把中英两份都带出来的原因
  * （见文件头那段）：中英文访客共用同一份缓存，用哪份由页面调 `localizeDeveloper` 决定。
  */
-export const listDevelopersCached = unstable_cache(
+export const listDevelopersCached = cached(
   async (offset: number, limit: number, keyword: string) =>
     listDevelopers(offset, limit, { keyword }),
   // v2：2026-10-13 给 developers 表批量补了厂标（image_url），旧键里缓存的还是
@@ -212,16 +211,12 @@ export const listDevelopersCached = unstable_cache(
 );
 
 /**
- * 首页那个「按开发商浏览」区块的 TTL（秒）= 24 小时。
+ * 首页那个「按开发商浏览」区块的 TTL（秒）= 12 小时。
  *
- * 和 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 是**同一个数、同一个理由**：
- * 首页是招牌不是货架 —— 它给爬虫和过路访客看，内容变得很慢，晚一天更新没有代价，
- * 而每个访客都重查一遍有代价。（`/games` 那边是 30 分钟，那是另一个页面的事。）
- *
- * **刻意各写一份而不是互相 import**：本文件不许 import `./games.ts`（见文件头那条单向依赖），
- * 所以两边改 TTL 时要一起改 —— 数值漂了不会报错，只会让首页两个区块的更新节奏悄悄分家。
+ * ⚠️ 和 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 必须一致 —— 本文件不许
+ *    import `./games.ts`，这里是手抄的；数值漂了不会报错，只会让首页两个区块分家。
  */
-export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 86400;
+export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 43200;
 
 /**
  * 「游戏最多的前 N 家开发商」—— 首页那个开发商区块用。
@@ -257,7 +252,7 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
  *    首页是另一回事 —— 它是一个由 D1 拼出来的落地页，每个访客都重查一遍没必要。
  *    缓存留在「页面这一侧」，和 games 那边同一条规矩。
  */
-export const listTopDevelopersCached = unstable_cache(
+export const listTopDevelopersCached = cached(
   async (limit: number) => listTopDevelopers(limit),
   // v2：同 listDevelopersCached —— 2026-10-13 批量补厂标后旧键里的快照没有 image_url。
   ['developers:top', 'v2'],

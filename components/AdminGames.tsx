@@ -14,9 +14,12 @@ import {
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
+import { romLangToFormValue } from '@/lib/rom-lang';
 import { unwrapRom } from '@/lib/unwrap';
+import AdminBulkImport from './AdminBulkImport';
 import AdminLoading from './AdminLoading';
-import { CONSOLE_LABEL } from './CartridgeSprite';
+import { FIELD_CLASS } from './adminStyles';
+import { CONSOLE_LABEL, CONSOLE_TYPES } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
 /** `/api/admin/games` 返回的条目。 */
@@ -61,7 +64,12 @@ interface GamePage {
 
 type Notice = { tone: 'ok' | 'error'; text: string };
 
-const CONSOLE_OPTIONS: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
+/**
+ * 表单里那排机种选项。**直接用登记表**，不再手抄一份 ——
+ * 2026-10-14 加机种时这里曾是「漏了不报错」的四处之一
+ * （`ConsoleType` 联合类型管不到一个手写的字符串数组）。
+ */
+const CONSOLE_OPTIONS: readonly ConsoleType[] = CONSOLE_TYPES;
 
 /** 列表每页条数。 */
 const PAGE_SIZE = 10;
@@ -94,10 +102,7 @@ function languageLabel(value: string | null): string | null {
   return LANGUAGE_LABEL[value] ?? value;
 }
 
-/** 输入框统一样式，省得每个字段重复一长串 class。 */
-const FIELD_CLASS =
-  'pixel-edge pxw-2 pxc-500 w-full bg-ink-900 px-2 py-2 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none';
-
+/** 每个字段外层那个 label（纵向排列 + 小字标签）。`FIELD_CLASS` 在 ./adminStyles（两个组件共用）。 */
 const LABEL_CLASS = 'flex flex-col gap-1 text-[12px] text-ink-400';
 
 /**
@@ -241,9 +246,10 @@ export default function AdminGames() {
   const romRef = useRef<HTMLInputElement>(null);
 
   /*
-   * 「从链接自动填充」（2026-10-13 加）：粘贴一个游戏页链接 → 抓元数据预填表单。
-   * **只填文本字段**，封面与 ROM 仍然要手动选文件 —— 那个接口只读网页文本、
-   * 不碰 ROM（见 app/api/admin/scrape-game/route.ts）。
+   * 「从链接自动填充」（2026-10-13 加；2026-10-14 起连封面和 ROM 一起抓）：
+   * 粘贴一个游戏页链接 → 抓元数据预填表单，再把页面挂的封面与游戏文件一并取回来。
+   * 接口只回**地址**，字节由这里再走两个服务端代理取（上游是别的域名，
+   * 浏览器直接 fetch 会被 CORS 挡）—— 见 app/api/admin/fetch-image 与 fetch-rom。
    */
   const [scrapeUrl, setScrapeUrl] = useState('');
   const [scraping, setScraping] = useState(false);
@@ -261,6 +267,16 @@ export default function AdminGames() {
 
   /** 增删改后重新拉一遍当前页（同一条路径给「上传完跳回第一页」用）。 */
   const reloadList = useCallback(() => setListVersion((n) => n + 1), []);
+
+  /**
+   * 「从列表导入」跑完之后叫这里：新条目按 created_at 倒序排在最前面，
+   * 所以跳回第 1 页再重拉（和单条上传收尾同一套动作）。
+   */
+  const handleBulkImported = useCallback(() => {
+    setPage(1);
+    reloadList();
+    router.refresh();
+  }, [reloadList, router]);
 
   /*
    * 每次翻页 / 搜索 / 增删改都重新拉**当前这一页**，不再一次性把全库拉回来。
@@ -441,10 +457,27 @@ export default function AdminGames() {
   };
 
   /**
+   * 经服务端代理把一个**外链封面**取回来，塞进「封面」那一栏。
+   *
+   * 浏览器直接 fetch 那个跨域地址会被 CORS 挡下，所以绕服务端一趟
+   * （见 /api/admin/fetch-image）。「自动填充」与「从网页拖图」两条路都走它。
+   */
+  const applyImageUrl = async (url: string) => {
+    const res = await fetch('/api/admin/fetch-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) throw new Error(await readError(res, t('admin.drop.imageFailed')));
+    const blob = await res.blob();
+    const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'cover');
+    setImage(new File([blob], name, { type: blob.type || 'image/png' }));
+  };
+
+  /**
    * 封面拖拽落点。两种来源：
    *   · 从资源管理器拖文件 —— `dataTransfer.files` 里就有 File，直接用；
-   *   · 从**网页**里拖一张图 —— 只有 URL，得让服务端把字节取回来
-   *     （浏览器直接 fetch 那个跨域地址会被 CORS 挡下，见 /api/admin/fetch-image）。
+   *   · 从**网页**里拖一张图 —— 只有 URL，交给 applyImageUrl 让服务端把字节取回来。
    */
   const onImageDrop = async (e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -464,15 +497,7 @@ export default function AdminGames() {
     }
 
     try {
-      const res = await fetch('/api/admin/fetch-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      if (!res.ok) throw new Error(await readError(res, t('admin.drop.imageFailed')));
-      const blob = await res.blob();
-      const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'cover');
-      setImage(new File([blob], name, { type: blob.type || 'image/png' }));
+      await applyImageUrl(url);
     } catch (error) {
       setModalNotice({
         tone: 'error',
@@ -491,7 +516,33 @@ export default function AdminGames() {
   };
 
   /**
-   * 从链接抓元数据填进表单。**只填文本字段**，封面 / ROM 照旧手动选文件。
+   * 经服务端代理把一个**外链 ROM** 取回来，塞进「游戏文件」那一栏。
+   *
+   * ⚠️ **文件名必须保住原样** —— FBNeo 是拿 zip 文件名认驱动的，改名会让街机静默
+   * 起不来（见 app/api/admin/games/route.ts 的 romName）。优先用代理回的响应头
+   * `x-file-name`（它取自最终地址，跳转后也准），拿不到再退到抓取接口给的名字。
+   *
+   * 最后仍走 `applyRomFile` —— 好让机种也跟着认一遍（拆包 + detectConsole）。
+   */
+  const applyRomUrl = async (url: string, fallbackName: string) => {
+    const res = await fetch('/api/admin/fetch-rom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) throw new Error(await readError(res, t('admin.scrape.romFailed')));
+    const blob = await res.blob();
+    const header = res.headers.get('x-file-name');
+    const name = (header ? decodeURIComponent(header) : '') || fallbackName || 'rom.zip';
+    await applyRomFile(new File([blob], name, { type: blob.type || 'application/zip' }));
+  };
+
+  /**
+   * 从链接抓元数据填进表单，**连封面和 ROM 一起**。
+   *
+   * 两段式：先问 /api/admin/scrape-game 要元数据 + 封面 / ROM 的**地址**，
+   * 再让封面与 ROM 各走一趟服务端代理把字节取回来（见上面两个 applyXxxUrl）。
+   * 两者并行、各自独立 —— 一个失败不该把另一个、以及已经填好的文本字段一起作废。
    *
    * 开发商那一栏特殊：下拉框认的是 `developers.id`，而接口回的是**名字**，
    * 所以在这里拿名字去选项里匹配一次；匹配不上就提示去开发商库建一个，不硬塞。
@@ -520,6 +571,10 @@ export default function AdminGames() {
         seriesEn?: string | null;
         description?: string | null;
         descriptionEn?: string | null;
+        imageUrl?: string | null;
+        romUrl?: string | null;
+        romName?: string | null;
+        romLang?: string | null;
       };
 
       if (data.title) setTitle(data.title);
@@ -531,14 +586,51 @@ export default function AdminGames() {
       if (data.description) setDescription(data.description);
       if (data.descriptionEn) setDescriptionEn(data.descriptionEn);
 
+      /*
+       * 语言：跟着**选中那个 ROM 的版本**填（上游 `fileName` 的 key）。
+       * 这个字段是判重的一环 —— 同名 + 同语言才算重复（见 lib/server/games.ts），
+       * 填错了要么被误拦、要么漏掉重复项。认不出的 key 不动它，保持默认。
+       */
+      const formLang = romLangToFormValue(data.romLang);
+      if (formLang) setLanguage(formLang);
+
+      /** 收尾拼成一句提示：元数据 + 开发商 + 封面 / ROM 各自的结论。 */
+      const notes: string[] = [];
+
       // 开发商：名字 → id
-      let text = t('admin.scrape.ok');
       if (data.developer) {
         const match = developerOptions.find((option) => option.name === data.developer);
         if (match) setDeveloperId(match.id);
-        else text = t('admin.scrape.developerMissing', { name: data.developer });
+        else notes.push(t('admin.scrape.developerMissing', { name: data.developer }));
       }
-      setScrapeNotice({ tone: 'ok', text });
+
+      // 取字节前先挂一条提示：ROM 有几 MB，不会瞬回，不给字就像卡住了
+      if (data.imageUrl || data.romUrl) {
+        setScrapeNotice({ tone: 'ok', text: t('admin.scrape.assets') });
+      }
+
+      const [cover, romFile] = await Promise.allSettled([
+        data.imageUrl ? applyImageUrl(data.imageUrl) : Promise.resolve(),
+        data.romUrl ? applyRomUrl(data.romUrl, data.romName ?? '') : Promise.resolve(),
+      ]);
+
+      let failed = false;
+      if (data.imageUrl && cover.status === 'rejected') {
+        notes.push(t('admin.scrape.coverFailed'));
+        failed = true;
+      }
+      if (data.romUrl && romFile.status === 'rejected') {
+        notes.push(t('admin.scrape.romFailed'));
+        failed = true;
+      }
+      // 页面根本没挂文件时明说一句 —— 否则用户会以为「抓到了但没填上」
+      if (!data.romUrl) notes.push(t('admin.scrape.noRom'));
+      else if (!failed && notes.length === 0) notes.push(t('admin.scrape.assetsOk'));
+
+      setScrapeNotice({
+        tone: failed ? 'error' : 'ok',
+        text: [failed ? '' : t('admin.scrape.ok'), ...notes].filter(Boolean).join(' '),
+      });
     } catch (error) {
       setScrapeNotice({
         tone: 'error',
@@ -685,6 +777,8 @@ export default function AdminGames() {
           >
             {t('admin.add')}
           </button>
+          {/* 「添加」旁边那个批量入口 —— 按钮和弹框都在它自己的组件里 */}
+          <AdminBulkImport onImported={handleBulkImported} />
         </div>
 
         {pageNotice && (

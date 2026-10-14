@@ -6,7 +6,7 @@ import type { ConsoleType } from '@/lib/emulator';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { localizeGame, type LocalizedGameText } from '@/lib/server/games';
 import type { Cartridge } from '@/lib/library';
-import { CONSOLE_LABEL } from './CartridgeSprite';
+import { CONSOLE_LABEL, CONSOLE_TYPES } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -153,11 +153,15 @@ const TABS: { value: Tab; label: MessageKey }[] = [
 
 /**
  * 在线库列表的机种筛选。`'all'` 单独列一档而不是用 null —— 渲染时不用再绕一层判断。
- * 标签：`'all'` 走 i18n，其余三个用 `CONSOLE_LABEL`（NES / SFC / ARC，丝印，不进文案表）。
+ * 标签：`'all'` 走 i18n，其余用 `CONSOLE_LABEL`（NES / SFC / GBA / ARC，丝印，不进文案表）。
+ *
+ * 2026-10-14 起**直接从登记表派生**（原本手抄一份四个）—— 那一份在加机种时不会报错，
+ * 漏了的结果是「新机种的游戏在这个弹窗里筛不出来」。十来个丝印词在窄弹窗里会折行，
+ * 这一行本来就是 `flex-wrap`，折就折（比换成横向滚动条好：滚动条藏内容，折行不藏）。
  */
 type ConsoleFilter = ConsoleType | 'all';
 
-const CONSOLE_FILTERS: readonly ConsoleFilter[] = ['all', 'nes', 'snes', 'gba', 'arcade'];
+const CONSOLE_FILTERS: readonly ConsoleFilter[] = ['all', ...CONSOLE_TYPES];
 
 /**
  * 在线库列表每页条数。

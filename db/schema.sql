@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_developers_created_at ON developers (created_at D
 
 -- 机种库（2026-10-14 加，用户要的「机种专题页」——和 developers 同一套做法）
 --
--- ⚠️ **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade'），不是 UUID：
+-- ⚠️ **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade' 等十二个），不是 UUID：
 --   机种是代码里定死的枚举（`ConsoleType`，见 lib/emulator.ts），加机种要改核心 / 卡带
 --   好几处，不是后台能随手加的东西。拿类型当主键换来两样好处：
 --   · 地址好看且稳定 —— 专题页是 `/consoles/nes` 而不是一串 uuid；
@@ -94,10 +94,13 @@ CREATE INDEX IF NOT EXISTS idx_developers_created_at ON developers (created_at D
 --   会退回代码里的默认名字（NES / SFC / GBA / ARC）照常渲染。所以后台删除 =
 --   「清掉资料恢复默认」，不做「名下有游戏不许删」那套拦截。
 --
+-- ⚠️ 2026-10-14 加了八个机种（gb / gbc / md / gg / sms / 32x / ws / ngp），
+--   老库靠 `scripts/add-consoles.mjs` 补行（幂等、只增不删）。
+--
 -- name / name_en / summary / … 的双语规则与 developers 完全一致：
 -- 没有后缀 = 中文原文，`_en` = 英文（空了回退中文）。
 CREATE TABLE IF NOT EXISTS consoles (
-  console_type  TEXT PRIMARY KEY,       -- nes / snes / gba / arcade（= ConsoleType）
+  console_type  TEXT PRIMARY KEY,       -- ConsoleType 十二个之一（nes / snes / gb / … / arcade）
   name          TEXT NOT NULL,          -- 展示名（必填，中文原文）
   name_en       TEXT,                   -- 展示名英文（可空）
   image_url     TEXT,                   -- 机图 / 图片公网 URL（可选）

@@ -125,6 +125,11 @@ const en = {
    * 定位（用户 2026-10-10 明确）：主推「在线玩复古游戏」，NES / SFC / GBA / 街机都算，
    * 有在线游戏库，也支持用自己的 ROM 文件。三条卖点按这个优先级排：
    * 玩什么（复古游戏）> 怎么玩（在线游戏库 / 拖自己的 ROM）> 免安装。
+   *
+   * ⚠️ 站内机种 **2026-10-14 从四个扩到十二个**（GB / GBC / MD / GG / SMS / 32X /
+   *    WonderSwan / Neo Geo Pocket）。文案里凡是要列举机种的地方，2026-10-14 起统一成
+   *    「**代表机型 + and more / 等**」——全列出来既读不通也超长，而且每加一个机种
+   *    就得回来改一遍。所以下面那些列举看着不全，是**刻意的**，别当漏字补全。
    */
   /*
    * <title>：站名在前（品牌词是搜索时最容易命中的），冒号后是「这站能干什么」。
@@ -136,15 +141,20 @@ const en = {
   /*
    * description：长度按 **155 字符上下** 写（桌面端 Google 大约只显示这么多），
    * 前半句必须能独立成立 —— 后半句被截掉也不能读不通。
+   *
+   * ⚠️ 机种那串**刻意只列代表机型、末尾加 and more**（2026-10-14 从四个扩到十二个时定的口径）：
+   *    十二个全列进来既读不通也超长，而每加一个机种就得回来改一遍。机种全名放下面
+   *    `meta.keywords` 那条（逗号列表，越长越没关系）。
    */
   'meta.description':
-    'Play NES, SNES / SFC, Game Boy Advance and arcade games right in your browser. Pick a title from the online library, or load your own ROM file.',
+    'Play NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive and arcade games in your browser. Pick a title from the online library, or load your own ROM file.',
   /*
    * keywords：Google 早在 2009 年就不看了，这里留着是给 Bing / Yandex / 站内搜索
    * 之类还有一点权重的地方 —— 属于「写了没坏处、别指望它」的一条。
+   * 机种多了之后这里是**唯一把所有机型写全**的地方，加机种顺手补一组词。
    */
   'meta.keywords':
-    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
+    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, Game Boy emulator, Game Boy Color emulator, Sega Mega Drive emulator, Sega Genesis emulator, Game Gear emulator, Master System emulator, Sega 32X emulator, WonderSwan emulator, Neo Geo Pocket emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
   /*
    * 这里**没有** og:image 的 alt —— 不是漏了。
    * alt 由 app/opengraph-image.tsx 按文件约定导出，而那个导出必须是**静态值**，
@@ -168,7 +178,7 @@ const en = {
    */
   'seo.room.title': 'Pixel Room — Play Retro Games in Your Browser',
   'seo.room.description':
-    'Step into the pixel room: NES, SNES / SFC, GBA and arcade games run on the CRT. Pick a title from the online library, or drop your own ROM file onto the screen.',
+    'Step into the pixel room: NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive and arcade games run on the CRT. Pick a title from the online library, or drop your own ROM file onto the screen.',
 
   /*
    * 登录页（`/login`，2026-10-13 加）。
@@ -200,7 +210,7 @@ const en = {
    */
   'home.hero.title': 'Play classic retro games in your browser',
   'home.hero.lead':
-    '{site} has NES, SNES / SFC, GBA and arcade games you can play online, with two-player netplay.',
+    '{site} has NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more to play online, with two-player netplay.',
   /* 首屏两颗钮：左边进屋子（真的开玩），右边进列表（先挑一挑） */
   'home.hero.play': 'Enter the room',
   'home.hero.browse': 'Browse all games',
@@ -210,7 +220,8 @@ const en = {
   'home.search.placeholder': 'Search title / developer / series',
   'home.search.submit': 'Search',
   'home.consoles.title': 'Browse by console',
-  'home.consoles.lead': 'NES, SNES / SFC, GBA and arcade — pick one to see its games.',
+  'home.consoles.lead':
+    'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more — pick one to see its games.',
   'home.consoles.count': '{count} games',
   /* 2026-10-14 改：原来写「See every game」（指向 /games），现在机种有了自己的专题页，这里指向 /consoles */
   'home.consoles.all': 'All consoles',
@@ -271,7 +282,7 @@ const en = {
    */
   'seo.heading': 'Play retro games in your browser',
   'seo.intro':
-    '{site} is an online retro game room. NES, SNES / SFC, GBA and arcade titles run right here in the browser — emulated on your own machine, with RetroArch compiled to WebAssembly.',
+    '{site} is an online retro game room. NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive and arcade titles run right here in the browser — emulated on your own machine, with RetroArch compiled to WebAssembly.',
   'seo.howTo':
     'Pick a game from the online library, or drop your own ROM file onto the television. Nothing to install.',
 
@@ -284,12 +295,12 @@ const en = {
    * 要能被直接搜到 —— 所以描述里都要带「能玩、能下载、免安装」这几个词。
    *
    * 详情页 / 下载页的两条带占位符：`{title}` 是游戏名、`{console}` 是机种
-   * （NES / SFC / GBA / ARC，丝印那四个英文词，不进文案表）。
+   * （`CONSOLE_LABEL` 那十二个丝印词，不进文案表）。
    * 列表页那条带 `{count}` —— 条数是现从库里读的，写死会在增减游戏后变成假话。
    */
   'seo.games.title': 'All games — Play NES, SNES, GBA & Arcade Online',
   'seo.games.description':
-    '{count} retro games in the online library, all playable in your browser: NES, SNES / SFC, GBA and arcade. Open a title for details, play it instantly, or download the ROM file.',
+    '{count} retro games in the online library, all playable in your browser: NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more. Open a title for details, play it instantly, or download the ROM file.',
   /*
    * 搜索结果的标题与说明。**这两条不会进索引**（列表页有 `q` 时是 noindex, follow，
    * 见 app/games/page.tsx 的注释）—— 它们服务的是**人**：标签页上写着搜了什么，
@@ -301,11 +312,11 @@ const en = {
   /*
    * 机种筛选（`/games?console=<机种>`，2026-10-13 加）。
    *
-   * `{console}` 是 `CONSOLE_LABEL` 那四个丝印词（NES / SFC / GBA / ARC）—— 和首页
+   * `{console}` 是 `CONSOLE_LABEL` 那十二个丝印词（NES / SFC / GBA / ARC…）—— 和首页
    * 「按机种浏览」那几张卡片用的是同一份，别在这里另写一套机种名（两套迟早对不上）。
    *
-   * 这一页**可以收录**（和 `?q=` 的搜索页不同，见上面那两条的注释）：机种是有限的四个，
-   * 每个都是一份真实分类，而不是「同一份列表的无限多个子集」。
+   * 这一页**可以收录**（和 `?q=` 的搜索页不同，见上面那两条的注释）：机种是一份有限、
+   * 封闭的清单，每个都是一份真实分类，而不是「同一份列表的无限多个子集」。
    */
   'seo.games.console.title': '{console} games — Play Online in Your Browser',
   'seo.games.console.description':
@@ -482,6 +493,18 @@ const en = {
    */
   'legend.needZip':
     'Format  FBNeo only reads .zip — this one looks like {ext}. Repack it, or grab a .zip build',
+  /*
+   * 这盘街机卡带**看着像** Neo Geo 游戏，而 BIOS 本地和站点两份都没拿到。
+   * （正常情况下 `ensureBios()` 会自动装站点自带的那份，这条根本不出现 ——
+   * 所以它只在「自建部署没放文件」或「用户手动删过」时才可能被看到。）
+   *
+   * 判据是猜的（见 `lib/bios.ts` 的 `looksLikeNeoGeoRomset`：按 rom 名认，不读内容），
+   * 所以措辞留了余地 —— 写「需要」而不是「必须」，别写成断言。
+   * 末尾那句「CPS1 / CPS2 不需要」是刻意加的：不装 BIOS 的 CPS 用户看到这条会以为
+   * 自己也得去搞一盘，而那类游戏本来就能跑。
+   */
+  'legend.needBios':
+    'BIOS  This looks like a Neo Geo game (KOF, Metal Slug…). It needs neogeo.zip — drag that file onto the page and it gets installed. CPS1 / CPS2 games do not need it.',
   /*
    * 手柄。单机是引擎白送的（RetroArch 的 `rwebpad` 驱动，我们一行代码没写），
    * 但界面上不说就等于没有 —— 用户不会去猜插上的东西有没有生效。
@@ -1082,7 +1105,7 @@ const en = {
   'tour.replay': 'Show the tour again',
   'tour.screen.title': 'Start with a game',
   'tour.screen.body':
-    'Drag a .nes / .sfc / .gba file (or an arcade .zip) onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
+    'Drag a ROM file (.nes, .sfc, .gba, .md, .gb …) or an arcade .zip onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
   'tour.rail.title': 'The switch rail',
   'tour.rail.body':
     'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Library (online games and this machine’s history), Netplay, Key bindings. Help: Controls help, and the Guestbook.',
@@ -1131,8 +1154,10 @@ const en = {
   'admin.upload.ok': 'Uploaded.',
   'admin.upload.required': 'Title, cover image and ROM file are required.',
   /*
-   * 「从链接自动填充」（2026-10-13 加）：给个游戏页链接，抓回元数据预填表单。
-   * **只抓元数据、不碰 ROM**，实现见 app/api/admin/scrape-game/route.ts。
+   * 「从链接自动填充」（2026-10-13 加；2026-10-14 起连封面和 ROM 一起抓）：
+   * 给个游戏页链接，抓回元数据预填表单，并把页面挂的封面 / 游戏文件一并取回。
+   * 实现见 app/api/admin/scrape-game/route.ts（只回地址）与
+   * app/api/admin/fetch-image / fetch-rom（取字节）。
    */
   'admin.scrape.placeholder': 'Paste a game page link to auto-fill',
   'admin.scrape.button': 'Auto-fill',
@@ -1140,6 +1165,39 @@ const en = {
   'admin.scrape.ok': 'Filled from the page.',
   'admin.scrape.failed': 'Could not read that page.',
   'admin.scrape.developerMissing': 'Developer “{name}” is not in the library yet.',
+  /* `assets` 是取字节期间那条提示（ROM 有几 MB，不会瞬回），其余几条是收尾结论。 */
+  'admin.scrape.assets': 'Fetching cover and ROM…',
+  'admin.scrape.assetsOk': 'Cover and ROM fetched.',
+  'admin.scrape.coverFailed': 'Cover could not be fetched.',
+  'admin.scrape.romFailed': 'ROM could not be fetched.',
+  'admin.scrape.noRom': 'No ROM file found on that page.',
+  /*
+   * 「从列表导入」（2026-10-14 加）：把一个机种列表页上的游戏**整页**导进来，
+   * 逐条走和手动添加同一条链路。实现见 components/AdminBulkImport.tsx +
+   * app/api/admin/scrape-list/route.ts。
+   * `total` / `stat` / `now` 里的 `{count}` `{ok}` 等由 translate() 插值。
+   */
+  'admin.bulk.button': 'Import from list',
+  'admin.bulk.title': 'Import from a list page',
+  'admin.bulk.hint': 'Paste a console list page — every game on it gets imported one by one.',
+  'admin.bulk.placeholder': 'e.g. https://retrogamesnexus.com/zh/snes-games?page=1',
+  'admin.bulk.read': 'Read list',
+  'admin.bulk.reading': 'Reading…',
+  'admin.bulk.readFailed': 'Could not read that list page.',
+  'admin.bulk.empty': 'No games found on that page.',
+  'admin.bulk.total': 'Games on this page: {count}',
+  'admin.bulk.start': 'Start import',
+  'admin.bulk.stop': 'Stop',
+  'admin.bulk.now': 'Importing: {title}',
+  'admin.bulk.stat': 'Imported {ok} · Skipped {skipped} · Failed {failed}',
+  'admin.bulk.failures': 'Not imported',
+  'admin.bulk.done': 'Finished.',
+  'admin.bulk.stopped': 'Stopped early.',
+  'admin.bulk.close': 'Close',
+  'admin.bulk.noTitle': 'That page has no title',
+  'admin.bulk.noCover': 'That page has no cover image',
+  'admin.bulk.noRom': 'That page has no ROM file',
+  'admin.bulk.duplicate': 'Already in the library (same title and language).',
   /*
    * 拖拽提示（2026-10-13 加）：封面 / 游戏文件两个选择框都接受从资源管理器拖文件；
    * 封面**额外**接受从网页里拖一张图过来（那条路走 /api/admin/fetch-image 取字节）。
@@ -1227,7 +1285,7 @@ const en = {
   'admin.consoles.field.name': 'Name',
   'admin.consoles.field.image': 'Console image',
   'admin.consoles.imageHint':
-    'Optional. Without one the public page falls back to the cartridge label (NES / SFC / GBA / ARC).',
+    'Optional. Without one the public page falls back to the cartridge label (NES / SFC / GBA / ARC and the rest).',
   'admin.consoles.imageCurrent': 'Current: {name}. Leave empty to keep it.',
   'admin.consoles.field.released': 'Release year',
   'admin.consoles.field.summary': 'Summary',
@@ -1345,13 +1403,13 @@ const en = {
 
   'gamesPage.heading': 'All games',
   'gamesPage.intro':
-    '{count} games in the online library — NES, SNES / SFC, GBA and arcade. Click a cover for details, or start playing straight away.',
+    '{count} games in the online library — NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more. Click a cover for details, or start playing straight away.',
   'gamesPage.empty': 'The library is empty right now.',
   /*
    * 机种筛选（`?console=<机种>`，2026-10-13 加）。
    *
    * `introConsole` 顶上 `intro`：筛了机种之后「共 N 款」说的是**这一档**的条数，
-   * 再念一遍「NES、SFC、GBA 和街机」那串就自相矛盾了。
+   * 再念一遍那一长串机种就自相矛盾了。
    * `filterAll` 是筛选条上那颗「全部」，`filterLabel` 是那条 `<nav>` 的读屏名字。
    */
   'gamesPage.introConsole':
@@ -1579,13 +1637,13 @@ export type MessageKey = keyof typeof en;
 const zh: Record<MessageKey, string> = {
   'meta.title': '{site} — 在浏览器里在线玩复古游戏：NES / SFC / GBA / 街机',
   'meta.description':
-    '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）、GBA（Game Boy Advance）和街机都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
+    '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
   'meta.keywords':
-    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
   /* 房间页（`/room`）自己的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
   'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
   'seo.room.description':
-    '走进像素小屋：NES、SFC（超级任天堂）、GBA 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
+    '走进像素小屋：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
 
   /* 登录页（`/login`），见上面英文那份的注释 */
   'seo.login.title': '登录',
@@ -1600,7 +1658,7 @@ const zh: Record<MessageKey, string> = {
    *    `netplay.wanDev` 兜着（没配 TURN 时公网档进不去），落地页不背这个包袱。
    */
   'home.hero.lead':
-    '{site}上在线玩 NES、SFC（超级任天堂）、GBA 和街机的游戏，支持联机对战。',
+    '{site}上在线玩 NES、SFC（超级任天堂）、GBA、世嘉 MD、Game Boy 和街机等十余款机种的游戏，支持联机对战。',
   'home.hero.play': '进入小屋',
   'home.hero.browse': '浏览全部游戏',
   'home.hero.or': '或',
@@ -1608,7 +1666,8 @@ const zh: Record<MessageKey, string> = {
   'home.search.placeholder': '搜索标题 / 开发者 / 系列',
   'home.search.submit': '搜索',
   'home.consoles.title': '按机种浏览',
-  'home.consoles.lead': 'NES、SFC、GBA、街机 —— 点一个看它有哪些游戏。',
+  'home.consoles.lead':
+    'NES、SFC、GBA、世嘉 MD、Game Boy、街机等十余款机种 —— 点一个看它有哪些游戏。',
   'home.consoles.count': '{count} 款游戏',
   /* 2026-10-14 改：原来写「查看全部游戏」（指向 /games），现在机种有了自己的专题页，这里指向 /consoles */
   'home.consoles.all': '全部机种',
@@ -1644,18 +1703,18 @@ const zh: Record<MessageKey, string> = {
 
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':
-    '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）、GBA 和街机游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
+    '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机等十余款机种的游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
   'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
 
   /* 游戏列表 / 详情 / 下载三页的 SEO 文案，见上面英文那份的注释 */
   'seo.games.title': '全部游戏 —— 在线玩 NES / SFC / GBA / 街机',
   'seo.games.description':
-    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：NES、SFC（超级任天堂）、GBA 和街机。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
+    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
   /* 搜索结果两条，见上面英文那份的注释（人不索引、只给人看） */
   'seo.games.search.title': '「{keyword}」的搜索结果',
   'seo.games.search.description':
     '在线游戏库里匹配「{keyword}」的游戏共 {count} 款。可以直接在浏览器里玩，也可以下载 ROM 文件。',
-  /* 机种筛选，见上面英文那份的注释（`{console}` 是 NES / SFC / GBA / ARC 那四个丝印词） */
+  /* 机种筛选，见上面英文那份的注释（`{console}` 是 NES / SFC / GBA / ARC 等丝印词） */
   'seo.games.console.title': '{console} 游戏 —— 在线玩',
   'seo.games.console.description':
     '在线游戏库里的 {count} 款 {console} 游戏，全部可以直接在浏览器里玩，也可以下载 ROM 文件。',
@@ -1751,6 +1810,9 @@ const zh: Record<MessageKey, string> = {
   'legend.title': '按键说明',
   'legend.close': '关闭',
   'legend.needZip': '格式  FBNeo 只吃 .zip —— 这个是 {ext}，重新打包一下（或换一个 .zip 版）',
+  /* Neo Geo 缺 BIOS 的提示，判据和措辞的来由见上面英文那份的注释。 */
+  'legend.needBios':
+    'BIOS  这盘看着像 Neo Geo 游戏（拳皇 / 合金弹头 / 侍魂…），需要 neogeo.zip —— 把它拖进页面就装上了。CPS1 / CPS2 那类不需要。',
   /* 手柄，见上面英文那份的注释。 */
   'legend.gamepad': '手柄  插上就能用；联机时房主和加入者各插一个也可以。',
 
@@ -2089,7 +2151,7 @@ const zh: Record<MessageKey, string> = {
   'tour.replay': '重看操作指引',
   'tour.screen.title': '先来一盘游戏',
   'tour.screen.body':
-    '把 .nes / .sfc / .gba 文件（或街机 .zip）拖到电视机上就能玩，也可以直接点屏幕挑文件。',
+    '把 ROM 文件（.nes / .sfc / .gba / .md / .gb 等）或街机 .zip 拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
   'tour.rail.body':
     '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：游戏库（在线库 + 本机历史）、联机、自定义按键。帮助：按键说明、留言本。',
@@ -2137,6 +2199,33 @@ const zh: Record<MessageKey, string> = {
   'admin.scrape.ok': '已从页面填充。',
   'admin.scrape.failed': '读取该页面失败。',
   'admin.scrape.developerMissing': '开发商「{name}」还不在库里 —— 先去建一个再选上。',
+  'admin.scrape.assets': '正在获取封面与游戏文件…',
+  'admin.scrape.assetsOk': '封面与游戏文件已获取。',
+  'admin.scrape.coverFailed': '封面获取失败。',
+  'admin.scrape.romFailed': '游戏文件获取失败。',
+  'admin.scrape.noRom': '该页面没有找到可下载的游戏文件。',
+  /* 「从列表导入」，见上面英文那份的注释 */
+  'admin.bulk.button': '从列表导入',
+  'admin.bulk.title': '从列表导入',
+  'admin.bulk.hint': '粘贴一个机种列表页 —— 那一页上的游戏会逐个导入。',
+  'admin.bulk.placeholder': '例如 https://retrogamesnexus.com/zh/snes-games?page=1',
+  'admin.bulk.read': '读取列表',
+  'admin.bulk.reading': '读取中…',
+  'admin.bulk.readFailed': '读取该列表页失败。',
+  'admin.bulk.empty': '那一页没有找到游戏。',
+  'admin.bulk.total': '本页共 {count} 款游戏',
+  'admin.bulk.start': '开始导入',
+  'admin.bulk.stop': '停止',
+  'admin.bulk.now': '正在导入：{title}',
+  'admin.bulk.stat': '成功 {ok} · 跳过 {skipped} · 失败 {failed}',
+  'admin.bulk.failures': '未导入',
+  'admin.bulk.done': '导入完成。',
+  'admin.bulk.stopped': '已提前停止。',
+  'admin.bulk.close': '关闭',
+  'admin.bulk.noTitle': '该页面没有标题',
+  'admin.bulk.noCover': '该页面没有封面图',
+  'admin.bulk.noRom': '该页面没有游戏文件',
+  'admin.bulk.duplicate': '库里已有同名同语言的游戏。',
   /* 拖拽提示，见上面英文那份的注释 */
   'admin.drop.image': '把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。',
   'admin.drop.rom': '把游戏文件拖到这里，或点选文件。',
@@ -2213,7 +2302,7 @@ const zh: Record<MessageKey, string> = {
     '重置「{name}」？它的资料（名字 / 图片 / 介绍）会被清掉，前台退回内置默认信息。游戏本身不受影响。',
   'admin.consoles.field.name': '名字',
   'admin.consoles.field.image': '机图 / 图片',
-  'admin.consoles.imageHint': '选填。没有图时前台用卡带丝印词（NES / SFC / GBA / ARC）占位。',
+  'admin.consoles.imageHint': '选填。没有图时前台用卡带丝印词（NES / SFC / GBA / ARC 等）占位。',
   'admin.consoles.imageCurrent': '当前：{name}。留空表示不换。',
   'admin.consoles.field.released': '发售年份',
   'admin.consoles.field.summary': '简介',
@@ -2293,7 +2382,7 @@ const zh: Record<MessageKey, string> = {
 
   'gamesPage.heading': '全部游戏',
   'gamesPage.intro':
-    '在线游戏库共 {count} 款：NES、SFC（超级任天堂）、GBA 和街机。点封面看详情，也可以直接开玩。',
+    '在线游戏库共 {count} 款：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点封面看详情，也可以直接开玩。',
   'gamesPage.empty': '游戏库现在还是空的。',
   /* 机种筛选三条，见上面英文那份的注释 */
   'gamesPage.introConsole': '游戏库里共 {count} 款 {console} 游戏。点封面看详情，也可以直接开玩。',

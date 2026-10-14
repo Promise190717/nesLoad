@@ -57,6 +57,12 @@ import { useI18n } from './I18nProvider';
  * ⚠️ SFC 的 Y / X 用 `y` / `x`，**不是**面板里街机叫法的 Y→`l`：街机的 Y 是第 5 个钮
  * （落在 `l`，肩键位），而 SFC 的 Y 是四个面键之一（`y`）。两者同名不同键，
  * 只能按机种分开写，否则按 SFC 的 Y 会去按肩键。
+ *
+ * 2026-10-14 随八个新机种补全。两条换算上的事实（这是「按键为什么落在这些键位」的依据）：
+ *   · **世嘉 MD / 32X 的 A B C / X Y Z 与街机同构** —— genesis_plus_gx 的默认映射就是
+ *     retropad B/A/Y → MD 的 A/B/C，X/L/R → MD 的 X/Y/Z，所以直接复用街机那一套叫法；
+ *   · **GB / GBC / GG / SMS / WS / NGP 都是两颗面键**，和红白机同构（左 B 右 A），
+ *     所以它们和 `nes` 长得一样 —— 这不是偷懒，是这些机器的面板上真的只有两颗。
  */
 const FACE_ROWS: Record<ConsoleType, ([string, ButtonName] | null)[][]> = {
   // B 在左、A 在右（红白机手柄的样子）
@@ -67,6 +73,9 @@ const FACE_ROWS: Record<ConsoleType, ([string, ButtonName] | null)[][]> = {
     [['Y', 'y'], null, ['A', 'a']],
     [null, ['B', 'b'], null],
   ],
+  // Game Boy 一系：两颗面键，A 在右（和红白机同构）—— GB / GBC 都是这一套
+  gb: [[['B', 'b'], ['A', 'a']]],
+  gbc: [[['B', 'b'], ['A', 'a']]],
   // GBA：面键只有 B / A（B 左 A 右，和 GBA 机身一致），
   // 肩键 L / R 单独摆一行 —— 机身顶部那两颗，掌机上只能和面键并列呈现
   gba: [
@@ -78,6 +87,19 @@ const FACE_ROWS: Record<ConsoleType, ([string, ButtonName] | null)[][]> = {
     [['A', 'b'], ['B', 'a'], ['C', 'y']],
     [['X', 'x'], ['Y', 'l'], ['Z', 'r']],
   ],
+  // 世嘉 MD 三键手柄：A B C 一排（换算同街机的第一排）
+  md: [[['A', 'b'], ['B', 'a'], ['C', 'y']]],
+  // Game Gear / Master System：面键是丝印的 1 / 2 两颗
+  gg: [[['1', 'b'], ['2', 'a']]],
+  sms: [[['1', 'b'], ['2', 'a']]],
+  // 32X 走世嘉六键手柄（A B C / X Y Z），摆法和街机完全一样
+  '32x': [
+    [['A', 'b'], ['B', 'a'], ['C', 'y']],
+    [['X', 'x'], ['Y', 'l'], ['Z', 'r']],
+  ],
+  // 万代 WonderSwan / SNK Neo Geo Pocket：各两颗面键（A / B）
+  ws: [[['A', 'b'], ['B', 'a']]],
+  ngp: [[['A', 'b'], ['B', 'a']]],
 };
 
 /** 认不出机种时用哪一套 —— 就是 NES 那两颗，也是「默认只有 b / a」那条要求 */

@@ -1,15 +1,21 @@
 /*
  * 后台「从链接自动填充」—— 给一个游戏页链接，抓回元数据交给表单预填。
  *
- * ⚠️ **只读网页文本，不碰任何 ROM 文件。** 解析的是页面里的 JSON-LD
- *    （schema.org 的 VideoGame 节点）加上开发商 / 系列那两条链接的文字；
- *    封面也只**回传图片地址**、不上传 R2 —— 封面与 ROM 仍然由后台手动选文件上传。
+ * 解析两处：
+ *   · 页面里的 JSON-LD（schema.org 的 VideoGame 节点）—— 标题 / 简介 / 机种 / 年份 / 封面；
+ *   · Next 的 RSC 数据块（`self.__next_f.push`）—— ROM 下载地址（对象里的 `fileName`）；
+ * 再加上开发商 / 系列那两条链接的文字。
+ *
+ * ⚠️ **只回传地址，不代取字节、不碰 R2。** 封面与 ROM 的字节由前端再走
+ *    /api/admin/fetch-image 与 /api/admin/fetch-rom 两个代理取回来（上游是别的域名，
+ *    浏览器直接 fetch 会被 CORS 挡）。真正上传仍走后台表单那一条路。
  *
  * 支持的链接形态（同一款游戏，slug 相同）：
  *   · https://retrogamesnexus.com/zh/games/<slug>
  *   · https://retrogamesnexus.com/zh/download-rom/<slug>
  *   · 干脆只给一个 <slug>
- * 无论哪种，一律去取 `/<locale>/games/<slug>` —— 只有那一页带完整的 JSON-LD。
+ * 无论哪种，一律去取 `/<locale>/games/<slug>` —— 那一页同时带完整 JSON-LD 与 RSC 数据
+ * （ROM 地址只在 RSC 里；两页都带 `fileName`，2026-10-14 核过下载页也有）。
  *
  * 双语：抓完主语言那一份，再**尽力**抓一次另一语言（失败就留空，前台会自动回退中文）。
  *
@@ -18,25 +24,17 @@
 
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
+import { romLangToFormValue } from '@/lib/rom-lang';
 import { assertAdmin } from '@/lib/server/admin-guard';
+import { findGameDuplicate } from '@/lib/server/games';
+import { UPSTREAM_LOCALES, UPSTREAM_SITE, fetchUpstreamHtml, toConsoleType } from '@/lib/server/upstream';
+import { failJson } from '@/lib/server/url-guard';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const SITE = 'https://retrogamesnexus.com';
-/** 站点认得的语言前缀；第一个是缺省。 */
-const LOCALES = ['zh', 'en'] as const;
-
 /** 上游站点的路径里，这两段后面跟的都是同一个 slug。 */
 const SLUG_KINDS = ['games', 'download-rom'];
-
-/** 抓页面时用的 UA —— 拿默认的 node UA 有些站点会直接拒。 */
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
-
-function fail(error: string, detail: string, status = 400) {
-  return NextResponse.json({ error, detail }, { status });
-}
 
 /** 从任意形态的输入里拆出 `{ locale, slug }`；认不出返回 null。 */
 function parseTarget(raw: string): { locale: string; slug: string } | null {
@@ -44,7 +42,7 @@ function parseTarget(raw: string): { locale: string; slug: string } | null {
   if (!text) return null;
 
   // 只给了 slug
-  if (/^[a-z0-9][a-z0-9-]*$/i.test(text)) return { locale: LOCALES[0], slug: text };
+  if (/^[a-z0-9][a-z0-9-]*$/i.test(text)) return { locale: UPSTREAM_LOCALES[0], slug: text };
 
   let url: URL;
   try {
@@ -60,7 +58,9 @@ function parseTarget(raw: string): { locale: string; slug: string } | null {
   const kind = parts.at(-2);
   if (!slug || !kind || !SLUG_KINDS.includes(kind)) return null;
 
-  const locale = (LOCALES as readonly string[]).includes(parts[0]) ? parts[0] : LOCALES[0];
+  const locale = (UPSTREAM_LOCALES as readonly string[]).includes(parts[0])
+    ? parts[0]
+    : UPSTREAM_LOCALES[0];
   return { locale, slug };
 }
 
@@ -79,18 +79,6 @@ function jsonLdNodes(html: string): Record<string, unknown>[] {
     }
   }
   return out;
-}
-
-/** 把 JSON-LD 的 `gamePlatform` 收敛成站内的 ConsoleType。 */
-function toConsoleType(value: unknown): ConsoleType | null {
-  const text = String(value ?? '').toLowerCase();
-  if (!text) return null;
-  if (text.includes('gba') || text.includes('game boy advance')) return 'gba';
-  if (text.includes('snes') || text.includes('super nintendo') || text.includes('super famicom'))
-    return 'snes';
-  if (text.includes('nes') || text.includes('famicom')) return 'nes';
-  if (text.includes('arcade') || text.includes('mame') || text.includes('fbneo')) return 'arcade';
-  return null;
 }
 
 /** 去掉标签与常见实体，压掉多余空白。 */
@@ -137,6 +125,64 @@ function linkText(html: string, kind: 'game-developer' | 'game-series'): string 
   return text || null;
 }
 
+/**
+ * ROM 多语言版本时挑选的先后：**英文 → 中文 → 日文**，都没有就退到第一个。
+ * `cn` / `zh` 都算中文（上游两种写法都用过，比较前统一转小写）。
+ */
+const ROM_LANG_PRIORITY = ['en', 'cn', 'zh', 'ja'] as const;
+
+/**
+ * 从 RSC 数据块里抠出 ROM 下载地址。
+ *
+ * 页面是 Next App Router 渲染的，`self.__next_f.push([1,"…"])` 里带着**完整游戏对象**，
+ * 其中 `fileName` 就是 ROM 的地址表（JSON-LD 里没有这个字段）：
+ *   "fileName":{"ja":"https://files.retrogamesnexus.com/games/roms/ultra-seven-ja.zip"}
+ * key 是 ROM 的语言版本（ja / en / cn…），value 是绝对地址。
+ *
+ * 顺手把选中那条的**语言 key** 也带出去 —— 表单的「语言」下拉就靠它填
+ * （那个字段是判重的一环：同名 + 同语言才算重复）。
+ *
+ * ⚠️ 这一段在 HTML 里是**转义过的**（`\"` 而不是 `"`），所以按转义形态匹配。
+ * ⚠️ 先拿 slug 定个锚点再往后找 —— 同一份数据里还有 `relatedGames`，
+ *    直接全局搜第一处 `fileName` 将来未必还是主游戏那条。
+ * ⚠️ 值是**两种形态**，同一页里会混着出现（2026-10-14 踩过）：
+ *    · 绝对地址 `https://files.retrogamesnexus.com/games/roms/x.zip`
+ *    · 站内相对路径 `/games/roms/Contra.nes`
+ *    只认 http(s) 会把后一批全漏掉 —— 表现就是 NES 那些游戏一律报「该页面没有游戏文件」。
+ *    相对路径的 base 是**主站**（`retrogamesnexus.com`），不是 `files.` 那个子域：
+ *    实测 `files.…/games/roms/Contra.nes` 是 404，主站那个才是 200。
+ */
+function romFromHtml(
+  html: string,
+  slug: string
+): { url: string; name: string; lang: string } | null {
+  const anchor = html.indexOf(`\\"slug\\":\\"${slug}\\"`);
+  const from = anchor === -1 ? 0 : anchor;
+  const segment = html.slice(from, from + 4000);
+
+  const block = segment.match(/\\"fileName\\":\{([^}]*)\}/);
+  if (!block) return null;
+
+  const entries: { lang: string; url: string }[] = [];
+  for (const match of block[1].matchAll(/\\"([\w-]+)\\":\\"(https?:\/\/[^\\"]+|\/[^\\"]+)\\"/g)) {
+    // 统一转小写再比 —— 上游的 key 大小写不一定稳；
+    // 相对路径补上主站域名（后面取文件名、交给 fetch-rom 抓都用得上）
+    entries.push({
+      lang: match[1].toLowerCase(),
+      url: match[2].startsWith('/') ? `${UPSTREAM_SITE}${match[2]}` : match[2],
+    });
+  }
+  if (!entries.length) return null;
+
+  // 按语言优先级挑一个；都没有就退到第一个（上游只给一个版本时就是这种情形）
+  const picked =
+    ROM_LANG_PRIORITY.map((lang) => entries.find((entry) => entry.lang === lang)).find(Boolean) ??
+    entries[0];
+
+  const name = decodeURIComponent(picked.url.split('/').pop() ?? '');
+  return name ? { url: picked.url, name, lang: picked.lang } : null;
+}
+
 interface ScrapedPage {
   title: string | null;
   /** 简介（「关于」首段），拿不到就是 null */
@@ -148,21 +194,24 @@ interface ScrapedPage {
   developer: string | null;
   series: string | null;
   imageUrl: string | null;
+  /** ROM 下载地址（RSC 数据里的 `fileName`），页面没挂文件时是 null */
+  romUrl: string | null;
+  /** ROM 原始文件名 —— FBNeo 认它当驱动名，改不得（2026-10-14 加） */
+  romName: string | null;
+  /** 选中那个 ROM 的语言 key（en / cn / zh / ja…）—— 表单「语言」下拉照它填 */
+  romLang: string | null;
 }
 
 /** 抓 `/<locale>/games/<slug>` 并解析出元数据。 */
 async function scrapeGamePage(locale: string, slug: string): Promise<ScrapedPage> {
-  const res = await fetch(`${SITE}/${locale}/games/${slug}`, {
-    headers: { 'user-agent': USER_AGENT, accept: 'text/html' },
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const html = await res.text();
+  const html = await fetchUpstreamHtml(`/${locale}/games/${slug}`);
 
   const node = jsonLdNodes(html).find((n) => n['@type'] === 'VideoGame') ?? {};
   const image = node.image as { url?: string } | undefined;
   const published = typeof node.datePublished === 'string' ? node.datePublished : '';
   const year = published ? Number.parseInt(published.slice(0, 4), 10) : Number.NaN;
+  // ROM 地址只在 RSC 数据里，JSON-LD 没有（见 romFromHtml 的注释）
+  const rom = romFromHtml(html, slug);
 
   return {
     title: typeof node.name === 'string' ? node.name : null,
@@ -173,6 +222,9 @@ async function scrapeGamePage(locale: string, slug: string): Promise<ScrapedPage
     developer: linkText(html, 'game-developer'),
     series: linkText(html, 'game-series'),
     imageUrl: typeof image?.url === 'string' ? image.url : null,
+    romUrl: rom?.url ?? null,
+    romName: rom?.name ?? null,
+    romLang: rom?.lang ?? null,
   };
 }
 
@@ -190,11 +242,11 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as { url?: unknown };
   } catch {
-    return fail('bad-request', '请求体不是合法 JSON');
+    return failJson('bad-request', '请求体不是合法 JSON');
   }
 
   const target = parseTarget(typeof body.url === 'string' ? body.url : '');
-  if (!target) return fail('bad-url', '认不出这个链接，请粘贴游戏页地址');
+  if (!target) return failJson('bad-url', '认不出这个链接，请粘贴游戏页地址');
 
   try {
     const primary = await scrapeGamePage(target.locale, target.slug);
@@ -204,7 +256,7 @@ export async function POST(request: Request) {
      * 前台对空的 `_en` 会自动回退中文（见 lib/server/games.ts 的 localizeGame），
      * 所以这里失败不该让整个请求失败。
      */
-    const other = LOCALES.find((l) => l !== target.locale) ?? LOCALES[0];
+    const other = UPSTREAM_LOCALES.find((l) => l !== target.locale) ?? UPSTREAM_LOCALES[0];
     let secondary: ScrapedPage | null = null;
     try {
       secondary = await scrapeGamePage(other, target.slug);
@@ -217,8 +269,27 @@ export async function POST(request: Request) {
     const zh = primaryIsEn ? secondary : primary;
     const en = primaryIsEn ? primary : secondary;
 
+    const title = zh?.title ?? primary.title;
+    // 语言 key 跟着选中的那份 ROM 走（它决定表单「语言」下拉填什么，也是判重的一半）
+    const romLang = primary.romLang ?? secondary?.romLang ?? null;
+
+    /*
+     * 顺手查一次重：判据与 POST /api/admin/games 里那次**完全一致**（都走 findGameDuplicate），
+     * 否则会出现「这里说不重复、下载完上传却被判重复」。
+     *
+     * 调用方（批量导入）靠它**先决定要不要去下载封面和 ROM** —— 那一步是几 MB，
+     * 是整条链路里最慢的一段；库里已有的（同名 + 同语言）直接跳过，不白下载一遍。
+     * ⚠️ 查重失败（D1 抖一下）**不该拦住抓取本身** —— 上传那一步还会再判一次，那才是兜底。
+     */
+    let duplicateOf: { id: string; title: string; language: string | null } | null = null;
+    try {
+      duplicateOf = title ? await findGameDuplicate(title, romLangToFormValue(romLang)) : null;
+    } catch (error) {
+      console.warn('[admin] 预检查重失败，交给上传那一步兜底', error);
+    }
+
     return NextResponse.json({
-      title: zh?.title ?? primary.title,
+      title,
       titleEn: en?.title ?? null,
       consoleType: primary.consoleType ?? secondary?.consoleType ?? null,
       year: primary.year ?? secondary?.year ?? null,
@@ -227,10 +298,18 @@ export async function POST(request: Request) {
       seriesEn: en?.series ?? null,
       description: bestDescription(zh ?? primary),
       descriptionEn: bestDescription(en),
+      // 封面 / ROM 的**地址**（字节不在这里取）：主语言那份优先 ——
+      // 不同语言页面挂的 ROM 版本可能不同（中文页给日版、英文页给美版）
       imageUrl: primary.imageUrl ?? secondary?.imageUrl ?? null,
+      romUrl: primary.romUrl ?? secondary?.romUrl ?? null,
+      romName: primary.romName ?? secondary?.romName ?? null,
+      romLang,
+      /** 库里已经有同名同语言的一条 —— 调用方据此**跳过下载**（那一步最慢） */
+      duplicate: duplicateOf !== null,
+      duplicateOf,
     });
   } catch (error) {
     console.error('[admin] 抓取游戏页失败', error);
-    return fail('scrape-failed', (error as Error).message, 502);
+    return failJson('scrape-failed', (error as Error).message, 502);
   }
 }

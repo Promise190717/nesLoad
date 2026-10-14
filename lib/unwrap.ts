@@ -36,6 +36,9 @@ import { baseName, inflateEntry, readZipEntries } from './zip';
  * 和 `lib/emulator.ts` 的 `EXTENSION_MAP` 是**同一批**，但这里刻意不复用那个表：
  * 那张表是「扩展名 → 机种」的回退映射，把 `zip` 也映到了街机；这张是「像 ROM 吗」，
  * 语义不同，混用会让以后加机种时两边打架。
+ *
+ * ⚠️ 和那张表一样**不收 `.bin`**：它太泛（光盘镜像、各种裸 dump），
+ * 收进来会让「装着一堆无关 bin 的压缩包」被当成 ROM 包拆开。
  */
 const ROM_EXTENSIONS = new Set([
   // NES / Famicom
@@ -49,8 +52,22 @@ const ROM_EXTENSIONS = new Set([
   'swc',
   'fig',
   'bs',
-  // GBA（2026-10-13 加）
+  // Game Boy 一系（2026-10-14 加：gb / gbc 是当天新增的两个机种，GBA 早就在）
+  'gb',
+  'gbc',
   'gba',
+  // 世嘉
+  'md',
+  'gen',
+  'smd',
+  'gg',
+  'sms',
+  '32x',
+  // 万代 / SNK 掌机
+  'ws',
+  'wsc',
+  'ngp',
+  'ngc',
 ]);
 
 /**

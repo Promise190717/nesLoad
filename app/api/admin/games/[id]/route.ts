@@ -11,14 +11,13 @@
 
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
+import { CONSOLE_TYPES } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { deleteGame, findGameDuplicate, getGameRow, updateGame, type GamePatch } from '@/lib/server/games';
 import { deleteObject, keyFromPublicUrl } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 function fail(error: string, detail: string, status = 400) {
   return NextResponse.json({ error, detail }, { status });

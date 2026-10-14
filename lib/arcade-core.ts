@@ -6,17 +6,28 @@
  * （`wof3js` / `wof3jsa` / `wof3sj` / `wof3sja` / `wofb` / `wofh` / `wofha` / `forgottnu1` /
  * `willowo`），FBNeo 多出 209 个。只挂一个核心，必然有一批 romset 静默失败。
  *
- * 更常见的一类失败是**名字不对**：FBNeo / FBA 拿 zip 里的文件名去查驱动表，它自己
- * **不校验 CRC** —— 内容一模一样、名字差一个下划线（`tke17.12b` vs `tke_17.12b`）
- * 就整个加载不了。网上流通的 romset 大量是「合并集命名」（`tk2_gfx1.rom` 这种），
- * 名字和任何一个核心都对不上，但内容是对的。
+ * 更常见的一类失败是**名字不对**：老核心（`fbalpha2012_cps1`，FBA 0.2.97.42）拿 zip 里的
+ * 文件名去查驱动表 —— 内容一模一样、名字差一个下划线（`tke17.12b` vs `tke_17.12b`）
+ * 就整个加载不了，它的报错是 `[FBA] ROM index %i was not found ... CRC: 0x%08x`。
+ * 网上流通的 romset 大量是「合并集命名」（`tk2_gfx1.rom` 这种），名字和它的表对不上，
+ * 但内容是对的。
+ *
+ * ⚠️ **更正（2026-10-14）：`fbneo` 那个核心并不这样。** 实测 `public/cores/fbneo_libretro.wasm`
+ * 里有 `Using ROM with known crc 0x%08x and name %s from archive %s`，对应
+ * `libretro/FBNeo` 的 `src/burner/libretro/libretro.cpp`：
+ * `int index = find_rom_by_crc(ri.nCrc, list, count, &real_rom_name);` —— **先按 CRC 在 zip 里找，
+ * 名字完全不参与**（只有 romdata / patched romset 模式才退回 `find_rom_by_name`）。
+ * 所以下面第 2 步「补名字」**真正服务的是 `fbalpha2012_cps1`，不是 fbneo**；
+ * 对 fbneo 来说它无害但也无用。写这段注释时的旧说法「FBNeo / FBA 都不校验 CRC、只认名字」
+ * 只对老核心成立，别再按那个理解去推 fbneo 的行为。
  *
  * 所以这里在 launch **之前**做三件事：
  *
  *   1. **认驱动**：读 zip 中央目录（文件名 + CRC32），去查两张表
  *      （`public/arcade-romsets.json`，由 FBNeo / FBA 的 `d_cps1.cpp` 解析生成）。
- *      判据是「驱动要的 rom **CRC 全都在**」—— 因为核心只按名字取、不校验 CRC，
- *      CRC 全在就等于内容齐了，剩下的只是名字问题。
+ *      判据是「驱动要的 rom **CRC 全都在**」—— 两张表里 `fbalpha2012_cps1` 那张要的是
+ *      「名字 + CRC 都对」，`fbneo` 那张要的是「CRC 在」（它按 CRC 取），
+ *      两种判据在 `collect()` 里统一成「先 CRC 全在、再数名字对上的条数」。
  *   2. **补名字**：挑中驱动后，如果 zip 里的名字和驱动期望的对不上，就把 zip
  *      **重打包一遍**（`lib/zip.ts`，压缩数据原样搬，只重写名字字段）。
  *   3. **挖一层**：顶层认不出来时，往「整合包」里找内层 zip（站点合集常见形态：

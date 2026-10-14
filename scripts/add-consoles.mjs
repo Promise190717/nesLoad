@@ -1,19 +1,22 @@
 /*
- * 建「机种库」并预填四个机种的默认资料行（2026-10-14 用户要求）。
+ * 建「机种库」并预填机种的默认资料行。
  *
  * 用法：
  *   node --env-file=.env.local scripts/add-consoles.mjs [--dry-run]
  *
  * 干两件事，**全部幂等、只增不删**（没有 DELETE / DROP / TRUNCATE）：
  *   ① 建 `consoles` 表（`CREATE TABLE IF NOT EXISTS`，已有就跳过）；
- *   ② 给四个机种（nes / snes / gba / arcade）各补一行默认资料
- *      （`INSERT OR IGNORE` 撞主键就跳过 —— 后台已经填过的名字 / 简介绝不会被覆盖）。
+ *   ② 给登记表里的每个机种各补一行默认资料（`INSERT OR IGNORE` 撞主键就跳过
+ *      —— 后台已经填过的名字 / 简介绝不会被覆盖）。
  *
  * 为什么要单独跑一个脚本：schema.sql 只对「还没建过表」的库有效（同 developers 那条），
  * 已经上线的库要靠这里补一次。
  *
+ * ⚠️ **加机种之后再跑一遍这个脚本**就是「数据库那边也补上」的全部动作 ——
+ *    它只会给新机种插行，老机种那几行原样保留（`INSERT OR IGNORE`）。
+ *
  * ⚠️ 预填的名字只是**占位默认值**（中文「红白机（NES）」这类），后台机种库里随时可改；
- *    图片 / 简介全部留空，等后台自己补。脚本重复跑多少遍都只会补缺的行、不动已有的列。
+ *    图片 / 详细介绍全部留空，等后台自己补。脚本重复跑多少遍都只会补缺的行、不动已有的列。
  *
  * ⚠️ `.env.local` 里连的是**真库**。先 `--dry-run` 看一眼它打算做什么。
  */
@@ -96,11 +99,17 @@ if (!DRY_RUN) {
 }
 console.log('① consoles 表：就绪（已存在则原样保留）。');
 
-// ---------------------------------------------------------------- ② 预填四个机种
+// ---------------------------------------------------------------- ② 预填机种资料
 
 /*
  * 默认资料。⚠️ 只是占位：后台机种库里随时能改。en 留空的机种英文站回退中文。
  * 展示名刻意写全称 + 括号简称 —— 和首页卡片上的丝印词（NES / SFC / GBA / ARC）是两码事。
+ *
+ * 顺序跟着 `lib/consoles.ts` 的 `CONSOLE_TYPES`（展示顺序）。前四个 2026-10-14 之前
+ * 就在库里了，`INSERT OR IGNORE` 会跳过它们；后八个是当天随新机种补的。
+ *
+ * `releaseYear` 是可空的（街机那种没有单一年份的留 null）。它只在机种专题页的
+ * 资料表里显示，填错不影响功能，后台随时改。
  */
 const DEFAULT_CONSOLES = [
   {
@@ -109,6 +118,7 @@ const DEFAULT_CONSOLES = [
     nameEn: 'NES (Famicom)',
     summary: '任天堂 1983 年推出的 8 位家用游戏机，本站库里的主力机种。',
     summaryEn: "Nintendo's 8-bit home console from 1983 — the backbone of this library.",
+    releaseYear: 1983,
   },
   {
     type: 'snes',
@@ -116,6 +126,7 @@ const DEFAULT_CONSOLES = [
     nameEn: 'Super Nintendo (SNES)',
     summary: '1990 年推出的 16 位家用游戏机，日版名 SFC。',
     summaryEn: 'The 16-bit home console from 1990, known as the Super Famicom in Japan.',
+    releaseYear: 1990,
   },
   {
     type: 'gba',
@@ -123,6 +134,7 @@ const DEFAULT_CONSOLES = [
     nameEn: 'Game Boy Advance',
     summary: '任天堂 2001 年推出的 32 位掌上游戏机。',
     summaryEn: "Nintendo's 32-bit handheld from 2001.",
+    releaseYear: 2001,
   },
   {
     type: 'arcade',
@@ -130,6 +142,73 @@ const DEFAULT_CONSOLES = [
     nameEn: 'Arcade',
     summary: '街机厅里的投币游戏，本站通过 FBNeo 核心运行。',
     summaryEn: 'Coin-op cabinet games, emulated here through the FBNeo core.',
+    releaseYear: null,
+  },
+
+  /* ——— 2026-10-14 新增的八个机种 ——— */
+  {
+    type: 'gb',
+    name: 'Game Boy',
+    nameEn: 'Game Boy',
+    summary: '任天堂 1989 年推出的掌上游戏机，四阶灰阶屏幕，全球销量过亿。',
+    summaryEn: "Nintendo's handheld from 1989 — a four-shade screen that sold over 100 million units.",
+    releaseYear: 1989,
+  },
+  {
+    type: 'gbc',
+    name: 'Game Boy Color',
+    nameEn: 'Game Boy Color',
+    summary: 'Game Boy 的彩色版本，1998 年推出，向下兼容黑白卡带。',
+    summaryEn: 'The colour Game Boy from 1998, backwards compatible with the black-and-white cartridges.',
+    releaseYear: 1998,
+  },
+  {
+    type: 'md',
+    name: '世嘉 MD（Mega Drive）',
+    nameEn: 'Sega Mega Drive',
+    summary: '世嘉 1988 年推出的 16 位家用游戏机，北美版叫 Genesis。',
+    summaryEn: "Sega's 16-bit console from 1988, sold as the Genesis in North America.",
+    releaseYear: 1988,
+  },
+  {
+    type: 'gg',
+    name: 'Game Gear',
+    nameEn: 'Game Gear',
+    summary: '世嘉 1990 年推出的彩色掌上游戏机，硬件接近 Master System。',
+    summaryEn: "Sega's colour handheld from 1990, built on Master System hardware.",
+    releaseYear: 1990,
+  },
+  {
+    type: 'sms',
+    name: '世嘉 Master System',
+    nameEn: 'Sega Master System',
+    summary: '世嘉 1987 年推出的 8 位家用游戏机。',
+    summaryEn: "Sega's 8-bit home console from 1987.",
+    releaseYear: 1987,
+  },
+  {
+    type: '32x',
+    name: '世嘉 32X',
+    nameEn: 'Sega 32X',
+    summary: 'MD 的 32 位附加硬件，1994 年发售，本站由 PicoDrive 核心直接运行。',
+    summaryEn: 'The 32-bit add-on for the Mega Drive, released in 1994 and emulated here by PicoDrive.',
+    releaseYear: 1994,
+  },
+  {
+    type: 'ws',
+    name: '万代 WonderSwan',
+    nameEn: 'WonderSwan',
+    summary: '万代 1999 年推出的掌上游戏机，横竖两个方向都能玩。',
+    summaryEn: "Bandai's handheld from 1999, playable in either portrait or landscape.",
+    releaseYear: 1999,
+  },
+  {
+    type: 'ngp',
+    name: 'Neo Geo Pocket',
+    nameEn: 'Neo Geo Pocket',
+    summary: 'SNK 1998 年推出的掌上游戏机，街机游戏的家用掌上版。',
+    summaryEn: "SNK's handheld from 1998 — the pocket-sized version of the Neo Geo.",
+    releaseYear: 1998,
   },
 ];
 
@@ -137,7 +216,7 @@ const INSERT_DEFAULT =
   `INSERT OR IGNORE INTO consoles
      (console_type, name, name_en, image_url, summary, summary_en,
       description, description_en, release_year, created_at)
-   VALUES (?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, ?)`;
+   VALUES (?, ?, ?, NULL, ?, ?, NULL, NULL, ?, ?)`;
 
 let inserted = 0;
 let kept = 0;
@@ -159,6 +238,7 @@ for (const item of DEFAULT_CONSOLES) {
       item.nameEn,
       item.summary,
       item.summaryEn,
+      item.releaseYear ?? null,
       Date.now(),
     ]);
   }

@@ -11,14 +11,13 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
+import { CONSOLE_TYPES } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { findGameDuplicate, insertGame, listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const CONSOLE_TYPES: readonly ConsoleType[] = ['nes', 'snes', 'gba', 'arcade'];
 
 /**
  * 失败响应统一格式：`error` 是稳定的机器码，`detail` 是给人看的说明。
