@@ -46,16 +46,21 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ---------------------------------------------------------------------------
  * 缓存（2026-10-12 加）
  *
- * 这一页**每次请求都要打两次 D1**（COUNT + SELECT），而它的内容变得很慢
+ * 这一页取数要打 D1（COUNT + SELECT），而它的内容变得很慢
  * （只有后台上传 / 编辑游戏时才变）。所以取数那一步套了 `unstable_cache`：
- * **30 分钟内同一批数据只查一次数据库**，之后由 Next 的缓存直接返回，
- * 页面照旧按请求动态渲染（语言还是跟着 cookie 走，不受缓存影响）。
+ * **12 小时内同一批数据只查一次数据库**（2026-10-14 从 30 分钟拉长 —— 用户为压 D1 的
+ * `rows_read` 额度拍板），之后由 Next 的缓存直接返回，页面照旧按请求动态渲染
+ * （语言还是跟着 cookie 走，不受缓存影响）。
  *
- * ⚠️ 缓存的作用范围**只是这一页的数据读取**，不在 `listGamesPage` 里 ——
- * 房间的在线库弹窗（`/api/games`）和后台列表（`/api/admin/games`）共用那个函数，
- * 它们必须立刻看到刚上传的游戏。细节与 TTL 常量见 lib/server/games.ts。
+ * ⚠️ **「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）——
+ *    翻多少页都只数一次全表，这是这次改动的重点。
  *
- * ⚠️ 副作用：**后台新传 / 改过的游戏，最多要等 30 分钟才出现在这一页**（后台自己那张
+ * ⚠️ 缓存的作用范围**只是页面这一侧的取数**，不在 `listGamesPage` 里 ——
+ * 后台列表（`/api/admin/games`）共用那个函数，必须立刻看到刚上传的游戏。
+ * （房间的在线库弹窗 `/api/games` 2026-10-14 起也走同一套缓存了。）
+ * 细节与 TTL 常量见 lib/server/games.ts。
+ *
+ * ⚠️ 副作用：**后台新传 / 改过的游戏，最多要等 12 小时才出现在这一页**（后台自己那张
  * 列表不受影响，它走 force-dynamic 的接口）。这是「不每次打数据库」必然的代价，
  * 想立刻生效就重启服务，或者把 TTL 调小（常量就一个）。
  *
@@ -216,17 +221,20 @@ function parseQuery(raw: SearchParams): {
  * 本页要的数据。
  *
  * **两层缓存，各管一件事**：
- *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 30 分钟）——
- *      请求根本没打到 D1。TTL 与理由见 lib/server/games.ts 那边。
+ *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 12 小时）——
+ *      请求根本没打到 D1。它内部那个 `total` 还另有 `countGamesCached` 一层
+ *      （键里没有 offset，所以翻多少页都只数一次全表）。TTL 与理由见
+ *      lib/server/games.ts 那边。
  *   ② 外层 `cache()`（React，只在**同一次请求**内有效）—— 让 `generateMetadata`
  *      与页面正文共用同一次查询：两处都要 `total`（一个拼 description 里的条数，
- *      一个算总页数），少了它同一份 COUNT 会被打两遍。
+ *      一个算总页数），少了它同一份数据要取两遍（即使内层命中缓存，也得各走一次
+ *      键查找 + 反序列化）。
  *
  * ⚠️ 缓存键 = `['games:list', offset, limit, keyword, consoleType]`（`unstable_cache`
  * 自动把入参拼进键里）。所以**翻页 / 换关键词 / 换机种各是一份缓存**，不会串味；
  * 命中不了的键照常回源。关键词也进键意味着 `?q=xxx` 会被缓存 —— 那一份本来就被
- * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 30 分钟 TTL、
- * 超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀。机种只有四个取值 + null，
+ * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 12 小时 TTL、
+ * 超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀。机种只有十二个取值 + null，
  * 基数更是定死的。
  */
 const loadPage = cache(async (page: number, keyword: string, consoleType: ConsoleType | null) => {

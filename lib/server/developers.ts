@@ -129,6 +129,24 @@ export interface DeveloperPageQuery {
 const SEARCH_CONDITION = '(name LIKE ?1 OR summary LIKE ?1 OR name_en LIKE ?1 OR summary_en LIKE ?1)';
 
 /**
+ * 只数总数，不取数据。
+ *
+ * 和 `listDevelopers` 拆开的理由同 games.ts 的 `countGames`（2026-10-14）：前台那份
+ * 总数要走 `countDevelopersCached` —— 那个缓存的键里**没有 offset**，翻多少页都只数
+ * 一次；而 `listDevelopersCached` 的键含 offset，每翻一页都是新条目、都要各自数一遍全表。
+ */
+export async function countDevelopers({ keyword = '' }: DeveloperPageQuery = {}): Promise<number> {
+  const needle = keyword.trim();
+  const where = needle ? `WHERE ${SEARCH_CONDITION}` : '';
+  const params = needle ? [`%${needle}%`] : [];
+  const rows = await query<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM developers ${where}`,
+    params
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
+/**
  * 分页读取开发商列表，顺带给出每个名下的游戏数。
  *
  * 排序键和 games 那边同一个理由用两个：`created_at` 是毫秒时间戳，批量导入时
@@ -137,28 +155,23 @@ const SEARCH_CONDITION = '(name LIKE ?1 OR summary LIKE ?1 OR name_en LIKE ?1 OR
  *
  * 越界同样**夹回最后一页**并把夹过的 offset 返回，调用方以返回值为准（和 listGamesPage 一套）。
  *
- * ⚠️ **公开列表页请用 `listDevelopersCached`**（带 24 小时缓存，见下）；本函数保持无缓存，
+ * ⚠️ **公开列表页请用 `listDevelopersCached`**（带 12 小时缓存，见下）；本函数保持无缓存，
  *    留给后台那几条「必须立刻看到刚改的数据」的路径。
  */
 export async function listDevelopers(
   offset: number,
   limit: number,
-  { keyword = '' }: DeveloperPageQuery = {}
+  filter: DeveloperPageQuery = {},
+  total?: number
 ): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
-  const needle = keyword.trim();
+  const needle = filter.keyword?.trim() ?? '';
   const where = needle ? `WHERE ${SEARCH_CONDITION}` : '';
   const params = needle ? [`%${needle}%`] : [];
 
-  const total = Number(
-    (
-      await query<{ total: number }>(
-        `SELECT COUNT(*) AS total FROM developers ${where}`,
-        params
-      )
-    )[0]?.total ?? 0
-  );
+  // 传了就用（前台走 countDevelopersCached 那份，省一次全表 COUNT），没传就自己数（后台路径）。
+  const resolvedTotal = total ?? (await countDevelopers(filter));
 
-  const lastOffset = Math.max(0, Math.ceil(total / limit) - 1) * limit;
+  const lastOffset = Math.max(0, Math.ceil(resolvedTotal / limit) - 1) * limit;
   let safeOffset = Math.min(offset, lastOffset);
 
   const select = (at: number) =>
@@ -176,7 +189,7 @@ export async function listDevelopers(
     rows = await select(safeOffset);
   }
 
-  return { developers: rows.map(toDeveloper), total, offset: safeOffset, limit };
+  return { developers: rows.map(toDeveloper), total: resolvedTotal, offset: safeOffset, limit };
 }
 
 /**
@@ -184,8 +197,22 @@ export async function listDevelopers(
  *
  * 和 `TOP_DEVELOPERS_REVALIDATE_SECONDS` 数值相同，但**刻意各留一个常量** ——
  * 服务的是两个页面，将来谁想快一点 / 慢一点不必牵动另一个。
+ *
+ * ⚠️ 2026-10-14 前台列表统一 12 小时之后，这个数也和 `games.ts` 的
+ *    `GAMES_PAGE_REVALIDATE_SECONDS` 撞上了 —— 数值巧合，语义仍各管一摊。
  */
 export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 43200;
+
+/**
+ * 「总数」的独立缓存 —— 理由同 games.ts 的 `countGamesCached`：
+ * `listDevelopersCached` 的键含 offset，每翻一页都要各自数一遍全表；
+ * 挪到这一层（键里没有 offset）之后，12 小时内无论翻到第几页只数一次。
+ */
+export const countDevelopersCached = cached(
+  async (keyword: string) => countDevelopers({ keyword }),
+  ['developers:count'],
+  { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
+);
 
 /**
  * 带缓存的列表读取 —— **只给 `/developers` 列表页用**，别处的调用方继续用 `listDevelopers`。
@@ -203,9 +230,15 @@ export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 43200;
  */
 export const listDevelopersCached = cached(
   async (offset: number, limit: number, keyword: string) =>
-    listDevelopers(offset, limit, { keyword }),
+    listDevelopers(
+      offset,
+      limit,
+      { keyword },
+      // 总数走独立缓存（键里没有 offset）—— 翻多少页都只数一次，见 countDevelopersCached。
+      await countDevelopersCached(keyword)
+    ),
   // v2：2026-10-13 给 developers 表批量补了厂标（image_url），旧键里缓存的还是
-  // 全 null 的快照 —— 不换键的话列表页要等 24 小时才露图。下次批量改库再照此升 v3。
+  // 全 null 的快照 —— 不换键的话列表页要等 12 小时才露图。下次批量改库再照此升 v3。
   ['developers:list', 'v2'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
@@ -248,7 +281,7 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
  *
  * ⚠️ 开发商列表页（`/developers`）**不用它** —— 那一页按 `created_at` 排（要「最新登记的
  *    在最前」），和这里「按游戏数排」是两个查询；它自己有 `listDevelopersCached`
- *    （同样是 24 小时，键前缀 `developers:list`，和这里的 `developers:top` 各存各的）。
+ *    （同样是 12 小时，键前缀 `developers:list`，和这里的 `developers:top` 各存各的）。
  *    首页是另一回事 —— 它是一个由 D1 拼出来的落地页，每个访客都重查一遍没必要。
  *    缓存留在「页面这一侧」，和 games 那边同一条规矩。
  */

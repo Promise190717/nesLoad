@@ -32,7 +32,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * ⚠️ **不写 `export const dynamic`**：读 D1 + cookie，本来就是动态渲染。
  *
- * 名下那段游戏列表走 `listGamesByDeveloperCached`（30 分钟 TTL，和 `/games` 列表页一致）；
+ * 名下那段游戏列表走 `listGamesByDeveloperCached`（12 小时 TTL，和 `/games` 列表页一致）；
  * 开发商自己的资料（名字 / 简介 / 介绍）**不缓存** —— 后台改完刷新就能看到。
  */
 type SearchParams = Record<string, string | string[] | undefined>;

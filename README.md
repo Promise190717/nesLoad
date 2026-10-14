@@ -170,7 +170,7 @@ pnpm dev
 
 - **为什么拆**：原来 `/` 既是门面又是屋子，两个身份要的东西是冲突的 —— 门面要一页能被搜索引擎整段读走的正文，屋子要满屏 CSS 场景 + canvas。原来那一页整页只有 canvas，唯一可读的文字是 `seo.heading` 那三句 sr-only —— 一个没有正文的站在搜索结果里等于不存在。
 - **首页刻意不写 `generateMetadata`**：`/` 的标题 / 说明 / canonical 就是根布局那三样（`meta.title` / `meta.description` / `alternatesFor(locale, '/')`），首页的 `title.default` 本来就是给它准备的。子页面（`/room`、`/games`…）才各写各的。`/room` 有自己的一套（`seo.room.*` + `alternatesFor(locale, '/room')`），少了它就会被当成首页的重复内容。
-- 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 24 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚一天**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），`/games` 仍是 30 分钟。
+- 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 12 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 12 小时**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 已统一成 12 小时（列表页原来是 30 分钟）。⚠️ 此前这里写的「24 小时」是笔误 —— 代码里 `HOME_REVALIDATE_SECONDS = 43200` 一直是 12 小时。
 - ⚠️ **首页没有 `export const revalidate`，那不是漏写**：根布局（`app/layout.tsx`）要读 cookie / 请求头决定语言，整个应用因此走动态渲染 —— 页面级 `revalidate` 对路由缓存**不起作用**。首页真正在用的 Next 缓存是上面那三个 `unstable_cache`（数据层，「页-侧」缓存，不下沉到 `listGamesPage` / `countGamesByConsole`）。
 - 首页 Hero 里那个搜索框**宽度是 100%**（`w-full`，跟着外层 `max-w-5xl` 走）：它的左右边界和下面几个区块的网格对齐，不再是原来 `max-w-md` 居中窄条。
 - ⚠️ **旧地址的 `?id=` / `?room=` 会被 307 透传到 `/room`**：详情页那颗「开始游戏」（`/room?id=<游戏>`）与联机分享出去的房间链接（`?room=<码>`）在拆分之前都挂在 `/` 上，已经分享出去的地址不该因为这次拆分失效。见 `app/[locale]/page.tsx` 里那段重定向（排在所有取数之前）。
@@ -227,12 +227,12 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`?page=N` 翻页（真 URL，爬虫顺得下去）。带搜索框（`?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **30 分钟缓存**（见下）。 |
+| `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`?page=N` 翻页（真 URL，爬虫顺得下去）。带搜索框（`?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **12 小时缓存**（见下）。 |
 | `/games/[id]` | 单款游戏的资料页：封面、标题、机种 / 年份 / 开发者 / 系列 / 语言、说明，加三个按钮。带 `VideoGame` + `BreadcrumbList` 结构化数据。 |
 | `/games/[id]/download` | 下载页：点「开始下载」**等 6 秒**才真的开始下（用户要求）。**只有这一颗按钮**，没有别的下载入口。 |
 
 - 详情页那三个按钮：**开始游戏** → `/room?id=<id>`（回房间，见下）、**下载 ROM** → 下载页、**分享游戏** → 把这一页的地址复制进剪贴板（`components/ShareGameButton.tsx`）。前两个都是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走；第三个不跳转，才是 `<button>`。
-- 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/games.ts` 的 `listGamesPageCached`），**TTL 30 分钟**，所以同一页 / 同一关键词正常不会反复打 D1。缓存**只给这一页**用 —— 房间的在线库弹窗（`/api/games`）和后台列表（`/api/admin/games`）继续走不缓存的 `listGamesPage`，它们必须立刻看到刚上传的游戏。副作用：**后台上传的新游戏最多晚 30 分钟才出现在列表页上**（后台自己那张列表不受影响）。
+- 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/games.ts` 的 `listGamesPageCached`），**TTL 12 小时**（2026-10-14 从 30 分钟拉长 —— 用户为压 D1 的 `rows_read` 额度拍板）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **房间的在线库弹窗（`/api/games`）2026-10-14 起也走同一套缓存**（在那之前它实时查库）；**后台列表（`/api/admin/games`）仍然走不缓存的 `listGamesPage`**，那边必须立刻看到刚上传的游戏。副作用：**后台上传的新游戏最多晚 12 小时才出现在列表页和在线库弹窗上**（后台自己那张列表不受影响）。
 - 详情页 / 下载页的 meta description 会**把后台填的那句「说明」放在最前面**（截到 100 字），后面接一句通用的「能玩、能下载」。没填说明就只用通用那句 —— **不编造**剧情 / 发行商那类信息。
 - 游戏不存在时两页都 `notFound()`，落到 `app/[locale]/games/[id]/not-found.tsx`（一页盖住两条路由），带 `noindex`。
 - 版式在 `components/GamesShell.tsx`（页头 + 返回 + 页脚互链，三页共用）；下载那颗按钮在 `components/RomDownloadGate.tsx`、分享那颗在 `components/ShareGameButton.tsx`（**这两个是这套页面里仅有的客户端组件**，其余整页留在服务端渲染）。
@@ -272,7 +272,7 @@ pnpm dev
 - 详情页原来的 `developer` 文本列**保留**（老数据、以及列表页 meta 描述里那个「年份 · 开发商 · 机种」仍读它），迁移脚本 `scripts/add-developers.mjs` 把库里 20 个不同的 `developer` 取值写进 `developers` 表并回填 `games.developer_id`（幂等、只补空的、可重复跑）。⚠️ 有的老数据本身填反了（如「西游释厄传」「冒险岛」其实是游戏名），脚本原样照搬，没做清洗。
 - 后台 `app/admin/(panel)/developers` 新增一个 tab 管开发商（增删改、logo 上传走 R2、删除前检查是否被游戏占用）；游戏表单里「开发商」从文本输入改成了**下拉**（选项来自 `/api/admin/developers/options`）。
 - 开发商页面也进 `sitemap.xml`，详情页 `notFound()` 落到 `app/[locale]/developers/[id]/not-found.tsx`（带 noindex）。
-- 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 24 小时** —— 这一页每次渲染要打两次 D1（COUNT + SELECT），缓存把它省掉。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚一天才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
+- 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 12 小时**（代码里 `DEVELOPERS_PAGE_REVALIDATE_SECONDS = 43200`；此前这里写的「24 小时」是笔误）。**「总数」另有一层独立缓存**（`countDevelopersCached`，键里没有 offset）：翻多少页都只数一次全表（2026-10-14 加，和 games 那边同一套做法）。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚 12 小时才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
 
 ### 机种（公开页面）
 
@@ -284,7 +284,7 @@ pnpm dev
 | 路由 | 是什么 |
 | --- | --- |
 | `/consoles` | 机种列表：**卡片是按代码里的机种清单画出来的**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认。 |
-| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，30 分钟）。 |
+| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，12 小时）。 |
 
 - 首页「按机种浏览」的卡片指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
 - 预填数据：`scripts/add-consoles.mjs`（**结构迁移 + 占位资料**：建表 + 给缺资料的机种补默认行，幂等、可反复跑；**加了新机种就跑它一遍**）+ `scripts/seed-consoles.mjs`（**一次性内容快照**：最早那四个机种的完整双语资料 + R2 机图，会**覆盖后台的人工编辑**，跑过就别再跑）。

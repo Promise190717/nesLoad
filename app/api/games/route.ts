@@ -12,17 +12,23 @@
  * 筛当页那几条 —— 翻页会换一批结果，等于没搜；分页也一样，本地 slice 的前提是
  * 手里有全量数据。所以关键词和机种都随查询一起下发。
  *
- * 代价是**每次翻页 / 改筛选 = 2 次 D1 查询**（COUNT + SELECT，见 lib/server/games.ts）。
- * 前端因此刻意保留「搜索是提交式」的写法（点「搜索」或回车才发请求），
- * 不让打字过程中每敲一个字就敲一次 D1。
+ * ⚠️ **2026-10-14 起走 `listGamesPageCached`（12 小时缓存）** —— 用户拍板「前台的列表
+ *    都加缓存」。代价是「后台刚传的游戏最多晚 12 小时才出现在这里」。在那之前这里是
+ *    实时查库（每次翻页 / 改筛选 = 2 次 D1：COUNT + SELECT，见 lib/server/games.ts）。
+ *    现在 COUNT 走独立缓存（键里没有 offset，翻多少页都只数一次），SELECT 按页缓存。
+ *    **后台列表（`/api/admin/games`）不受影响，仍然实时。**
+ *
+ * 前端因此刻意保留「搜索是提交式」的写法（点「搜索」或回车才发请求）——
+ * 缓存键含关键词，打字过程中每敲一个字都会多产生一个缓存条目，没必要。
  */
 
 import { NextResponse } from 'next/server';
 import { CONSOLE_TYPES } from '@/lib/consoles';
-import { listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
+import { listGamesPageCached, MAX_PAGE_SIZE } from '@/lib/server/games';
 
 export const runtime = 'nodejs';
-// 走 D1 实时读，别让构建期把它静态化了（构建时并没有数据库凭据）
+// 数据虽然走了缓存，路由本身仍要按请求读 searchParams —— 别让构建期把它静态化了
+// （构建时并没有数据库凭据）。
 export const dynamic = 'force-dynamic';
 
 /** 不传 limit 时的每页条数，和前台 GameLibraryPanel 的 `PAGE_SIZE` 对齐。 */
@@ -48,7 +54,7 @@ export async function GET(request: Request) {
   const consoleType = CONSOLE_TYPES.find((value) => value === consoleParam) ?? null;
 
   try {
-    return NextResponse.json(await listGamesPage(offset, limit, { keyword, consoleType }));
+    return NextResponse.json(await listGamesPageCached(offset, limit, keyword, consoleType));
   } catch (error) {
     console.error('[games] 列表读取失败', error);
     return NextResponse.json({ error: 'list-failed' }, { status: 500 });

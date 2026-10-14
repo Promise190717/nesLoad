@@ -177,7 +177,7 @@ export interface GamePageQuery {
  * 绑定值编号（?1），收益为零、风险不小。
  *
  * ⚠️ **它内部把绑定值写死成 `?1`**（同一条件里出现多次，复用同一个值）。
- * 所以调用方必须保证「关键词」是**第 1 个**绑定参数 —— 见 `listGamesPage` 里拼条件的顺序。
+ * 所以调用方必须保证「关键词」是**第 1 个**绑定参数 —— 见 `buildGamesWhere` 里拼条件的顺序。
  */
 const SEARCH_CONDITION = `(
   title LIKE ?1 OR
@@ -195,30 +195,15 @@ const SEARCH_CONDITION = `(
 )`;
 
 /**
- * 分页读取。前台在线库（`/api/games`）与后台列表（`/api/admin/games`）共用这一个入口。
+ * 拼出 `WHERE` 子句与绑定值 —— `listGamesPage` 和 `countGames` 共用这一份。
  *
- * 排序键**不能只是 `created_at DESC`**：它是毫秒时间戳，批量 / 并发上传时很容易撞上
- * 同值，而 SQLite 对并列行不保证跨查询的顺序稳定 —— 那会出现「某条在第 1 页和第 2 页
- * 各出现一次，另一条谁也见不着」。用 `id` 做第二排序键兜底。
- *
- * `total` 与数据一起返回：让调用方能算出总页数，不必再为分页单开一个接口。
- *
- * 越界时（最后一页被删空了）**夹回最后一页**，并把夹过的 `offset` 一并返回 ——
- * 调用方以返回值为准，别拿自己请求时那个去算页码。
- *
- * ⚠️ **`total` 与数据用同一个 `safeOffset`，不能各算各的**。调用方拿 `total` 算页数、
- * 拿 `offset` 算页码，两者必须描述**同一批数据**，否则页码会与实际显示的条目错位。
- * 踩过的坑：`total` 取的是**全局**条数，而 `offset` 被夹到全局最后一页 —— 删干净某一页时
- * 全局最后一页可能仍算得出来（只差 deflection 一条），于是那一页是空的，而调用方按
- * `total` 算出的页码还指着它 ⇒ 界面停在**永远空的一页**上，再删也出不来。
- * 只有这一页确实空了（`rows.length === 0`）才回退到上一页，一次退到位。
+ * ⚠️ 条件拼装的顺序**不能动**：`SEARCH_CONDITION` 内部把绑定值写死成 `?1`，
+ *    所以关键词必须是第 1 个绑定参数。两处各写一份迟早会漂，所以抽在这里。
  */
-export async function listGamesPage(
-  offset: number,
-  limit: number,
-  { keyword = '', consoleType = null, developerId = null }: GamePageQuery = {}
-): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
-  const needle = keyword.trim();
+function buildGamesWhere(filter: GamePageQuery): { where: string; params: unknown[] } {
+  const needle = filter.keyword?.trim() ?? '';
+  const consoleType = filter.consoleType ?? null;
+  const developerId = filter.developerId ?? null;
 
   const conditions: string[] = [];
   /** 绑定值，按占位符编号顺序排。 */
@@ -238,15 +223,61 @@ export async function listGamesPage(
     params.push(developerId);
   }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
+}
 
-  const total = Number(
-    (
-      await query<{ total: number }>(`SELECT COUNT(*) AS total FROM games ${where}`, params)
-    )[0]?.total ?? 0
+/**
+ * 只数总数，不取数据。
+ *
+ * 为什么从 `listGamesPage` 里拆出来（2026-10-14）：前台那份总数要走
+ * `countGamesCached` —— 那个缓存的键里**没有 offset**，所以翻多少页都只数一次；
+ * 而 `listGamesPageCached` 的键含 offset，每翻一页都是新条目。两者混在一起的话，
+ * 每个页码都会各自重数一遍全表（1000+ 行），这正是要治的病。
+ */
+export async function countGames(filter: GamePageQuery = {}): Promise<number> {
+  const { where, params } = buildGamesWhere(filter);
+  const rows = await query<{ total: number }>(
+    `SELECT COUNT(*) AS total FROM games ${where}`,
+    params
   );
+  return Number(rows[0]?.total ?? 0);
+}
 
-  const lastOffset = Math.max(0, Math.ceil(total / limit) - 1) * limit;
+/**
+ * 分页读取。后台列表（`/api/admin/games`）直接调它；前台那几条列表路径走
+ * `listGamesPageCached` 那一族（内部最终还是调这里）。
+ *
+ * 排序键**不能只是 `created_at DESC`**：它是毫秒时间戳，批量 / 并发上传时很容易撞上
+ * 同值，而 SQLite 对并列行不保证跨查询的顺序稳定 —— 那会出现「某条在第 1 页和第 2 页
+ * 各出现一次，另一条谁也见不着」。用 `id` 做第二排序键兜底。
+ *
+ * `total` 与数据一起返回：让调用方能算出总页数，不必再为分页单开一个接口。
+ *
+ * 越界时（最后一页被删空了）**夹回最后一页**，并把夹过的 `offset` 一并返回 ——
+ * 调用方以返回值为准，别拿自己请求时那个去算页码。
+ *
+ * ⚠️ **`total` 与数据用同一个 `safeOffset`，不能各算各的**。调用方拿 `total` 算页数、
+ * 拿 `offset` 算页码，两者必须描述**同一批数据**，否则页码会与实际显示的条目错位。
+ * 踩过的坑：`total` 取的是**全局**条数，而 `offset` 被夹到全局最后一页 —— 删干净某一页时
+ * 全局最后一页可能仍算得出来（只差 deflection 一条），于是那一页是空的，而调用方按
+ * `total` 算出的页码还指着它 ⇒ 界面停在**永远空的一页**上，再删也出不来。
+ * 只有这一页确实空了（`rows.length === 0`）才回退到上一页，一次退到位。
+ *
+ * `total` 是**可选入参**（2026-10-14 加）：前台那几条路径会传进来一份走
+ * `countGamesCached` 的值，省掉这里再数一遍全表；不传就自己数 —— 后台那几条
+ * 「必须立刻看到刚改的数据」的路径走这条。
+ */
+export async function listGamesPage(
+  offset: number,
+  limit: number,
+  filter: GamePageQuery = {},
+  total?: number
+): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
+  const { where, params } = buildGamesWhere(filter);
+
+  const resolvedTotal = total ?? (await countGames(filter));
+
+  const lastOffset = Math.max(0, Math.ceil(resolvedTotal / limit) - 1) * limit;
   let safeOffset = Math.min(offset, lastOffset);
 
   const select = (at: number) =>
@@ -265,36 +296,64 @@ export async function listGamesPage(
     rows = await select(safeOffset);
   }
 
-  return { games: rows.map(toGame), total, offset: safeOffset, limit };
+  return { games: rows.map(toGame), total: resolvedTotal, offset: safeOffset, limit };
 }
 
 /**
- * `/games` 列表页的数据缓存时长（秒）。**这个数只写在这里**，页面那边读常量。
+ * 前台「列表类」数据的缓存时长（秒）= 12 小时。**这个数只写在这里**，页面那边读常量。
  *
- * 30 分钟是用户 2026-10-12 定的。这一页的味道偏向「静态页」：给搜索引擎和过路访客看，
- * 内容变一次要等后台传新游戏，而每次渲染却要打**两次 D1**（COUNT + SELECT，见上）。
- * 半小时的代价是「后台上传的新游戏最多晚半小时才出现在列表页上」——
- * 对一个自助收录的站点，这个交换是划算的。
+ * ⚠️ **2026-10-14 从 30 分钟改成 12 小时**（用户为压 D1 的 `rows_read` 额度拍板）。
+ *    30 分钟那份是他 2026-10-12 定的，理由是「新游戏最多晚半小时上架」；改 12 小时后
+ *    这个代价变成「后台上传的新游戏最多晚 12 小时才出现在列表页 / 在线库弹窗里」——
+ *    用户明确接受。**别自作主张调回 30 分钟。**
+ *
+ * 和 `HOME_REVALIDATE_SECONDS` 数值相同（都是 43200）但**刻意各留一个常量**：
+ * 服务的是两类页面（货架 vs 落地页），将来谁想快一点不必牵动另一个。
+ *
+ * ⚠️ 开发模式走 `lib/server/cache.ts` 的 `cached`，那边把 TTL 压到 5 分钟（见该文件）。
  */
-export const GAMES_PAGE_REVALIDATE_SECONDS = 1800;
+export const GAMES_PAGE_REVALIDATE_SECONDS = 43200;
+
+/**
+ * 「总数」的独立缓存 —— **键里没有 offset**，这是它存在的全部理由。
+ *
+ * `listGamesPageCached` 那一族的键含 offset，每翻一页都是一个新条目、都要各自数一遍
+ * 全表（1000+ 行）。把 COUNT 挪到这一层之后，12 小时内无论翻到第几页，
+ * 总数只算一次，各页共用同一份。
+ *
+ * ⚠️ 代价：`total` 与某一页的数据来自**两个独立缓存**，TTL 起点可能错开 ⇒
+ *    页码条的总数可能比实际内容旧一轮。有 `listGamesPage` 里「末页空了就回退一页」
+ *    兜底，不会停在永远空的一页上。用户 2026-10-14 明确选了「总数和内容都 12 小时」。
+ */
+export const countGamesCached = cached(
+  async (keyword: string, consoleType: ConsoleType | null, developerId: string | null) =>
+    countGames({ keyword, consoleType, developerId }),
+  ['games:count'],
+  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
+);
 
 /**
  * 首页那几个「由 D1 拼出来的区块」的缓存时长（秒）= 12 小时。
  *
- * ⚠️ 刻意和 `GAMES_PAGE_REVALIDATE_SECONDS`（30 分钟）不是同一个数：`/games` 是货架，
- *    传完游戏就该尽快看到；首页是落地页，晚半天更新没代价，而每个访客都打三趟 D1。
- * ⚠️ 只在线上生效，开发模式走 `lib/server/cache.ts` 的 `cached` 直接查库。
+ * ⚠️ 2026-10-14 起数值和 `GAMES_PAGE_REVALIDATE_SECONDS` **相同**（都是 12 小时）——
+ *    前台列表统一 12 小时之后两者撞了，「首页比列表页慢」那层区分已不存在。
+ *    仍然**各留一个常量**：服务的是两类页面，将来谁想快一点不必牵动另一个。
+ * ⚠️ 开发模式走 `lib/server/cache.ts` 的 `cached`，那边把 TTL 压到 5 分钟（见该文件）。
  * ⚠️ `developers.ts` 里有一份等值手抄（两个文件不许互相 import），改这里要一起改。
  */
 export const HOME_REVALIDATE_SECONDS = 43200;
 
 /**
- * 带缓存的列表读取 —— **只给 `/games` 列表页用**，别处的调用方继续用 `listGamesPage`。
+ * 带缓存的列表读取 —— 前台那两条列表路径共用：`/games` 列表页、在线库弹窗（`/api/games`）。
  *
- * ⚠️ 为什么不直接在 `listGamesPage` 里加缓存：那个函数被三个地方共用 ——
- * 前台在线库弹窗（`/api/games`）、后台列表（`/api/admin/games`）、以及列表页。
- * 后两个**必须立刻看到刚上传的数据**（后台传完一款游戏，列表里却要等半小时才出现，
- * 那是 bug 不是缓存）。所以缓存是**页面这一侧的策略**，不该下沉到数据层。
+ * ⚠️ **2026-10-14 起在线库弹窗也走这里**（用户拍板「前台的列表都加缓存」）。在那之前
+ *    它调的是无缓存的 `listGamesPage`，立场是「传完游戏要立刻能在弹窗里看到」；现在这个
+ *    代价变成「新传的游戏最多晚 12 小时才出现在弹窗里」，用户明确接受。
+ *    **后台列表（`/api/admin/games`）仍然走无缓存的 `listGamesPage`** —— 那边必须实时。
+ *
+ * ⚠️ 为什么不直接在 `listGamesPage` 里加缓存：那个函数被前台和后台共用，后台那几条
+ * **必须立刻看到刚上传的数据**（传完一款游戏，列表里却要等半天才出现，那是 bug 不是缓存）。
+ * 所以缓存是**页面这一侧的策略**，不该下沉到数据层。
  *
  * 参数刻意都是**扁平的基本类型**（offset / limit / keyword / consoleType），而不是收一个
  * `GamePageQuery` 对象：`unstable_cache` 把入参当作缓存键的一部分，扁平参数拼出来的键
@@ -313,7 +372,13 @@ export const HOME_REVALIDATE_SECONDS = 43200;
  */
 export const listGamesPageCached = cached(
   async (offset: number, limit: number, keyword: string, consoleType: ConsoleType | null) =>
-    listGamesPage(offset, limit, { keyword, consoleType }),
+    listGamesPage(
+      offset,
+      limit,
+      { keyword, consoleType },
+      // 总数走独立缓存（键里没有 offset）—— 翻多少页都只数一次，见 countGamesCached。
+      await countGamesCached(keyword, consoleType, null)
+    ),
   ['games:list'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
@@ -321,16 +386,18 @@ export const listGamesPageCached = cached(
 /**
  * 首页「最新收录」区块要的那几款 —— 首页专用，**别拿 `listGamesPageCached` 顶替**。
  *
- * 两者查的是同一张表、都从第 0 条开始，差别只在 TTL（24 小时 vs 30 分钟）：首页是招牌，
- * `/games` 是货架。各自一份缓存条目（键前缀 `games:latest` vs `games:list`），互不影响 ——
- * 后台传一款新游戏，半小时后在 `/games` 上出现，首页则要等第二天。
+ * 两者查的是同一张表、都从第 0 条开始，**2026-10-14 起 TTL 也一样（都是 12 小时）**：
+ * 各自一份缓存条目（键前缀 `games:latest` vs `games:list`），互不影响。
+ * （在那之前首页是 24 小时、`/games` 是 30 分钟 —— 前台列表统一 12 小时之后两者撞了。）
  *
  * 参数收成一个 `limit`：首页永远是**第一页、无关键词、不筛机种**，把 offset / keyword
  * 那几维摆出来只会让人以为首页也能翻页。将来首页真要能翻页，再照着 `listGamesPageCached`
  * 的形状加参数，并且**必须同步改缓存键** —— 键不变而语义变了，旧缓存会串味。
  */
 export const listLatestGamesCached = cached(
-  async (limit: number) => listGamesPage(0, limit, {}),
+  // 首页其实不用 `total`，但照样传进去 —— 和列表页共用同一份总数缓存（键相同），
+  // 省掉这里再数一遍全表。
+  async (limit: number) => listGamesPage(0, limit, {}, await countGamesCached('', null, null)),
   ['games:latest'],
   { revalidate: HOME_REVALIDATE_SECONDS }
 );
@@ -408,24 +475,34 @@ export async function countGamesByConsoleCached(): Promise<Record<ConsoleType, n
  */
 export const listGamesByDeveloperCached = cached(
   async (developerId: string, offset: number, limit: number) =>
-    listGamesPage(offset, limit, { developerId }),
+    listGamesPage(
+      offset,
+      limit,
+      { developerId },
+      await countGamesCached('', null, developerId)
+    ),
   ['games:by-developer'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
 
 /**
  * 机种专题页（`/consoles/<type>`）那段「这个机种下的游戏」—— 和开发商详情页那条
- * **完全同构**：同一个 TTL（30 分钟）、同一套理由，只是缓存键换成自己的前缀
+ * **完全同构**：同一个 TTL（12 小时）、同一套理由，只是缓存键换成自己的前缀
  * （`games:by-console`），不与 `games:by-developer` 串味。
  *
  * `consoleType` 进缓存键意味着**每个机种各有一份缓存** —— 和 `/games?console=` 那个
- * 筛选（`listGamesPageCached` 的第四维）各存各的：两边 TTL 不同（专题页 30 分钟 vs
- * 列表页也是 30 分钟，但键形状不该为了另一个页面而变），见 listGamesByDeveloperCached
+ * 筛选（`listGamesPageCached` 的第四维）各存各的：两边 TTL 相同（2026-10-14 起都是
+ * 12 小时），但键形状不该为了另一个页面而变，见 listGamesByDeveloperCached
  * 那段「为什么不加第四个参数」的说明。
  */
 export const listGamesByConsoleCached = cached(
   async (consoleType: ConsoleType, offset: number, limit: number) =>
-    listGamesPage(offset, limit, { consoleType }),
+    listGamesPage(
+      offset,
+      limit,
+      { consoleType },
+      await countGamesCached('', consoleType, null)
+    ),
   ['games:by-console'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );

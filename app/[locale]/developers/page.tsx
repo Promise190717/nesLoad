@@ -27,13 +27,16 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * ⚠️ **不写 `export const dynamic`**：要读 D1 和语言（cookie），本来就是动态渲染。
  *
- * 数据走 `listDevelopersCached`（**24 小时**，2026-10-13 用户要求）。原来是不缓存的
+ * 数据走 `listDevelopersCached`（**12 小时**，2026-10-13 用户要求）。原来是不缓存的
  * （理由：「几十条、一条 SELECT 带个 COUNT 子查询就完了，改完名字刷新就该看到」），
  * 但这一页每次渲染要打**两次 D1**（COUNT + SELECT，见 listDevelopers），所以改成缓存。
  *
- * ⚠️ 代价是**后台改完开发商的名字 / 简介，这一页最多要等一天才更新**。和首页那几个区块
+ * ⚠️ 2026-10-14 起 COUNT 那半另有一层独立缓存（`countDevelopersCached`，键里没有 offset）——
+ *    翻多少页都只数一次全表。
+ *
+ * ⚠️ 代价是**后台改完开发商的名字 / 简介，这一页最多要等 12 小时才更新**。和首页那几个区块
  *    同一个取舍：这一页是给爬虫和过路访客的入口，内容变得慢，而每个访客都查两趟不划算。
- *    （开发商详情页上开发商自己的资料**不缓存**，那边改完是立刻的；名下游戏列表 30 分钟。）
+ *    （开发商详情页上开发商自己的资料**不缓存**，那边改完是立刻的；名下游戏列表 12 小时。）
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 

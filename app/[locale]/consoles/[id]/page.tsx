@@ -37,7 +37,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *    「游戏数」一项。首页与 `/consoles` 的卡片永远指得到这里 —— 绝不 404。
  *
  * ⚠️ 机种自己的资料**不缓存**（后台改完刷新就看到）；名下游戏列表走
- *    `listGamesByConsoleCached`（30 分钟 TTL，和 `/games`、开发商详情页一致）。
+ *    `listGamesByConsoleCached`（12 小时 TTL，和 `/games`、开发商详情页一致）。
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
