@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server';
 import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { getConsole, upsertConsole } from '@/lib/server/consoles';
+import { deleteConsole, getConsole, upsertConsole } from '@/lib/server/consoles';
 import { deleteObject, keyFromPublicUrl, publicUrl, uploadObject } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
