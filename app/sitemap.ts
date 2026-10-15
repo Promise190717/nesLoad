@@ -1,8 +1,8 @@
 import type { MetadataRoute } from 'next';
 import { LOCALES, localePath } from '@/lib/i18n';
-import { listConsoleStubs } from '@/lib/server/consoles';
-import { listDeveloperStubs } from '@/lib/server/developers';
-import { listGameStubs } from '@/lib/server/games';
+import { listConsoleStubsCached } from '@/lib/server/consoles';
+import { listDeveloperStubsCached } from '@/lib/server/developers';
+import { listGameStubsCached } from '@/lib/server/games';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
@@ -95,7 +95,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
    */
   let stubs: { id: string; createdAt: number }[] = [];
   try {
-    stubs = await listGameStubs();
+    /*
+     * 三个 stub 读取都走 24 小时缓存（listXxxStubsCached）—— sitemap 每次被抓都要
+     * 全表扫一遍，爬虫反复来的时候这是单次请求 rows_read 最大的一块。缓存之后
+     * 一天最多算一轮；后台增删游戏会 revalidateTag('games') 立刻刷掉游戏那份。
+     */
+    stubs = await listGameStubsCached();
   } catch (error) {
     console.error('[sitemap] 读取游戏列表失败，本次只输出静态地址', error);
   }
@@ -103,7 +108,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // 开发商同理：读不到就只少这几条，别让整个 sitemap 挂掉
   let developers: { id: string; createdAt: number }[] = [];
   try {
-    developers = await listDeveloperStubs();
+    developers = await listDeveloperStubsCached();
   } catch (error) {
     console.error('[sitemap] 读取开发商列表失败，本次略过开发商地址', error);
   }
@@ -111,7 +116,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // 机种同理（2026-10-14 加）：迁移没跑过（表还没建）也只少这几条
   let consoles: { type: string; createdAt: number }[] = [];
   try {
-    consoles = await listConsoleStubs();
+    consoles = await listConsoleStubsCached();
   } catch (error) {
     console.error('[sitemap] 读取机种列表失败，本次略过机种地址', error);
   }

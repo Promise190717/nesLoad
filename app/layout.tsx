@@ -181,7 +181,16 @@ export const viewport: Viewport = {
  *     只管按农历算一个默认值；`nesload:season` 这个键已经废弃（旧值不再被读取）。
  *   - 简洁模式：记住，写 localStorage（`nesload:simple`，`'on'` 才是开）。
  *   - 电视机大小：记住，写 localStorage（`nesload:tv`，`small` / `medium` / `large`，
- *     认不出的值一律当 `small`）。**只读这一个键**，尺寸本身在 CSS 里。
+ *     **三个都是合法值**——用户明确选了哪档就是哪档；认不出的值才走分页面兜底）。
+ *     **只读这一个键**，尺寸本身在 CSS 里。
+ *     ⚠️ **兜底值分页面**：`/play` 是 `medium`，其它页面（`/room`）是 `small` ——
+ *     两页的档位映射的是**两套 CSS**（`--play-size-scale` vs `--tv-ratio`），
+ *     同一档在两页量出来的大小本来就不一样，默认自然也不该一样。
+ *     判据是**路径前缀**（下面那段用 `location.pathname` 现读），
+ *     ⚠️ **改这里必须同步 `PlayScene.tsx` 的 `PLAY_DEFAULT_SCREEN_SIZE`**。
+ *     ⚠️ **`small` 必须出现在合法值列表里**：老写法只认 medium/large、把 small
+ *     当「没存过」，在兜底恰好也是 small 的年代没暴露；现在 /play 兜底是 medium，
+ *     漏掉它就会把用户明确选的小档强行抬成中档。
  *   - 移动端：**不落盘**，每次现判 —— 它是设备的属性，不是用户的偏好
  *     （同一台手机永远是移动端，换成桌面端就该变回来）。
  * 季节和主题**无关**：切主题不会重置季节，季节只看农历
@@ -193,7 +202,7 @@ export const viewport: Viewport = {
  * 同理，`data-tv` 的合法值抄的是 `lib/tv-size.ts` 的 `TvSize`，那边加档位要同步这里；
  * `data-mobile` 的判定抄的是 `lib/device.ts` 的 `isMobileDevice()`，**改那边必须同步这里**。
  */
-const BOOT_INIT = `(function(){try{var t=localStorage.getItem('nesload:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.dataset.theme=t;var l=localStorage.getItem('nesload:lamp');if(t==='light')l='off';document.documentElement.dataset.lamp=l==='off'?'off':'on';var sm=localStorage.getItem('nesload:simple');document.documentElement.dataset.simple=sm==='on'?'on':'off';var tv=localStorage.getItem('nesload:tv');document.documentElement.dataset.tv=tv==='medium'||tv==='large'?tv:'small';var ua=navigator.userAgent;var mob=!!(navigator.userAgentData&&navigator.userAgentData.mobile)||/Android|iPhone|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);document.documentElement.dataset.mobile=mob?'on':'off';var s;try{var p=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric'}).formatToParts(new Date());var v='';for(var i=0;i<p.length;i++){if(p[i].type==='month'){v=p[i].value;}}var m=parseInt(v,10);if(!(m>=1&&m<=12)){m=new Date().getMonth()+1;}s=m<=3?'spring':m<=6?'summer':m<=9?'autumn':'winter';}catch(err){s='winter';}document.documentElement.dataset.season=s;}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.dataset.lamp='on';document.documentElement.dataset.simple='off';document.documentElement.dataset.tv='small';document.documentElement.dataset.mobile='off';document.documentElement.dataset.season='winter';}})();`;
+const BOOT_INIT = `(function(){try{var t=localStorage.getItem('nesload:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.dataset.theme=t;var l=localStorage.getItem('nesload:lamp');if(t==='light')l='off';document.documentElement.dataset.lamp=l==='off'?'off':'on';var sm=localStorage.getItem('nesload:simple');document.documentElement.dataset.simple=sm==='on'?'on':'off';var tv=localStorage.getItem('nesload:tv');document.documentElement.dataset.tv=tv==='medium'||tv==='large'||tv==='small'?tv:(/^\\/(zh\\/)?play(\\/|$)/.test(location.pathname)?'medium':'small');var ua=navigator.userAgent;var mob=!!(navigator.userAgentData&&navigator.userAgentData.mobile)||/Android|iPhone|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);document.documentElement.dataset.mobile=mob?'on':'off';var s;try{var p=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric'}).formatToParts(new Date());var v='';for(var i=0;i<p.length;i++){if(p[i].type==='month'){v=p[i].value;}}var m=parseInt(v,10);if(!(m>=1&&m<=12)){m=new Date().getMonth()+1;}s=m<=3?'spring':m<=6?'summer':m<=9?'autumn':'winter';}catch(err){s='winter';}document.documentElement.dataset.season=s;}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.dataset.lamp='on';document.documentElement.dataset.simple='off';document.documentElement.dataset.tv=/^\\/(zh\\/)?play(\\/|$)/.test(location.pathname)?'medium':'small';document.documentElement.dataset.mobile='off';document.documentElement.dataset.season='winter';}})();`;
 
 /**
  * 结构化数据（JSON-LD）。搜索引擎读不懂 canvas 里跑的东西 —— 页面本身几乎没有

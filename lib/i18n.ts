@@ -238,9 +238,10 @@ const en = {
   'home.empty':
     'The library is empty right now — open the room and drop a ROM onto the CRT to start playing.',
   /*
-   * 折叠问答（`<details>`，零 JS）。六条都只讲**真的实现了**的事，不写没做的卖点 ——
-   * 第 4 条的答案对应移动端那台掌机（只能从在线库载入），别写成「手机上也能拖 ROM」；
-   * 第 6 条讲联机，2026-10-13 用户明确要求**就写一句招呼**（「快喊上小伙伴，开个房间一起对战吧」），
+   * 折叠问答（`<details>`，零 JS）。都只讲**真的实现了**的事，不写没做的卖点 ——
+   * 「能用自己的 ROM 吗」那条 2026-10-15 用户要求删掉；手机那条**只说支持**，
+   * 别提「变成掌机」（内部实现细节，用户不需要知道）。
+   * 联机那条讲联机，2026-10-13 用户明确要求**就写一句招呼**（「快喊上小伙伴，开个房间一起对战吧」），
    * 不展开「谁开房 / 怎么连」这些技术细节。⚠️ 代价：「公网那一档要站点配了 TURN 才放行」
    * 这件事只剩**联机面板里的提示**兜着（没配时那里显示 `netplay.wanDev`）——
    * 那条提示别删，否则「跨网络连不上」就没人告知了。
@@ -252,20 +253,17 @@ const en = {
   'home.faq.q2': 'Do I need to install anything?',
   'home.faq.a2':
     'No — just click a game and play it right in your browser.',
-  'home.faq.q3': 'Can I play my own ROM files?',
+  'home.faq.q3': 'Does it work on phones and tablets?',
   'home.faq.a3':
-    'Yes. Drop your own ROM in and it plays — nothing is uploaded.',
-  'home.faq.q4': 'Does it work on phones and tablets?',
+    'Yes — it works right in the browser on phones and tablets.',
+  'home.faq.q4': 'Can I download the ROM files?',
   'home.faq.a4':
-    'Yes. On a phone the room becomes a handheld, playing games from the library.',
-  'home.faq.q5': 'Can I download the ROM files?',
-  'home.faq.a5':
     'Yes — every game page has a download button. Only download ROM files you are legally allowed to use.',
-  'home.faq.q6': 'Can I play with a friend?',
-  'home.faq.a6':
+  'home.faq.q5': 'Can I play with a friend?',
+  'home.faq.a5':
     'Of course! Grab a friend and start a room for a match.',
-  'home.faq.q7': 'Does it support game controllers?',
-  'home.faq.a7':
+  'home.faq.q6': 'Does it support game controllers?',
+  'home.faq.a6':
     'Yes — plug in a USB or Bluetooth controller and the emulator picks it up through your browser. Button mapping follows each core\'s defaults; on a phone you use the on-screen buttons.',
 
   /*
@@ -462,6 +460,10 @@ const en = {
   'saves.groupLocal': 'This device',
   'saves.groupCloud': 'Cloud (account)',
   'saves.deleteCloud': 'Delete this cloud save',
+  'saves.delete': 'Delete',
+  /* 未登录时云端那组的占位提示 */
+  'saves.loginHint': 'Sign in to keep cloud saves and pick up on any device.',
+  'saves.login': 'Sign in',
   /* 面板刚弹出来、列表还在路上时的那一行（openLoad 先开面板再取数） */
   'saves.loading': 'Loading…',
   /* 本机 + 云端一条都没有 */
@@ -651,6 +653,9 @@ const en = {
   'play.retry': 'Load again',
   'play.retryJoin': 'Try joining again',
   'play.saved': 'Game saved.',
+  'play.localSaving': 'Saving…',
+  'play.uploading': 'Uploading…',
+  'play.cloudFailed': 'Cloud sync failed.',
   'play.theme': 'Theme',
   'play.saveFailed': 'Could not save the game. Please try again.',
   'play.loadFailed': 'Could not load the save. Please try again.',
@@ -667,6 +672,12 @@ const en = {
   /* 操作表底部那颗钮。**只写「编辑」**，具体编辑什么靠 tooltip（`keybind.open`）说 */
   'play.edit': 'Edit',
   'play.hint': 'Esc leaves fullscreen. Nothing else here uses the keyboard.',
+  /* 左上角返回钮在游戏运行中拦截时弹的自绘确认框（见 PlayBackLink） */
+  'play.leaveTitle': 'Game in progress',
+  'play.leaveBody':
+    'Going back ends this session — progress is not saved automatically.',
+  'play.leaveStay': 'Keep playing',
+  'play.leaveGo': 'Leave',
   'gamesPage.playOnline': 'Play online',
 
   /*
@@ -1743,7 +1754,7 @@ const zh: Record<MessageKey, string> = {
   'home.developers.lead': '这几家开发商在库里的游戏最多。',
   'home.developers.viewAll': '全部开发商',
   'home.empty': '游戏库现在还是空的 —— 进小屋把 ROM 拖到电视上就能开玩。',
-  /* 折叠问答七条，见上面英文那份的注释（只写真的实现了的事） */
+  /* 折叠问答六条，见上面英文那份的注释（只写真的实现了的事） */
   'home.faq.title': '常见问题',
   'home.faq.q1': '免费吗？',
   'home.faq.a1':
@@ -1751,19 +1762,16 @@ const zh: Record<MessageKey, string> = {
   'home.faq.q2': '要装什么东西吗？',
   'home.faq.a2':
     '不用，点击游戏即可在网页在线玩。',
-  'home.faq.q3': '能用自己的 ROM 吗？',
+  'home.faq.q3': '手机上能玩吗？',
   'home.faq.a3':
-    '可以。把自己电脑里的 ROM 拖进去就能玩，不会上传。',
-  'home.faq.q4': '手机上能玩吗？',
-  'home.faq.a4':
-    '可以。手机上小屋会变成一台掌机，玩库里的游戏。',
-  'home.faq.q5': '能下载 ROM 吗？',
-  'home.faq.a5': '能，每个游戏页上都有下载按钮。请只下载你有权使用的 ROM 文件。',
-  'home.faq.q6': '能和朋友一起玩吗？',
-  'home.faq.a6':
+    '支持，手机和平板上直接在浏览器里玩。',
+  'home.faq.q4': '能下载 ROM 吗？',
+  'home.faq.a4': '能，每个游戏页上都有下载按钮。请只下载你有权使用的 ROM 文件。',
+  'home.faq.q5': '能和朋友一起玩吗？',
+  'home.faq.a5':
     '当然！快喊上小伙伴，开个房间一起联机对战吧。',
-  'home.faq.q7': '支持手柄吗？',
-  'home.faq.a7':
+  'home.faq.q6': '支持手柄吗？',
+  'home.faq.a6':
     '支持。用 USB 或蓝牙连上手柄，浏览器识别后模拟器核心会直接读到；按键映射以各核心默认为准。手机上用屏幕上的虚拟按键。',
 
   'seo.heading': '在浏览器里玩复古游戏',
@@ -1864,6 +1872,10 @@ const zh: Record<MessageKey, string> = {
   'saves.groupLocal': '本机',
   'saves.groupCloud': '云端（账号）',
   'saves.deleteCloud': '删除这份云端存档',
+  'saves.delete': '删除',
+  /* 未登录时云端那组的占位提示 */
+  'saves.loginHint': '登录后可用云端存档，换台设备也能接着玩。',
+  'saves.login': '去登录',
   'saves.loading': '读取中…',
   'saves.empty': '还没有存档',
 
@@ -1968,7 +1980,10 @@ const zh: Record<MessageKey, string> = {
   'play.cancelled': '已取消加载',
   'play.retry': '重新加载',
   'play.retryJoin': '重新加入',
-  'play.saved': '存档成功',
+  'play.saved': '保存成功',
+  'play.localSaving': '本地保存…',
+  'play.uploading': '上传云端…',
+  'play.cloudFailed': '云端同步失败',
   'play.theme': '模式',
   'play.saveFailed': '存档失败，请重试',
   'play.loadFailed': '读档失败，请重试',
@@ -1983,6 +1998,10 @@ const zh: Record<MessageKey, string> = {
   'play.volume': '音量',
   'play.edit': '编辑',
   'play.hint': 'Esc 退出全屏，其余操作都在右侧。',
+  'play.leaveTitle': '游戏正在进行中',
+  'play.leaveBody': '返回会结束当前这一局，进度不会自动保存。',
+  'play.leaveStay': '继续游戏',
+  'play.leaveGo': '离开并返回',
   'gamesPage.playOnline': '联机游戏',
 
   // 按钮 tooltip 叫「按键设置」，面板标题仍叫「自定义按键」—— 刻意不同名（理由见英文侧注释）

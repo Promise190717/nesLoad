@@ -13,7 +13,7 @@ import {
   translate,
   type MessageKey,
 } from '@/lib/i18n';
-import { getGame, localizeGame } from '@/lib/server/games';
+import { getGameCached, localizeGame } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -30,7 +30,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * **不写 `export const dynamic`**：读 D1 + 读 cookie 语言，本来就是动态渲染
  * （和 app/privacy/page.tsx 同一个理由）。
  */
-const loadGame = cache(async (id: string) => getGame(id));
+const loadGame = cache(async (id: string) => getGameCached(id));
 
 /*
  * 这里**不重复 getGame 的查询**：`generateMetadata` 和页面正文都用 `loadGame`，

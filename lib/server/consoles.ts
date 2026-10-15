@@ -220,3 +220,12 @@ export async function listConsoleStubs(): Promise<{ type: string; createdAt: num
   );
   return rows.map((row) => ({ type: row.console_type, createdAt: row.created_at }));
 }
+
+/**
+ * sitemap 用的 stub 读取 —— 缓存 24 小时（理由同 games.ts 的 listGameStubsCached）。
+ */
+export const listConsoleStubsCached = cached(
+  async () => listConsoleStubs(),
+  ['consoles:stubs'],
+  { revalidate: 86400 }
+);

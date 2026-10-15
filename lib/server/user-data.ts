@@ -172,22 +172,18 @@ export async function clearUserHistory(userId: string): Promise<void> {
  * 删掉某人历史里的**一款**（个人中心那个历史 tab 的单条删除）。
  *
  * 返回是否真删到了 —— 不存在 / 不是他的回 false，调用方据此回 404。
- * 判定方式和 `removeUserSave` 一致：**先 SELECT 再 DELETE**。
- * （D1 REST 的 `/query` 只返回结果行，拿不到 `changes`，所以没法用影响行数判断，
- * 只能先查一次。）
+ * 判定用 **`DELETE … RETURNING`**：删中了才回行，一条查询顶过去「先 SELECT 再
+ * DELETE」两条（省一次 D1 API 往返，行数额度也省一半）。
  *
  * `game_id` 是复合主键的另一半，所以 DELETE 必须把 `user_id` 一起带上 ——
  * 否则「删某一款的历史」会删到全体用户（和归档那份「漏 WHERE user_id」是同一类坑）。
  */
 export async function removeUserHistory(userId: string, gameId: string): Promise<boolean> {
   const rows = await query<{ game_id: string }>(
-    'SELECT game_id FROM user_history WHERE user_id = ? AND game_id = ?',
+    'DELETE FROM user_history WHERE user_id = ? AND game_id = ? RETURNING game_id',
     [userId, gameId]
   );
-  if (rows.length === 0) return false;
-
-  await query('DELETE FROM user_history WHERE user_id = ? AND game_id = ?', [userId, gameId]);
-  return true;
+  return rows.length > 0;
 }
 
 /* ================================================================== *
@@ -293,16 +289,27 @@ export async function createUserSave(userId: string, input: SaveInput): Promise<
     [id, userId, input.gameId, input.romName, input.title, stateKey, input.state.byteLength, createdAt]
   );
 
-  // 淘汰：按 romName 分组，超出 MAX_SAVES 的那些（最早的）连同 R2 对象一起清掉
-  const stale = await query<{ id: string; state_key: string }>(
-    `SELECT id, state_key FROM user_saves
+  /*
+   * 淘汰：留下最近 MAX_SAVES 条，把更早的删掉（连 R2 对象一起清）。
+   *
+   * 一条 `DELETE … RETURNING` 搞定：删除条件是「同一 (user, romName) 下、
+   * 不在最新 MAX_SAVES 条里的那些行」，RETURNING 把 state_key 带回来，
+   * 供下面删 R2 用。过去是「SELECT 淘汰名单 → 逐行 DELETE」＝ 1 + N 次查询，
+   * 现在恒为 1 次。
+   */
+  const stale = await query<{ state_key: string }>(
+    `DELETE FROM user_saves
       WHERE user_id = ? AND rom_name = ?
-      ORDER BY created_at DESC
-      LIMIT -1 OFFSET ?`,
-    [userId, input.romName, MAX_SAVES]
+        AND id NOT IN (
+          SELECT id FROM user_saves
+           WHERE user_id = ? AND rom_name = ?
+           ORDER BY created_at DESC
+           LIMIT ?
+        )
+      RETURNING state_key`,
+    [userId, input.romName, userId, input.romName, MAX_SAVES]
   );
   for (const row of stale) {
-    await query('DELETE FROM user_saves WHERE id = ? AND user_id = ?', [row.id, userId]);
     // 尽力而为：R2 删失败不该让「存档已存下」这件事变成错误
     try {
       await deleteObject(row.state_key);
@@ -360,18 +367,18 @@ export async function readUserSaveBytes(userId: string, saveId: string): Promise
 /**
  * 删一份存档（行 + R2 对象）。
  *
- * **返回删掉没有**：先查一次确认存在（D1 REST 不回影响行数，同 feedback.setFeedbackResolved）；
- * 查不到就是「不是你的 / 不存在」，返回 false 让路由回 404。
+ * **返回删掉没有**：用 `DELETE … RETURNING` 判 —— 删中了才回行（D1 REST 不回
+ * 影响行数，但 RETURNING 的行会进 results）。查不到就是「不是你的 / 不存在」，
+ * 返回 false 让路由回 404。
  */
 export async function removeUserSave(userId: string, saveId: string): Promise<boolean> {
   const rows = await query<{ state_key: string }>(
-    'SELECT state_key FROM user_saves WHERE id = ? AND user_id = ?',
+    'DELETE FROM user_saves WHERE id = ? AND user_id = ? RETURNING state_key',
     [saveId, userId]
   );
   const row = rows[0];
   if (!row) return false;
 
-  await query('DELETE FROM user_saves WHERE id = ? AND user_id = ?', [saveId, userId]);
   try {
     await deleteObject(row.state_key);
   } catch (error) {
@@ -383,11 +390,11 @@ export async function removeUserSave(userId: string, saveId: string): Promise<bo
 
 /** 清空某人的全部存档（连同 R2 对象）。封禁 / 删号时用。 */
 export async function clearUserSaves(userId: string): Promise<number> {
-  const rows = await query<{ id: string; state_key: string }>(
-    'SELECT id, state_key FROM user_saves WHERE user_id = ?',
+  // DELETE … RETURNING：行删掉的同一瞬间把 state_key 带回来，一条查询顶过去两条
+  const rows = await query<{ state_key: string }>(
+    'DELETE FROM user_saves WHERE user_id = ? RETURNING state_key',
     [userId]
   );
-  await query('DELETE FROM user_saves WHERE user_id = ?', [userId]);
   for (const row of rows) {
     try {
       await deleteObject(row.state_key);
@@ -531,29 +538,30 @@ export async function countGameFavorites(gameId: string): Promise<number> {
  *
  * 返回 true 表示这次真的加上了（先前没有）。要拿这个区分前端提示文案，
  * 但**别依赖它做正确性判断** —— 真正的状态一律以服务端这份表为准。
+ *
+ * ⚠️ 「真的加上了」怎么判断：`DO NOTHING RETURNING` —— **插入成功才回行**，
+ * 冲突被吃掉时 results 是空的。一条查询顶过去「先 SELECT 再 INSERT」两条。
  */
 export async function addUserFavorite(userId: string, gameId: string): Promise<boolean> {
-  const existing = await query<{ game_id: string }>(
-    'SELECT game_id FROM user_favorites WHERE user_id = ? AND game_id = ?',
-    [userId, gameId]
-  );
-  if (existing[0]) return false;
-  await query(
-    'INSERT INTO user_favorites (user_id, game_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, game_id) DO NOTHING',
+  const rows = await query<{ game_id: string }>(
+    `INSERT INTO user_favorites (user_id, game_id, created_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id, game_id) DO NOTHING
+     RETURNING game_id`,
     [userId, gameId, Date.now()]
   );
-  return true;
+  return rows.length > 0;
 }
 
-/** 取消收藏。返回 true 表示真的删掉了一行（D1 REST 不回影响行数，所以先查）。 */
+/**
+ * 取消收藏。返回 true 表示真的删掉了一行
+ * （`DELETE … RETURNING` 删中了才回行，一条查询顶过去两条）。
+ */
 export async function removeUserFavorite(userId: string, gameId: string): Promise<boolean> {
-  const existing = await query<{ game_id: string }>(
-    'SELECT game_id FROM user_favorites WHERE user_id = ? AND game_id = ?',
+  const rows = await query<{ game_id: string }>(
+    'DELETE FROM user_favorites WHERE user_id = ? AND game_id = ? RETURNING game_id',
     [userId, gameId]
   );
-  if (!existing[0]) return false;
-  await query('DELETE FROM user_favorites WHERE user_id = ? AND game_id = ?', [userId, gameId]);
-  return true;
+  return rows.length > 0;
 }
 
 /* ================================================================== *
@@ -599,15 +607,22 @@ export async function removeAvatar(key: string | null): Promise<void> {
 export async function countUserData(
   userId: string
 ): Promise<{ history: number; saves: number; favorites: number }> {
-  const [history, saves, favorites] = await Promise.all([
-    query<{ n: number }>('SELECT COUNT(*) AS n FROM user_history WHERE user_id = ?', [userId]),
-    query<{ n: number }>('SELECT COUNT(*) AS n FROM user_saves WHERE user_id = ?', [userId]),
-    query<{ n: number }>('SELECT COUNT(*) AS n FROM user_favorites WHERE user_id = ?', [userId]),
-  ]);
+  /*
+   * 三块合成一条查询：过去是三次独立的 COUNT = 三次 D1 API 往返；
+   * 现在一条 SELECT 里三个标量子查询，读的行数一样，API 调用只剩一次。
+   */
+  const rows = await query<{ history: number; saves: number; favorites: number }>(
+    `SELECT
+       (SELECT COUNT(*) FROM user_history   WHERE user_id = ?) AS history,
+       (SELECT COUNT(*) FROM user_saves     WHERE user_id = ?) AS saves,
+       (SELECT COUNT(*) FROM user_favorites WHERE user_id = ?) AS favorites`,
+    [userId, userId, userId]
+  );
+  const row = rows[0];
   return {
-    history: Number(history[0]?.n ?? 0),
-    saves: Number(saves[0]?.n ?? 0),
-    favorites: Number(favorites[0]?.n ?? 0),
+    history: Number(row?.history ?? 0),
+    saves: Number(row?.saves ?? 0),
+    favorites: Number(row?.favorites ?? 0),
   };
 }
 

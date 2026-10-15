@@ -11,7 +11,7 @@ import {
   translate,
   type Locale,
 } from '@/lib/i18n';
-import { getGame, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
+import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -50,7 +50,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ⚠️ **不写 `export const dynamic`**：它要读语言（cookie / 请求头）+ searchParams，
  * 本来就是动态渲染。
  */
-const loadGame = cache((id: string) => getGame(id));
+const loadGame = cache((id: string) => getGameCached(id));
 
 /**
  * meta description 的截断上限 —— 详情页同一个数（Google 约 155 字符就截）。

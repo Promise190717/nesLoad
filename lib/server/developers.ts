@@ -555,3 +555,13 @@ export async function listDeveloperStubs(): Promise<{ id: string; createdAt: num
   );
   return rows.map((row) => ({ id: row.id, createdAt: row.created_at }));
 }
+
+/**
+ * sitemap 用的 stub 读取 —— 缓存 24 小时（2026-10-15 从 1 小时改过来，理由同
+ * games.ts 的 listGameStubsCached：sitemap 每次被抓都现读全表，爬虫反复来）。
+ */
+export const listDeveloperStubsCached = cached(
+  async () => listDeveloperStubs(),
+  ['developers:stubs'],
+  { revalidate: 86400 }
+);

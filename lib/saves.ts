@@ -124,3 +124,15 @@ export async function readSave(id: string): Promise<Blob | null> {
   const record = await run<SaveRecord>(db, STORE_SAVES, 'readonly', (store) => store.get(id));
   return record?.state ?? null;
 }
+
+/**
+ * 删掉本机的某一份存档槽（快照本体跟着记录一起走）。
+ * 云端那份的删除走 `/api/user/saves/<id>` DELETE，两套存储互不知晓 ——
+ * 和写入时「本机为主、云端补充」是同一条分界线。
+ */
+export async function deleteSave(id: string): Promise<boolean> {
+  const db = await openDb();
+  if (!db) return false;
+  const result = await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(id));
+  return result !== null;
+}

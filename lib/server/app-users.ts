@@ -281,25 +281,26 @@ export async function touchLastLogin(id: string): Promise<void> {
  * `expiresAt` 传毫秒时间戳；传 `null` = 取消会员（清掉到期时间，回到非会员）。
  * 不在这里拦「过期时间」：admin 给个过去的日期等价于立刻取消，随他去。
  *
- * **先 SELECT 确认存在**再 UPDATE（D1 REST 不回影响行数，打空了看不出来 ——
- * 同 setAppUserBanned 的套路）。返回这个人在不在。
+ * 用 `UPDATE … RETURNING` 判存在：改中了才回行，一条查询顶过去「先 SELECT 再
+ * UPDATE」两条（同 setAppUserBanned 的套路）。返回这个人在不在。
  */
 export async function setAppUserVip(id: string, expiresAt: number | null): Promise<boolean> {
-  const rows = await query<{ id: string }>('SELECT id FROM app_users WHERE id = ?', [id]);
-  if (!rows[0]) return false;
-  await query('UPDATE app_users SET vip_expires_at = ? WHERE id = ?', [expiresAt, id]);
-  return true;
+  const rows = await query<{ id: string }>(
+    'UPDATE app_users SET vip_expires_at = ? WHERE id = ? RETURNING id',
+    [expiresAt, id]
+  );
+  return rows.length > 0;
 }
 
 /**
- * 改封禁状态。**返回这个人在不在**（同 feedback.setFeedbackResolved：D1 REST 不回影响行数，
- * UPDATE 打空了看不出区别，所以先确认存在）。
+ * 改封禁状态。**返回这个人在不在**（`UPDATE … RETURNING` 改中了才回行）。
  */
 export async function setAppUserBanned(id: string, banned: boolean): Promise<boolean> {
-  const rows = await query<{ id: string }>('SELECT id FROM app_users WHERE id = ?', [id]);
-  if (!rows[0]) return false;
-  await query('UPDATE app_users SET status = ? WHERE id = ?', [banned ? 0 : 1, id]);
-  return true;
+  const rows = await query<{ id: string }>(
+    'UPDATE app_users SET status = ? WHERE id = ? RETURNING id',
+    [banned ? 0 : 1, id]
+  );
+  return rows.length > 0;
 }
 
 /* ================================================================== *
@@ -311,13 +312,15 @@ export async function setAppUserBanned(id: string, banned: boolean): Promise<boo
  *
  * 返回改完之后的那个人（拿最新的头像地址 / 别的新字段一起回给前端，
  * 免得前端改一次资料还得再拉一遍）。
- * **先 SELECT 确认存在**再 UPDATE —— D1 REST 不回影响行数，打空了看不出来。
- * 不存在返回 null。
+ * 用 `UPDATE … RETURNING` 判存在：改中了才回行，一条查询顶过去两条。
+ * 不存在返回 null（这一格回行后还要回查完整资料给前端，那个 getAppUser 省不掉）。
  */
 export async function setAppUserGender(id: string, gender: Gender | null): Promise<AppUser | null> {
-  const rows = await query<{ id: string }>('SELECT id FROM app_users WHERE id = ?', [id]);
-  if (!rows[0]) return null;
-  await query('UPDATE app_users SET gender = ? WHERE id = ?', [gender, id]);
+  const updated = await query<{ id: string }>(
+    'UPDATE app_users SET gender = ? WHERE id = ? RETURNING id',
+    [gender, id]
+  );
+  if (updated.length === 0) return null;
   return getAppUser(id);
 }
 

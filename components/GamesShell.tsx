@@ -35,6 +35,7 @@ export default function GamesShell({
   showAllGamesLink = true,
   showTopBar = true,
   showHomeLink = false,
+  backNode,
   children,
 }: {
   locale: Locale;
@@ -54,6 +55,19 @@ export default function GamesShell({
    * `link` = 真跳到一个写死的地址，文案用具体名字：**三个 404 页**。
    */
   back: { href: string; label: MessageKey; mode?: 'link' | 'history' };
+  /**
+   * **整颗替换**左上角返回的节点（2026-10-15 加）。
+   *
+   * 为什么：`back` 两种模式都满足不了 `/play` —— 那一页要在「游戏运行中」时
+   * 拦一下返回（提示进度不会保存），而拦截逻辑在客户端组件 `PlayBackLink`
+   * 里（状态借 `lib/play-leave-guard.ts` 从 `PlayScene` 桥过来）。本组件是
+   * 服务端组件接不了 handler，但**可以接一个客户端组件元素**当节点传进来。
+   *
+   * ⚠️ 目前**只有 `/play` 传**（见 `app/[locale]/play/page.tsx`）。传了之后
+   * `back.href` / `back.label` / `back.mode` 只剩兜底语义（backNode 自带落点），
+   * 调用方仍要按类型传全。
+   */
+  backNode?: ReactNode;
   /**
    * 「全部游戏」那颗**页脚**链接的落点，默认 `/games` 本体。
    * 只给页脚用 —— 左上角返回走的是 `back`，两者是两码事（见返回链接那段注释）。
@@ -169,10 +183,10 @@ export default function GamesShell({
           它照样贴左 —— 别的内容页版式一个字都不变。
         */}
         <div className={wide ? 'play-navigation mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-ink-700 pb-4' : 'flex items-center justify-between gap-4'}>
-          {back.mode === 'history' ? (
+          {backNode ?? (back.mode === 'history' ? (
             <BackLink
               href={back.href}
-              className={wide ? 'inline-flex shrink-0 items-center gap-2 border border-ink-600 bg-ink-900 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:border-accent/50 hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
+              className={wide ? 'pixel-edge pxw-1 pxc-600 inline-flex shrink-0 items-center gap-1.5 bg-ink-900 px-2.5 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
             >
               <span aria-hidden="true">←</span>
               <span>{t(back.label)}</span>
@@ -180,12 +194,12 @@ export default function GamesShell({
           ) : (
             <Link
               href={back.href}
-              className={wide ? 'inline-flex shrink-0 items-center gap-2 border border-ink-600 bg-ink-900 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:border-accent/50 hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
+              className={wide ? 'pixel-edge pxw-1 pxc-600 inline-flex shrink-0 items-center gap-1.5 bg-ink-900 px-2.5 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
             >
               <span aria-hidden="true">←</span>
               <span>{t(back.label)}</span>
             </Link>
-          )}
+          ))}
 
           {showHomeLink && (
             <Link href={home} className="text-[12px] text-ink-400 transition-colors hover:text-accent">

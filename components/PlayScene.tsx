@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type ReactNode
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { canReturnWithinSite } from '@/lib/site-history';
 import { getAudioTrack } from '@/lib/audio-tap';
@@ -8,6 +15,7 @@ import { ensureBios } from '@/lib/bios';
 import { EmulatorController, VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
 import { readGamepads } from '@/lib/gamepad';
 import { isAbortError, readBodyWithProgress } from '@/lib/http';
+import { setPlayActive } from '@/lib/play-leave-guard';
 import type { MessageKey } from '@/lib/i18n';
 import {
   BUTTONS,
@@ -18,7 +26,7 @@ import {
   loadBindings,
   saveBindings,
   type ButtonName,
-  type KeyBindings,
+  type KeyBindings
 } from '@/lib/keybindings';
 import {
   captureFpsFor,
@@ -29,7 +37,7 @@ import {
   type NetplayError,
   type NetplayMode,
   type NetplayState,
-  type StreamQuality,
+  type StreamQuality
 } from '@/lib/netplay';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import ConsoleScreen from './ConsoleScreen';
@@ -39,6 +47,7 @@ import KeyBindingsPanel from './KeyBindingsPanel';
 import PlaySaveControls from './PlaySaveControls';
 import { MobileGamepad } from './HandheldConsole';
 import { ExpandIcon, PlayMoonIcon, ReloadIcon, SunIcon } from './icons';
+import { TV_SIZES, type TvSize } from '@/lib/tv-size';
 
 /*
  * `/play` —— 从游戏详情那颗「联机游戏」进来的**简洁版房间**（2026-10-14 加，用户要求）。
@@ -98,7 +107,12 @@ interface PlaySceneProps {
   initialRoomCode?: string;
 }
 
-export default function PlayScene({ serverGame, initialMode = 'solo', autoStart = false, initialRoomCode = '' }: PlaySceneProps) {
+export default function PlayScene({
+  serverGame,
+  initialMode = 'solo',
+  autoStart = false,
+  initialRoomCode = ''
+}: PlaySceneProps) {
   const { t, locale, href } = useI18n();
   const router = useRouter();
 
@@ -118,16 +132,35 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
       const frameStyle = getComputedStyle(frame);
       const number = (value: string) => Number.parseFloat(value) || 0;
       const workspace = stage.parentElement;
-      const top = (workspace ?? stage).getBoundingClientRect().top + window.scrollY + (workspace ? number(getComputedStyle(workspace).paddingTop) : 0);
+      const top =
+        (workspace ?? stage).getBoundingClientRect().top +
+        window.scrollY +
+        (workspace ? number(getComputedStyle(workspace).paddingTop) : 0);
       const availableHeight = Math.max(0, window.innerHeight - top - 20) * 0.92;
-      const stageInset = number(stageStyle.paddingTop) + number(stageStyle.paddingBottom) + number(stageStyle.borderTopWidth) + number(stageStyle.borderBottomWidth);
-      const frameInsetY = number(frameStyle.paddingTop) + number(frameStyle.paddingBottom);
-      const frameInsetX = number(frameStyle.paddingLeft) + number(frameStyle.paddingRight);
-      const maxWidth = Math.max(0, availableHeight - stageInset - frameInsetY) * 4 / 3 + frameInsetX;
-      stage.style.setProperty('--play-display-height', `${Math.max(0, availableHeight - stageInset)}px`);
+      const stageInset =
+        number(stageStyle.paddingTop) +
+        number(stageStyle.paddingBottom) +
+        number(stageStyle.borderTopWidth) +
+        number(stageStyle.borderBottomWidth);
+      const frameInsetY =
+        number(frameStyle.paddingTop) + number(frameStyle.paddingBottom);
+      const frameInsetX =
+        number(frameStyle.paddingLeft) + number(frameStyle.paddingRight);
+      const maxWidth =
+        (Math.max(0, availableHeight - stageInset - frameInsetY) * 4) / 3 +
+        frameInsetX;
+      stage.style.setProperty(
+        '--play-display-height',
+        `${Math.max(0, availableHeight - stageInset)}px`
+      );
       stage.style.setProperty('--play-display-max-width', `${maxWidth}px`);
-      stage.parentElement?.style.setProperty('--play-display-max-width', `${maxWidth}px`);
-      document.querySelector<HTMLElement>('.play-navigation')?.style.setProperty('--play-display-max-width', `${maxWidth}px`);
+      stage.parentElement?.style.setProperty(
+        '--play-display-max-width',
+        `${maxWidth}px`
+      );
+      document
+        .querySelector<HTMLElement>('.play-navigation')
+        ?.style.setProperty('--play-display-max-width', `${maxWidth}px`);
     };
     updateSize();
     const observer = new ResizeObserver(updateSize);
@@ -190,7 +223,8 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
     const page = workspaceRef.current?.closest<HTMLElement>('.play-page');
     if (!page) return;
     pageThemeRef.current = page;
-    page.dataset.playTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    page.dataset.playTheme =
+      document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
     return () => {
       if (themeFadeTimer.current !== null) clearTimeout(themeFadeTimer.current);
       page.classList.remove('play-theme-fading');
@@ -202,18 +236,40 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
   const [keybindOpen, setKeybindOpen] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [savesOpen, setSavesOpen] = useState(false);
-  const [keysPlayer, setKeysPlayer] = useState<'p1' | 'p2'>(initialRoomCode ? 'p2' : 'p1');
-  const [screenSize, setScreenSize] = useState<'small' | 'medium' | 'large'>('large');
+  const [keysPlayer, setKeysPlayer] = useState<'p1' | 'p2'>(
+    initialRoomCode ? 'p2' : 'p1'
+  );
+  /*
+   * 预挂载值只能是`PLAY_DEFAULT_SCREEN_SIZE`（中）：服务端没有 localStorage，
+   * 首屏那份**用户真实偏好**由下面的 effect 从 `<html data-tv>` 读回来后补上。
+   * 两边都是「中」时首帧不跳；用户存过别的档位，就由首屏内联脚本先写属性、
+   * effect 再对齐 —— 和主题 / 键位同一条路。
+   */
+  const [screenSize, setScreenSize] = useState<TvSize>(
+    PLAY_DEFAULT_SCREEN_SIZE
+  );
 
   const [mode] = useState<PlayMode>(initialRoomCode ? 'join' : initialMode);
+  /**
+   * 房间卡「刚出现」的高亮。建好房 / 加入成功那一刻置 true，几秒后自己落回 ——
+   * 对应卡片边框闪主题色（`play-room-flash`），提醒用户看右栏。
+   */
+  const [roomFlash, setRoomFlash] = useState(false);
   const autoStartedRef = useRef(false);
   const [joinCode] = useState(initialRoomCode.toUpperCase());
   const [netplayMode] = useState<NetplayMode>('wan');
-  const [streamQuality, setStreamQuality] = useState<StreamQuality>(DEFAULT_STREAM_QUALITY);
-  const [netplayState, setNetplayState] = useState<NetplayState>(IDLE_NETPLAY_STATE);
+  const [streamQuality, setStreamQuality] = useState<StreamQuality>(
+    DEFAULT_STREAM_QUALITY
+  );
+  const [netplayState, setNetplayState] =
+    useState<NetplayState>(IDLE_NETPLAY_STATE);
   const [netplayBusy, setNetplayBusy] = useState(false);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [roomToast, setRoomToast] = useState<{ key: MessageKey; kind: 'ok' | 'danger'; id: number } | null>(null);
+  const [roomToast, setRoomToast] = useState<{
+    key: MessageKey;
+    kind: 'ok' | 'danger';
+    id: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!roomToast) return;
@@ -228,36 +284,82 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
    * 和 room 相比这里**不认「刚连上 / 对方离开」那两枚会自动消失的提示**：
    * 这一页的状态行是常驻在右侧的（房间码下面那行），不需要另开一条会过期的通道。
    */
-  const [netplay] = useState(
-    () => {
-      let previousState = IDLE_NETPLAY_STATE;
-      return new NetplayController({
-        onState: (next) => {
-          const previous = previousState;
-          previousState = next;
-          setNetplayState(next);
-          if (next.status === 'connected' && previous.status !== 'connected') {
-            setRoomToast({ key: next.role === 'host' ? 'netplay.toastHost' : 'netplay.toastGuest', kind: 'ok', id: Date.now() });
-          } else if (previous.status === 'connected' && next.status === 'waiting' && next.role === 'host') {
-            setRoomToast({ key: 'netplay.toastGuestLeft', kind: 'danger', id: Date.now() });
-          } else if (next.error === 'host-left' && previous.error !== 'host-left') {
-            setRoomToast({ key: 'netplay.toastHostLeft', kind: 'danger', id: Date.now() });
-          }
-        },
-        onRemoteButton: (button, down, role) => {
-          // 只有房主本机跑着模拟器；加入者那份注入无处可去，所以这里是单向的
-          if (role !== 'host') return;
-          // 对方那台机器上的 1P，在这台机器上是 2P（`remotePlayer('host')` 就是这个 2）
-          controller.pressButton(button, 2, down);
-        },
-        onRemoteStream: (stream) => setRemoteStream(stream),
-      });
-    }
-  );
+  const [netplay] = useState(() => {
+    let previousState = IDLE_NETPLAY_STATE;
+    return new NetplayController({
+      onState: (next) => {
+        const previous = previousState;
+        previousState = next;
+        setNetplayState(next);
+        if (next.status === 'connected' && previous.status !== 'connected') {
+          setRoomToast({
+            key:
+              next.role === 'host' ? 'netplay.toastHost' : 'netplay.toastGuest',
+            kind: 'ok',
+            id: Date.now()
+          });
+        } else if (
+          previous.status === 'connected' &&
+          next.status === 'waiting' &&
+          next.role === 'host'
+        ) {
+          setRoomToast({
+            key: 'netplay.toastGuestLeft',
+            kind: 'danger',
+            id: Date.now()
+          });
+        } else if (
+          next.error === 'host-left' &&
+          previous.error !== 'host-left'
+        ) {
+          setRoomToast({
+            key: 'netplay.toastHostLeft',
+            kind: 'danger',
+            id: Date.now()
+          });
+        }
+      },
+      onRemoteButton: (button, down, role) => {
+        // 只有房主本机跑着模拟器；加入者那份注入无处可去，所以这里是单向的
+        if (role !== 'host') return;
+        // 对方那台机器上的 1P，在这台机器上是 2P（`remotePlayer('host')` 就是这个 2）
+        controller.pressButton(button, 2, down);
+      },
+      onRemoteStream: (stream) => setRemoteStream(stream)
+    });
+  });
 
   const hasPicture = Boolean(rom) || Boolean(remoteStream);
   const inRoom = netplayState.status !== 'idle';
   const busy = phase === 'downloading' || phase === 'booting';
+  /**
+   * 加载卡正盖在屏幕上吗？两个入口：主流程（busy）和 directSolo 的自动开播。
+   * 卡里已经带了游戏名 + 机种，叠层顶部那两行就不再重复画（见渲染处）。
+   */
+  const loadingCardVisible =
+    busy || (directSolo && !notice && !loadCancelled);
+
+  useEffect(() => {
+    if (!(inRoom && netplayState.code)) return;
+    // 微任务里置位：effect 里同步 setState 会撞 react-hooks/set-state-in-effect
+    // （本仓库既有规则），和上面主题/键位那两段是同一个理由。
+    void Promise.resolve().then(() => setRoomFlash(true));
+    const timer = setTimeout(() => setRoomFlash(false), 5000);
+    return () => clearTimeout(timer);
+  }, [inRoom, netplayState.code]);
+  /*
+   * 「游戏运行中」= ROM 已载入开玩（`phase === 'ready'`），或联机加入者已连上
+   * 房主正在收画面（guest 本机没有模拟器，`phase` 永远到不了 ready）。
+   * 报给左上角那颗返回（`lib/play-leave-guard.ts`）：运行中点返回要先确认。
+   * 卸载时清回 false —— SPA 里离开这一页的收尾不会自动清它。
+   */
+  const playing =
+    phase === 'ready' ||
+    (netplayState.role === 'guest' && netplayState.status === 'connected');
+  useEffect(() => {
+    setPlayActive(playing);
+    return () => setPlayActive(false);
+  }, [playing]);
   /**
    * 这一款的文案（标题 / 开发商按当前语言取一份，见 `localizeLibraryGame`）。
    * `gameText` 可能为 null（地址上没有 `?id=`，或者查无此款），下面一路都得判空。
@@ -272,10 +374,16 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
       activeRef.current = false;
       abortRef.current?.abort();
       lastRomRef.current = null;
-      void controller.exit().catch((error) => console.warn('[play] 退出失败', error));
-      void netplay.leave().catch((error) => console.warn('[play] 退房失败', error));
+      void controller
+        .exit()
+        .catch((error) => console.warn('[play] 退出失败', error));
+      void netplay
+        .leave()
+        .catch((error) => console.warn('[play] 退房失败', error));
     };
-    const restore = () => { activeRef.current = true; };
+    const restore = () => {
+      activeRef.current = true;
+    };
     window.addEventListener('pagehide', stop);
     window.addEventListener('pageshow', restore);
     return () => {
@@ -297,7 +405,8 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
      * 塞进微任务是因为 effect 里同步 setState 会撞上 `react-hooks/set-state-in-effect`
      * （本仓库既有规则），和 room 那边推到 `.then()` 里是同一个理由。
      */
-    const storedTheme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    const storedTheme =
+      document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
     void Promise.resolve().then(() => setTheme(storedTheme));
 
     /*
@@ -309,6 +418,32 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
     controller.setBindings(stored);
     void Promise.resolve().then(() => setBindings(stored));
 
+    /*
+     * 屏幕尺寸。和 room 共用同一份落盘（`nesload:tv`，也是首屏内联脚本读的那个键），
+     * 所以这一页选完刷新、下次再进来都还是那一档，切到 `/room` 也认得。
+     *
+     * **为什么读 localStorage 而不是 `<html data-tv>`**：内联脚本只在**整页加载**
+     * 时跑一次。从游戏详情点「联机游戏」进这页是 SPA 内部跳转——脚本不会重跑，
+     * 属性上还留着首载页面（比如首页）算出的值；而本页默认档是分页面的
+     * （/play 是 medium，别处是 small），跟着旧属性走必然错。
+     * 直接读键 + 本页自己的合法值表 + 本页默认，两条进入路径都对。
+     * （`data-screen-size` 只挂在 .play-display 上、吃的全是 React state，
+     * `<html data-tv>` 在这一页没有视觉职责，不需要同步回去。）
+     */
+    const raw = (() => {
+      try {
+        return localStorage.getItem(TV_KEY);
+      } catch {
+        return null; // 隐私模式读不出来，走默认
+      }
+    })();
+    void Promise.resolve().then(() =>
+      setScreenSize(
+        raw === 'small' || raw === 'medium' || raw === 'large'
+          ? raw
+          : PLAY_DEFAULT_SCREEN_SIZE
+      )
+    );
   }, [controller]);
 
   /* ---------------- 游戏数据 ---------------- */
@@ -326,8 +461,12 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
     const ac = new AbortController();
     void (async () => {
       try {
-        const res = await fetch(`/api/games/${encodeURIComponent(id)}`, { signal: ac.signal });
-        const found = res.ok ? ((await res.json()) as { game?: LibraryGame }).game : undefined;
+        const res = await fetch(`/api/games/${encodeURIComponent(id)}`, {
+          signal: ac.signal
+        });
+        const found = res.ok
+          ? ((await res.json()) as { game?: LibraryGame }).game
+          : undefined;
         if (found) setGame(found);
         else setNotice('play.notFound');
       } catch (error) {
@@ -372,10 +511,14 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
       try {
         if (!romFile) {
           setPhase('downloading');
-          const res = await fetch(`/api/games/${game!.id}/rom`, { signal: ac.signal });
+          const res = await fetch(`/api/games/${game!.id}/rom`, {
+            signal: ac.signal
+          });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await readBodyWithProgress(res, setRomRatio);
-          romFile = new File([blob], game!.romName, { type: 'application/octet-stream' });
+          romFile = new File([blob], game!.romName, {
+            type: 'application/octet-stream'
+          });
         }
 
         if (ac.signal.aborted || !activeRef.current) return;
@@ -421,7 +564,8 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
       } catch (error) {
         if (!activeRef.current) return;
         // 用户自己掐的：不是故障，回到「设置好了，点开始」那一屏
-        if (isAbortError(error)) console.info('[play] 已取消载入：', game?.title);
+        if (isAbortError(error))
+          console.info('[play] 已取消载入：', game?.title);
         else {
           console.error('[play] 载入失败：', game?.title, error);
           setNotice('play.loadFail');
@@ -502,7 +646,14 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
   }, [joinCode, load, mode, netplay, netplayMode]);
 
   useEffect(() => {
-    if (!autoStart || initialMode !== 'solo' || mode !== 'solo' || !game || autoStartedRef.current) return;
+    if (
+      !autoStart ||
+      initialMode !== 'solo' ||
+      mode !== 'solo' ||
+      !game ||
+      autoStartedRef.current
+    )
+      return;
     let cancelled = false;
     // 等挂载和偏好初始化完成；StrictMode 清理的那次任务不会执行。
     void Promise.resolve().then(() => {
@@ -510,7 +661,9 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
       autoStartedRef.current = true;
       void start();
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [autoStart, initialMode, mode, game, start]);
 
   useEffect(() => {
@@ -521,7 +674,9 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
       autoStartedRef.current = true;
       void start();
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [mode, joinCode, start]);
 
   const leaveRoom = useCallback(async () => {
@@ -547,7 +702,10 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
   useEffect(() => {
     if (netplayState.role !== 'host' || !rom) return;
 
-    const stream = createCaptureStream(canvasRef.current, captureFpsFor(streamQuality));
+    const stream = createCaptureStream(
+      canvasRef.current,
+      captureFpsFor(streamQuality)
+    );
     if (!stream) return;
 
     netplay.publishStream(stream, streamQuality);
@@ -662,13 +820,16 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
     };
   }, [netplayState.role, netplay, bindings, keybindOpen, savesOpen]);
 
-  const handleTouchButton = useCallback((button: ButtonName, down: boolean) => {
-    if (netplayState.role === 'guest') {
-      netplay.sendButton(button, down);
-    } else {
-      controller.pressButton(button, 1, down);
-    }
-  }, [controller, netplay, netplayState.role]);
+  const handleTouchButton = useCallback(
+    (button: ButtonName, down: boolean) => {
+      if (netplayState.role === 'guest') {
+        netplay.sendButton(button, down);
+      } else {
+        controller.pressButton(button, 1, down);
+      }
+    },
+    [controller, netplay, netplayState.role]
+  );
 
   /* ---------------- 播放控制 ---------------- */
 
@@ -686,7 +847,7 @@ export default function PlayScene({ serverGame, initialMode = 'solo', autoStart 
     await load(file);
   }, [load]);
 
-const changeVolume = useCallback(
+  const changeVolume = useCallback(
     (level: number) => setVolume(controller.setVolume(level)),
     [controller]
   );
@@ -719,6 +880,27 @@ const changeVolume = useCallback(
         root.style.removeProperty('--theme-fade-duration');
         themeFadeTimer.current = null;
       }, 550);
+    }
+  }, []);
+
+  /**
+   * 切屏幕档位。
+   *
+   * `data-screen-size` 撑的是**这一页自己的排版**（`--play-size-scale`），
+   * 和 `/room` 那台电视机的 `--tv-ratio` 是两套 CSS，但**档位是同一个偏好**：
+   * 除了本地 state，还要写 `<html data-tv>` 和 `localStorage`（`nesload:tv`）。
+   * 不写属性只写 state 的话，刷新就被首屏内联脚本按旧值/默认值覆盖回去 ——
+   * 这正是之前「选完刷新又变回原样」的原因。
+   *
+   * 写存储失败（隐私模式）静默即可，和 `applyTvSize` / `saveBindings` 同一处置。
+   */
+  const applyScreenSize = useCallback((next: TvSize) => {
+    document.documentElement.dataset.tv = next;
+    setScreenSize(next);
+    try {
+      localStorage.setItem(TV_KEY, next);
+    } catch {
+      // 隐私模式下写不进去，忽略即可
     }
   }, []);
 
@@ -761,8 +943,15 @@ const changeVolume = useCallback(
   return (
     <>
       {roomToast && (
-        <div role="status" aria-live="polite" className={`fixed left-1/2 top-5 z-[80] flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 border bg-ink-900 px-5 py-3 text-[13px] shadow-lg ${roomToast.kind === 'ok' ? 'border-ok/40 text-ok' : 'border-danger/40 text-danger'}`}>
-          <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-current" />
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed left-1/2 top-5 z-[80] flex max-w-[calc(100%-32px)] -translate-x-1/2 items-center gap-3 border bg-ink-900 px-5 py-3 text-[13px] shadow-lg ${roomToast.kind === 'ok' ? 'border-ok/40 text-ok' : 'border-danger/40 text-danger'}`}
+        >
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 shrink-0 rounded-full bg-current"
+          />
           <span>{t(roomToast.key)}</span>
         </div>
       )}
@@ -772,11 +961,16 @@ const changeVolume = useCallback(
           onQuality={setStreamQuality}
           pending={netplayBusy}
           disabled={mode === 'host' ? !game : !joinCode.trim()}
-          error={netplayState.error ? t(NETPLAY_ERROR_MESSAGE[netplayState.error]) : null}
+          error={
+            netplayState.error
+              ? t(NETPLAY_ERROR_MESSAGE[netplayState.error])
+              : null
+          }
           onConfirm={() => void start()}
           onBack={() => {
             if (window.history.length > 1) window.history.back();
-            else window.location.assign(locale === 'zh' ? '/zh/games' : '/games');
+            else
+              window.location.assign(locale === 'zh' ? '/zh/games' : '/games');
           }}
         />
       )}
@@ -786,7 +980,10 @@ const changeVolume = useCallback(
         这里 `flex-1` + `lg:items-stretch` 是为了「吃掉外壳剩下来的纵向空间」——
         `GamesShell` 传了 `fill`，页脚因此被压到视口最底部（2026-10-14 用户要求）。
       */}
-      <div ref={workspaceRef} className="play-workspace flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-stretch">
+      <div
+        ref={workspaceRef}
+        className="play-workspace flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-stretch"
+      >
         {/*
           这一页没有可见的大标题（用户要的就是干净），但**不能没有 h1** ——
           读屏和爬虫都靠它认「这一页在讲什么」。用游戏名当它，没有就退回页面自己的名字。
@@ -809,36 +1006,43 @@ const changeVolume = useCallback(
           ⚠️ 别改成给屏幕挂 `max-h`（或 `h-full`）—— 会和 `aspect-ratio` 打架：
           宽度还是 100%、高度被截短，而 canvas 是 `h-full w-full`，画面会被压扁。
         */}
-        <section ref={stageRef} className="play-stage flex min-w-0 flex-1 items-center justify-center">
+        <section
+          ref={stageRef}
+          className="play-stage flex min-w-0 flex-1 items-center justify-center"
+        >
           <div className="play-screen-area">
-          <div ref={displayRef} className="play-display w-full" data-screen-size={screenSize}>
-            {/*
+            <div
+              ref={displayRef}
+              className="play-display w-full"
+              data-screen-size={screenSize}
+            >
+              {/*
               屏幕外框就是站上那套像素描边（`pixel-edge pxw-3 pxc-600 bg-ink-800 p-3`）——
               和别处的「一块屏幕」同一个观感，**别改成 1px 细边**（我第一版那么写过，被退了）。
             */}
-            <div className="play-frame">
-            <div className="relative" data-playing={hasPicture}>
-              <ConsoleScreen
-                canvasRef={canvasRef}
-                screenRef={screenRef}
-                rom={rom}
-                crtOff={false}
-                remoteStream={remoteStream}
-                remotePlaying={netplayState.remotePlaying}
-                remotePaused={netplayState.remotePaused}
-                netplayLive={netplayState.status === 'connected'}
-                paused={paused}
-                /* 进度走下面那块叠层（它要连「第几段 + 取消」一起说），屏幕里不再画一条 */
-                loading={null}
-                volume={volume}
-                fileOver={false}
-                variant="desktop"
-                hideHint
-                frameClassName="play-game-screen w-full"
-                onExitFullscreen={exitFullscreen}
-              />
+              <div className="play-frame">
+                <div className="relative" data-playing={hasPicture}>
+                  <ConsoleScreen
+                    canvasRef={canvasRef}
+                    screenRef={screenRef}
+                    rom={rom}
+                    crtOff={false}
+                    remoteStream={remoteStream}
+                    remotePlaying={netplayState.remotePlaying}
+                    remotePaused={netplayState.remotePaused}
+                    netplayLive={netplayState.status === 'connected'}
+                    paused={paused}
+                    /* 进度走下面那块叠层（它要连「第几段 + 取消」一起说），屏幕里不再画一条 */
+                    loading={null}
+                    volume={volume}
+                    fileOver={false}
+                    variant="desktop"
+                    hideHint
+                    frameClassName="play-game-screen w-full"
+                    onExitFullscreen={exitFullscreen}
+                  />
 
-              {/*
+                  {/*
                 叠层：没画面时盖住整块屏幕。三种状态按优先级分开说 ——
                 载入中（进度 + 取消）→ 联机等待 → 房间选择；房间信息显示在右侧。
                 有画面（本机的或房主推来的）就整块撤掉。
@@ -847,89 +1051,154 @@ const changeVolume = useCallback(
                 浅色主题下就成了黑底黑字。`overflow-y-auto` 是兜底 —— 屏幕窄/矮到
                 装不下那几行时能滚，而不是把内容顶出去。
               */}
-              {!hasPicture && (
-                <div className="play-overlay absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-y-auto px-8 py-8 text-center">
-                  {/* 先报「这是哪一款 / 出了什么事」 */}
-                  <div className="play-headline flex flex-col items-center gap-1">
-                    {headline && <span className="text-[13px] text-crt-ink-200">{headline}</span>}
-                    {game && (
-                      <span className="text-[12px] text-crt-ink-500">
-                        {CONSOLE_LABEL[game.consoleType]}
-                      </span>
-                    )}
-                    {game && notice && <span className="text-[12px] text-danger">{t(notice)}</span>}
-                  </div>
-
-                  {mode === 'join' && netplayState.status !== 'connected' ? (
-                    <div className="flex w-full max-w-[320px] flex-col items-center gap-4" role="status">
-                      {netplayState.error ? (
-                        <>
-                          <p className="text-[12px] text-danger">{t(NETPLAY_ERROR_MESSAGE[netplayState.error])}</p>
-                          <button type="button" disabled={netplayBusy} onClick={() => void start()} className="border border-crt-ink-500 px-4 py-2 text-[12px] text-crt-ink-200 disabled:opacity-40">{t('play.retryJoin')}</button>
-                        </>
-                      ) : (
-                        <>
-                          <span aria-hidden="true" className="h-7 w-7 animate-spin rounded-full border-2 border-crt-ink-600 border-t-crt-ink-200 motion-reduce:animate-none" />
-                          <p className="text-[13px] text-crt-ink-200">{t('netplay.joining')}</p>
-                        </>
-                      )}
-                    </div>
-                  ) : busy ? (
-                    /* ① 载入中：阶段 + 进度 + 取消 */
-                    <>
-                      <span className="text-[12px] text-crt-ink-300">
-                        {t(phase === 'downloading' ? 'play.downloading' : 'play.booting')}
-                      </span>
-                      <LoadBar ratio={phase === 'downloading' ? romRatio : coreRatio} />
+                  {!hasPicture && (
+                    <div className="play-overlay absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-y-auto px-8 py-8 text-center">
                       {/*
-                        取消：**只在 ROM 下载那一段可用**。核心已经在唱戏之后
-                        Nostalgist 没有中断接口（见 load() 的注释），按了也没用 ——
-                        与其画一颗假的，不如让它灰着。
-                      */}
-                      <button
-                        type="button"
-                        onClick={cancelLoad}
-                        disabled={phase !== 'downloading'}
-                        className="pixel-edge pxw-2 pxc-500 bg-crt-950/85 px-4 py-1.5 text-[12px] text-crt-ink-200 transition-colors enabled:hover:text-crt-accent disabled:cursor-not-allowed disabled:opacity-35"
-                      >
-                        {t('play.cancel')}
-                      </button>
-                    </>
-                  ) : directSolo ? (
-                    <div className="flex w-full max-w-[320px] flex-col items-center gap-4">
-                      {!notice && !loadCancelled ? (
-                        <>
-                          <span role="status" className="text-[12px] text-crt-ink-300">{t('play.downloading')}</span>
-                          <LoadBar ratio={null} />
-                        </>
-                      ) : (
-                        <>
-                          {loadCancelled && <span role="status" className="text-[12px] text-crt-ink-300">{t('play.cancelled')}</span>}
-                          {game && (
-                            <button type="button" onClick={() => void load()} className="pixel-edge pxw-2 pxc-500 bg-crt-950/85 px-4 py-1.5 text-[12px] text-crt-ink-200 hover:text-crt-accent">
-                              {t('play.retry')}
-                            </button>
-                          )}
-                        </>
+                    「这是哪一款」两行（游戏名 + 机种）**只在加载卡不显示时才画** ——
+                    卡片里已经有封面 + 名字 + 机种，叠两层就是同一句话说两遍。
+                    报错那行（notice）不在此列：它不在卡里，得永远留着。
+                  */}
+                      {(game || notice) &&
+                        !loadingCardVisible && (headline || (game && !notice)) && (
+                          <div className="play-headline flex flex-col items-center gap-1">
+                            {headline && !notice && (
+                              <span className="text-[13px] text-crt-ink-200">
+                                {headline}
+                              </span>
+                            )}
+                            {game && (
+                              <span className="text-[12px] text-crt-ink-500">
+                                {CONSOLE_LABEL[game.consoleType]}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      {notice && (
+                        <span className="text-[12px] text-danger">
+                          {t(notice)}
+                        </span>
                       )}
-                    </div>
-                  ) : inRoom ? (
-                    <span role="status" className="flex items-center gap-2 text-[12px] text-info">
-                      <span aria-hidden="true" className="h-2 w-2 animate-pulse rounded-full bg-current motion-reduce:animate-none" />
-                      {t(netplayState.role === 'guest' ? 'netplay.waitingGame' : 'netplay.waiting')}
-                    </span>
-                  ) : null}
 
+                      {mode === 'join' &&
+                      netplayState.status !== 'connected' ? (
+                        <div
+                          className="flex w-full max-w-[320px] flex-col items-center gap-4"
+                          role="status"
+                        >
+                          {netplayState.error ? (
+                            <>
+                              <p className="text-[12px] text-danger">
+                                {t(NETPLAY_ERROR_MESSAGE[netplayState.error])}
+                              </p>
+                              <button
+                                type="button"
+                                disabled={netplayBusy}
+                                onClick={() => void start()}
+                                className="border border-crt-ink-500 px-4 py-2 text-[12px] text-crt-ink-200 disabled:opacity-40"
+                              >
+                                {t('play.retryJoin')}
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span
+                                aria-hidden="true"
+                                className="h-7 w-7 animate-spin rounded-full border-2 border-crt-ink-600 border-t-crt-ink-200 motion-reduce:animate-none"
+                              />
+                              <p className="text-[13px] text-crt-ink-200">
+                                {t('netplay.joining')}
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      ) : busy ? (
+                        /* ① 载入中：封面 + 游戏名 + 长进度条 + 取消（2026-10-15 重写） */
+                        <LoadingCard
+                          image={game?.imageUrl ?? null}
+                          title={gameText?.title ?? null}
+                          subtitle={game ? CONSOLE_LABEL[game.consoleType] : null}
+                          phaseLabel={t(
+                            phase === 'downloading'
+                              ? 'play.downloading'
+                              : 'play.booting'
+                          )}
+                          ratio={
+                            phase === 'downloading' ? romRatio : coreRatio
+                          }
+                          onCancel={cancelLoad}
+                          cancelDisabled={phase !== 'downloading'}
+                          cancelLabel={t('play.cancel')}
+                        />
+                      ) : directSolo ? (
+                        <div className="flex w-full max-w-[320px] flex-col items-center gap-4">
+                          {!notice && !loadCancelled ? (
+                            <LoadingCard
+                              image={game?.imageUrl ?? null}
+                              title={gameText?.title ?? null}
+                              subtitle={game ? CONSOLE_LABEL[game.consoleType] : null}
+                              phaseLabel={t('play.downloading')}
+                              ratio={null}
+                            />
+                          ) : (
+                            <>
+                              {loadCancelled && (
+                                <span
+                                  role="status"
+                                  className="text-[12px] text-crt-ink-300"
+                                >
+                                  {t('play.cancelled')}
+                                </span>
+                              )}
+                              {game && (
+                                <button
+                                  type="button"
+                                  onClick={() => void load()}
+                                  className="pixel-edge pxw-2 pxc-500 bg-crt-950/85 px-4 py-1.5 text-[12px] text-crt-ink-200 hover:text-crt-accent"
+                                >
+                                  {t('play.retry')}
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ) : inRoom ? (
+                        <span
+                          role="status"
+                          className="flex items-center gap-2 text-[12px] text-info"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="h-2 w-2 animate-pulse rounded-full bg-current motion-reduce:animate-none"
+                          />
+                          {t(
+                            netplayState.role === 'guest'
+                              ? 'netplay.waitingGame'
+                              : 'netplay.waiting'
+                          )}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
-              )}
               </div>
             </div>
           </div>
-
-          </div>
           <MobileGamepad
-            consoleType={rom?.console ?? netplayState.remoteGame?.console ?? game?.consoleType ?? 'nes'}
-            enabled={hasPicture && !busy && !saveBusy && !savesOpen && !paused && !netplayState.remotePaused && !keybindOpen}
+            consoleType={
+              rom?.console ??
+              netplayState.remoteGame?.console ??
+              game?.consoleType ??
+              'nes'
+            }
+            enabled={
+              hasPicture &&
+              !busy &&
+              !saveBusy &&
+              !savesOpen &&
+              !paused &&
+              !netplayState.remotePaused &&
+              !keybindOpen
+            }
             onButton={handleTouchButton}
           />
         </section>
@@ -945,7 +1214,7 @@ const changeVolume = useCallback(
         */}
         <aside className="play-sidebar">
           {game && (
-            <div className="play-game flex gap-3">
+            <div className="play-game pixel-edge pxw-2 pxc-700 flex gap-3">
               <div className="pixel-edge pxw-2 pxc-700 w-[92px] shrink-0 bg-ink-900">
                 {/*
                   图不在链接里、是这一页自己的主图，所以配 alt
@@ -966,27 +1235,134 @@ const changeVolume = useCallback(
                   {game.year ? ` · ${game.year}` : ''}
                 </p>
                 {gameText?.developer && (
-                  <p className="mt-0.5 truncate text-[12px] text-ink-500">{gameText.developer}</p>
+                  <p className="mt-0.5 truncate text-[12px] text-ink-500">
+                    {gameText.developer}
+                  </p>
                 )}
               </div>
             </div>
           )}
 
-          <section aria-label={t('keybind.open')} className="play-keys">
-            <div className="play-panel-heading"><h2>{t('keybind.open')}</h2>          {/* 编辑仍复用原有按键设置，右侧列表跟随自定义键位更新。 */}
-          <button
-            type="button"
-            onClick={() => setKeybindOpen(true)}
-            title={t('keybind.open')}
+          {/*
+        联机房间卡（2026-10-15：从按键下面挪上来 + 紧凑重排）。
+        挪上来是因为：房主选完画质、房间建好，这张卡才冒出来 —— 原来压在
+        按键长列表底下根本注意不到。刚出现时 `play-room-flash` 让边框闪几下
+        主题色（见 globals.css），几秒后自己停，不打扰。
+      */}
+          {inRoom && netplayState.code && (
+            <section
+              aria-label={t('netplay.roomCode')}
+              className={`play-room pixel-edge pxw-2 pxc-700 ${roomFlash ? 'play-room-flash' : ''}`}
+            >
+              <div className="play-panel-heading">
+                <h2>{t('netplay.roomCode')}</h2>
+                <button
+                  type="button"
+                  disabled={netplayBusy}
+                  onClick={() => void leaveRoom()}
+                  className="inline-flex items-center border border-danger/40 bg-danger/10 px-2 py-0.5 text-[11px] text-danger transition-colors hover:bg-danger/20 disabled:opacity-40"
+                >
+                  {t(
+                    netplayState.role === 'host'
+                      ? 'netplay.closeRoom'
+                      : 'netplay.leave'
+                  )}
+                </button>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-pixel text-[16px] tracking-[0.2em] text-accent">
+                  {netplayState.code}
+                </p>
+                <CopyBtn
+                  text={netplayState.code}
+                  label={t('netplay.copy')}
+                  done={t('netplay.copied')}
+                  sidebar
+                />
+              </div>
+              <p
+                role="status"
+                className={`mt-2 flex items-center gap-2 text-[12px] ${netplayState.error ? 'text-danger' : netplayState.status === 'connected' ? 'text-ok' : netplayState.role === 'guest' ? 'text-accent' : 'text-info'}`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-2 w-2 shrink-0 rounded-full bg-current ${!netplayState.error && netplayState.status !== 'connected' ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+                />
+                {netplayState.error
+                  ? t(NETPLAY_ERROR_MESSAGE[netplayState.error])
+                  : t(
+                      netplayState.status === 'connected'
+                        ? 'netplay.connected'
+                        : netplayState.role === 'guest'
+                          ? 'netplay.joining'
+                          : 'netplay.waiting'
+                    )}
+                {netplayState.status === 'connected' && (
+                  <span
+                    className={`ml-auto shrink-0 text-right text-[12px] ${netplayState.rtt === null ? 'text-ink-300' : netplayState.rtt < 100 ? 'text-ok' : netplayState.rtt < 200 ? 'text-warn' : 'text-danger'}`}
+                  >
+                    {t('play.latency')} ·{' '}
+                    {netplayState.rtt === null
+                      ? t('play.measuringLatency')
+                      : `${Math.round(netplayState.rtt)} ms`}
+                  </span>
+                )}
+              </p>
+              {netplayState.role === 'host' && (
+                <p className="mt-1.5 text-[12px] text-ink-400">
+                  {t('netplay.quality')} · {t(QUALITY_MESSAGE[streamQuality])}
+                </p>
+              )}
+              {netplayState.role === 'host' && !rom && !busy && (
+                <button
+                  type="button"
+                  disabled={!game || netplayBusy}
+                  onClick={() => void load()}
+                  className="mt-2 w-full bg-accent px-3 py-1.5 text-[12px] text-ink-950 disabled:opacity-40"
+                >
+                  {t('play.retry')}
+                </button>
+              )}
+              <div className="play-share-row mt-2 flex items-center gap-2">
+                <input
+                  aria-label={t('netplay.share')}
+                  readOnly
+                  value={shareLink(netplayState.code)}
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="play-share-input pixel-edge pxw-1 pxc-700 w-full min-w-0 flex-1 bg-ink-950 px-2 py-1.5 text-[12px] text-ink-300"
+                />
+                <CopyBtn
+                  text={shareLink(netplayState.code)}
+                  label={t('netplay.share')}
+                  done={t('netplay.shareCopied')}
+                  sidebar
+                />
+              </div>
+            </section>
+          )}
+
+          <section
             aria-label={t('keybind.open')}
-            className="play-edit pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
+            className="play-keys pixel-edge pxw-2 pxc-700"
           >
-            {t('play.edit')}
-          </button>
-
-
-</div>
-            <div className="mb-3 flex gap-2" role="group" aria-label={t('keybind.open')}>
+            <div className="play-panel-heading">
+              <h2>{t('keybind.open')}</h2>{' '}
+              {/* 编辑仍复用原有按键设置，右侧列表跟随自定义键位更新。 */}
+              <button
+                type="button"
+                onClick={() => setKeybindOpen(true)}
+                title={t('keybind.open')}
+                aria-label={t('keybind.open')}
+                className="play-edit pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
+              >
+                {t('play.edit')}
+              </button>
+            </div>
+            <div
+              className="mb-3 flex gap-2"
+              role="group"
+              aria-label={t('keybind.open')}
+            >
               {(['p1', 'p2'] as const).map((player) => (
                 <button
                   key={player}
@@ -1001,147 +1377,150 @@ const changeVolume = useCallback(
             </div>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
               {BUTTONS.map((button) => (
-                <div key={button} className="flex min-w-0 items-center justify-between gap-1 border-b border-ink-800 pb-2">
-                  <dt className="shrink-0 text-[12px] text-ink-300">{buttonLabel(button, t)}</dt>
+                <div
+                  key={button}
+                  className="flex min-w-0 items-center justify-between gap-1 border-b border-ink-800 pb-2"
+                >
+                  <dt className="shrink-0 text-[12px] text-ink-300">
+                    {buttonLabel(button, t)}
+                  </dt>
                   <dd className="min-w-0 text-right">
-                    <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">{codeLabel(bindings[keysPlayer][button])}</kbd>
+                    <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
+                      {codeLabel(bindings[keysPlayer][button])}
+                    </kbd>
                   </dd>
                 </div>
               ))}
             </dl>
-            {netplayState.role && <p className="mt-3 text-[12px] leading-5 text-ink-300">{t('play.netplayKeysHint')}</p>}
+            {netplayState.role && (
+              <p className="mt-3 text-[12px] leading-5 text-ink-300">
+                {t('play.netplayKeysHint')}
+              </p>
+            )}
           </section>
 
-          {inRoom && netplayState.code && (
-            <section aria-label={t('netplay.roomCode')} className="play-room">
-              <p className="text-[12px] text-ink-300">{t('netplay.roomCode')}</p>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <p className="font-pixel text-[22px] tracking-[0.25em] text-accent">{netplayState.code}</p>
-                <CopyBtn text={netplayState.code} label={t('netplay.copy')} done={t('netplay.copied')} sidebar />
-              </div>
-              <p role="status" className={`mt-3 flex items-center gap-2 text-[12px] ${netplayState.error ? 'text-danger' : netplayState.status === 'connected' ? 'text-ok' : netplayState.role === 'guest' ? 'text-accent' : 'text-info'}`}>
-                <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full bg-current ${!netplayState.error && netplayState.status !== 'connected' ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
-                {netplayState.error ? t(NETPLAY_ERROR_MESSAGE[netplayState.error]) : t(netplayState.status === 'connected' ? 'netplay.connected' : netplayState.role === 'guest' ? 'netplay.joining' : 'netplay.waiting')}
-              {netplayState.status === 'connected' && (
-                <span className={`ml-auto shrink-0 text-right text-[12px] ${netplayState.rtt === null ? 'text-ink-300' : netplayState.rtt < 100 ? 'text-ok' : netplayState.rtt < 200 ? 'text-warn' : 'text-danger'}`}>
-                  {t('play.latency')} · {netplayState.rtt === null ? t('play.measuringLatency') : `${Math.round(netplayState.rtt)} ms`}
-                </span>
-              )}
-              </p>
-              {netplayState.role === 'host' && <p className="mt-2 text-[12px] text-ink-400">{t('netplay.quality')} · {t(QUALITY_MESSAGE[streamQuality])}</p>}
-
-              {netplayState.error && <p role="alert" className="mt-3 text-[12px] text-danger">{t(NETPLAY_ERROR_MESSAGE[netplayState.error])}</p>}
-              {netplayState.role === 'host' && !rom && !busy && (
-                <button type="button" disabled={!game || netplayBusy} onClick={() => void load()} className="mt-3 w-full bg-accent px-3 py-2 text-[12px] text-ink-950 disabled:opacity-40">{t('play.retry')}</button>
-              )}
-              <div className="play-share-row mt-3 flex items-center gap-3">
-              <input
-                aria-label={t('netplay.share')}
-                readOnly
-                value={shareLink(netplayState.code)}
-                onFocus={(event) => event.currentTarget.select()}
-                className="w-full min-w-0 flex-1 border border-ink-700 bg-ink-950 px-2 py-2 text-[12px] text-ink-300"
-              />
-              <CopyBtn text={shareLink(netplayState.code)} label={t('netplay.share')} done={t('netplay.shareCopied')} sidebar />
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button type="button" disabled={netplayBusy} onClick={() => void leaveRoom()} className="ml-auto inline-flex items-center border border-danger/40 bg-danger/10 px-2.5 py-1 text-[12px] text-danger transition-colors hover:bg-danger/20 disabled:opacity-40">
-                {t(netplayState.role === 'host' ? 'netplay.closeRoom' : 'netplay.leave')}
-              </button>
-              </div>
-            </section>
-          )}
-
-
-
-          <section className="play-control-panel">
+          <section className="play-control-panel pixel-edge pxw-2 pxc-700">
             <h2 className="play-panel-title">{t('play.controlsTitle')}</h2>
-          <ul className="play-controls">
-            <Row label={t(paused ? 'panel.resume' : 'panel.pause')}>
-              <RowBtn
-                label={t(paused ? 'panel.resume' : 'panel.pause')}
-                onClick={() => void togglePause()}
-                disabled={!rom || saveBusy}
-              >
-                {paused ? '▶' : '❚❚'}
-              </RowBtn>
-            </Row>
-
-            <Row label={t('panel.reset')}>
-              <RowBtn label={t('panel.reset')} onClick={() => void reload()} disabled={!rom || busy || saveBusy}>
-                <ReloadIcon size={16} />
-              </RowBtn>
-            </Row>
-
-<Row label={t('play.fullscreen')}>
-              <RowBtn label={t('play.fullscreen')} onClick={() => void requestFullscreen()}>
-                <ExpandIcon size={15} />
-              </RowBtn>
-            </Row>
-
-            {/* 显示（夜 / 昼）。说明写的是「点了会变成什么」，和上面几行同一口径 */}
-            <Row label={t('play.theme')}>
-              <RowBtn
-                label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
-                onClick={toggleTheme}
-              >
-                {theme === 'dark' ? <SunIcon size={15} /> : <PlayMoonIcon size={16} />}
-              </RowBtn>
-            </Row>
-
-            {/* 音量：− / 档位格 / +。点档位格直接跳档（和 `/room` 面板上那套同语义） */}
-            <PlaySaveControls controller={controller} rom={rom} gameId={game?.id} disabled={busy || saveBusy} onBusy={setSaveBusy} onOpen={setSavesOpen} />
-            <Row label={t('play.volume')} wide>
-              <span className="play-volume-group flex items-center gap-1.5" style={{ width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)` }}>
+            <ul className="play-controls">
+              <Row label={t(paused ? 'panel.resume' : 'panel.pause')}>
                 <RowBtn
-                  label={t('volume.down')}
-                  onClick={() => changeVolume(volume - 1)}
-                  disabled={volume <= 0}
+                  label={t(paused ? 'panel.resume' : 'panel.pause')}
+                  onClick={() => void togglePause()}
+                  disabled={!rom || saveBusy}
                 >
-                  −
+                  {paused ? '▶' : '❚❚'}
                 </RowBtn>
-                <span className="flex items-center gap-[3px]">
-                  {Array.from({ length: VOLUME_MAX }, (_, i) => i + 1).map((level) => (
+              </Row>
+
+              <Row label={t('panel.reset')}>
+                <RowBtn
+                  label={t('panel.reset')}
+                  onClick={() => void reload()}
+                  disabled={!rom || busy || saveBusy}
+                >
+                  <ReloadIcon size={16} />
+                </RowBtn>
+              </Row>
+
+              <Row label={t('play.fullscreen')}>
+                <RowBtn
+                  label={t('play.fullscreen')}
+                  onClick={() => void requestFullscreen()}
+                >
+                  <ExpandIcon size={15} />
+                </RowBtn>
+              </Row>
+
+              {/* 显示（夜 / 昼）。说明写的是「点了会变成什么」，和上面几行同一口径 */}
+              <Row label={t('play.theme')}>
+                <RowBtn
+                  label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
+                  onClick={toggleTheme}
+                >
+                  {theme === 'dark' ? (
+                    <SunIcon size={15} />
+                  ) : (
+                    <PlayMoonIcon size={16} />
+                  )}
+                </RowBtn>
+              </Row>
+
+              {/* 音量：− / 档位格 / +。点档位格直接跳档（和 `/room` 面板上那套同语义） */}
+              <PlaySaveControls
+                controller={controller}
+                rom={rom}
+                gameId={game?.id}
+                disabled={busy || saveBusy}
+                onBusy={setSaveBusy}
+                onOpen={setSavesOpen}
+              />
+              <Row label={t('play.volume')} wide>
+                <span
+                  className="play-volume-group flex items-center gap-1.5"
+                  style={{
+                    width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)`
+                  }}
+                >
+                  <RowBtn
+                    label={t('volume.down')}
+                    onClick={() => changeVolume(volume - 1)}
+                    disabled={volume <= 0}
+                  >
+                    −
+                  </RowBtn>
+                  <span className="flex items-center gap-[3px]">
+                    {Array.from({ length: VOLUME_MAX }, (_, i) => i + 1).map(
+                      (level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => changeVolume(level)}
+                          title={t('volume.set', { level, max: VOLUME_MAX })}
+                          aria-label={t('volume.set', {
+                            level,
+                            max: VOLUME_MAX
+                          })}
+                          className={`h-[12px] w-[5px] transition-colors ${
+                            level <= volume ? 'bg-accent' : 'bg-ink-700'
+                          }`}
+                        />
+                      )
+                    )}
+                  </span>
+                  <RowBtn
+                    label={t('volume.up')}
+                    onClick={() => changeVolume(volume + 1)}
+                    disabled={volume >= VOLUME_MAX}
+                  >
+                    +
+                  </RowBtn>
+                </span>
+              </Row>
+
+              <Row label={t('play.screenSize')} wide>
+                <span
+                  className="play-size-group grid grid-cols-3 items-center gap-3"
+                  style={{
+                    width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)`
+                  }}
+                >
+                  {TV_SIZES.map((size) => (
                     <button
-                      key={level}
+                      key={size}
                       type="button"
-                      onClick={() => changeVolume(level)}
-                      title={t('volume.set', { level, max: VOLUME_MAX })}
-                      aria-label={t('volume.set', { level, max: VOLUME_MAX })}
-                      className={`h-[12px] w-[5px] transition-colors ${
-                        level <= volume ? 'bg-accent' : 'bg-ink-700'
-                      }`}
-                    />
+                      aria-pressed={screenSize === size}
+                      aria-label={t('tvSize.pick', {
+                        level: t(`tvSize.opt.${size}`)
+                      })}
+                      onClick={() => applyScreenSize(size)}
+                      className={`pixel-edge pxw-2 pxc-500 px-2 py-1 text-[12px] transition-colors ${screenSize === size ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
+                    >
+                      {t(`tvSize.opt.${size}`)}
+                    </button>
                   ))}
                 </span>
-                <RowBtn
-                  label={t('volume.up')}
-                  onClick={() => changeVolume(volume + 1)}
-                  disabled={volume >= VOLUME_MAX}
-                >
-                  +
-                </RowBtn>
-              </span>
-            </Row>
-
-            <Row label={t('play.screenSize')} wide>
-              <span className="play-size-group grid grid-cols-3 items-center gap-3" style={{ width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)` }}>
-                {(['small', 'medium', 'large'] as const).map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    aria-pressed={screenSize === size}
-                    onClick={() => setScreenSize(size)}
-                    className={`pixel-edge pxw-2 pxc-500 px-2 py-1 text-[12px] transition-colors ${screenSize === size ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
-                  >
-                    {t(`tvSize.opt.${size}`)}
-                  </button>
-                ))}
-              </span>
-            </Row>
-
-
-          </ul>
+              </Row>
+            </ul>
           </section>
         </aside>
       </div>
@@ -1174,16 +1553,43 @@ const changeVolume = useCallback(
 /** 重试音频轨的最长尝试次数（每次 500ms）—— 和 ConsoleScene 里那个常量同值 */
 const AUDIO_RETRY_LIMIT = 10;
 
+/**
+ * 屏幕档位的落盘键。**和 room 的 `TV_KEY` 是同一个字符串**（也等于首屏内联脚本
+ * 里读的那个键）—— 两页共用一份偏好，所以刻意不另起 `nesload:play-size`。
+ */
+const TV_KEY = 'nesload:tv';
+
+/**
+ * 这一页的默认档：**中**（2026-10-15 用户指定「初次默认是中」）。
+ *
+ * 刻意不复用 `lib/tv-size.ts` 的 `DEFAULT_TV_SIZE`（那边是 `small`，是**房间**的默认）：
+ * 这里 `medium` 映射的是 `--play-size-scale: .88`，而房间那边同一档是 `--tv-ratio: .9`，
+ * 各自是「自己那套排版里合适的大小」，两页的默认没有理由绑在一起。
+ *
+ * ⚠️ 这只在**从没选过**时生效。用户一旦点过任意一档，`nesload:tv` 就有值了 ——
+ * 包括在 `/room` 里点的那一次，属共用偏好（见上面 `TV_KEY`），这里会照样跟着走。
+ * 也就是说「初次」指的是**这台浏览器从没记录过档位**，不是「每次打开 /play」。
+ */
+const PLAY_DEFAULT_SCREEN_SIZE: TvSize = 'medium';
+
 /** 画质三档的顺序：由省到费 */
 const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
 
 const QUALITY_MESSAGE: Record<StreamQuality, MessageKey> = {
   smooth: 'netplay.qualitySmooth',
   balanced: 'netplay.qualityBalanced',
-  sharp: 'netplay.qualitySharp',
+  sharp: 'netplay.qualitySharp'
 };
 
-function QualityDialog({ quality, onQuality, pending, disabled, error, onConfirm, onBack }: {
+function QualityDialog({
+  quality,
+  onQuality,
+  pending,
+  disabled,
+  error,
+  onConfirm,
+  onBack
+}: {
   quality: StreamQuality;
   onQuality: (quality: StreamQuality) => void;
   pending: boolean;
@@ -1202,25 +1608,75 @@ function QualityDialog({ quality, onQuality, pending, disabled, error, onConfirm
     return () => dialog?.close();
   }, []);
   return (
-    <dialog ref={dialogRef} aria-labelledby="play-quality-title" onCancel={(event) => event.preventDefault()} onKeyDown={(event) => event.stopPropagation()} className="play-quality-dialog">
-      <h2 ref={headingRef} tabIndex={-1} id="play-quality-title" className="text-[20px] font-semibold text-ink-100 outline-none">{t('netplay.quality')}</h2>
-      <p className="mt-2 text-[13px] leading-6 text-ink-300">{t('play.qualityIntro')}</p>
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="play-quality-title"
+      onCancel={(event) => event.preventDefault()}
+      onKeyDown={(event) => event.stopPropagation()}
+      className="play-quality-dialog"
+    >
+      <h2
+        ref={headingRef}
+        tabIndex={-1}
+        id="play-quality-title"
+        className="text-[20px] font-semibold text-ink-100 outline-none"
+      >
+        {t('netplay.quality')}
+      </h2>
+      <p className="mt-2 text-[13px] leading-6 text-ink-300">
+        {t('play.qualityIntro')}
+      </p>
       <div className="my-5 flex flex-col gap-2.5">
         {QUALITY_ORDER.map((value) => (
-          <button key={value} type="button" disabled={pending} aria-pressed={quality === value} onClick={() => onQuality(value)} className={`flex items-center gap-3 border px-4 py-3 text-left transition-colors disabled:opacity-50 ${quality === value ? 'border-ink-300 bg-ink-800' : 'border-ink-700 bg-ink-900 hover:bg-ink-850'}`}>
-            <span aria-hidden="true" className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[12px] ${quality === value ? 'border-ink-200 bg-ink-200 text-ink-950' : 'border-ink-500'}`}>{quality === value ? '✓' : ''}</span>
+          <button
+            key={value}
+            type="button"
+            disabled={pending}
+            aria-pressed={quality === value}
+            onClick={() => onQuality(value)}
+            className={`flex items-center gap-3 border px-4 py-3 text-left transition-colors disabled:opacity-50 ${quality === value ? 'border-ink-300 bg-ink-800' : 'border-ink-700 bg-ink-900 hover:bg-ink-850'}`}
+          >
+            <span
+              aria-hidden="true"
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[12px] ${quality === value ? 'border-ink-200 bg-ink-200 text-ink-950' : 'border-ink-500'}`}
+            >
+              {quality === value ? '✓' : ''}
+            </span>
             <span>
-              <span className="block text-[13px] font-semibold text-ink-100">{t(QUALITY_MESSAGE[value])}</span>
-              <span className="mt-1 block text-[12px] leading-5 text-ink-300">{t(`play.qualityHint.${value}`)}</span>
+              <span className="block text-[13px] font-semibold text-ink-100">
+                {t(QUALITY_MESSAGE[value])}
+              </span>
+              <span className="mt-1 block text-[12px] leading-5 text-ink-300">
+                {t(`play.qualityHint.${value}`)}
+              </span>
             </span>
           </button>
         ))}
       </div>
-      {error && <p role="alert" className="mb-4 text-[12px] text-danger">{error}</p>}
-      <p className="mb-4 text-[12px] leading-5 text-ink-400">{t('play.qualityConfirmHint')}</p>
+      {error && (
+        <p role="alert" className="mb-4 text-[12px] text-danger">
+          {error}
+        </p>
+      )}
+      <p className="mb-4 text-[12px] leading-5 text-ink-400">
+        {t('play.qualityConfirmHint')}
+      </p>
       <div className="grid grid-cols-2 gap-3 border-t border-ink-700 pt-4">
-        <button type="button" onClick={onBack} className="border border-ink-600 px-4 py-2.5 text-[13px] text-ink-200 hover:bg-ink-800">{t('common.back')}</button>
-        <button type="button" disabled={pending || disabled} onClick={onConfirm} className="bg-accent px-4 py-2.5 text-[13px] font-semibold text-ink-950 hover:bg-accent/80 disabled:opacity-40">{t(pending ? 'play.connecting' : 'play.confirm')}</button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="border border-ink-600 px-4 py-2.5 text-[13px] text-ink-200 hover:bg-ink-800"
+        >
+          {t('common.back')}
+        </button>
+        <button
+          type="button"
+          disabled={pending || disabled}
+          onClick={onConfirm}
+          className="bg-accent px-4 py-2.5 text-[13px] font-semibold text-ink-950 hover:bg-accent/80 disabled:opacity-40"
+        >
+          {t(pending ? 'play.connecting' : 'play.confirm')}
+        </button>
       </div>
     </dialog>
   );
@@ -1238,7 +1694,7 @@ const NETPLAY_ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
   handshake: 'netplay.errHandshake',
   'host-left': 'netplay.errHostLeft',
   'room-full': 'netplay.errRoomFull',
-  'join-failed': 'netplay.errUnknown',
+  'join-failed': 'netplay.errUnknown'
 };
 
 /**
@@ -1266,33 +1722,124 @@ function shareLink(code: string): string {
  * 画面来自 `canvas.captureStream`（声音另走 WebAudio 旁路，见 lib/audio-tap.ts）——
  * 帧率是**建流参数**，事后改不了，所以质量档变了只能整条重建。
  */
-function createCaptureStream(canvas: HTMLCanvasElement | null, fps: number): MediaStream | null {
+function createCaptureStream(
+  canvas: HTMLCanvasElement | null,
+  fps: number
+): MediaStream | null {
   if (!canvas || typeof canvas.captureStream !== 'function') return null;
   return canvas.captureStream(fps);
 }
 
-/** 黑区那条进度条。`ratio` 为 null 时画一条来回滑的「不确定」进度条 */
-function LoadBar({ ratio }: { ratio: number | null }) {
+/**
+ * 载入卡（2026-10-15 重写，替代旧的「一行字 + 短进度条」）：
+ * 封面图 + 游戏名 + 机种 + 阶段文案，下面一条**长进度条**（`ratio` 到 1 时填满）
+ * 和百分比；传了 `onCancel` 就带取消钮（没传就不画 —— directSolo 那条老路径没有取消）。
+ *
+ * 颜色一律 `crt-*`：面板底是 `crt-ink-600`（#33333c，实心灰蓝）—— 黑屏幕上
+ * 「亮一块」的卡片感，比再垫一层近黑底对比明显；`ink-*` 会跟主题翻转、浅色下会黑底黑字。
+ * `game` 取不到时（地址上没 id / 查询失败）自动退化成「只有进度条」的极简版。
+ * 封面走 `<img>` 不走 next/image —— 和游戏库那边同一个理由（R2 公网域名没登记 remotePatterns）。
+ */
+function LoadingCard({
+  image,
+  title,
+  subtitle,
+  phaseLabel,
+  ratio,
+  onCancel,
+  cancelDisabled = false,
+  cancelLabel
+}: {
+  image: string | null;
+  title: string | null;
+  subtitle: string | null;
+  phaseLabel: string;
+  ratio: number | null;
+  onCancel?: () => void;
+  cancelDisabled?: boolean;
+  cancelLabel?: string;
+}) {
   const pct = ratio === null ? null : Math.round(ratio * 100);
   return (
-    <div className="flex items-center justify-center gap-3">
-      <div className="relative h-[10px] w-[min(300px,72%)] overflow-hidden border-2 border-crt-ink-500 bg-crt-950/90">
-        {pct === null ? (
-          <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-crt-accent/70" />
-        ) : (
-          <span className="absolute inset-y-0 left-0 bg-crt-accent" style={{ width: `${pct}%` }} />
-        )}
+    <div
+      role="status"
+      className="flex w-full max-w-[320px] flex-col items-center gap-3 border border-crt-ink-500 bg-crt-ink-600 px-5 py-4"
+    >
+      {(image || title) && (
+        <div className="flex w-full items-center gap-2.5 text-left">
+          {image && (
+            <img
+              src={image}
+              alt=""
+              className="h-16 w-12 shrink-0 border border-crt-ink-500 bg-crt-950 object-cover"
+            />
+          )}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            {title && (
+              <span className="line-clamp-2 text-[12px] font-semibold leading-snug text-crt-ink-200">
+                {title}
+              </span>
+            )}
+            {subtitle && (
+              <span className="text-[10px] text-crt-ink-500">{subtitle}</span>
+            )}
+            <span className="text-[10px] text-crt-ink-400">{phaseLabel}</span>
+          </div>
+        </div>
+      )}
+      {!(image || title) && (
+        <span className="text-[11px] text-crt-ink-300">{phaseLabel}</span>
+      )}
+
+      {/* 长条：到 100% 恰好填满。`ratio` 为 null 时画来回滑的「不确定」条 */}
+      <div className="flex w-full items-center gap-2.5">
+        <div className="relative h-2 flex-1 overflow-hidden border border-crt-ink-500 bg-crt-950">
+          {pct === null ? (
+            <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-crt-accent/70" />
+          ) : (
+            <span
+              className="absolute inset-y-0 left-0 bg-crt-accent transition-[width] duration-200"
+              style={{ width: `${pct}%` }}
+            />
+          )}
+        </div>
+        {/* 百分数全是数字，font-pixel 掉不了字形；宽度写死，位数变化时不抖 */}
+        <span className="w-[34px] shrink-0 font-pixel text-[11px] text-crt-ink-300">
+          {pct === null ? '' : `${pct}%`}
+        </span>
       </div>
-      {/* 百分数全是数字，font-pixel 掉不了字形；宽度写死，位数变化时不抖 */}
-      <span className="w-[34px] shrink-0 font-pixel text-[12px] text-crt-ink-300">
-        {pct === null ? '' : `${pct}%`}
-      </span>
+
+      {onCancel && (
+        /*
+          取消：**只在 ROM 下载那一段可用**。核心已经在唱戏之后
+          Nostalgist 没有中断接口（见 load() 的注释），按了也没用 ——
+          与其画一颗假的，不如让它灰着。
+        */
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelDisabled}
+          className="pixel-edge pxw-2 pxc-500 bg-crt-950 px-4 py-1 text-[11px] text-crt-ink-200 transition-colors enabled:hover:text-crt-accent disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          {cancelLabel}
+        </button>
+      )}
     </div>
   );
 }
 
 /** 复制一颗东西到剪贴板，成功后自己显示一小会儿「已复制」。 */
-function CopyBtn({ text, label, done, sidebar = false }: { text: string; label: string; done: string; sidebar?: boolean }) {
+function CopyBtn({
+  text,
+  label,
+  done,
+  sidebar = false
+}: {
+  text: string;
+  label: string;
+  done: string;
+  sidebar?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -1325,9 +1872,19 @@ function CopyBtn({ text, label, done, sidebar = false }: { text: string; label: 
  * 抽出来是因为六行的版式完全一样（`justify-between` + 同样的上下内边距），
  * 各写一遍迟早会有行高不一样。行之间的分隔线交给父级 `<ul>` 的 `divide-y`。
  */
-function Row({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
+function Row({
+  label,
+  children,
+  wide = false
+}: {
+  label: string;
+  children: ReactNode;
+  wide?: boolean;
+}) {
   return (
-    <li className={`flex items-center justify-between gap-3 py-2.5 ${wide ? 'col-span-2' : ''}`}>
+    <li
+      className={`flex items-center justify-between gap-3 py-2.5 ${wide ? 'col-span-2' : ''}`}
+    >
       <span className="text-[12px] text-ink-400">{label}</span>
       {children}
     </li>
@@ -1347,7 +1904,10 @@ function RowBtn({
   danger = false,
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  danger?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -1364,4 +1924,3 @@ function RowBtn({
     </button>
   );
 }
-

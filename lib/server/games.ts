@@ -20,6 +20,7 @@
  *    中文站反过来不做回退（原文是必填的 `title`，其余按原样）。
  */
 
+import { revalidateTag } from 'next/cache';
 import { cached } from './cache';
 import { CONSOLE_TYPES } from '@/lib/consoles';
 import type { ConsoleType } from '@/lib/emulator';
@@ -614,6 +615,40 @@ export async function getGame(id: string): Promise<Game | null> {
 }
 
 /**
+ * 按 id 取一条游戏的**缓存版**（12 小时，后台写入时用 `revalidateTag('games')` 主动失效）。
+ *
+ * 为什么值得单独一份：按 id 的单条查询是**全站请求量最大、却完全没缓存的读路径** ——
+ *   · `/api/games/<id>/rom` 代理：每次开局都要查一次（浏览器那份 max-age=3600 只挡
+ *     同一个浏览器的重复下载，换个人 / 换天就打穿）；
+ *   · 详情页 / 下载页 / `/room` / `/play`：每次渲染各查一次。
+ * 单条虽然只读一行，但架不住次数多 —— 缓存之后这些全部归零。
+ *
+ * ⚠️ 后台改完游戏**立刻**调 `revalidateTag('games')`（insertGame / updateGame /
+ *    deleteGame 里已经加了），所以「改了名字详情页还是旧的」最多只发生在缓存层
+ *    出纰漏的时候，正常情况不存在。
+ *
+ * ⚠️ 写接口里「校验游戏还在不在」的调用方**继续用无缓存的 `getGame`**：
+ *    那些路径要的是「此刻是否存在」，不差这一次单行查询。
+ */
+export const getGameCached = cached(
+  async (id: string) => getGame(id),
+  ['games:by-id'],
+  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
+);
+
+/**
+ * `getGameRow` 的缓存版 —— **只给 ROM 代理用**。
+ *
+ * 代理需要的是原始行（`rom_url` 拼公网地址、`rom_name` 进 Content-Disposition），
+ * 这两样在缓存有效的 12 小时里不会变（换了 ROM 走的是删除重传，那边会失效 tag）。
+ */
+export const getGameRowCached = cached(
+  async (id: string) => getGameRow(id),
+  ['games:row-by-id'],
+  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
+);
+
+/**
  * 找「同名**且语言相同**」的那一条 —— 给后台「添加 / 修改游戏」判重用。
  *
  * 为什么判重必须落在服务端：列表是**分页**的，前端手里只有当前页，
@@ -688,6 +723,23 @@ export async function listGameStubs(): Promise<{ id: string; createdAt: number }
 }
 
 /**
+ * sitemap 用的 stub 读取 —— **缓存 24 小时**（2026-10-15 从 1 小时改过来，用户拍板）。
+ *
+ * 为什么值得缓存：sitemap 是 `force-dynamic` 的，**每次爬虫来抓都现读一遍全表**
+ * （1000+ 行）。爬虫不会只来一次 —— Google / Bing 各自按自己的节奏反复拉，
+ * 这一条是「单次请求 rows_read 最大」的查询。缓存之后一天最多算一轮全表读，
+ * 「后台上传的游戏最多晚 24 小时进 sitemap」的代价用户明确接受。
+ *
+ * tag 挂 `games`：后台增删游戏时 `revalidateTag('games')` 会顺带把这份也刷掉，
+ * 所以后台动过库的话新游戏基本是立刻进 sitemap 的（TTL 只约束「谁都没动过库」的情形）。
+ */
+export const listGameStubsCached = cached(
+  async () => listGameStubs(),
+  ['games:stubs'],
+  { revalidate: 86400, tags: ['games'] }
+);
+
+/**
  * 由开发商 id 反查名字（中英两份）—— `games.developer` / `games.developer_en`
  * 两个快照列要跟着一起写。
  *
@@ -757,6 +809,8 @@ export async function insertGame(input: NewGame): Promise<Game> {
       createdAt,
     ]
   );
+  // 新增的游戏让按 id 的缓存层立刻可命中（否则 12 小时内缓存层会回 null → 404）
+  revalidateTag('games', { expire: 0 });
   return {
     id,
     title: input.title,
@@ -822,8 +876,12 @@ export async function updateGame(id: string, patch: GamePatch): Promise<void> {
       id,
     ]
   );
+  // 元数据变了，按 id 的缓存必须立刻失效（详情页 / ROM 代理读的是这份）
+  revalidateTag('games', { expire: 0 });
 }
 
 export async function deleteGame(id: string): Promise<void> {
   await query('DELETE FROM games WHERE id = ?', [id]);
+  // 删掉的游戏不能再被按 id 的缓存当成「还在」（否则 ROM 代理 / 详情页 12 小时内不 404）
+  revalidateTag('games', { expire: 0 });
 }

@@ -162,14 +162,14 @@ export async function insertFeedback(content: string): Promise<Feedback> {
 /**
  * 改「已解决」标记。**返回这条在不在**，而不是静默成功。
  *
- * 之所以先查一次：D1 的 REST /query 只回结果行，不回影响行数，
- * UPDATE 打空了也看不出区别（和 games 的 updateGame 一样得先确认存在）。
+ * 用 `UPDATE … RETURNING` 判存在：改中了才回行，一条查询顶过去「先 SELECT 再 UPDATE」两条。
  */
 export async function setFeedbackResolved(id: string, resolved: boolean): Promise<boolean> {
-  const rows = await query<{ id: string }>('SELECT id FROM feedback WHERE id = ?', [id]);
-  if (!rows[0]) return false;
-  await query('UPDATE feedback SET resolved = ? WHERE id = ?', [resolved ? 1 : 0, id]);
+  const rows = await query<{ id: string }>(
+    'UPDATE feedback SET resolved = ? WHERE id = ? RETURNING id',
+    [resolved ? 1 : 0, id]
+  );
   // 列表里每条都带 resolved 标记，改一条就可能让任何一页变旧
   invalidateFeedbackCache();
-  return true;
+  return rows.length > 0;
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { cache } from 'react';
 import GamesShell from '@/components/GamesShell';
+import PlayBackLink from '@/components/PlayBackLink';
 import PlayScene from '@/components/PlayScene';
 import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
 import {
@@ -12,7 +13,7 @@ import {
   translate,
   type Locale,
 } from '@/lib/i18n';
-import { getGame, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
+import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -37,7 +38,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ⚠️ **不写 `export const dynamic`**：它要读语言（cookie / 请求头）+ searchParams，
  * 本来就是动态渲染。
  */
-const loadGame = cache((id: string) => getGame(id));
+const loadGame = cache((id: string) => getGameCached(id));
 
 /**
  * meta description 的截断上限 —— 详情页和 `/room` 同一个数（Google 约 155 字符就截）。
@@ -162,6 +163,12 @@ export default async function PlayPage({
         label: 'common.back',
         mode: 'history',
       }}
+      /*
+        返回用 `PlayBackLink` 整颗替换（2026-10-15 用户要求）：游戏运行中点返回
+        要先弹确认（进度不会保存）。落点和上面 `back.href` 同一个兜底地址 ——
+        `PlayBackLink` 自己拿它当 history.length <= 1 时的 push 兜底。
+      */
+      backNode={<PlayBackLink href={id ? localePath(locale, `/games/${id}`) : localePath(locale, '/games')} />}
       showHeader={false}
       /*
         `fill`：这一页中间是固定 4:3 的屏幕，要「游戏区域吃满剩下的纵向空间、

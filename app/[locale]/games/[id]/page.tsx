@@ -22,7 +22,7 @@ import {
   type MessageKey,
 } from '@/lib/i18n';
 import { USER_SESSION_COOKIE, verifyUserSession } from '@/lib/server/app-session';
-import { getGame, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
+import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -49,7 +49,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 并不知道有哪些 id；而且语言要先读 cookie。所以这条路由是**按需动态渲染**的
  * （本来也不会被静态化：读 cookie + 读 D1）。
  */
-const loadGame = cache(async (id: string) => getGame(id));
+const loadGame = cache(async (id: string) => getGameCached(id));
 
 /**
  * 当前浏览者是谁（没登录就是 null）。

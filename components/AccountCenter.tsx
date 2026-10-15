@@ -210,9 +210,10 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
    * 页头那颗「退出登录」（2026-10-13 加）。
    *
    * 和屋里 `UserPanel` 的 `signOut` 是同一个接口（`DELETE /api/user/login` 清掉
-   * `nesload_user` 那个 cookie），只是这一页没有「面板开关」要收 —— 退完直接回房间。
+   * `nesload_user` 那个 cookie），只是这一页没有「面板开关」要收。
+   * 2026-10-15 改：退出后回**首页**（原来回房间 —— 用户要求改掉）。
    * 失败时**不静默**：留在原地并提示，让用户知道那颗钮点过了、只是没成功
-   * （cookie 没被清掉，这时跳回房间会显得「明明点了退出却还登着」）。
+   * （cookie 没被清掉，这时跳走会显得「明明点了退出却还登着」）。
    */
   const router = useRouter();
   /**
@@ -231,10 +232,10 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
     try {
       const res = await fetch('/api/user/login', { method: 'DELETE' });
       if (!res.ok) throw new Error(String(res.status));
-      // 回**当前语言**的房间（`/zh/account` 上退出不该把人扔进英文房间）
+      // 回**当前语言**的首页（`/zh/account` 上退出不该把人扔进英文首页）
       topLoader.start();
-      router.push(localeHref('/room'));
-      // 落地页在守卫里（layout 读 cookie），push 之后本组件会被卸载，不必再复位 busy
+      router.push(localeHref('/'));
+      // 首页没有守卫，push 之后本组件会被卸载，不必再复位 busy
     } catch {
       setSigningOut(false);
       setSignOutError(true);
@@ -318,10 +319,11 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
             `ml-auto` 推到这一行最右：页头是 `items-center` 的横排，
             名字那块 `min-w-0` 会随长用户名伸缩，靠右固定才不会跟着漂。
 
-            退出后**回房间**（`router.push('/room')`）：这一页是登录态专属，
-            退出去留在原地会立刻被 `app/[locale]/account/layout.tsx` 的守卫重定向
+            退出后**回首页**（`router.push('/')`，2026-10-15 用户要求改掉原来的回房间）：
+            这一页是登录态专属，退出去留在原地会立刻被
+            `app/[locale]/account/layout.tsx` 的守卫重定向
             （`/login?next=/account`，2026-10-13 有独立登录页之后是这样）——
-            那是「被弹走」的观感。自己主动导航回房间，落点干净，也不会莫名其妙
+            那是「被弹走」的观感。自己主动导航回首页，落点干净，也不会莫名其妙
             被弹到登录页。
 
             按钮文案借 `user.signOut`（屋里那颗退出用的是同一个键）——

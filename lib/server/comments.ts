@@ -244,18 +244,15 @@ export async function getGameRatingSummary(gameId: string): Promise<RatingSummar
  * 删一条 —— **只认作者**：`WHERE id = ? AND user_id = ?` 两条件缺一不可。
  *
  * 返回是否真删到了（不存在 / 不是他写的都回 false，调用方据此回 404）。
- * 判定方式和 `removeUserHistory` 一致：**先 SELECT 再 DELETE** —— D1 的 REST /query
- * 只返回结果行、拿不到影响行数，DELETE 打空了也看不出区别。
+ * 判定用 `DELETE … RETURNING`：删中了才回行，一条查询顶过去「先 SELECT 再 DELETE」两条。
  *
- * ⚠️ `user_id` 必须进第二个条件：漏了它就成了「任何人可以删任何一条」——
+ * ⚠️ `user_id` 必须进 WHERE：漏了它就成了「任何人可以删任何一条」——
  *    和归档那份「漏 WHERE user_id」是同一类坑。
  */
 export async function deleteComment(id: string, userId: string): Promise<boolean> {
   const rows = await query<{ id: string }>(
-    'SELECT id FROM game_comments WHERE id = ? AND user_id = ?',
+    'DELETE FROM game_comments WHERE id = ? AND user_id = ? RETURNING id',
     [id, userId]
   );
-  if (!rows[0]) return false;
-  await query('DELETE FROM game_comments WHERE id = ? AND user_id = ?', [id, userId]);
-  return true;
+  return rows.length > 0;
 }

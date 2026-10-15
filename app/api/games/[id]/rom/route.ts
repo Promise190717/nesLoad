@@ -8,7 +8,7 @@
  *      （街机 FBNeo 依赖这个文件名）。
  */
 
-import { getGameRow, type GameRow } from '@/lib/server/games';
+import { getGameRowCached, type GameRow } from '@/lib/server/games';
 import { publicUrl } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
@@ -25,7 +25,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   let row: GameRow | null;
   try {
-    row = await getGameRow(id);
+    /*
+     * 缓存版（12 小时 / 后台写入失效 tag）：ROM 代理是全站请求量最大的单条查询，
+     * 每次开局都打一遍 D1 不值当。元数据在缓存窗口里不变（换 ROM 走删除重传，会失效 tag）。
+     */
+    row = await getGameRowCached(id);
   } catch (error) {
     console.error('[games] ROM 查询失败', error);
     return new Response('lookup failed', { status: 500 });

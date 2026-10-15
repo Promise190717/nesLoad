@@ -22,7 +22,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getGame } from '@/lib/server/games';
+import { getGameCached } from '@/lib/server/games';
 
 export const runtime = 'nodejs';
 // 走 D1 实时读，别让构建期把它静态化（构建时并没有数据库凭据）
@@ -32,7 +32,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
 
   try {
-    const game = await getGame(id);
+    const game = await getGameCached(id);
     if (!game) return NextResponse.json({ error: 'not-found' }, { status: 404 });
     return NextResponse.json({ game });
   } catch (error) {

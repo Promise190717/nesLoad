@@ -148,12 +148,12 @@ export async function insertReport(input: {
 /**
  * 改「已解决」标记。**返回这条在不在**，而不是静默成功。
  *
- * 之所以先查一次：D1 的 REST /query 只回结果行，不回影响行数，
- * UPDATE 打空了也看不出区别（同 feedback.setFeedbackResolved）。
+ * 用 `UPDATE … RETURNING` 判存在：改中了才回行，一条查询顶过去「先 SELECT 再 UPDATE」两条。
  */
 export async function setReportResolved(id: string, resolved: boolean): Promise<boolean> {
-  const rows = await query<{ id: string }>('SELECT id FROM game_reports WHERE id = ?', [id]);
-  if (!rows[0]) return false;
-  await query('UPDATE game_reports SET resolved = ? WHERE id = ?', [resolved ? 1 : 0, id]);
-  return true;
+  const rows = await query<{ id: string }>(
+    'UPDATE game_reports SET resolved = ? WHERE id = ? RETURNING id',
+    [resolved ? 1 : 0, id]
+  );
+  return rows.length > 0;
 }
