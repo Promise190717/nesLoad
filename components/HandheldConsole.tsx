@@ -76,6 +76,17 @@ const FACE_ROWS: Record<ConsoleType, ([string, ButtonName] | null)[][]> = {
   // Game Boy 一系：两颗面键，A 在右（和红白机同构）—— GB / GBC 都是这一套
   gb: [[['B', 'b'], ['A', 'a']]],
   gbc: [[['B', 'b'], ['A', 'a']]],
+  /*
+   * NDS（2026-10-15 加）：四颗面键 + L / R，十字摆法 —— 和 GBA / SFC 同一套。
+   * 摆法和 `snes` 一样用菱形（空位用 null 占住），下面再单摆一行肩键。
+   * ⚠️ 触屏（下屏是电阻屏）在掌机这套虚拟键里**没有**对应物，只能先不做。
+   */
+  nds: [
+    [null, ['X', 'x'], null],
+    [['Y', 'y'], null, ['A', 'a']],
+    [null, ['B', 'b'], null],
+    [['L', 'l'], ['R', 'r']],
+  ],
   // GBA：面键只有 B / A（B 左 A 右，和 GBA 机身一致），
   // 肩键 L / R 单独摆一行 —— 机身顶部那两颗，掌机上只能和面键并列呈现
   gba: [
@@ -129,8 +140,15 @@ interface HandheldConsoleProps {
    * 只有这个字段能回答。房主那盘是街机就长六键。
    */
   remoteGameConsole: ConsoleType | null;
-  /** 点屏幕 —— 移动端就是打开在线游戏库 */
-  onOpenLibrary: () => void;
+  /**
+   * 点屏幕 —— 移动端就是打开在线游戏库。
+   *
+   * ⚠️ 2026-10-15 起**变成可选**：`/room` 把游戏库入口收了（见 ConsoleScene 里那颗钮的注释），
+   * 父级不再传它。不传 ⇒ 下面那个 `onTap` 就是 undefined ⇒ ConsoleScreen 的待机点击层
+   * 整块不画（那边现在是「没有 `onTap` 就不画」，不再是一颗点了没反应的按钮）。
+   * **别改回必填** —— 父级那行是注释掉的，必填会直接报类型错。
+   */
+  onOpenLibrary?: () => void;
   /** 虚拟键按下 / 松开。玩家号、联机转发都在父级决定 */
   onButton: (button: ButtonName, down: boolean) => void;
   onTogglePause: () => void;
@@ -309,6 +327,8 @@ export default function HandheldConsole({
             /* 掌机上没有拖拽，这一路恒为 false */
             fileOver={false}
             variant="mobile"
+            /* ⚠️ 2026-10-15：`onOpenLibrary` 现在可能不传（房间那边收了游戏库入口），
+               这时 `onTap` 是 undefined —— ConsoleScreen 见它不在就整块不画待机点击层 */
             onTap={onOpenLibrary}
           />
         </div>

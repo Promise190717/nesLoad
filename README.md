@@ -165,7 +165,7 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/` | 首页落地页：Hero（标题 + 「进入小屋 / 浏览全部游戏」两个入口 + **房间号输入 + 加入房间**（GET 表单，零 JS，跳 `/play?room=<码>`）+ 搜索框（**铺满整行 100%**））→ 按机种浏览（**十二张卡，`CONSOLE_TYPES` 现读**，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
+| `/` | 首页落地页：Hero（标题 + 「浏览全部游戏 / 加载本地 ROM」两个入口 + **房间号输入 + 加入房间**（GET 表单，零 JS，跳 `/play?room=<码>`）+ 搜索框（**铺满整行 100%**））→ 按机种浏览（**按游戏数取前 8 张，`CONSOLE_TYPES` 现读**，带现读的游戏数，指向 `/consoles/<机种>` 专题页；右上「全部机种」→ `/consoles`）→ 最新收录（12 款，复用 `GameCardGrid`）→ 按开发商浏览（8 家，**按游戏数**排）→ 折叠问答（原生 `<details>`，零 JS）→ 页脚。 |
 | `/room` | 那间屋子（2026-10-13 之前它就是 `/`）：电视机 + 桌子 + 窗，拖入 ROM 即玩；也是 `?id=` / `?room=` 两条深链的落点。 |
 | `/play` | **联机开局页**（2026-10-14 加）：左边一块屏幕（外框是站上那套像素描边）、右边一列 —— 顶上这一款的封面 + 名字 / 机种 / 年份 / 开发商，中间一张平铺的「说明 + 控件」操作表（暂停 / 重载 / 弹出 / 音量 / 显示 / 全屏），底下一颗「编辑」开按键设置。**开局要做的选择摆在屏幕里**（没画面时那层叠层）：单人 / 创建房间 / 加入 + 链路 + 画质，进了房换成房间码 / 分享 / 连接状态 / 离开，载入中换进度条 + 取消。外壳走 `GamesShell`（`showHeader={false}` + `fill`），所以 `.wall` 背景 / 顶栏 / 返回 / 页脚和内容页一致，页脚压在视口最底部。入口是详情页动作区那颗「联机游戏」。 |
 
@@ -177,10 +177,11 @@ pnpm dev
 - 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 12 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 12 小时**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 已统一成 12 小时（列表页原来是 30 分钟）。⚠️ 此前这里写的「24 小时」是笔误 —— 代码里 `HOME_REVALIDATE_SECONDS = 43200` 一直是 12 小时。
 - ⚠️ **首页没有 `export const revalidate`，那不是漏写**：根布局（`app/layout.tsx`）要读 cookie / 请求头决定语言，整个应用因此走动态渲染 —— 页面级 `revalidate` 对路由缓存**不起作用**。首页真正在用的 Next 缓存是上面那三个 `unstable_cache`（数据层，「页-侧」缓存，不下沉到 `listGamesPage` / `countGamesByConsole`）。
 - 首页 Hero 里那个搜索框**宽度是 100%**（`w-full`，跟着外层 `max-w-5xl` 走）：它的左右边界和下面几个区块的网格对齐，不再是原来 `max-w-md` 居中窄条。
+- 首页 Hero 的入口（2026-10-15 定）：**「浏览全部游戏」**（`/games`，accent 实底的主按钮）＋**「加载本地 ROM」**（`/room`，描边次按钮）并排。右那颗是 2026-10-15 用户要求加的（键 `home.hero.play`，文案从「进入小屋」改过来），点进去就是屋里拖 / 选自己的 ROM —— 屋里那个**在线游戏库入口同日收掉了**（见 `components/ConsoleScene.tsx` 那颗钮的注释）。⚠️ 这颗钮的文案当天还改过一版：原先写的是「游玩本地 ROM」，动词换成「加载」是为了和屋里点进去第一眼看到的那句同一套说法（`screen.tapLoad` =「点击从本地加载」/ "CLICK TO LOAD A LOCAL ROM"）—— 按钮说什么，落点第一句就说什么。⚠️ 页脚里的「回到房间」全站已删（含首页这条），见下面页脚那一行。
 - ⚠️ **旧地址的 `?id=` / `?room=` 会被 307 透传到 `/room`**：详情页那颗「开始游戏」（`/room?id=<游戏>`）与联机分享出去的房间链接（`?room=<码>`）在拆分之前都挂在 `/` 上，已经分享出去的地址不该因为这次拆分失效。见 `app/[locale]/page.tsx` 里那段重定向（排在所有取数之前）。
-- 内容页（`/games`、`/developers`、`/privacy`、404…）的页脚多了两颗：**「首页」**（`/`）与**「回到房间」**（`/room`）—— 2026-10-13 之后那是两个不同的地址、两件不同的事（`common.home` 与 `gamesPage.backHome`）。页脚那颗「首页」由 `GamesShell` / `LegalPage` 统一出，别在某一页单独少画一颗。
+- 内容页（`/games`、`/developers`、`/privacy`…）的页脚那颗**「首页」**（`/`，`common.home`）由 `GamesShell` / `LegalPage` 统一出，别在某一页单独少画一颗。⚠️ **2026-10-15：三处页脚的「回到房间」（`/room`）全删了**（用户要求「其他页面底部的回到房间也去除」，首页那颗同日早些时候先删）—— 页脚里现在只有「首页」这一条回去的路。`gamesPage.backHome` 这个键**只剩 404 页那两颗在用**（左上角那颗真链接 + 正文下面那颗钮；那页刻意不挂顶栏，所以那两颗是唯一的确定去处，别跟着删）。
 - `/account` 未登录时的落点是 **`/login?next=/account`**（`app/[locale]/account/layout.tsx`，2026-10-13 有独立登录页之后改的；在那之前是弹回 `/room?from=account`，让房间替他开登录浮层）。
-- ⚠️ `app/manifest.ts` 的 `start_url` **仍是 `/`**（本次没跟着改）：装到主屏后打开的是落地页，从那儿点「进入小屋」进屋。想让它直接进屋，改那一处即可。
+- ⚠️ `app/manifest.ts` 的 `start_url` **仍是 `/`**（本次没跟着改）：装到主屏后打开的是落地页，从那儿点「加载本地 ROM」进屋。想让它直接进屋，改那一处即可。
 
 ### 顶栏与登录页（`/login`）
 
@@ -287,7 +288,7 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/consoles` | 机种列表：**卡片是按代码里的机种清单画出来的**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认。 |
+| `/consoles` | 机种列表：**卡片是按代码里的机种清单画出来的**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认；**按游戏数从多到少排**（2026-10-15 加，和首页「按机种浏览」同一口径；数量并列时保持 `CONSOLE_TYPES` 的固定次序，空机种垫底但不过滤）。 |
 | `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，12 小时）。 |
 
 - 首页「按机种浏览」的卡片指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
@@ -295,9 +296,13 @@ pnpm dev
 - 后台 `app/admin/(panel)/consoles` 一个 tab 管资料（**没有添加 / 搜索 / 翻页** —— 条目跟随代码里的机种清单，只有编辑与重置；接口 `PATCH /api/admin/consoles/[type]` 是 upsert，资料行不存在时顺带创建）。
 - 机种页面也进 `sitemap.xml`（只列**有资料行**的机种）。
 
-#### 加机种要动的地方（2026-10-14 扩到十二个时踩过的坑）
+#### 加机种要动的地方（2026-10-14 扩到十二个、2026-10-15 加 NDS 时踩过的坑）
 
 机种清单**只有一个来源**：`lib/consoles.ts`（`CONSOLE_LABEL` / `CONSOLE_TYPES` / `CONSOLE_TINT`）。`components/CartridgeSprite.tsx` 只是原样再导出，老 import 路径不用改；挪出组件的原因是 `lib/netplay.ts`、服务端页面、后台接口都要读它，而组件不该被 `lib/*` 依赖。
+
+⚠️ 现在是**十三个**机种（2026-10-15 加了 `nds`）。原来十二个正好铺满首页四列网格的三整行，加完末尾只剩一张卡独占第四行 —— 刻意的取舍。
+
+⚠️ **判重（`findGameDuplicate`）从 2026-10-15 起是三个维度：同名 + 同机种 + 同语言**。加机种时别只想着渲染 —— 「同一款游戏在不同机种上各有一版」正是加机种要支持的场景，判重少一维就会把新机种的同名游戏全拒掉。
 
 改一处会**编译报错**提醒你的（`Record<ConsoleType, …>`）：`lib/emulator.ts` 的 `CORE_MAP`、`lib/server/games.ts` 的 `countGamesByConsole`、`components/HandheldConsole.tsx` 的 `FACE_ROWS`、上面那三个表。
 
@@ -307,14 +312,24 @@ pnpm dev
 | --- | --- |
 | `lib/emulator.ts` | `EXTENSION_MAP`（扩展名回退）、`detectConsole`（文件头判据）、`LOCAL_CORE_CONSOLES`（核心走本地还是 CDN） |
 | `lib/unwrap.ts` | `ROM_EXTENSIONS`（zip 里装着这种 ROM 时要能拆一层） |
-| `lib/server/upstream.ts` | `toConsoleType`（上游页面文字 → 站内机种，批量导入在用）；⚠️ 短标识（`md` / `gg` / `ws`）必须按整词匹配 |
+| `lib/server/upstream.ts` | `toConsoleType`（上游页面文字 → 站内机种，批量导入在用）；⚠️ 短标识（`md` / `gg` / `ws` / `ds`）必须按整词匹配，且跑不了的机种（`3ds` / `sega cd`…）要**挡在兜底之前** |
 | `scripts/add-consoles.mjs` | 默认资料行（跑一遍就把数据库补上） |
-| `lib/i18n.ts` | 那些列举机种的文案 —— **口径是「代表机型 + 等十余款机种 / and more」**，不是全列 |
+| `lib/i18n.ts` | 那些列举机种的文案 —— **口径是「代表机型 + 等十余款机种 / and more」**，不是全列；`meta.keywords` 是唯一写全机型的地方 |
 
-> **哪些机能加、哪些加不了**（2026-10-14 核过一遍）：上限由项目用的那个 WASM 构建
+> **哪些机能加、哪些加不了**（2026-10-14 核过一遍，2026-10-15 因 NDS 更正）：
+> 上限由项目用的那个 WASM 构建
 > （[retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build) `v1.22.2`，共 90 个核心）
-> 决定。**加不了**的是构建里根本没编的：NDS、N64、世嘉土星、Atari Jaguar、PS1 之外的 3D 世代
-> （逐个核过，`desmume` / `melonds` / `mupen64plus` / `saturn` / `virtualjaguar` 全为 0）。
+> 决定。**那个构建里没有**的是：NDS（`desmume` / `melonds` 与 `mupen64plus` / `saturn` /
+> `virtualjaguar` 一样，核过全是 0）。
+>
+> ⚠️ **但 NDS 仍然加上了**（2026-10-15）：那个构建里没有，不代表核心不存在 ——
+> `public/cores/melonds_libretro.{js,wasm}` 是从 **EmulatorJS 的 `melonds-wasm.data`**
+> 里解出来的（那是个 7z 壳，解开就是这两个文件，文件名和本站的命名规范一字不差）。
+> 代价是那份胶水是 `var EJS_Runtime = (function(...)…)` 的闭包形态，
+> `JSEvents` / `Browser` 在闭包内，需要照 **32X 那套 `globalThis.__NESL_*` 补丁**的形状重打。
+> ⚠️ 所以「NDS 走本站核心」这条**不是** `LOCAL_CORE_CONSOLES` 里唯一一个非
+> `retroarch-emscripten-build` 来源的例外 —— 换它的文件时**别再当成「从 jsdelivr 拿现成 zip」**。
+>
 > **能加但还没加**的：PC Engine（`mednafen_pce_fast`）、ColecoVision、Atari Lynx、Vectrex、
 > C64（`vice_x64` 一整套）、PC-88 / X1 等。**光盘机种**（PS1 / Sega CD / PCE CD）核心在，
 > 但要多文件镜像 + 一份 BIOS，而 `lib/bios.ts` 目前**全站只存一份 BIOS**（id 写死 `neogeo`），

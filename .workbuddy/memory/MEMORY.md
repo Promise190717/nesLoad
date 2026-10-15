@@ -16,16 +16,21 @@
 
 ## 机种 / 核心
 
-- `ConsoleType` = `nes|snes|gb|gbc|gba|md|gg|sms|32x|ws|ngp|arcade`（`lib/emulator.ts`）。
+- `ConsoleType` = `nes|snes|gb|gbc|gba|nds|md|gg|sms|32x|ws|ngp|arcade`（`lib/emulator.ts`）。
 - ⭐ **机种清单唯一出口 = `lib/consoles.ts`**（`CONSOLE_TYPES`/`CONSOLE_LABEL` ≤3 字/`CONSOLE_TINT`/`isConsoleType`），`CartridgeSprite.tsx` 只 re-export。**别再各处手抄数组**（放 lib 而非组件：服务端组件不能 import `lib/emulator.ts`，它顶层跑 `installAudioTap()`）。
-- `CORE_MAP`：nes→`fceumm`、snes→`snes9x`（**只这两台走 jsdelivr CDN**）；gba/gb/gbc→`mgba`、md/gg/sms→`genesis_plus_gx`、32x→`picodrive`、ws→`mednafen_wswan`、ngp→`mednafen_ngp`、arcade→`fbneo`（兜底）/`fbalpha2012_cps1`（`lib/arcade-core.ts` 按 romset 挑）。**其余 10 台全走本站 `public/cores/`**（jsdelivr 国内不可靠），判据 = `LOCAL_CORE_CONSOLES`。
-- 本地核心名严格 `<core>_libretro.js`/`.wasm`，取自 `arianrhodsandlot/retroarch-emscripten-build@v1.22.2`（共 90 核；**NDS/N64/Saturn/Jaguar 核不存在**）。
+- `CORE_MAP`：nes→`fceumm`、snes→`snes9x`（**只这两台走 jsdelivr CDN**）；gba/gb/gbc→`mgba`、md/gg/sms→`genesis_plus_gx`、32x→`picodrive`、ws→`mednafen_wswan`、ngp→`mednafen_ngp`、**nds→`melonds`**、arcade→`fbneo`（兜底）/`fbalpha2012_cps1`（`lib/arcade-core.ts` 按 romset 挑）。**其余 11 台全走本站 `public/cores/`**（jsdelivr 国内不可靠），判据 = `LOCAL_CORE_CONSOLES`。
+- 本地核心名严格 `<core>_libretro.js`/`.wasm`，**默认**取自 `arianrhodsandlot/retroarch-emscripten-build@v1.22.2`（共 90 核；N64/Saturn/Jaguar 核不存在，那个 tag 下也没有 NDS）。
+- ⚠️⚠️ **NDS 的 melonds 是「EJS 核」，两条硬约束**（2026-10-15 加第 13 台，`melonds_libretro.{js,wasm}` 从 EmulatorJS 的 `melonds-wasm.data`（7z 壳）解出）：
+  ① **js 里有 `nost-compat` 补丁，不能换成 CDN 原样那份**（让 Nostalgist 走 `isEsmScript` 分支 + 暴露 `libretro_melonds`/`melonds` 工厂名 + `findEventTarget` 认 `!canvas`/`!parent` 哨兵）。
+  ② **运行时控制面和其余 7 个本地核不是一套**：它没有 `_cmd_toggle_pause`/`_cmd_load_state`/`_cmd_reset` ⇒ Nostalgist 的 `pause()`/`loadState()`/`restart()` 在 NDS 上**全部打不到核心**（暂停、读档、重置失效），存档也拿不到（`saveState()` 等的是核心永远不会写的 `.state` 文件）。已在 `lib/emulator.ts` 的 `createEjsControl()` 按**能力探测**分路：暂停→`toggleMainLoop(0/1)`、存档→`save_state_info()`（快照在 wasm 堆上，`HEAPU8.slice` 抠出来）、读档→写 `/game.state` + `load_state('game.state',0)`、重置→`system_restart()`。**以后再引 EJS 核就照这条走，别只在 `CORE_MAP` 里加个名字。**
+  ③ ⚠️⚠️ **输入面也换了一套（2026-10-15 同日，用户报「按键功能不行」）**：EJS 那支输入驱动（`EmulatorJS/RetroArch` 的 `input/drivers/emulatorjs_input.c`）把上游 `rwebinput_input.c` 的 **`rwebinput_is_pressed()` 掏成了 `return 0;`** ⇒ 写进 `retroarch.cfg` 的 `input_playerN_*` 在 NDS 上**一个钮也点不动**（**别去开 `ejs_set_keyboard_enabled`，那是喂核心键盘设备的，跟手柄钮无关**）。它认的是 `simulate_input(user, id, value)`：**user 0 基**；id = RetroPad 编号 `0b 1y 2select 3start 4up 5down 6left 7right 8a 9x 10l 11r 12l2 13r2`（见 `EJS_JOYPAD_ID`，**顺序和 `ALL_BUTTONS` 不一样**）。已在 `attachEjsKeyboard()` 里自己接 `window` 的 keydown/keyup/blur → `simulate_input`（**只在 `this.ejs?.simulate` 非 null 时挂**，探测别并进 ② 那三样）；`pressButton()` 加了 EJS 分支（**它收 1 基 player，要减一**）⇒ 联机注入 + 掌机虚拟钮一起通。写这条时对齐了 Nostalgist 的 `isInteractable` 过滤和 `preventDefault`。
 - **加机种要动**（README 有同名表）：`ConsoleType`/`CORE_MAP`/`EXTENSION_MAP`（**刻意不含 `.bin`**）/`detectConsole`（9 步顺序，**SNES 刻意压最后**）；`lib/consoles.ts` 四件套；`countGamesByConsole` 初始化对象；`lib/unwrap.ts` 内层扩展名表；`HandheldConsole.tsx` 的 `FACE_ROWS`；`lib/server/upstream.ts` 的 `toConsoleType()`（`hasToken()` 词界；gba 先于 game boy、32x 先于 genesis、neo geo pocket 先于 neo geo；躲 `nes`/`genesis` 子串坑）；`public/cores/` 放文件；`db/schema.sql` + `scripts/add-consoles.mjs`；机种列举文案（对齐 `home.hero.lead`/`home.faq.a6`/`netplay.open`）。
 - ⚠️ **4 处硬编码机种数组已消灭**（`app/api/games/route.ts`、`app/api/admin/games/route.ts`、`app/api/admin/games/[id]/route.ts`、`AdminGames.tsx` 的 `CONSOLE_OPTIONS`），现都 `import { CONSOLE_TYPES }`。
 - `SCREEN_WIDTH/HEIGHT = 720×540` 只是**启动基准**；显示尺寸全在 globals.css，核心靠 ResizeObserver 跟。别读 `canvas.width` 算 launch size。
 - ⚠️ CD 机种（PS1 / Sega CD / PCE CD）**当前架构不通**：`lib/bios.ts` 只存一份 BIOS（id 写死 `neogeo`），多文件光盘镜像也不合单文件加载流。
 - `/consoles` 专题页：⚠️ **表主键就是 `console_type`**，它是**资料的扩展不是清单**。表里某行被删 ⇒ 前台退回 `CONSOLE_LABEL` 默认渲染，**专题页永不 404** ⇒ 后台**没有「名下有游戏不许删」拦截**（DELETE = 重置资料）。⚠️ **首页「按机种浏览」= 按游戏数取前 8（不过滤空机种）**；`/consoles` 列表页与 `/games` 筛选条才是全量。`/consoles/[type]` = 资料 + 名下游戏（30 分钟）。资料 `listConsolesCached`（12h，键 `consoles:list` + `v2`）／单条 `getConsole` **不缓存**；双语回退 `localizeConsole`。`lib/server/consoles.ts` **不许 import `./games.ts`**。后台 `/api/admin/consoles`（GET 合并固定项+资料行，**没有 POST**）+ `/[id]` PATCH(upsert)/DELETE。
 - 预填脚本：`scripts/add-consoles.mjs`（建表+占位，幂等）+ `scripts/seed-consoles.mjs`（一次性快照，**会覆盖后台人工编辑，跑过别再跑**）。sitemap 只列**有资料行**的机种。
+- 机种图：放在 R2 `images/consoles/<机种>-pixel.png`，公网地址写进 `consoles.image_url`；补图脚本 = `scripts/fill-console-images.mjs` + 源图目录 `scripts/console-images/`（**只填 NULL 行**，`--force` 才覆盖，`--dry-run` 先看）。图规格 = **正方形 PNG、必须透明底**（卡片画在 `bg-ink-950` 上，白底会显白方块）。⚠️ **加机种 = 代码 + `add-consoles.mjs` + 一张图，三样都要**；⚠️ **动 `consoles` 的资料就要把 `listConsolesCached` 键尾版本 +1**（现 `v3`），否则首页 / `/consoles` 要等 12h。
 
 ## 两台机器 / 尺寸链
 
@@ -59,7 +64,9 @@
 ## 进行中（未提交，2026-10-14）
 
 - 上游批量导入：`app/api/admin/scrape-list`、`app/api/admin/fetch-rom`、`components/AdminBulkImport.tsx`、`lib/server/upstream.ts`、`lib/server/url-guard.ts`、`lib/rom-lang.ts`；`AdminGames.tsx`、`lib/i18n.ts`、`lib/zip.ts` 随之在改。
-- 机种扩容（本日完成）：12 台 + `public/cores/` 新增 4 核 8 文件（genesis_plus_gx / picodrive / mednafen_wswan / mednafen_ngp；目录现 14 文件 56 MB）；D1 `consoles` 表 12 行资料齐全（image_url + 双语简介，已核）。
+- 机种扩容（本日完成）：**13 台**（2026-10-15 加 NDS；`public/cores/` 现 16 文件，含 `melonds_libretro.{js,wasm}`）；D1 `consoles` 表 13 行资料齐全（image_url + 双语简介，已核）。
+- ⚠️ **三处页脚的「回到房间」（`/room`）2026-10-15 全删**：首页 / 内容页（`GamesShell`）/ 法务页（`LegalPage`）。**只剩 404 页那两颗在用**（`gamesPage.backHome` 这个键别删）。同一日首页 Hero 加回第二颗钮**「游玩本地 ROM」→ `/room`**（键 `home.hero.play`，「浏览全部游戏」在左）。
+- ⚠️ **`/room` 的游戏库入口 2026-10-15 注释式隐藏**（用户要求，不是删）：**三样一套** —— `ConsoleScene` 那颗 `.rail-games` 钮＋掌机 `onOpenLibrary`＋`ConsoleScreen` 待机层（`onTap` 没传就整层不画）。⇒ `libraryOpen` 恒 false，`games.open`/`screen.orLibrary`/`screen.mobile*` 暂**无引用**（键留着没删）；`tour.rail.body` 中英已去掉「游戏库」那一项。**恢复要把三样一起放回来**，细节见 `2026-10-15.md`。
 
 ## 部署 / 校验
 

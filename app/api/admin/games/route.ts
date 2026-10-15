@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
-import { CONSOLE_TYPES } from '@/lib/consoles';
+import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { findGameDuplicate, insertGame, listAdminGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
@@ -120,15 +120,20 @@ export async function POST(request: Request) {
      * 判重必须在**上传之前**：重复就直接拒，别白白把封面和 ROM 传上 R2 ——
      * 传完再拒会留下一对没人认领的对象（D1 里没有任何一行指向它们）。
      *
-     * 判据是**同名 + 同语言**（见 lib/server/games.ts 的 findGameDuplicate）：
-     * 同一款游戏的日版 / 美版 / 中文版是几条合法记录，只按名字拦会全挡在门外。
+     * 判据是**同名 + 同机种 + 同语言**（见 lib/server/games.ts 的 findGameDuplicate）：
+     * 同一款游戏在 NES / SFC / GB 上各有一版是几条合法记录（那是几盘不同的 ROM），
+     * 日版 / 美版 / 中文版同理，只按名字拦会全挡在门外。
      * 比较放在服务端做：列表是分页的，前端手里只有当前页，在浏览器里比名字一定会漏。
      */
-    const duplicate = await findGameDuplicate(title, language);
+    const duplicate = await findGameDuplicate(title, language, consoleType);
     if (duplicate) {
-      // 顺带把命中的那条语言说出来 —— 「同名但语言不同」是放行的，用户得看得见差在哪
+      // 顺带把命中那条的机种与语言说出来 —— 「同名但机种 / 语言不同」是放行的，
+      // 用户得看得见差在哪
       const langText = duplicate.language ? `语言：${duplicate.language}` : '语言未标注';
-      return fail('duplicate-title', `已存在同名同语言的游戏：「${duplicate.title}」（${langText}）`);
+      return fail(
+        'duplicate-title',
+        `已存在同名同机种同语言的游戏：「${duplicate.title}」（${CONSOLE_LABEL[consoleType]} · ${langText}）`
+      );
     }
 
     await uploadObject(imageKey, new Uint8Array(await image.arrayBuffer()), image.type || 'application/octet-stream');

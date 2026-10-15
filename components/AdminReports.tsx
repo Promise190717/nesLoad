@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { formatTime } from '@/lib/i18n';
 import AdminLoading from './AdminLoading';
-import { useI18n } from './I18nProvider';
 
 /** `/api/admin/game-reports` 返回的条目。 */
 interface ReportItem {
@@ -59,8 +58,6 @@ async function readError(res: Response, fallback: string): Promise<string> {
  * 这是对的：那时候确实没得看了，但名字（快照）还在，仍能判断这条反馈说的是什么。
  */
 export default function AdminReports() {
-  const { t, locale } = useI18n();
-
   const [items, setItems] = useState<ReportItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -111,13 +108,13 @@ export default function AdminReports() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resolved: next }),
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.reports.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       // 就地翻标记，不重拉列表 —— 重拉会把已经翻过的页数打回第一页
       setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, resolved: next } : row)));
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.reports.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusyId(null);
@@ -127,7 +124,7 @@ export default function AdminReports() {
   return (
     <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
       <div className="mb-3 flex items-center gap-3">
-        <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.reports.title')}</h2>
+        <h2 className="shrink-0 text-[12px] text-ink-200">{'游戏反馈'}</h2>
         {notice && (
           <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
@@ -135,10 +132,10 @@ export default function AdminReports() {
         )}
       </div>
 
-      {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
-      {state === 'error' && <p className="text-[12px] text-danger">{t('admin.reports.failed')}</p>}
+      {state === 'loading' && <AdminLoading label="载入中…" />}
+      {state === 'error' && <p className="text-[12px] text-danger">{'请求失败。'}</p>}
       {state === 'ready' && items.length === 0 && (
-        <p className="text-[12px] text-ink-500">{t('admin.reports.empty')}</p>
+        <p className="text-[12px] text-ink-500">{'还没有反馈。'}</p>
       )}
 
       {items.length > 0 && (
@@ -168,10 +165,10 @@ export default function AdminReports() {
                   item.resolved ? 'bg-ok/20 text-ok' : 'bg-ink-700 text-ink-400'
                 }`}
               >
-                {t(item.resolved ? 'admin.reports.resolved' : 'admin.reports.unresolved')}
+                {item.resolved ? '已解决' : '未解决'}
               </span>
               <span className="w-[132px] shrink-0 text-right text-[12px] text-ink-500">
-                {formatTime(item.createdAt, locale)}
+                {formatTime(item.createdAt, 'zh')}
               </span>
               <button
                 type="button"
@@ -179,7 +176,7 @@ export default function AdminReports() {
                 onClick={() => void toggle(item)}
                 className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {t(item.resolved ? 'admin.reports.markUnresolved' : 'admin.reports.markResolved')}
+                {item.resolved ? '标记未解决' : '标记已解决'}
               </button>
             </li>
           ))}
@@ -193,7 +190,7 @@ export default function AdminReports() {
           onClick={loadMore}
           className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {moreState === 'loading' ? t('feedback.loading') : t('admin.reports.loadMore')}
+          {moreState === 'loading' ? '载入中…' : '加载更多'}
         </button>
       )}
     </section>

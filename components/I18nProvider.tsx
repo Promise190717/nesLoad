@@ -44,8 +44,8 @@ function isAdminPath(pathname: string): boolean {
  * 所以真正的来源是 **`usePathname()`**：地址变了它就跟着变，这是唯一能跟上导航的信号。
  *
  * `initialLocale` 只在一种情况下用得上 —— **后台**：`/admin/...` 没有前缀，
- * `splitLocalePath()` 会一律判成英文，而后台的语言其实由 cookie 决定。
- * 那部分 cookie 只有服务端读得到，所以走这个 prop。
+ * `splitLocalePath()` 会一律判成英文，而后台固定中文（不走 i18n，见 middleware.ts
+ * 的 adminLocale），那个值只有服务端读得到，所以走这个 prop。
  *
  * `<html lang>` / `data-locale` 由根布局在服务端写死（首屏是对的），但客户端导航
  * 改不了服务端渲染的属性，所以下面那个 effect 负责在语言变化时手动同步 ——

@@ -72,10 +72,17 @@ function hasToken(text: string, token: string): boolean {
  * Master System / 32X 各有自己的 slug（2026-10-14 各抽两款印证过）。所以它在
  * 世嘉那组里**垫底**兜成 `md`。
  *
- * ℹ️ 上游还有一批**我们跑不了**的机种（NDS / N64 / PlayStation / 土星 / Jaguar /
+ * ℹ️ 上游还有一批**我们跑不了**的机种（N64 / PlayStation / 土星 / Jaguar /
  * Sega CD / PC Engine CD / MSX2 —— 那个 WASM 构建里没编这些核心），一律返回 null。
  * `sega cd` / `sega saturn` 要**显式挡在 `sega` 那条之前**，否则会被兜成 MD。
  * 见 README「机种」一节。
+ *
+ * ⚠️ **NDS 2026-10-15 起能跑了**（本站自带 melonds 核心），所以它从上面那张
+ *    「跑不了」的名单里挪出来了 —— 上游的 slug 是 `nds-games` / `nintendo-ds`。
+ *    判断放在任天堂掌机那一组里（`ds` 是两字母，必须按整词匹配：`3ds` 里也藏着
+ *    `ds`，用 `includes` 会把 3DS 也吃进来，而 3DS 我们跑不了）。
+ *    ⚠️ 顺序：`nds` 要排在 `gb` / `gba` 那几条**之前或之后都行**（两者不重叠），
+ *    但**必须在任何 `game boy` 兜底之前**不留隐患 —— 放在最上面那行最省心。
  */
 export function toConsoleType(value: unknown): ConsoleType | null {
   const raw = String(value ?? '')
@@ -89,6 +96,17 @@ export function toConsoleType(value: unknown): ConsoleType | null {
 
   // 我们跑不了的那几台：必须在 `sega` 兜底之前挡掉（见上面 ℹ️）
   if (text.includes('sega cd') || text.includes('sega saturn')) return null;
+  // 3DS / 2DS 也跑不了 —— 必须在下面 `ds` 那条之前挡掉（`3ds` 里含 `ds`）
+  if (text.includes('3ds') || text.includes('2ds')) return null;
+
+  /*
+   * NDS（2026-10-15 起支持）。上游写法：`nds` / `nintendo-ds` / `nintendo ds`。
+   * ⚠️ `ds` 按整词匹配（见上面 ⚠️）；`nds` 三字母可以放心用 includes（`includes('nds')`
+   *    不会误伤 —— 想不出哪个机种 slug 里顺带含 `nds`）。
+   */
+  if (compact.includes('nds') || text.includes('nintendo ds') || hasToken(text, 'ds')) {
+    return 'nds';
+  }
 
   // 任天堂掌机（长名在前，短代号在后 —— 见上面那条 ⚠️）
   if (compact.includes('gba') || compact.includes('gameboyadvance')) return 'gba';

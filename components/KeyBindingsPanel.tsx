@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import {
-  BUTTONS,
   buttonHolding,
   buttonLabel,
+  buttonsFor,
   cloneDefaultBindings,
   codeLabel,
   codeToRetroArch,
@@ -14,6 +14,7 @@ import {
   type ButtonName,
   type KeyBindings,
 } from '@/lib/keybindings';
+import type { ConsoleType } from '@/lib/emulator';
 import type { NetplayRole } from '@/lib/netplay';
 import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
@@ -40,6 +41,16 @@ interface Notice {
 interface KeyBindingsPanelProps {
   open: boolean;
   bindings: KeyBindings;
+  /**
+   * 本机正在跑的那盘卡带的机种（没有就 null）。
+   *
+   * 两件事跟着它走：
+   *   · **画哪几个钮、钮叫什么**（`buttonsFor` / `buttonLabel`）—— NDS 的丝印是
+   *     A / B / X / Y + L / R / L2 / R2 + START / SELECT，套街机叫法会长出
+   *     「C」「Y」「Z」这些机器上没有的字，而真正要按的 L / R 反而看不见；
+   *   · **是不是单人机**（见下面 `soloOnly`）—— NDS 不支持双人，页签收成一个。
+   */
+  consoleType: ConsoleType | null;
   /**
    * 当前联机角色。联机时提示文案不一样，**页签也锁在你自己的那套（1P 组）**，
    * 不管是房主还是加入者 —— 理由见下面 `lockedPlayer`。
@@ -70,15 +81,20 @@ interface KeyBindingsPanelProps {
  * 自定义按键面板。和存档列表 / 联机面板同一套视觉：浮在房间上、**不进屏幕**
  * —— 屏幕里跑的是游戏画面，这张表要写字、还得一格一格点着改键。
  *
- * 1P / 2P 分两组标签页，不是一次铺 24 行：单机双人时两组都要配，但一次只看一组
+ * 1P / 2P 分两组标签页，不是一次铺两倍的行数：单机双人时两组都要配，但一次只看一组
  * 才看得清「哪个钮 = 哪个键」。
  *
- * **联机时只给你自己那套**（两边都是 1P 那组），页签收成一个标签 ——
- * 理由见下面 `lockedPlayer` 那段注释。
+ * **页签收成一个标签**有两种情况，都在下面 `lockedPlayer` / `soloOnly` 里派生了：
+ *   · 联机时只给你自己那套（两边都是 1P 那组）；
+ *   · **单人机**（NDS）—— 它压根不支持双人，摆一个永远点不动的「玩家 2」只会让人
+ *     以为坏了（2026-10-15 用户要求）。
+ *
+ * 画哪几个钮、钮叫什么由 `consoleType` 决定（见 props 的注释）。
  */
 export default function KeyBindingsPanel({
   open,
   bindings,
+  consoleType,
   role,
   localPlaying,
   onChange,
@@ -86,7 +102,7 @@ export default function KeyBindingsPanel({
   onClose,
 }: KeyBindingsPanelProps) {
   const { t } = useI18n();
-  /** 页签。**只在单机时有效** —— 联机时下面那个 `player` 按角色直接定死，不看它。 */
+  /** 页签。**只在单机双人时有效** —— 联机或单人机都由下面 `player` 直接定死，不看它。 */
   const [tab, setTab] = useState<'p1' | 'p2'>('p1');
   /** 正在等新键的那个钮。null 表示不在捕获态。 */
   const [capturing, setCapturing] = useState<ButtonName | null>(null);
@@ -108,7 +124,21 @@ export default function KeyBindingsPanel({
    * 离房），派生出来的一定跟着变，不会留下一个改不动的旧页签。
    */
   const lockedPlayer = role ? 'p1' : null;
-  const player = lockedPlayer ?? tab;
+
+  /**
+   * 单人机 —— 现在只有 NDS（2026-10-15 用户定的：「nds 不支持双人了」）。
+   *
+   * 判据写死在机种上而不是「查一下这个机种支持几个玩家」：这个站里 NDS 是**唯一**
+   * 一台不支持双人的机器（它没有第二个手柄口，也没有联机），单独列一张表反而多一层
+   * 间接。以后真有第二台再说。
+   *
+   * 效果和联机锁定一样（只给 1P 那组、不给切换），但**标签文案不同**：
+   * 联机那句「你的键位」讲的是归属，单人机这里该老老实实写「玩家 1」。
+   */
+  const soloOnly = consoleType === 'nds';
+  const player = lockedPlayer ?? (soloOnly ? 'p1' : tab);
+  /** 页签那一行是不是收成了一个标签（联机锁定 / 单人机都算）。 */
+  const singleTab = Boolean(lockedPlayer) || soloOnly;
 
   // 每次打开都重置：默认落在「你自己那组」（= 1P），捕获态和上一条提示都清掉
   useEffect(() => {
@@ -214,10 +244,15 @@ export default function KeyBindingsPanel({
    * 提示按「改完什么时候生效」分四种，不能只按角色分：
    * 加入者本机没模拟器时是立刻生效，可他要是自己在房主出画面之前插了一盘，
    * 那盘读的就是**同一组键**（他又转发又本地用）—— 一样要重载卡带。
+   *
+   * 单人机那档（`soloOnly`）走 `keybind.soloHint`：它和默认那句只差最后半句
+   * 「两位玩家不能共用同一个键」—— 单人机的面板上根本没有玩家 2 可切，
+   * 说了只会让人回头去找那个钮。
    */
   let hint: MessageKey;
   if (role === 'guest') hint = localPlaying ? 'keybind.guestLocalHint' : 'keybind.guestHint';
   else if (role === 'host') hint = 'keybind.hostHint';
+  else if (soloOnly) hint = 'keybind.soloHint';
   else hint = 'keybind.hint';
 
   /**
@@ -265,17 +300,21 @@ export default function KeyBindingsPanel({
 
         <div className="flex flex-col gap-3 p-4">
           {/*
-            联机时只留一个标签，不再是可切换的页签 —— 能改的只有它，
-            摆两个按钮出来、其中一个永远点不动，只会让人以为坏了。
-            单机（不在房间里）才给两个可切换的页签。
+            页签那一行只在**单机双人**时才有得切。两种收成一个标签的情况：
 
-            标签写「你的键位」而不是「玩家 1」：加入者锁的也是这一组，可他游戏里是 2P，
-            写「玩家 1」他会读成「那是房主的键」—— 明明是他自己在按。
+              · 联机（`lockedPlayer`）—— 能改的只有你自己那组，摆两个按钮出来、
+                其中一个永远点不动，只会让人以为坏了；
+              · 单人机（`soloOnly`）—— 面板上根本没有玩家 2 这回事，
+                留着那颗钮等于凭空告诉用户「这台机器能双人」。
+
+            标签文案两种情况不一样：联机写「你的键位」而不是「玩家 1」—— 加入者锁的
+            也是这一组，可他游戏里是 2P，写「玩家 1」他会读成「那是房主的键」（明明是
+            他自己在按）；单人机反过来，就老老实实写「玩家 1」。
           */}
           <div className="flex gap-2">
-            {lockedPlayer ? (
+            {singleTab ? (
               <span className="pixel-edge pxw-2 pxc-500 flex-1 bg-accent py-1.5 text-center text-[12px] text-ink-950">
-                {t('keybind.mine')}
+                {t(lockedPlayer ? 'keybind.mine' : 'keybind.p1')}
               </span>
             ) : (
               (['p1', 'p2'] as const).map((which) => (
@@ -301,16 +340,17 @@ export default function KeyBindingsPanel({
           </div>
 
           {/*
-            12 个钮分两列：正好配成 上/下、左/右、A/B、C/X、Y/Z、投币/开始。
+            钮表按机种给（`buttonsFor`）：默认 12 个，分两列正好配成
+            上/下、左/右、A/B、C/X、Y/Z、投币/开始；NDS 多一排 L2 / R2，7 行。
 
             键值走系统字体、11px，**不用 font-pixel**：值里会出现 ↑↓←→ 和小键盘名，
             而 Press Start 2P 没有箭头字形 —— 那几个会掉回系统字体，和旁边的
             `J`、`Enter` 混排出两种字形。和页脚（legend.*）同一个理由。
           */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {BUTTONS.map((button) => {
+            {buttonsFor(consoleType).map((button) => {
               const active = capturing === button;
-              const name = buttonLabel(button, t);
+              const name = buttonLabel(button, t, consoleType);
               const label = codeLabel(table[button]);
               return (
                 <div key={button} className="flex items-center gap-2">
@@ -340,7 +380,7 @@ export default function KeyBindingsPanel({
           {notice && (
             <p className="text-[12px] text-danger">
               {t(notice.key, {
-                button: notice.button ? buttonLabel(notice.button, t) : '',
+                button: notice.button ? buttonLabel(notice.button, t, consoleType) : '',
                 player: notice.player ?? '',
                 pressed: notice.pressed ?? '',
               })}
@@ -354,9 +394,12 @@ export default function KeyBindingsPanel({
             没有本地卡带时（加入者、或还没插卡）没什么可重载的，所以禁用而不是藏起来
             —— 按钮在、灰着，配上上面那句提示，能说清「为什么现在用不了」。
 
-            恢复默认：单机是**两组一起**回到默认（标签没写「本组」，「把键位弄回一个已知
-            状态」就是这个按钮的用途）；联机时只复位**你自己那组**（= 1P）—— 面板本来就
-            只给你这一组，连另一组一起推回默认就超出「只能改自己的键位」了。
+            恢复默认：**单机双人**时两组一起回到默认（标签没写「本组」，「把键位弄回
+            一个已知状态」就是这个按钮的用途）；页签收成一个标签的两种情况都只复位
+            **当前这一组** —— 联机时另一组是对方的（见 `lockedPlayer`），单人机时另一组
+            面板上根本画不出来，跟着一起推回默认是改用户看不见的东西。
+
+            `consoleType` 一路传下去：推回的必须是**这个机种**那套默认（NDS 有自己的）。
           */}
           <div className="flex gap-2">
             <button
@@ -371,7 +414,9 @@ export default function KeyBindingsPanel({
               type="button"
               onClick={() => {
                 onChange(
-                  lockedPlayer ? resetPlayerBindings(bindings, lockedPlayer) : cloneDefaultBindings()
+                  singleTab
+                    ? resetPlayerBindings(bindings, player, consoleType)
+                    : cloneDefaultBindings(consoleType)
                 );
                 setCapturing(null);
                 setNotice(null);

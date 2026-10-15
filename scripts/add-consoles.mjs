@@ -106,7 +106,8 @@ console.log('① consoles 表：就绪（已存在则原样保留）。');
  * 展示名刻意写全称 + 括号简称 —— 和首页卡片上的丝印词（NES / SFC / GBA / ARC）是两码事。
  *
  * 顺序跟着 `lib/consoles.ts` 的 `CONSOLE_TYPES`（展示顺序）。前四个 2026-10-14 之前
- * 就在库里了，`INSERT OR IGNORE` 会跳过它们；后八个是当天随新机种补的。
+ * 就在库里了，`INSERT OR IGNORE` 会跳过它们；后八个是当天随新机种补的，
+ * nds 是 2026-10-15 补的（`nds` 插在 `gba` 后面，跟着展示顺序排）。
  *
  * `releaseYear` 是可空的（街机那种没有单一年份的留 null）。它只在机种专题页的
  * 资料表里显示，填错不影响功能，后台随时改。
@@ -135,6 +136,14 @@ const DEFAULT_CONSOLES = [
     summary: '任天堂 2001 年推出的 32 位掌上游戏机。',
     summaryEn: "Nintendo's 32-bit handheld from 2001.",
     releaseYear: 2001,
+  },
+  {
+    type: 'nds',
+    name: '任天堂 DS（NDS）',
+    nameEn: 'Nintendo DS',
+    summary: '任天堂 2004 年推出的双屏掌上游戏机，上下两块屏幕、下屏带触控。',
+    summaryEn: "Nintendo's dual-screen handheld from 2004 — two screens, the lower one touch-enabled.",
+    releaseYear: 2004,
   },
   {
     type: 'arcade',

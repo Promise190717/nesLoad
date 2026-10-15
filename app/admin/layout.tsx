@@ -1,6 +1,4 @@
 import type { Metadata } from 'next';
-import { translate } from '@/lib/i18n';
-import { readLocale } from '@/lib/server/locale';
 
 /*
  * /admin 整个子树的 metadata。
@@ -17,15 +15,11 @@ import { readLocale } from '@/lib/server/locale';
  *   这里的 noindex        —— 来了也别收（页面级，最硬的一道）
  *   middleware.ts        —— 未登录直接重定向走，压根读不到内容
  *
- * 标题走 i18n：后台是双语界面（AdminShell 里那句 t('admin.title')），
- * 浏览器标签页不该是另一种语言。根 layout 的 title 模板会补上站名后缀，
- * 结果就是「后台 · 游戏小屋」/「Admin · Game Hut」。
+ * 标题是写死的中文（⚠️ 2026-10-15 起后台整体不走 i18n，见 AdminShell 顶上那条注释）。
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const locale = await readLocale();
-
   return {
-    title: translate(locale, 'admin.title'),
+    title: '后台',
     robots: {
       index: false,
       follow: false,

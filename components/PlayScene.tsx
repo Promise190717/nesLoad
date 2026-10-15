@@ -12,14 +12,20 @@ import { useRouter } from 'next/navigation';
 import { canReturnWithinSite } from '@/lib/site-history';
 import { getAudioTrack } from '@/lib/audio-tap';
 import { ensureBios } from '@/lib/bios';
-import { EmulatorController, VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
+import {
+  EmulatorController,
+  unsupportedArchive,
+  UnsupportedRomError,
+  VOLUME_MAX,
+  type LoadedRom
+} from '@/lib/emulator';
 import { readGamepads } from '@/lib/gamepad';
 import { isAbortError, readBodyWithProgress } from '@/lib/http';
 import { setPlayActive } from '@/lib/play-leave-guard';
 import type { MessageKey } from '@/lib/i18n';
 import {
-  BUTTONS,
   buttonLabel,
+  buttonsFor,
   codeLabel,
   codeToButton,
   DEFAULT_BINDINGS,
@@ -146,6 +152,15 @@ export default function PlayScene({
         number(frameStyle.paddingTop) + number(frameStyle.paddingBottom);
       const frameInsetX =
         number(frameStyle.paddingLeft) + number(frameStyle.paddingRight);
+      /*
+      宽高比**所有机种统一按 4 / 3**，NDS 也不例外。
+
+      原因（2026-10-15 用户定的）：NDS 是竖屏双屏，如果让它的外框按自己的 2:3 缩窄，
+      切换游戏时整块屏幕会**忽大忽小、形状突变**，很突兀。改成「外框尺寸统一、
+      竖屏在里面居中内缩」—— 和别的机种一个占位，
+      多出来的两侧由屏幕自己的黑底（`ConsoleScreen` 根节点是 `bg-black`，
+      配合 `canvas { object-fit: contain }`）自然填成黑色，读起来还是一整块屏幕。
+      */
       const maxWidth =
         (Math.max(0, availableHeight - stageInset - frameInsetY) * 4) / 3 +
         frameInsetX;
@@ -184,7 +199,29 @@ export default function PlayScene({
   const [paused, setPaused] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [loadCancelled, setLoadCancelled] = useState(false);
-  const directSolo = autoStart && initialMode === 'solo';
+
+  /**
+   * 这一局的机种。三个来源按可信度排：
+   *   1. `rom.console` —— 真插上去的那盘说了算；
+   *   2. `game.consoleType` —— 服务端预取（或接口兜底）那一款，**还没插卡带时唯一能用的**；
+   *   3. null —— 地址上没带 `?id=`（首页那个「加入房间」表单跳过来的就是这种），
+   *      这会儿压根不知道要跑什么，只能等房主出画面。
+   */
+  const consoleType = rom?.console ?? game?.consoleType ?? null;
+
+  /**
+   * 单人机 —— 现在只有 NDS（2026-10-15 用户定的：「nds 不支持双人了」）。
+   *
+   * 这一页要拦的是**地址栏上手动塞进来的联机参数**：`?mode=host`（建房）和
+   * `?room=XXXX`（当加入者）。两个都不该对 NDS 生效 —— 见下面 `mode` 和那条
+   * 自动加入的 effect。
+   *
+   * 判据跟着 `consoleType` 走，所以服务端预取到了（正常情况）第一帧就成立；
+   * 万一服务端那次查询抛了、走客户端兜底，`game` 到齐那一刻也会自动成立。
+   */
+  const soloOnly = consoleType === 'nds';
+
+  const directSolo = (autoStart && initialMode === 'solo') || (soloOnly && Boolean(game));
   /** ROM 整包下载进度（0..1），null = 拿不到字节数或这一阶段还没开始 */
   const [romRatio, setRomRatio] = useState<number | null>(null);
   /** 核心包下载进度（0..1），null = 拿不到字节数 */
@@ -203,6 +240,16 @@ export default function PlayScene({
   const [notice, setNotice] = useState<MessageKey | null>(
     serverGame === null ? 'play.notFound' : null
   );
+  /**
+   * 这盘 ROM 是站点解不开的压缩格式（`7z` / `rar`）时挂上 —— 和 `notice` **并排**显示。
+   *
+   * 和 `/room` 的 `archiveHint` 是同一件事、同一份判据（`unsupportedArchive()`），
+   * 只是这一页没有那个弹窗，只能直接摊在屏幕上。
+   *
+   * ⚠️ 单独一个 state 而不是塞进 `notice`：`notice` 存的是 `MessageKey`（不带参数），
+   *    而这条要带 `{ ext }`。两者的生命周期倒是一样的（每次 `load` 开头一起清）。
+   */
+  const [archive, setArchive] = useState<'7z' | 'rar' | null>(null);
   /** 这一笔 ROM 下载的取消把手；没有下载在飞时是 null */
   const abortRef = useRef<AbortController | null>(null);
   /**
@@ -249,7 +296,22 @@ export default function PlayScene({
     PLAY_DEFAULT_SCREEN_SIZE
   );
 
-  const [mode] = useState<PlayMode>(initialRoomCode ? 'join' : initialMode);
+  /**
+   * 地址栏上写着的模式（`?room=` 优先当加入者，否则看 `?mode=`）。**只是初值**，
+   * 真正生效的是下面那个 `mode` —— 它是从这里派生出来的。
+   */
+  const [rawMode] = useState<PlayMode>(initialRoomCode ? 'join' : initialMode);
+  /**
+   * 实际生效的模式。
+   *
+   * ⚠️ **单人机（NDS）一律落回单人**：`?mode=host` / `?room=` 是可以在地址栏上手打的，
+   * 用户 2026-10-15 明确要求「即使自己添加联机参数进来也要忽略」。拦在这里而不是只拦
+   * 在游戏详情那颗钮上 —— 那颗钮只管「正常入口」，管不住手打地址。
+   *
+   * 派生而不是 `useEffect` 里改 state：`consoleType` 可能晚一步才知道（服务端预取失败
+   * 时走客户端兜底），派生出来的一定跟着变，不会留下一个已经点开了的建房弹窗。
+   */
+  const mode: PlayMode = soloOnly ? 'solo' : rawMode;
   /**
    * 房间卡「刚出现」的高亮。建好房 / 加入成功那一刻置 true，几秒后自己落回 ——
    * 对应卡片边框闪主题色（`play-room-flash`），提醒用户看右栏。
@@ -500,6 +562,7 @@ export default function PlayScene({
       loadingRef.current = true;
       setLoadCancelled(false);
       setNotice(null);
+      setArchive(null);
       setRomRatio(null);
       setCoreRatio(null);
 
@@ -530,9 +593,26 @@ export default function PlayScene({
          * 备上（`public/bios/`），用户拖进来的那份能覆盖它。非街机一律 null，
          * `loadRom` 也只认街机那条分支。
          */
-        const consoleType = game?.consoleType ?? null;
-        const bios = consoleType === 'arcade' ? await ensureBios() : null;
+        const targetConsole = game?.consoleType ?? null;
+        const bios = targetConsole === 'arcade' ? await ensureBios() : null;
         if (ac.signal.aborted || !activeRef.current) return;
+
+        /*
+         * 机种定了，键位也跟着定 —— 用户**没自定义过**的话，NDS 要换成它自己那套
+         * （见 lib/keybindings.ts 的 `defaultBindingsFor`：十字键在方向键、A/B/X/Y
+         * 在 Z X / A S、肩键在 Q E / R W）。
+         *
+         * ⚠️ 必须在**启动之前**做：`bindingsToRetroArch(this.bindings)` 是 `loadRom`
+         * 里一次性写进 RetroArch 配置的，核心起来之后再改就得重载卡带。
+         * 也不能只靠 `consoleType` 那个派生值来「重新算一遍」—— 它要到 `setRom`
+         * 之后才知道（那是启动完的事），那时候已经晚了。
+         *
+         * `loadBindings(机种)` 的语义是「存过就用存的那份」，所以真改过键位的人
+         * 一个字都不会被冲掉。
+         */
+        const resolved = loadBindings(targetConsole);
+        setBindings(resolved);
+        controller.setBindings(resolved);
 
         /*
          * 核心包那段进度按 1% 节流（几百个 chunk 全 setState 会把整页重渲染几百次）；
@@ -568,6 +648,16 @@ export default function PlayScene({
           console.info('[play] 已取消载入：', game?.title);
         else {
           console.error('[play] 载入失败：', game?.title, error);
+          /*
+           * 机种认不出时单独认一次压缩格式 —— 和 `/room` 对齐（`ConsoleScene` 的
+           * `archiveHint`）。这一类是「有准话可给」的失败：7z / rar 用不着用户瞎猜。
+           *
+           * 走到这里 `romFile` 必然有值（`UnsupportedRomError` 只在 `detectConsole`
+           * 返回 null 时抛，而那一步在下载之后），那个判断只是别让类型收窄难看。
+           */
+          if (error instanceof UnsupportedRomError && romFile) {
+            setArchive(await unsupportedArchive(romFile));
+          }
           setNotice('play.loadFail');
         }
         setRom(null);
@@ -645,15 +735,13 @@ export default function PlayScene({
     await load();
   }, [joinCode, load, mode, netplay, netplayMode]);
 
+  /*
+   * 进页面就自己开跑。判据收敛到 `directSolo`（它把「正常入口」和「单人机」两种情况
+   * 一起管了，见那边的注释）—— 原来这里写的是 `autoStart && initialMode === 'solo'`，
+   * 和 `directSolo` 是同一句话，分开写只会让两处漂。
+   */
   useEffect(() => {
-    if (
-      !autoStart ||
-      initialMode !== 'solo' ||
-      mode !== 'solo' ||
-      !game ||
-      autoStartedRef.current
-    )
-      return;
+    if (!directSolo || mode !== 'solo' || !game || autoStartedRef.current) return;
     let cancelled = false;
     // 等挂载和偏好初始化完成；StrictMode 清理的那次任务不会执行。
     void Promise.resolve().then(() => {
@@ -664,8 +752,14 @@ export default function PlayScene({
     return () => {
       cancelled = true;
     };
-  }, [autoStart, initialMode, mode, game, start]);
+  }, [directSolo, mode, game, start]);
 
+  /*
+   * `?room=XXXX` 进来就自动加入。
+   *
+   * `mode` 已经是派生过的（单人机被按成 `'solo'`），所以 NDS 手打 `?room=` 时这里
+   * 整条不会跑 —— 不需要再单独判一次 `soloOnly`。
+   */
   useEffect(() => {
     if (mode !== 'join' || !joinCode || autoStartedRef.current) return;
     let cancelled = false;
@@ -1078,6 +1172,16 @@ export default function PlayScene({
                           {t(notice)}
                         </span>
                       )}
+                      {/*
+                        格式那条（7z / rar）跟在报错下面：它不是「出事了」而是
+                        「换个包就行」—— 所以用 `crt-ink-300` 而不是 `danger`，
+                        和 `/room` 那边同一个口径（那边是弹窗里的一行）。
+                      */}
+                      {archive && (
+                        <span className="text-[12px] text-crt-ink-300">
+                          {t('play.needZip', { ext: archive })}
+                        </span>
+                      )}
 
                       {mode === 'join' &&
                       netplayState.status !== 'connected' ? (
@@ -1347,46 +1451,78 @@ export default function PlayScene({
           >
             <div className="play-panel-heading">
               <h2>{t('keybind.open')}</h2>{' '}
-              {/* 编辑仍复用原有按键设置，右侧列表跟随自定义键位更新。 */}
-              <button
-                type="button"
-                onClick={() => setKeybindOpen(true)}
-                title={t('keybind.open')}
-                aria-label={t('keybind.open')}
-                className="play-edit pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
-              >
-                {t('play.edit')}
-              </button>
-            </div>
-            <div
-              className="mb-3 flex gap-2"
-              role="group"
-              aria-label={t('keybind.open')}
-            >
-              {(['p1', 'p2'] as const).map((player) => (
+              {/*
+                ⚠️ **NDS 不画这颗「编辑」**（2026-10-15 用户要求「nds 游戏按钮编辑隐藏」）。
+                它开的是自定义按键面板；NDS 的键位是固定那套（掌机键位没有可换的余地，
+                面板里那 14 个钮也只是给人看的），给一颗点不出结果入口不如不给。
+
+                **只藏入口，不藏这张表** —— 下面那份键位列表照旧列出来（用户明确要
+                「按键说明要显示」），NDS 那套丝印和键值由 `buttonsFor` / `buttonLabel`
+                按机种给。
+
+                同一套门禁还有 `/room` 那颗 `.rail-keybind`（见 ConsoleScene）。
+                `KeyBindingsPanel` 里那套 `soloOnly` 逻辑**留着没删**：入口藏起来之后
+                它在 NDS 下确实走不到了，但删掉的话，哪天要放回入口就得连逻辑一起重写。
+              */}
+              {!soloOnly && (
                 <button
-                  key={player}
                   type="button"
-                  aria-pressed={keysPlayer === player}
-                  onClick={() => setKeysPlayer(player)}
-                  className={`flex-1 px-2 py-1.5 text-[12px] transition-colors ${keysPlayer === player ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
+                  onClick={() => setKeybindOpen(true)}
+                  title={t('keybind.open')}
+                  aria-label={t('keybind.open')}
+                  className="play-edit pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
-                  {t(`keybind.${player}`)}
+                  {t('play.edit')}
                 </button>
-              ))}
+              )}
             </div>
+            {/*
+              P1 / P2 切换只在**单机双人**时才画。
+
+              单人机（NDS）整块不画：它不支持双人，摆一颗「玩家 2」出来等于告诉用户
+              「这台机器能双人」（2026-10-15 用户要求）。键位面板里那颗同理，见
+              `KeyBindingsPanel` 的 `soloOnly`。
+
+              ⚠️ 不画的同时**下面那张表也得跟着锁到 1P** —— `keysPlayer` 的初值可能是
+              `'p2'`（手打 `?room=` 进来时，见那个 useState），不锁的话用户看到的是
+              一整套「玩家 2」的键，却没有地方切回去。
+            */}
+            {!soloOnly && (
+              <div
+                className="mb-3 flex gap-2"
+                role="group"
+                aria-label={t('keybind.open')}
+              >
+                {(['p1', 'p2'] as const).map((player) => (
+                  <button
+                    key={player}
+                    type="button"
+                    aria-pressed={keysPlayer === player}
+                    onClick={() => setKeysPlayer(player)}
+                    className={`flex-1 px-2 py-1.5 text-[12px] transition-colors ${keysPlayer === player ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
+                  >
+                    {t(`keybind.${player}`)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {/*
+              钮名和「有哪几个钮」都按机种来（`buttonsFor` / `buttonLabel` 的
+              `consoleType`）—— NDS 列的是 A / B / X / Y + L / R + L2 / R2 +
+              START / SELECT，不是街机那套 A B C X Y Z / 投币。
+            */}
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
-              {BUTTONS.map((button) => (
+              {buttonsFor(consoleType).map((button) => (
                 <div
                   key={button}
                   className="flex min-w-0 items-center justify-between gap-1 border-b border-ink-800 pb-2"
                 >
                   <dt className="shrink-0 text-[12px] text-ink-300">
-                    {buttonLabel(button, t)}
+                    {buttonLabel(button, t, consoleType)}
                   </dt>
                   <dd className="min-w-0 text-right">
                     <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
-                      {codeLabel(bindings[keysPlayer][button])}
+                      {codeLabel(bindings[soloOnly ? 'p1' : keysPlayer][button])}
                     </kbd>
                   </dd>
                 </div>
@@ -1528,10 +1664,13 @@ export default function PlayScene({
       {/*
         自定义按键。这一页的 `localPlaying` 就是「本机插着卡带没有」——
         房主天然是 true，加入者是 false（他没有本机模拟器，改完立刻生效）。
+
+        `consoleType` 决定面板画哪几个钮、钮叫什么、以及是不是单人机（NDS 收成一个页签）。
       */}
       <KeyBindingsPanel
         open={keybindOpen}
         bindings={bindings}
+        consoleType={consoleType}
         role={netplayState.role}
         localPlaying={Boolean(rom)}
         onChange={(next) => {

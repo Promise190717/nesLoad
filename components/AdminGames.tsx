@@ -13,13 +13,13 @@ import {
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
-import { romLangToFormValue } from '@/lib/rom-lang';
+import { GAME_LANGUAGES, GAME_LANGUAGE_LABEL, romLangToFormValue } from '@/lib/rom-lang';
 import { unwrapRom } from '@/lib/unwrap';
+import AdminAutoCrawl from './AdminAutoCrawl';
 import AdminBulkImport from './AdminBulkImport';
 import AdminLoading from './AdminLoading';
 import { FIELD_CLASS } from './adminStyles';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from './CartridgeSprite';
-import { useI18n } from './I18nProvider';
 
 /** `/api/admin/games` 返回的条目。 */
 interface AdminGame {
@@ -71,12 +71,14 @@ const CONSOLE_OPTIONS: readonly ConsoleType[] = CONSOLE_TYPES;
 /** 列表每页条数。 */
 const PAGE_SIZE = 10;
 
-/** 语言字段落到 DB 里存的是短码，这里给出可读标签。 */
-const LANGUAGE_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: 'zh', label: '中文' },
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日本語' },
-];
+/**
+ * 语言字段落到 DB 里存的是短码，选项与可读标签**都从 `lib/rom-lang.ts` 派生**。
+ *
+ * ⚠️ 2026-10-15 起不再在本文件手抄一份（原来是两个常量各写一遍）——
+ *    加韩语时正是要同时改「下拉选项」和「列表标签」两处，漏一处就是
+ *    「能存进去但列表上显示成 `ko`」。语言清单的唯一出处是 `GAME_LANGUAGES`。
+ */
+const LANGUAGE_OPTIONS = GAME_LANGUAGES;
 
 /**
  * 新增游戏时「语言」下拉的默认值。
@@ -87,11 +89,7 @@ const LANGUAGE_OPTIONS: readonly { value: string; label: string }[] = [
  */
 const DEFAULT_LANGUAGE = 'en';
 
-const LANGUAGE_LABEL: Record<string, string> = {
-  zh: '中文',
-  en: 'English',
-  ja: '日本語',
-};
+const LANGUAGE_LABEL = GAME_LANGUAGE_LABEL;
 
 /** 语言短码转可读名字；老数据若是自由文本则原样返回。 */
 function languageLabel(value: string | null): string | null {
@@ -180,7 +178,6 @@ function imageUrlFromDrop(data: DataTransfer): string | null {
  */
 
 export default function AdminGames() {
-  const { t } = useI18n();
   const router = useRouter();
 
   const [games, setGames] = useState<AdminGame[]>([]);
@@ -489,7 +486,7 @@ export default function AdminGames() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    if (!res.ok) throw new Error(await readError(res, t('admin.drop.imageFailed')));
+    if (!res.ok) throw new Error(await readError(res, '取不到那张图片。'));
     const blob = await res.blob();
     const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'cover');
     setImage(new File([blob], name, { type: blob.type || 'image/png' }));
@@ -513,7 +510,7 @@ export default function AdminGames() {
 
     const url = imageUrlFromDrop(e.dataTransfer);
     if (!url) {
-      setModalNotice({ tone: 'error', text: t('admin.drop.imageFailed') });
+      setModalNotice({ tone: 'error', text: '取不到那张图片。' });
       return;
     }
 
@@ -522,7 +519,7 @@ export default function AdminGames() {
     } catch (error) {
       setModalNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.drop.imageFailed'),
+        text: error instanceof Error ? error.message : '取不到那张图片。',
       });
     }
   };
@@ -551,7 +548,7 @@ export default function AdminGames() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    if (!res.ok) throw new Error(await readError(res, t('admin.scrape.romFailed')));
+    if (!res.ok) throw new Error(await readError(res, '游戏文件获取失败。'));
     const blob = await res.blob();
     const header = res.headers.get('x-file-name');
     const name = (header ? decodeURIComponent(header) : '') || fallbackName || 'rom.zip';
@@ -580,7 +577,7 @@ export default function AdminGames() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.scrape.failed')));
+      if (!res.ok) throw new Error(await readError(res, '读取该页面失败。'));
 
       const data = (await res.json()) as {
         title?: string | null;
@@ -622,12 +619,12 @@ export default function AdminGames() {
       if (data.developer) {
         const match = developerOptions.find((option) => option.name === data.developer);
         if (match) setDeveloperId(match.id);
-        else notes.push(t('admin.scrape.developerMissing', { name: data.developer }));
+        else notes.push(`开发商「${data.developer}」还不在库里 —— 先去建一个再选。`);
       }
 
       // 取字节前先挂一条提示：ROM 有几 MB，不会瞬回，不给字就像卡住了
       if (data.imageUrl || data.romUrl) {
-        setScrapeNotice({ tone: 'ok', text: t('admin.scrape.assets') });
+        setScrapeNotice({ tone: 'ok', text: '正在获取封面与游戏文件…' });
       }
 
       const [cover, romFile] = await Promise.allSettled([
@@ -637,25 +634,25 @@ export default function AdminGames() {
 
       let failed = false;
       if (data.imageUrl && cover.status === 'rejected') {
-        notes.push(t('admin.scrape.coverFailed'));
+        notes.push('封面获取失败。');
         failed = true;
       }
       if (data.romUrl && romFile.status === 'rejected') {
-        notes.push(t('admin.scrape.romFailed'));
+        notes.push('游戏文件获取失败。');
         failed = true;
       }
       // 页面根本没挂文件时明说一句 —— 否则用户会以为「抓到了但没填上」
-      if (!data.romUrl) notes.push(t('admin.scrape.noRom'));
-      else if (!failed && notes.length === 0) notes.push(t('admin.scrape.assetsOk'));
+      if (!data.romUrl) notes.push('该页面没有找到可下载的游戏文件。');
+      else if (!failed && notes.length === 0) notes.push('封面与游戏文件已获取。');
 
       setScrapeNotice({
         tone: failed ? 'error' : 'ok',
-        text: [failed ? '' : t('admin.scrape.ok'), ...notes].filter(Boolean).join(' '),
+        text: [failed ? '' : '已从页面填充。', ...notes].filter(Boolean).join(' '),
       });
     } catch (error) {
       setScrapeNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.scrape.failed'),
+        text: error instanceof Error ? error.message : '读取该页面失败。',
       });
     } finally {
       setScraping(false);
@@ -669,19 +666,19 @@ export default function AdminGames() {
 
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      setModalNotice({ tone: 'error', text: t('admin.title.required') });
+      setModalNotice({ tone: 'error', text: '请填写游戏名。' });
       return;
     }
 
     const yearText = year.trim();
     const parsedYear = yearText ? Number(yearText) : null;
     if (parsedYear !== null && !Number.isInteger(parsedYear)) {
-      setModalNotice({ tone: 'error', text: t('admin.badYear') });
+      setModalNotice({ tone: 'error', text: '年份必须是整数。' });
       return;
     }
 
     if (!isEditing && (!image || !rom)) {
-      setModalNotice({ tone: 'error', text: t('admin.upload.required') });
+      setModalNotice({ tone: 'error', text: '游戏名、封面图片、游戏文件为必传项。' });
       return;
     }
 
@@ -707,7 +704,7 @@ export default function AdminGames() {
             descriptionEn: descriptionEn.trim() || null,
           }),
         });
-        if (!res.ok) throw new Error(await readError(res, t('admin.request.failed')));
+        if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       } else {
         const form = new FormData();
         form.set('title', trimmedTitle);
@@ -725,8 +722,8 @@ export default function AdminGames() {
 
         const res = await fetch('/api/admin/games', { method: 'POST', body: form });
         // 失败时把服务端细节原样抛出来，交给 catch 显示
-        if (!res.ok) throw new Error(await readError(res, t('admin.upload.failed')));
-        setPageNotice({ tone: 'ok', text: t('admin.upload.ok') });
+        if (!res.ok) throw new Error(await readError(res, '上传失败。'));
+        setPageNotice({ tone: 'ok', text: '已上传。' });
         // 列表按 created_at 倒序，新条目在第一页 —— 跳回去才看得到刚传的那条。
         // 本来就在第一页时 setPage 不改值、effect 也不会重跑，所以另加一次版本号。
         setPage(1);
@@ -741,7 +738,7 @@ export default function AdminGames() {
     } catch (error) {
       setModalNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.request.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusy(false);
@@ -749,10 +746,10 @@ export default function AdminGames() {
   };
 
   const remove = async (game: AdminGame) => {
-    if (!window.confirm(t('admin.deleteConfirm', { name: game.title }))) return;
+    if (!window.confirm(`删除「${game.title}」？此操作不可撤销。`)) return;
     try {
       const res = await fetch(`/api/admin/games/${game.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await readError(res, t('admin.request.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       // 行消失就是最好的反馈，不必再弹成功提示
       reloadList();
       setPageNotice(null);
@@ -760,7 +757,7 @@ export default function AdminGames() {
     } catch (error) {
       setPageNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.request.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     }
   };
@@ -768,8 +765,10 @@ export default function AdminGames() {
   return (
     <div className="flex flex-col gap-6">
       <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
-        <div className="mb-3 flex items-center gap-3">
-          <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.list.title')}</h2>
+        {/* ⚠️ `flex-wrap` 不能省：这一行现在有搜索框 + 添加 + 从列表导入 + 自动爬取，
+            窄屏下不折行就会横向溢出（四个钮都是 shrink-0） */}
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <h2 className="shrink-0 text-[12px] text-ink-200">{'已上传的游戏'}</h2>
           {/* 搜索框与按钮同属一个 form，回车等同点击「搜索」 */}
           <form
             onSubmit={(e) => {
@@ -781,14 +780,14 @@ export default function AdminGames() {
             <input
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder={t('admin.searchPlaceholder')}
+              placeholder={'搜索游戏名 / 开发者 / 系列'}
               className={`${FIELD_CLASS} min-w-0 flex-1`}
             />
             <button
               type="submit"
               className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
-              {t('admin.search')}
+              {'搜索'}
             </button>
           </form>
           <button
@@ -796,10 +795,12 @@ export default function AdminGames() {
             onClick={openAdd}
             className="pixel-edge pxw-3 pxc-600 shrink-0 bg-accent px-4 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
           >
-            {t('admin.add')}
+            {'添加'}
           </button>
-          {/* 「添加」旁边那个批量入口 —— 按钮和弹框都在它自己的组件里 */}
+          {/* 「添加」旁边那两个批量入口 —— 按钮和弹框都在它们各自的组件里 */}
           <AdminBulkImport onImported={handleBulkImported} />
+          {/* 「自动爬取」：给一个分类页，一页页爬到最后一页（2026-10-15 加） */}
+          <AdminAutoCrawl onImported={handleBulkImported} />
         </div>
 
         {pageNotice && (
@@ -813,15 +814,15 @@ export default function AdminGames() {
         )}
 
         {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
-        {listPending && <AdminLoading label={t('feedback.loading')} />}
+        {listPending && <AdminLoading label="载入中…" />}
 
         {listLoaded && games.length === 0 && !keyword && (
-          <p className="text-[12px] text-ink-500">{t('admin.list.empty')}</p>
+          <p className="text-[12px] text-ink-500">{'还没有上传任何游戏。'}</p>
         )}
 
         {/* 库里有东西、只是没搜到 —— 和「库是空的」分开说，否则会以为库坏了 */}
         {listLoaded && games.length === 0 && keyword && (
-          <p className="text-[12px] text-ink-500">{t('admin.noMatch')}</p>
+          <p className="text-[12px] text-ink-500">{'没有匹配的游戏。'}</p>
         )}
 
         {games.length > 0 && (
@@ -859,14 +860,14 @@ export default function AdminGames() {
                   onClick={() => openEdit(game)}
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
-                  {t('admin.edit')}
+                  {'编辑'}
                 </button>
                 <button
                   type="button"
                   onClick={() => void remove(game)}
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-danger"
                 >
-                  {t('admin.delete')}
+                  {'删除'}
                 </button>
               </li>
             ))}
@@ -881,16 +882,16 @@ export default function AdminGames() {
               onClick={goPrev}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {t('admin.prev')}
+              {'上一页'}
             </button>
-            <span className="text-[12px] text-ink-500">{t('admin.currentPage', { page })}</span>
+            <span className="text-[12px] text-ink-500">{`第 ${page} 页`}</span>
             <button
               type="button"
               disabled={!hasMore || !nextCursor}
               onClick={goNext}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {t('admin.next')}
+              {'下一页'}
             </button>
           </div>
         )}
@@ -914,7 +915,7 @@ export default function AdminGames() {
           */}
           <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 max-h-[85vh] w-full max-w-[620px] overflow-y-auto p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
-              {isEditing ? t('admin.edit.title') : t('admin.upload.title')}
+              {isEditing ? '编辑游戏' : '添加游戏'}
             </h2>
 
             {/*
@@ -934,7 +935,7 @@ export default function AdminGames() {
                         void autofill();
                       }
                     }}
-                    placeholder={t('admin.scrape.placeholder')}
+                    placeholder={'粘贴游戏页链接，自动填充'}
                     className={`${FIELD_CLASS} min-w-0 flex-1`}
                   />
                   <button
@@ -943,7 +944,7 @@ export default function AdminGames() {
                     disabled={scraping}
                     className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {scraping ? t('admin.scrape.loading') : t('admin.scrape.button')}
+                    {scraping ? '读取中…' : '自动填充'}
                   </button>
                 </div>
                 {scrapeNotice && (
@@ -967,7 +968,7 @@ export default function AdminGames() {
                 填的时候一眼能对上；下面那行小字统一说明「留空回退中文」这条规则。
               */}
               <label className={LABEL_CLASS}>
-                {t('admin.field.title')}
+                {'游戏名'}
                 <input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -976,7 +977,7 @@ export default function AdminGames() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.field.titleEn')}
+                {'游戏名 (EN)'}
                 <input
                   value={titleEn}
                   onChange={(e) => setTitleEn(e.target.value)}
@@ -985,7 +986,7 @@ export default function AdminGames() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.field.console')}
+                {'类型'}
                 <select
                   value={consoleType}
                   onChange={(e) => setConsoleType(e.target.value as ConsoleType)}
@@ -1000,7 +1001,7 @@ export default function AdminGames() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.field.year')}
+                {'年份'}
                 <input
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
@@ -1010,13 +1011,13 @@ export default function AdminGames() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.field.language')}
+                {'语言'}
                 <select
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
                   className={FIELD_CLASS}
                 >
-                  <option value="">{t('admin.language.none')}</option>
+                  <option value="">{'未指定'}</option>
                   {LANGUAGE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -1034,13 +1035,13 @@ export default function AdminGames() {
                 （2026-10-13 起与「语言」并排一行。）
               */}
               <label className={LABEL_CLASS}>
-                {t('admin.field.developer')}
+                {'开发商'}
                 <select
                   value={developerId}
                   onChange={(e) => setDeveloperId(e.target.value)}
                   className={FIELD_CLASS}
                 >
-                  <option value="">{t('admin.developers.none')}</option>
+                  <option value="">{'未指定'}</option>
                   {developerOptions.map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.name}
@@ -1048,23 +1049,23 @@ export default function AdminGames() {
                   ))}
                 </select>
                 <span className="text-[12px] text-ink-600">
-                  {t('admin.developers.addHint')}{' '}
+                  {'列表里没有？先去'}{' '}
                   <Link
                     href="/admin/developers"
                     className="text-ink-400 underline transition-colors hover:text-accent"
                   >
-                    {t('admin.nav.developers')}
+                    {'开发商'}
                   </Link>
                 </span>
                 {unlinkedDeveloper && (
                   <span className="text-[12px] text-danger">
-                    {t('admin.developers.unlinked', { name: unlinkedDeveloper })}
+                    {`这条游戏现在写着「${unlinkedDeveloper}」，但它没接上开发商。请在下面选一个，否则保存后这行字会被清掉。`}
                   </span>
                 )}
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.field.series')}
+                {'系列'}
                 <input
                   value={series}
                   onChange={(e) => setSeries(e.target.value)}
@@ -1073,7 +1074,7 @@ export default function AdminGames() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.field.seriesEn')}
+                {'系列 (EN)'}
                 <input
                   value={seriesEn}
                   onChange={(e) => setSeriesEn(e.target.value)}
@@ -1083,23 +1084,23 @@ export default function AdminGames() {
 
               {/* 英文字段的统一说明，横跨整行，压在几组中英并排字段的下面 */}
               <p className={`${LABEL_CLASS} text-ink-600 sm:col-span-2`}>
-                {t('admin.i18n.hint')}
+                {'选填。英文站显示这一份；留空则回退到中文。'}
               </p>
 
               {/* 说明：本表唯一一个多行字段，`resize-y` 让它可以往下拉高一点写长句 */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.field.description')}
+                {'说明'}
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
-                  placeholder={t('admin.description.placeholder')}
+                  placeholder={'选填。鼠标停在游戏库那张卡片上时会显示这行字。'}
                   className={`${FIELD_CLASS} resize-y`}
                 />
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.field.descriptionEn')}
+                {'说明 (EN)'}
                 <textarea
                   value={descriptionEn}
                   onChange={(e) => setDescriptionEn(e.target.value)}
@@ -1110,12 +1111,12 @@ export default function AdminGames() {
 
               {isEditing ? (
                 <p className="text-[12px] text-ink-500 sm:col-span-2">
-                  {t('admin.files.locked')}
+                  {'封面与游戏文件仅在添加时设置 —— 如需更换请删除后重新添加。'}
                 </p>
               ) : (
                 <>
                   <label className={LABEL_CLASS}>
-                    {t('admin.field.image')}
+                    {'封面图片'}
                     {/*
                       整块都是落点：从资源管理器拖文件、或从网页里拖一张图过来。
                       高亮挂在包裹层上 —— 挂在 input 上没意义（它本身不是落点）。
@@ -1138,7 +1139,7 @@ export default function AdminGames() {
                         onChange={(e) => setImage(e.target.files?.[0] ?? null)}
                         className={FIELD_CLASS}
                       />
-                      <span className="text-[12px] text-ink-600">{t('admin.drop.image')}</span>
+                      <span className="text-[12px] text-ink-600">{'把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。'}</span>
                       {image && (
                         <span className="truncate text-[12px] text-ink-400">{image.name}</span>
                       )}
@@ -1146,7 +1147,7 @@ export default function AdminGames() {
                   </label>
 
                   <label className={LABEL_CLASS}>
-                    {t('admin.field.rom')}
+                    {'游戏文件'}
                     <div
                       onDragOver={(e) => {
                         e.preventDefault();
@@ -1165,7 +1166,7 @@ export default function AdminGames() {
                         onChange={(e) => void onRomChange(e)}
                         className={FIELD_CLASS}
                       />
-                      <span className="text-[12px] text-ink-600">{t('admin.drop.rom')}</span>
+                      <span className="text-[12px] text-ink-600">{'把游戏文件拖到这里，或点选文件。'}</span>
                       {rom && <span className="truncate text-[12px] text-ink-400">{rom.name}</span>}
                     </div>
                   </label>
@@ -1180,11 +1181,11 @@ export default function AdminGames() {
                 >
                   {isEditing
                     ? busy
-                      ? t('admin.saving')
-                      : t('admin.save')
+                      ? '保存中…'
+                      : '保存'
                     : busy
-                      ? t('admin.upload.submitting')
-                      : t('admin.upload.submit')}
+                      ? '上传中…'
+                      : '上传'}
                 </button>
                 <button
                   type="button"
@@ -1192,7 +1193,7 @@ export default function AdminGames() {
                   disabled={busy}
                   className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-4 py-2 text-[12px] text-ink-300 transition-colors enabled:hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {t('admin.cancel')}
+                  {'取消'}
                 </button>
                 {modalNotice && (
                   <span

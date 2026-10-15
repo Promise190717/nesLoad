@@ -3,9 +3,6 @@
 .play-controls { --play-control-size: 26px; }
 .play-size-group { flex-shrink: 0; }
 .play-controls .play-size-group > button { padding-inline: 4px; }
-@media (max-width: 767px), (pointer: coarse) {
-  .play-controls { --play-control-size: 40px; }
-}
 .play-quality-dialog { margin: auto; width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 18px; border: 1px solid var(--color-ink-700); border-radius: 12px; background: var(--color-ink-900); color: var(--color-ink-100); box-shadow: 0 24px 80px rgba(0,0,0,.3); }
 .play-quality-dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
 .play-quality-dialog button { border-radius: 6px; }
@@ -24,6 +21,17 @@
 .play-display { --play-size-scale: 1; width: 100%; height: calc(var(--play-display-height, 80dvh) * var(--play-size-scale)); max-width: min(100%, var(--play-display-max-width, calc((100dvh - 160px) * 4 / 3))); }
 .play-display[data-screen-size='small'] { --play-size-scale: .75; width: 75%; max-width: min(75%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .75)); }
 .play-display[data-screen-size='medium'] { --play-size-scale: .88; width: 88%; max-width: min(88%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .88)); }
+/*
+⚠️ **这个页面的尺寸真源在 JS，不在 CSS**：`--play-display-max-width` 是 `PlayScene.tsx`
+的 `updateSize()` 算好、以内联自定义属性写在元素上的，上面这些 `var(..., 兜底值)`
+的兜底**永远轮不到**。要改屏幕占位大小就去改 `updateSize()`。
+
+NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一致**（统一按 4/3 算）——
+让它按自己的 2:3 缩窄的话，切换游戏时屏幕会忽大忽小、形状突变，很突兀。
+竖屏画面在里面居中内缩，两侧多出来的部分由屏幕自己的黑底
+（`ConsoleScreen` 根节点是 `bg-black` + `canvas { object-fit: contain }`）自然填黑，
+读起来还是一整块屏幕。**所以这里没有任何 NDS 例外规则，这是刻意的。**
+*/
 .play-display .play-frame,
 .play-display .play-frame > div { height: 100%; }
 .play-game-screen:not(:fullscreen) { height: 100%; aspect-ratio: auto; }
@@ -125,8 +133,45 @@
   .play-controls { column-gap: 16px; padding-inline: 8px; }
 }
 
+/*
+ * `/play` 的「移动端形态」= **只看设备，不看窗口宽度**（2026-10-15 用户要求）。
+ *
+ * 判据是 `<html data-mobile>`（`'on'` / `'off'`）：首屏由 `app/layout.tsx` 的内联脚本
+ * 按 UA / 触摸能力写入，完整理由见 `lib/device.ts`。为什么不看宽度 —— 桌面端把窗口拉窄、
+ * 平板横屏，宽度都会撒谎；这里要回答的是「手上是什么设备」。和整间屋子换掌机
+ * （`ConsoleScene` 的 `readMobileFlag()`）是同一套规矩。
+ *
+ * ⚠️ 下面这几条**不能**写回 `@media (max-width: 767px)`：
+ *   · `.play-touch` 一窄就冒出来 —— 桌面端键盘还在手上，它只会挡住右栏；
+ *   · `.play-keys` 一窄就消失 —— 窄窗口的桌面端正需要那张表。
+ * 触屏目标尺寸（40px 那批）同理：那是给手指的，不是给窄窗口的。
+ *
+ * 纯版式那几条（workspace 收成单列、屏幕按 4:3、sidebar 堆叠、overlay 内边距）
+ * **留在下面那个宽度媒体查询里** —— 它们回答的才是「现在有多宽」，窄窗口照样要收。
+ */
 .play-touch { display: none; }
-@media (max-width: 767px), (pointer: coarse) {
+:root[data-mobile='on'] .play-controls { --play-control-size: 40px; }
+:root[data-mobile='on'] .play-keys { display: none; }
+:root[data-mobile='on'] .play-touch {
+  display: block;
+  width: 100%;
+  --pad-btn: clamp(30px, 8vw, 50px);
+  --pad-font: 14px;
+  padding: 12px 8px max(16px, env(safe-area-inset-bottom));
+}
+:root[data-mobile='on'] .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+:root[data-mobile='on'] .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
+:root[data-mobile='on'] .play-touch-system button,
+:root[data-mobile='on'] .play-shoulders button { min-height: 40px; min-width: 76px; }
+:root[data-mobile='on'] .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
+:root[data-mobile='on'] .play-controls > li { min-height: 52px; }
+:root[data-mobile='on'] .play-controls > li button { min-width: 40px; min-height: 40px; height: 40px; }
+:root[data-mobile='on'] .play-controls .play-icon-button { width: 40px; min-width: 40px; max-width: 40px; height: 40px; min-height: 40px; max-height: 40px; padding: 0; flex-basis: 40px; }
+:root[data-mobile='on'] .play-controls > li span > span > button { min-width: 6px; min-height: 24px; height: 24px; }
+:root[data-mobile='on'] .play-room input { min-height: 44px; }
+:root[data-mobile='on'] .play-room button { min-height: 40px; }
+:root[data-mobile='on'] .play-page { padding-bottom: env(safe-area-inset-bottom); }
+@media (max-width: 767px) {
   .play-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
   .play-stage { position: static; flex-direction: column; justify-content: flex-start; gap: 20px; min-height: 0; padding: 0; }
   .play-display,
@@ -136,35 +181,22 @@
   .play-overlay { padding: 20px 12px; }
   .play-sidebar { display: flex; flex-direction: column; min-width: 0; }
   .play-sidebar > * { width: 100%; min-width: 0; }
-  .play-keys { display: none; }
-  .play-touch {
-    display: block;
-    width: 100%;
-    --pad-btn: clamp(30px, 8vw, 50px);
-    --pad-font: 14px;
-    padding: 12px 8px max(16px, env(safe-area-inset-bottom));
-  }
-  .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
-  .play-touch-system button, .play-shoulders button { min-height: 40px; min-width: 76px; }
-  .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
   .play-controls { column-gap: 16px; }
-  .play-controls > li { min-height: 52px; }
-  .play-controls > li button { min-width: 40px; min-height: 40px; height: 40px; }
-  .play-controls .play-icon-button { width: 40px; min-width: 40px; max-width: 40px; height: 40px; min-height: 40px; max-height: 40px; padding: 0; flex-basis: 40px; }
-  .play-controls > li span > span > button { min-width: 6px; min-height: 24px; height: 24px; }
-  .play-room input { min-height: 44px; }
-  .play-room button { min-height: 40px; }
-  .play-page { padding-bottom: env(safe-area-inset-bottom); }
 }
 @media (max-width: 359px) {
-  .play-touch { --pad-btn: 30px; padding-inline: 2px; }
-  .play-touch-main { gap: 8px; }
+  /*
+   * ⚠️ 这几条**必须带上 `:root[data-mobile='on']` 前缀**：手柄本体那两条规则的
+   * 特异性是 0,3,0（`:root` + `[data-mobile]` + `.play-touch`），只写 `.play-touch`
+   * 会被它压住 —— 小屏那档 `--pad-btn: 30px` 就成了死规则，按钮还是 50px 顶出去。
+   */
+  :root[data-mobile='on'] .play-touch { --pad-btn: 30px; padding-inline: 2px; }
+  :root[data-mobile='on'] .play-touch-main { gap: 8px; }
   .play-controls { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-height: 540px) and (orientation: landscape) and (pointer: coarse) {
   .play-display { max-width: min(100%, 62vh); }
-  .play-touch { --pad-btn: 38px; max-width: 600px; }
+  /* 同上：特异性要压过手柄本体那条，否则横屏这档 38px 也是死的。 */
+  :root[data-mobile='on'] .play-touch { --pad-btn: 38px; max-width: 600px; }
 }
 
 /* Homepage: a quiet arcade backdrop, clear entry points, and shared console cards. */

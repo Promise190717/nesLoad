@@ -19,6 +19,11 @@
  *
  * 双语：抓完主语言那一份，再**尽力**抓一次另一语言（失败就留空，前台会自动回退中文）。
  *
+ * ⚠️ **2026-10-15：`fileName` 是「一份语言一个地址」，不是只给一个。**
+ *    所以除了一直有的 `romUrl` / `romName` / `romLang`（挑出来的那一份，手动添加那条路在用），
+ *    响应里多带一个 `roms` —— **整张语言表**，并且逐份查过重。「从列表导入」靠它把
+ *    一款游戏的中 / 英 / 日 / 韩 四个版本各导一条（见 components/AdminBulkImport）。
+ *
  * 鉴权自查（本目录的接口都不挂 middleware，原因见 admin-guard.ts）。
  */
 
@@ -128,59 +133,83 @@ function linkText(html: string, kind: 'game-developer' | 'game-series'): string 
 /**
  * ROM 多语言版本时挑选的先后：**英文 → 中文 → 日文**，都没有就退到第一个。
  * `cn` / `zh` 都算中文（上游两种写法都用过，比较前统一转小写）。
+ *
+ * ⚠️ 这一套只服务**手动添加那条路**（表单一次只能填一份 ROM）。「从列表导入」不挑 ——
+ *    它把 `roms` 里每一份都导一遍（2026-10-15）。
  */
 const ROM_LANG_PRIORITY = ['en', 'cn', 'zh', 'ja'] as const;
 
+/** `fileName` 里的一份语言版本。 */
+interface RomVariant {
+  /** 上游那个 key（en / zh / cn / ja / ko…） */
+  lang: string;
+  /** 站内短码（zh / en / ja / ko）；上游给了我们不认的语言就是 null */
+  language: string | null;
+  /** 绝对地址（相对路径已补上主站域名） */
+  url: string;
+  /** 原始文件名 —— FBNeo 认它当驱动名，改不得 */
+  name: string;
+}
+
 /**
- * 从 RSC 数据块里抠出 ROM 下载地址。
+ * 从 RSC 数据块里抠出**所有** ROM 下载地址（一份语言一条）。
  *
  * 页面是 Next App Router 渲染的，`self.__next_f.push([1,"…"])` 里带着**完整游戏对象**，
  * 其中 `fileName` 就是 ROM 的地址表（JSON-LD 里没有这个字段）：
- *   "fileName":{"ja":"https://files.retrogamesnexus.com/games/roms/ultra-seven-ja.zip"}
- * key 是 ROM 的语言版本（ja / en / cn…），value 是绝对地址。
- *
- * 顺手把选中那条的**语言 key** 也带出去 —— 表单的「语言」下拉就靠它填
- * （那个字段是判重的一环：同名 + 同语言才算重复）。
+ *   "fileName":{"en":"https://files.retrogamesnexus.com/games/roms/kirby-squeak-squad.nds",
+ *               "zh":"…-cn.nds","ja":"…-ja.nds","ko":"…-ko.nds"}
+ * key 是 ROM 的语言版本，value 是地址。**顺序保持上游给的顺序**，这里不重排。
  *
  * ⚠️ 这一段在 HTML 里是**转义过的**（`\"` 而不是 `"`），所以按转义形态匹配。
  * ⚠️ 先拿 slug 定个锚点再往后找 —— 同一份数据里还有 `relatedGames`，
- *    直接全局搜第一处 `fileName` 将来未必还是主游戏那条。
+ *    全局搜第一处 `fileName` 会摸到**别的游戏**（实测 kirby-squeak-squad 那一页
+ *    后面还跟着十几个相关游戏的 `fileName`）。锚点窗口 4000 字符够用：
+ *    实测主游戏那一份落在锚点后第 3000 字符上下。
  * ⚠️ 值是**两种形态**，同一页里会混着出现（2026-10-14 踩过）：
  *    · 绝对地址 `https://files.retrogamesnexus.com/games/roms/x.zip`
  *    · 站内相对路径 `/games/roms/Contra.nes`
  *    只认 http(s) 会把后一批全漏掉 —— 表现就是 NES 那些游戏一律报「该页面没有游戏文件」。
  *    相对路径的 base 是**主站**（`retrogamesnexus.com`），不是 `files.` 那个子域：
  *    实测 `files.…/games/roms/Contra.nes` 是 404，主站那个才是 200。
+ * ⚠️ `cn` / `zh` 都算中文，所以按**站内短码**去重 —— 上游两种写法都挂着时只留先出现的那个
+ *    （不然会往库里灌两条一模一样的「中文版」）。
  */
-function romFromHtml(
-  html: string,
-  slug: string
-): { url: string; name: string; lang: string } | null {
+function romsFromHtml(html: string, slug: string): RomVariant[] {
   const anchor = html.indexOf(`\\"slug\\":\\"${slug}\\"`);
   const from = anchor === -1 ? 0 : anchor;
   const segment = html.slice(from, from + 4000);
 
   const block = segment.match(/\\"fileName\\":\{([^}]*)\}/);
-  if (!block) return null;
+  if (!block) return [];
 
-  const entries: { lang: string; url: string }[] = [];
+  const out: RomVariant[] = [];
+  const seen = new Set<string>();
+
   for (const match of block[1].matchAll(/\\"([\w-]+)\\":\\"(https?:\/\/[^\\"]+|\/[^\\"]+)\\"/g)) {
     // 统一转小写再比 —— 上游的 key 大小写不一定稳；
     // 相对路径补上主站域名（后面取文件名、交给 fetch-rom 抓都用得上）
-    entries.push({
-      lang: match[1].toLowerCase(),
-      url: match[2].startsWith('/') ? `${UPSTREAM_SITE}${match[2]}` : match[2],
-    });
+    const lang = match[1].toLowerCase();
+    const url = match[2].startsWith('/') ? `${UPSTREAM_SITE}${match[2]}` : match[2];
+    const name = decodeURIComponent(url.split('/').pop() ?? '');
+    if (!name) continue;
+
+    const language = romLangToFormValue(lang);
+    // 认不出的语言拿它自己的 key 去重 —— 那是它唯一的身份
+    const key = language ?? lang;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({ lang, language, url, name });
   }
-  if (!entries.length) return null;
+  return out;
+}
 
-  // 按语言优先级挑一个；都没有就退到第一个（上游只给一个版本时就是这种情形）
-  const picked =
-    ROM_LANG_PRIORITY.map((lang) => entries.find((entry) => entry.lang === lang)).find(Boolean) ??
-    entries[0];
-
-  const name = decodeURIComponent(picked.url.split('/').pop() ?? '');
-  return name ? { url: picked.url, name, lang: picked.lang } : null;
+/** 按语言优先级从整张表里挑一份（手动添加那条路用）；表空就是 null。 */
+function pickRom(roms: readonly RomVariant[]): RomVariant | null {
+  if (!roms.length) return null;
+  return (
+    ROM_LANG_PRIORITY.map((lang) => roms.find((rom) => rom.lang === lang)).find(Boolean) ?? roms[0]
+  );
 }
 
 interface ScrapedPage {
@@ -194,11 +223,16 @@ interface ScrapedPage {
   developer: string | null;
   series: string | null;
   imageUrl: string | null;
-  /** ROM 下载地址（RSC 数据里的 `fileName`），页面没挂文件时是 null */
+  /**
+   * `fileName` 里**每一个**语言版本（2026-10-15 加）。
+   * 「从列表导入」照它逐语言入库；手动添加那条路只用下面挑好的那一份。
+   */
+  roms: RomVariant[];
+  /** 从 `roms` 里按优先级挑出来的那一份的下载地址，页面没挂文件时是 null */
   romUrl: string | null;
   /** ROM 原始文件名 —— FBNeo 认它当驱动名，改不得（2026-10-14 加） */
   romName: string | null;
-  /** 选中那个 ROM 的语言 key（en / cn / zh / ja…）—— 表单「语言」下拉照它填 */
+  /** 挑中那一份的语言 key（en / cn / zh / ja…）—— 表单「语言」下拉照它填 */
   romLang: string | null;
 }
 
@@ -210,8 +244,10 @@ async function scrapeGamePage(locale: string, slug: string): Promise<ScrapedPage
   const image = node.image as { url?: string } | undefined;
   const published = typeof node.datePublished === 'string' ? node.datePublished : '';
   const year = published ? Number.parseInt(published.slice(0, 4), 10) : Number.NaN;
-  // ROM 地址只在 RSC 数据里，JSON-LD 没有（见 romFromHtml 的注释）
-  const rom = romFromHtml(html, slug);
+  // ROM 地址只在 RSC 数据里，JSON-LD 没有（见 romsFromHtml 的注释）
+  const roms = romsFromHtml(html, slug);
+  // 手动添加那条路要的「一份」：按优先级挑（见 pickRom）
+  const rom = pickRom(roms);
 
   return {
     title: typeof node.name === 'string' ? node.name : null,
@@ -222,6 +258,7 @@ async function scrapeGamePage(locale: string, slug: string): Promise<ScrapedPage
     developer: linkText(html, 'game-developer'),
     series: linkText(html, 'game-series'),
     imageUrl: typeof image?.url === 'string' ? image.url : null,
+    roms,
     romUrl: rom?.url ?? null,
     romName: rom?.name ?? null,
     romLang: rom?.lang ?? null,
@@ -274,24 +311,58 @@ export async function POST(request: Request) {
     const romLang = primary.romLang ?? secondary?.romLang ?? null;
 
     /*
-     * 顺手查一次重：判据与 POST /api/admin/games 里那次**完全一致**（都走 findGameDuplicate），
-     * 否则会出现「这里说不重复、下载完上传却被判重复」。
+     * 顺手查一次重：判据与 POST /api/admin/games 里那次**完全一致**（都走 findGameDuplicate，
+     * 同名 + 同机种 + 同语言），否则会出现「这里说不重复、下载完上传却被判重复」。
+     *
+     * ⚠️ 机种这一维取**先定的那个值**（primary 优先，再看 secondary）—— 和下面响应体里
+     *    `consoleType` 用的是同一个表达式，别再算一遍，否则两条路径会漂。
      *
      * 调用方（批量导入）靠它**先决定要不要去下载封面和 ROM** —— 那一步是几 MB，
-     * 是整条链路里最慢的一段；库里已有的（同名 + 同语言）直接跳过，不白下载一遍。
+     * 是整条链路里最慢的一段；库里已有的（同名 + 同机种 + 同语言）直接跳过，不白下载一遍。
      * ⚠️ 查重失败（D1 抖一下）**不该拦住抓取本身** —— 上传那一步还会再判一次，那才是兜底。
      */
+    const consoleType = primary.consoleType ?? secondary?.consoleType ?? null;
     let duplicateOf: { id: string; title: string; language: string | null } | null = null;
     try {
-      duplicateOf = title ? await findGameDuplicate(title, romLangToFormValue(romLang)) : null;
+      duplicateOf = title
+        ? await findGameDuplicate(title, romLangToFormValue(romLang), consoleType)
+        : null;
     } catch (error) {
       console.warn('[admin] 预检查重失败，交给上传那一步兜底', error);
     }
 
+    /*
+     * 「从列表导入」要**一款多语言全导**（2026-10-15 用户要求）：上游 `fileName` 一份语言
+     * 一个地址（实测 kirby-squeak-squad 是 en / zh / ja / ko 四份），所以整张表都带出去，
+     * 并且**逐份查一次重** —— 判据与上传那一步、与上面那次完全一致（findGameDuplicate）。
+     *
+     * 为什么不让调用方自己判：它手里只有 slug，「标题 + 机种 + 语言」都得先解析出来。
+     * 而下载封面 / ROM 是整条链路里最慢的一段（几 MB × 语言数），在服务端先判掉能省一大半流量。
+     *
+     * ⚠️ 只对**认得出站内短码**的那几份查重：认不出的语言（`fr` / `es`…）如果拿 `null`
+     *    去查，会命中「没标语言」的老记录 —— 那不是同一盘 ROM，不能算重复。
+     *    那几份一律 `duplicate: false`，由上传那一步兜底判。
+     * ⚠️ 查重失败（D1 抖一下）同样不该拦住抓取 —— 置 false，交给上传那一步。
+     */
+    const variants = primary.roms.length ? primary.roms : secondary?.roms ?? [];
+    const roms = await Promise.all(
+      variants.map(async (variant) => {
+        let duplicate = false;
+        if (title && variant.language) {
+          try {
+            duplicate = (await findGameDuplicate(title, variant.language, consoleType)) !== null;
+          } catch (error) {
+            console.warn('[admin] 逐语言预检查重失败，交给上传那一步兜底', error);
+          }
+        }
+        return { ...variant, duplicate };
+      })
+    );
+
     return NextResponse.json({
       title,
       titleEn: en?.title ?? null,
-      consoleType: primary.consoleType ?? secondary?.consoleType ?? null,
+      consoleType,
       year: primary.year ?? secondary?.year ?? null,
       developer: zh?.developer ?? primary.developer,
       series: zh?.series ?? primary.series,
@@ -301,6 +372,13 @@ export async function POST(request: Request) {
       // 封面 / ROM 的**地址**（字节不在这里取）：主语言那份优先 ——
       // 不同语言页面挂的 ROM 版本可能不同（中文页给日版、英文页给美版）
       imageUrl: primary.imageUrl ?? secondary?.imageUrl ?? null,
+      /**
+       * `fileName` 里**每一个**语言版本（2026-10-15 加）—— 「从列表导入」照它逐份入库：
+       * `language` 是站内短码（zh / en / ja / ko），认不出的语言是 null；
+       * `duplicate` 只对认得的那几种算（见上面注释）。
+       */
+      roms,
+      // 下面三个是「挑出来的那一份」，手动添加（AdminGames 自动填充）在用，别删
       romUrl: primary.romUrl ?? secondary?.romUrl ?? null,
       romName: primary.romName ?? secondary?.romName ?? null,
       romLang,

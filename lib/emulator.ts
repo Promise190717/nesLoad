@@ -6,10 +6,12 @@ import { installAudioTap } from './audio-tap';
 import { NEOGEO_BIOS_NAME } from './bios';
 import { downloadFile } from './download';
 import {
+  ALL_BUTTONS,
   bindingsToRetroArch,
   DEFAULT_BINDINGS,
   type ButtonName,
   type KeyBindings,
+  type PlayerBindings,
 } from './keybindings';
 import { unwrapRom } from './unwrap';
 
@@ -26,8 +28,16 @@ installAudioTap();
  *
  * 2026-10-14 从四个扩到十二个：GB / GBC / MD / GG / SMS / 32X / WonderSwan /
  * Neo Geo Pocket。挑的都是「核心在我们用的那个 WASM 构建里现成有」的机种 ——
- * 做法、以及为什么 NDS / N64 / 土星 / Jaguar 上不了（那个构建里根本没编），
+ * 做法、以及为什么 N64 / 土星 / Jaguar 上不了（那个构建里根本没编），
  * 记在 `README.md` 的「机种」一节。
+ *
+ * ⚠️ 2026-10-15 又加了 NDS（melonds）。⚠️ **它和上面那批不是一回事**：
+ *    那个 `arianrhodsandlot/retroarch-emscripten-build` 构建里**没有** melonds，
+ *    `public/cores/` 下现在那对 `melonds_libretro.js` / `.wasm` 是从 EmulatorJS
+ *    的 `melonds-wasm.data` 里解出来的（那是个 7z 壳）。胶水形态和本站其它核心不同，
+ *    启动时那套 `globalThis.__NESL_*` 补丁是照着 32X 那份的做法打的。
+ *    ⚠️ **换 / 重传这对文件时别再当成「从 jsdelivr 拿现成 zip」**，详见
+ *    `.workbuddy-ai/memory/analysis-nds-retrogamesnexus.md`。
  */
 export type ConsoleType =
   | 'nes'
@@ -35,6 +45,7 @@ export type ConsoleType =
   | 'gb'
   | 'gbc'
   | 'gba'
+  | 'nds'
   | 'md'
   | 'gg'
   | 'sms'
@@ -107,6 +118,19 @@ const CORE_MAP: Record<ConsoleType, string> = {
   gbc: 'mgba',
   gba: 'mgba',
   /*
+   * NDS 走 `melonds`（Nostalgist 的 systemCoreMap 里 `nds` 就指向它）。
+   *
+   * ⚠️ 和上面那批**来源不同**：那个 `retroarch-emscripten-build@v1.22.2` 里没有
+   *    melonds，`public/cores/melonds_libretro.{js,wasm}` 是从 EmulatorJS 的
+   *    `melonds-wasm.data`（7z 壳）里解出来的。见 `ConsoleType` 上面那段注释。
+   *
+   * ⚠️ NDS 是**双屏**（上屏 256×192、下屏 256×192，竖排 256×384），
+   *    和这里 `SCREEN_WIDTH / SCREEN_HEIGHT` 那个 4:3 基准不是一回事。
+   *    melonds 的核心会自己按 canvas 尺寸摆两屏，所以基准值先照旧用 720×540 ——
+   *    显示比例是否合适得看实际效果再调（未验证）。
+   */
+  nds: 'melonds',
+  /*
    * 世嘉三台共用一个核心：Genesis Plus GX 一套吃 MD / Master System / Game Gear
    * （还能吃 SG-1000）。**这是本批里性价比最高的一步**：一个核心换三台机种。
    *
@@ -153,12 +177,32 @@ const CORE_MAP: Record<ConsoleType, string> = {
 export const SCREEN_WIDTH = 720;
 export const SCREEN_HEIGHT = 540;
 
+/*
+ * 各机种的**初始画布尺寸**（传给 Nostalgist 的 `size`）。
+ *
+ * 为什么要按机种分，而不是全部 720×540：
+ *
+ * NDS 是**竖屏双屏**（上屏 256×192、下屏 256×192 竖排 = 256×384，比例 2:3）。
+ * 传 4:3 的 720×540 给它，核心会按这个画幅去摆两屏 —— 结果是被 letterbox 成
+ * 中间一条竖带（2026-10-15 实测：canvas 512×384 时只看到一条竖条）。
+ * 传 256×384 时核心自己就把上下两屏铺满了，不需要前端另做双屏布局。
+ *
+ * 其余机种维持 4:3（720×540），行为和以前完全一致。
+ *
+ * ⚠️ 这只是**初始值**。核心启动后会按 `devicePixelRatio` 重设后备存储来保清晰度
+ * （见上面 `SCREEN_WIDTH` 那段注释），显示尺寸另由 CSS 决定，两者不互相牵制。
+ * 所以 NDS 这里写 256×384 不会让它变糊 —— 那只是「告诉核心按什么画幅摆两屏」。
+ */
+const INITIAL_SIZE: Partial<Record<ConsoleType, { width: number; height: number }>> = {
+  nds: { width: 256, height: 384 },
+};
+
 /**
  * 核心的**本站路径**（`public/cores/`）。
  *
  * 2026-10-14 之后：**除了 NES / SFC，全部机种的核心都走本地**。
  * NES / SFC 一直是从 jsdelivr 拉的、从来没出过问题，所以不动它们；
- * 其余十个（gba / gb / gbc / md / gg / sms / 32x / ws / ngp / arcade）都在这里，
+ * 其余十一个（gba / gb / gbc / nds / md / gg / sms / 32x / ws / ngp / arcade）都在这里，
  * 因为核心包是整个项目里**唯一在运行时才去下载的东西**，而 jsdelivr 在国内经常
  * 连不上或被限速 —— 拉不动就是「拖进去毫无反应」，用户看不出是网络问题。
  * 放进 `public/` 之后这一段就再没有网络变量了（代价是仓库多了几十 MB，
@@ -183,6 +227,8 @@ const LOCAL_CORE_CONSOLES = new Set<ConsoleType>([
   'gba',
   'gb',
   'gbc',
+  // NDS 的 melonds **必须**走本站：上游那个构建里没有它，CDN 那条路是死的
+  'nds',
   'md',
   'gg',
   'sms',
@@ -218,6 +264,13 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
   gb: 'gb',
   gbc: 'gbc',
   gba: 'gba',
+  /*
+   * NDS 和 WonderSwan 同档 —— **没有可用的固定指纹**，只能靠扩展名。
+   * `.nds` 是裸卡带镜像；`.dsi` 是 DSi 增强版卡带（同一台机器、同一个核心，
+   * 落同一档就行，`.wsc` → `ws` 那条是同样的处理）。
+   */
+  nds: 'nds',
+  dsi: 'nds',
   md: 'md',
   gen: 'md',
   smd: 'md',
@@ -394,6 +447,17 @@ function looksLikeNgp(bytes: Uint8Array): boolean {
   return ascii(bytes, 0, NGP_SIGNATURE.length) === NGP_SIGNATURE;
 }
 
+/**
+ * zip 的本地文件头 `PK\x03\x04`。
+ *
+ * 两处**必须共用同一份判断**：`detectConsole` 里「文件头是 zip → 街机」那条，
+ * 和末尾「扩展名回退到 `.zip` 时也必须真是 zip」那条 —— 后者 2026-10-15 才补上，
+ * 起因见 `detectConsole` 末尾那段注释。
+ */
+function looksLikeZip(bytes: Uint8Array): boolean {
+  return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+}
+
 export function consoleFromExtension(fileName: string): ConsoleType | null {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   return EXTENSION_MAP[ext] ?? null;
@@ -417,9 +481,13 @@ export function consoleFromExtension(fileName: string): ConsoleType | null {
  *   9. 全都认不出 → 扩展名回退（`EXTENSION_MAP`）。
  *
  * WonderSwan **没有固定指纹**（ROM 头就是几条跳转指令加校验和，不像上面那些有
- * 版权串可认），所以它只能靠扩展名（`.ws` / `.wsc`）—— 这是本表里唯一一台
- * 「必须带对扩展名」的机种，刻意不做弱判据：把别的 ROM 猜成 WonderSwan，
- * 换来的是核心静默失败，比「认不出」更难查。
+ * 版权串可认），所以它只能靠扩展名（`.ws` / `.wsc`）。
+ *
+ * NDS（2026-10-15 加）同样是**只能靠扩展名**（`.nds` / `.dsi`）：
+ * 它的头在 0x00–0x200 之间确实有 `$$` / `AA55` 一类签名，但**位置和内容随加密状态变**
+ * （加密卡带的头是密文），拿它当判据比扩展名更容易误判 —— 所以刻意不加指纹分支，
+ * 多一层误判只是把「认不出」换成「核心静默失败」。这两台是本表里唯一
+ * 「必须带对扩展名」的机种。
  */
 export async function detectConsole(file: File): Promise<ConsoleType | null> {
   const head = new Uint8Array(await file.slice(0, 0x10000).arrayBuffer());
@@ -440,7 +508,7 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
    * 代价是「把一盘 NES ROM 压成 zip」也会被认成街机 —— 这种玩法在这个项目里
    * 不支持，会静默失败（FBNeo 读不出 .nes）。README 的「已知限制」里写明了。
    */
-  if (head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04) {
+  if (looksLikeZip(head)) {
     return 'arcade';
   }
 
@@ -463,7 +531,25 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
 
   if (looksLikeSnes(head, file.size)) return 'snes';
 
-  return consoleFromExtension(file.name);
+  /*
+   * 扩展名回退。
+   *
+   * ⚠️ **`zip → arcade` 这条回退必须要求文件头真是 zip**（2026-10-15 补）。
+   * `EXTENSION_MAP` 把 `zip` 映到街机，前提是「真 romset 就是 zip」；而网上
+   * **把 7z 改名成 `.zip`** 的情况大量存在（NDS / PS1 的 ROM 站尤其多）。
+   * 那种文件走到这里时文件头不是 `PK`，判成街机只会让 FBNeo 拿文件名去查驱动表，
+   * 查不到就画一句 `THIS IS NOT A BUG !`（实测原文在
+   * `public/cores/fbneo_libretro.wasm` 里）—— 用户和排查的人都看不出是格式问题。
+   *
+   * 返回 `null` 之后调用方报「机种认不出」，而 `unsupportedArchive()` 认得出它是 7z，
+   * 界面据此给一句准话。**比「静默走错核心」好得多。**
+   *
+   * ⚠️ 真 7z 现在**在 `unwrapRom` 里就被拆开了**（见 `lib/unwrap.ts`），走不到这儿 ——
+   *    这条兜的是「拆包失败」和「是 rar」那两种情况。
+   */
+  const byExtension = consoleFromExtension(file.name);
+  if (byExtension === 'arcade' && !looksLikeZip(head)) return null;
+  return byExtension;
 }
 
 /**
@@ -584,10 +670,367 @@ function overrideInjectionKeyMap(nostalgist: Nostalgist, launched: KeyBindings):
     (player === 1 ? launched.p1 : launched.p2)[button as ButtonName];
 }
 
+/**
+ * EJS 核（现在只有 NDS 的 melonds）的 Module —— 只写我们真正用到的那几样。
+ *
+ * `[key: string]: unknown` 是为了按名字探导出面（`module['_toggleMainLoop']`）。
+ */
+interface EjsModule {
+  cwrap(
+    name: string,
+    returnType: string,
+    argTypes: string[]
+  ): (...args: unknown[]) => unknown;
+  /**
+   * ⚠️ **每次用都要现读**：内存增长时核心会把 `Module.HEAPU8` 换成新的视图
+   * （`updateMemoryViews()` 里那句 `Module["HEAPU8"]=HEAPU8=new Uint8Array(b)`），
+   * 缓存住就会读到一个已经作废的堆。
+   */
+  HEAPU8: Uint8Array;
+  FS: {
+    writeFile(path: string, data: Uint8Array): void;
+    unlink(path: string): void;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * RetroPad 钮号 —— libretro 的 `RETRO_DEVICE_ID_JOYPAD_*`，也就是 EJS 的
+ * `simulate_input(player, id, value)` 要的那个 id。
+ *
+ * 照抄 EmulatorJS 那份输入驱动里的 `keymap[]`
+ * （`EmulatorJS/RetroArch` 的 `input/drivers/emulatorjs_input.c`，源头是上游的
+ * `rwebinput_input.c`）：
+ *
+ *   0 b · 1 y · 2 select · 3 start · 4 up · 5 down · 6 left · 7 right
+ *   8 a · 9 x · 10 l · 11 r · 12 l2 · 13 r2 · 14 l3 · 15 r3
+ *
+ * ⚠️ **顺序和 `ALL_BUTTONS` 不一样**，别照那张表抄 —— `ALL_BUTTONS` 是「面板上怎么排」，
+ *    这张是「核心认几号」，两者只有名字重合。
+ */
+const EJS_JOYPAD_ID: Record<ButtonName, number> = {
+  b: 0,
+  y: 1,
+  select: 2,
+  start: 3,
+  up: 4,
+  down: 5,
+  left: 6,
+  right: 7,
+  a: 8,
+  x: 9,
+  l: 10,
+  r: 11,
+  l2: 12,
+  r2: 13,
+};
+
+/** 见 `createEjsControl`。几个方法都是**同步**的 —— 核心那几个导出本来就是同步调用。 */
+interface EjsControl {
+  setPaused(paused: boolean): void;
+  saveState(): Blob;
+  loadState(bytes: Uint8Array): void;
+  restart(): void;
+  /**
+   * 把某个钮按下 / 松开（EJS 的 `simulate_input`）。**`player` 是 0 基** ——
+   * 它的那张表就是 `down_1`…`down_4` 四个槽，0 号对应本机的 1P。
+   *
+   * `null` = 这个 EJS 核没导出 `simulate_input`（现在的 melonds 有）。判空的那一头
+   * 就是 `attachEjsKeyboard` —— 没有它，键盘桥挂上去也是白挂。
+   */
+  simulate: ((player: number, button: ButtonName, down: boolean) => void) | null;
+}
+
+/**
+ * 状态在虚拟文件系统里的落脚点。
+ *
+ * 照抄 EJS 前端（`GameManager.loadState`）：**写根目录的绝对路径、按相对名读回来**。
+ * 名字固定 `game.state`，和 ROM 名无关 —— 它是每次读档时现写现读的临时文件，不像
+ * RetroArch 自己那套 `<ROM 名>.state` 需要和内容文件名对得上。
+ */
+const EJS_STATE_PATH = '/game.state';
+const EJS_STATE_NAME = 'game.state';
+
+/**
+ * EJS 核的运行时控制面。
+ *
+ * **为什么要另开一条路**（2026-10-15）：`public/cores/melonds_libretro.{js,wasm}` 是从
+ * EmulatorJS 的 `melonds-wasm.data` 里解出来的（wasm 里有 `Built for EmulatorJS`），
+ * 它的导出面和另外 7 个本地核**不是一套** —— 它**没有** `_cmd_toggle_pause` /
+ * `_cmd_load_state` / `_cmd_reset`，而 Nostalgist 的 `pause()` / `loadState()` /
+ * `restart()` 恰恰只会发这三条命令（`sendCommand()` 里那张
+ * `PAUSE_TOGGLE → _cmd_toggle_pause` 表）；这三条打不到核心，就只剩「字符串队列」
+ * 那条退路 —— 而它在 NDS 上也是打不通的（2026-10-15 实测：暂停按了没动静、存档
+ * 一直卡着、重置也没用）。存档还多一层：Nostalgist 的 `saveState()` 等的是虚拟文件
+ * 系统里的 `<ROM 名>.state`，而 EJS 核的快照**根本不落盘**（见下），那个文件永远不会出现。
+ *
+ * 它自己有另一套，也就是 EJS 前端 `GameManager.js` 用的那套：
+ *
+ *   `save_state_info()`        → `"<字节数>|<堆偏移>|<成功标志>"`，
+ *                                状态本体**就留在 wasm 堆上**，根本不进文件系统
+ *   `load_state(名字, 槽位)`   → 反过来，从文件系统读一个文件当状态
+ *   `toggleMainLoop(0 / 1)`    → 停 / 起主循环 —— **EJS 的「暂停」就是它**
+ *   `system_restart()`         → 重置
+ *
+ * （导出面对照表见 `.workbuddy-ai/memory/REFERENCE.md` 的「NDS 的 melonds 是 EJS 构建」。）
+ *
+ * ⚠️ 判据是**能力探测**而不是机种名：这三样只有 melonds 有，其余 7 个本地核一处都没有。
+ * 所以非 EJS 核一律返回 null，调用方原样退回 Nostalgist 那套，其余 12 个机种零影响。
+ */
+function createEjsControl(nostalgist: Nostalgist): EjsControl | null {
+  const emulator = nostalgist.getEmulator() as unknown as {
+    getEmscripten?: () => { Module?: EjsModule };
+  };
+  const wasm = emulator.getEmscripten?.()?.Module;
+  if (!wasm) return null;
+
+  const exported = (name: string) => typeof wasm[`_${name}`] === 'function';
+  if (
+    !exported('toggleMainLoop') ||
+    !exported('save_state_info') ||
+    !exported('load_state')
+  )
+    return null;
+
+  /*
+   * 按名字取函数（和 EJS 前端同一手法）：`cwrap('toggleMainLoop', …)` 找的就是
+   * `_toggleMainLoop`。上面已经确认过这三样在，所以 cwrap 不会抛。
+   */
+  const wrap = (name: string, returnType: string, argTypes: string[]) =>
+    wasm.cwrap(name, returnType, argTypes);
+  const toggleMainLoop = wrap('toggleMainLoop', 'null', ['number']);
+  const saveStateInfo = wrap('save_state_info', 'string', []);
+  const loadState = wrap('load_state', 'number', ['string', 'number']);
+  /** `system_restart` 是 EJS 核顺手带的第四样；万一没有就不给重置（调用方会看到空操作） */
+  const restart = exported('system_restart')
+    ? wrap('system_restart', 'null', [])
+    : null;
+  /*
+   * `simulate_input` 是 EJS 核的输入口（见 `attachEjsKeyboard`）。同样是「有就接、
+   * 没有就不接」：**别把它并进上面那条判据** —— 少了它这个核照样是 EJS 核，
+   * 暂停 / 存档该走 EJS 那套还得走，只是键盘桥挂不上而已。
+   */
+  const simulateInput = exported('simulate_input')
+    ? wrap('simulate_input', 'null', ['number', 'number', 'number'])
+    : null;
+
+  return {
+    setPaused: (paused) => {
+      toggleMainLoop(paused ? 0 : 1);
+    },
+    saveState: () => {
+      /*
+       * 三段：字节数 / 堆偏移 / 成功标志。**先看第三段** —— 失败时第一段是一句错误话，
+       * 后两段根本没有（EJS 前端 `getState()` 也是这么拆的）。
+       */
+      const [sizeText, offsetText, ok] = String(saveStateInfo()).split('|');
+      const size = Number.parseInt(sizeText, 10);
+      const offset = Number.parseInt(offsetText, 10);
+      if (
+        ok !== '1' ||
+        !Number.isFinite(size) ||
+        !Number.isFinite(offset) ||
+        size <= 0
+      )
+        throw new Error(sizeText || 'save_state_info 没有给出可用的快照');
+      /*
+       * 用 `slice` 而不是 `subarray`：前者把字节**拷出堆**。堆是核心的公共内存，
+       * 核心继续跑就会覆盖它（下一次存档、加载别的资源都算）。
+       */
+      const bytes = wasm.HEAPU8.slice(offset, offset + size);
+      return new Blob([bytes], { type: 'application/octet-stream' });
+    },
+    loadState: (bytes) => {
+      try {
+        wasm.FS.unlink(EJS_STATE_PATH);
+      } catch {
+        // 没有这个文件是常态（这一局的第一次读档），unlink 会抛，忽略即可
+      }
+      wasm.FS.writeFile(EJS_STATE_PATH, bytes);
+      loadState(EJS_STATE_NAME, 0);
+    },
+    restart: () => {
+      restart?.();
+    },
+    simulate: simulateInput
+      ? (player, button, down) =>
+          simulateInput(player, EJS_JOYPAD_ID[button], down ? 1 : 0)
+      : null,
+  };
+}
+
+/**
+ * 键盘事件的目标是不是「用户在跟它打交道」的元素 —— 抄 Nostalgist 内部的
+ * `isInteractable`（元素范围对齐：a / button / details / input / select / textarea）。
+ *
+ * 为什么要有这个东西：Nostalgist 给其余 12 个机种装的键盘回调带一道过滤，
+ * 事件落在这些元素上时**不转发给核心**；`attachEjsKeyboard` 是另一条路，
+ * 不自己抄一遍行为就会分叉。屋子的注释里还记着这条规矩的来历
+ * （点完按钮焦点留在按钮上、按方向键没反应，所以他们在 `pointerup` 时 blur 按钮）。
+ */
+function isInteractableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  switch (target.tagName) {
+    case 'A':
+    case 'BUTTON':
+    case 'DETAILS':
+    case 'INPUT':
+    case 'SELECT':
+    case 'TEXTAREA':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * EJS 核（现在只有 NDS）的键盘桥。返回**拆卸函数**：退出时摘监听、把欠着的那几个钮松开。
+ *
+ * ## 为什么 EJS 核不能像其余 12 个机种那样「让核心自己读键盘」
+ *
+ * melonds 的输入驱动是 EmulatorJS 打在 RetroArch 上的分支
+ * （`EmulatorJS/RetroArch` 的 `input/drivers/emulatorjs_input.c`，上游就是
+ * `rwebinput_input.c`），对着源码比一比，最大的差别是那句
+ *
+ *     static int16_t rwebinput_is_pressed(...) { return 0; }
+ *
+ * —— **整个函数被掏空成 `return 0;`**。于是「按住哪个键 = 按下哪个钮」这条查表路
+ * 直接没了：我们写进 `retroarch.cfg` 的 `input_playerN_*` 在 NDS 上一个钮也点不动，
+ * 键盘事件只剩「原样喂给核心的键盘设备」（`input_keyboard_event(..., RETRO_DEVICE_KEYBOARD)`）
+ * 这一个用途 —— 而 NDS 机身上没有键盘。这就是 2026-10-15 用户报的「按键功能不行」。
+ *
+ * 它换上来的是另一套：`simulate_input(player, id, value)` 直接改一张
+ * 「谁按着哪个钮」的表（`keymap[]` 里那四个 `down_1..down_4` 槽），核心的
+ * `input_state` 再把那张表或进手柄状态里
+ * （EJS 版就是 `ejs_is_pressed(port, i) || rwebinput_is_pressed(...)`，后者恒为 0）。
+ * EJS 前端自己的键盘就是这么打的（`GameManager.simulateInput`）—— 它压根不用核心的键盘。
+ *
+ * ⚠️ 那条 `||` 有个前提：**`binds[port][id].valid` 必须为真**（单钮查询那一支是
+ *    `if (binds[port][id].valid) { if (ejs_is_pressed(...)) return 1; }`），也就是
+ *    `input_playerN_*` 得写上。这一条我们的 `bindingsToRetroArch` 本来就满足了
+ *    （14 个钮全写），所以这里不用再补配置。
+ *
+ * ## 这一层只干一件事
+ *
+ * 把我们这套键位（`KeyboardEvent.code`）翻成 `simulate_input` 的 `(player, id)`，
+ * 自己接键盘。**不碰核心的键盘** —— 那条路在 EJS 核上是死的，开着它只会多一份没人读的队列。
+ *
+ * ⚠️ 只有能力探测通过的 EJS 核会调到这里（见 `loadRom` 的调用点），其余 12 个机种
+ *    一个字节都不走 —— 它们的键盘由核心自己读，**别把这个监听也挂上去**：
+ *    那样同一套键位会被打两遍（值一样，白费），更糟的是会和核心的「热键 / 输入框例外」
+ *    两套判定打架。
+ */
+function attachEjsKeyboard(
+  simulate: (player: number, button: ButtonName, down: boolean) => void,
+  getBindings: () => KeyBindings
+): () => void {
+  /** 现在按着哪几个（`"player:button"` → 那一位）。失焦时要按这本账松开。 */
+  const held = new Map<string, { player: number; button: ButtonName }>();
+
+  /*
+   * 「哪个物理键 = 谁的哪个钮」**每次按键现算**，不吃快照：
+   * 键位面板会直接改 `this.bindings`（见 `setBindings`），而我们这张表是路由用的、
+   * 不需要像核心那样把配置烤进启动 —— 改完键位就该立刻按新键生效。
+   *
+   * 1P 优先：两个玩家绑到同一个键本来就被 `conflictInOtherPlayer` 拦着，
+   * 真撞上了（联机下才可能）也只该让本机那一位动。
+   */
+  const lookup = (code: string): { player: number; button: ButtonName } | null => {
+    const bindings = getBindings();
+    const tables: [number, PlayerBindings][] = [
+      [0, bindings.p1],
+      [1, bindings.p2],
+    ];
+    for (const [player, table] of tables) {
+      for (const button of ALL_BUTTONS) {
+        if (table[button] === code) return { player, button };
+      }
+    }
+    return null;
+  };
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    // 长按的连发没有意义：`simulate_input` 只是把同一个位置 1，重复置位不产生新信息
+    if (event.repeat) return;
+    /*
+     * 和其余 12 个机种一条规矩：事件目标落在可交互元素上时**不转发**。
+     *
+     * 那条规矩本来归 Nostalgist（它内部的 `isInteractable`，只对它自己装的那份
+     * 键盘回调生效），这条是我们自己接的，得自己抄一遍，否则 NDS 会和别处不一样：
+     * 屋子那边专门为此在 `pointerup` 时把按钮 blur 掉（见 ConsoleScene 的注释），
+     * 而房间码是个 `<input>` —— 不拦的话在里面打字会顺手把游戏按一通。
+     *
+     * 元素范围和它对齐（a / button / details / input / select / textarea）。
+     */
+    if (isInteractableTarget(event.target)) return;
+    const hit = lookup(event.code);
+    if (!hit) return;
+    /*
+     * 其余机种是**核心**替我们挡的滚动（emscripten 的键盘回调返回真值就会
+     * `preventDefault`），这条路上没人挡：方向键 / 空格不拦就会滚页面。
+     */
+    event.preventDefault();
+    held.set(`${hit.player}:${hit.button}`, hit);
+    simulate(hit.player, hit.button, true);
+  };
+
+  const onKeyUp = (event: KeyboardEvent) => {
+    const hit = lookup(event.code);
+    if (!hit) return;
+    /*
+     * keyup **不看焦点**（和上面那道过滤不对称，故意的）：只松「真按下去过」的那几个。
+     * 按住期间焦点可能跑进输入框（keydown 被上面拦掉、这里就不在账上），
+     * 也可能反过来 —— 焦点在别处按下、松开时人已经点进输入框了。
+     * 后者要是不松，那个钮就永远停在「按下」。
+     */
+    if (!held.delete(`${hit.player}:${hit.button}`)) return;
+    event.preventDefault();
+    simulate(hit.player, hit.button, false);
+  };
+
+  /**
+   * 把手里的钮一次性松开。
+   *
+   * 浏览器**不补发** keyup：切标签页 / 点到别处时，按着的方向键会永远停在「按下」。
+   * 核心那条路有同样的毛病，但它归核心管；这条是我们自己接的，得自己收尾。
+   */
+  const releaseAll = () => {
+    for (const hit of held.values()) simulate(hit.player, hit.button, false);
+    held.clear();
+  };
+
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', releaseAll);
+
+  return () => {
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('blur', releaseAll);
+    releaseAll();
+  };
+}
+
 export class EmulatorController {
   private instance: Nostalgist | null = null;
   private currentRom: LoadedRom | null = null;
   private paused = false;
+
+  /**
+   * EJS 核（现在只有 NDS）的控制面，`createEjsControl` 探出来的。
+   *
+   * 非 null 时暂停 / 存档 / 读档 / 重置**全走它**，Nostalgist 那几条命令一律不发
+   * （原因见 `createEjsControl` 的注释）。生命周期跟着 `instance`：启动时探一次、
+   * `exit()` 里清掉。
+   */
+  private ejs: EjsControl | null = null;
+
+  /**
+   * EJS 核的键盘桥的拆卸函数（见 `attachEjsKeyboard`），非 EJS 核为 null。
+   *
+   * 和 `ejs` 一样只在 EJS 核上非 null，生命周期也跟着它：`loadRom` 里挂、`exit()` 里拆。
+   */
+  private detachEjsKeyboard: (() => void) | null = null;
 
   /**
    * 当前这套键位。只在 `loadRom` 里被写进 retroarchConfig。
@@ -646,21 +1089,33 @@ export class EmulatorController {
 
     /*
      * 有些 ROM 是**压缩包伪装成 ROM**（`jojos-....smc` 前四字节其实是 `PK\x03\x04`），
-     * 也有些就是老老实实的 `.zip` 里装一盘 NES / SFC。两种都得先拆开 —— 否则
-     * `detectConsole` 会把它们一律判成**街机**（任何 `PK\x03\x04` 都当 romset），
-     * 然后交给 FBNeo 拿文件名当驱动名查表，查不到就**完全静默地失败**。
+     * 也有些就是老老实实的压缩包里装一盘 ROM（`.zip`，2026-10-15 起还有 **7z** ——
+     * 那是「宝可梦 珍珠打不开」的根因）。几种都得先拆开 —— 否则 `detectConsole`
+     * 会把它们一律判成**街机**（任何 `PK\x03\x04` 都当 romset），然后交给 FBNeo
+     * 拿文件名当驱动名查表，查不到就**完全静默地失败**（画面里只剩 FBNeo 自己画的
+     * `THIS IS NOT A BUG !`）。
      *
      * 判定规则、以及为什么这不会误伤街机 romset（靠内层扩展名区分），都在 `lib/unwrap.ts`。
      *
-     * 拆出来的 ROM **只喂给 NES / SFC 那条路**；街机仍然拿**原始文件**去
-     * `resolveArcadeCore()` —— romset 本身就该是 zip，被拆开反而坏事。
+     * 拆出来的 ROM **只喂给非街机那条路**（NES / SFC / NDS / GB / GBA… 都算）；
+     * 街机仍然拿**原始文件**去 `resolveArcadeCore()` —— romset 本身就该是 zip，
+     * 被拆开反而坏事。
      */
-    const unwrapped = await unwrapRom(file);
+    /*
+     * `onProgress` 顺手接给解包：7z 那条路要在 Worker 里解十几秒（EJS 那份是 asm.js，
+     * 本机实测 64 MB 的包 14.6 秒），不报进度就是一块死屏。
+     * 它的语义是 `(loaded, total)`，这里按 `(ratio, 1)` 喂 —— 调用方算的是
+     * `loaded / total * 100`，正好落回 0–100。
+     */
+    const unwrapped = await unwrapRom(
+      file,
+      onProgress ? (ratio) => onProgress(ratio, 1) : undefined
+    );
     const romFile = unwrapped?.file ?? file;
     if (unwrapped) {
       console.info(
-        `[nesload] 「${file.name}」是个压缩包，已解出内层「${unwrapped.innerName}」` +
-          `（${romFile.size} 字节）`
+        `[nesload] 「${file.name}」是个 ${unwrapped.container}，` +
+          `已解出内层「${unwrapped.innerName}」（${romFile.size} 字节）`
       );
     }
 
@@ -833,6 +1288,27 @@ export class EmulatorController {
            * 核心侧从头到尾没有 shader 预设 —— 那条渲染管线整条都用不上，关掉省一层。
            */
           video_shader_enable: false,
+          /*
+           * ⚠️ 必须显式关掉 —— Nostalgist 的默认配置里它是 `true`
+           * （`getDefaultRetroarchConfig()`），而 `retroarchConfig` 是**深合并**
+           * 进那份默认里的（nostalgist.js 的 `merge`），不写这一行就等于开着。
+           *
+           * 开着时 `instance.saveState()` 会
+           * `Promise.all([waitForFile('.state'), waitForFile('.state.png')])`
+           * （nostalgist.js 的 `saveState()`）—— **两个文件都到齐才返回**，
+           * 最坏 120 次重试 ≈ 59 秒后才抛 `fs timeout`。而存档面板的
+           * 「本地保存…」是个**刻意没有超时兜底**的进行中态（见 PlaySaveControls），
+           * 于是这将近一分钟界面就一直挂在「本地保存…」上，看起来像卡死。
+           *
+           * 缩略图全站一个地方都没用：本文件的 `saveState()` 只解构 `state`，
+           * 存档槽 `lib/saves.ts` 也只收那个 Blob。关掉对 13 个机种都只有好处
+           * （少写一个 PNG）。
+           *
+           * ⚠️ **NDS 尤其需要这一行**：它的 melonds 是 EmulatorJS 构建，命令导出面
+           * 和其余 7 个 `retroarch-emscripten-build` 核心不一样（见下面 `LOCAL_CORE_DIR`），
+           * 那一版很可能根本不产 `.state.png` —— 那样 NDS 每次存档都必然撞上这 59 秒。
+           */
+          savestate_thumbnail_enable: false,
         },
         /*
          * 初始尺寸**写死屏幕尺寸，不要读 `canvas.width/height`**。
@@ -844,8 +1320,11 @@ export class EmulatorController {
          * 屏幕那段的完整因果写在 RetroTv 的屏幕 div 上。
          *
          * 传固定的 720×540 也不影响清晰度：核心拿到 CSS 尺寸后会自己按 dpr 再设一次。
+         *
+         * ⚠️ NDS 例外：它是竖屏双屏，必须给 256×384，否则两屏会被 letterbox 成一条竖带。
+         *    见 `INITIAL_SIZE` 那段注释。
          */
-        size: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
+        size: INITIAL_SIZE[consoleType] ?? { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
         style: {
           width: '100%',
           height: '100%',
@@ -872,6 +1351,19 @@ export class EmulatorController {
      * 而核心认的始终是这次启动写进去的那份。
      */
     overrideInjectionKeyMap(nostalgist, this.bindings);
+    /*
+     * 顺手探一次这是不是 EJS 核（NDS 的 melonds）—— 是的话暂停 / 存档 / 读档 / 重置
+     * 走它自己那套（见 `createEjsControl`），不走 Nostalgist 那几条命令。
+     */
+    this.ejs = createEjsControl(nostalgist);
+    /*
+     * EJS 核的键盘也得我们自己接：核心那条路在它身上是空的
+     * （`rwebinput_is_pressed()` 被掏成 `return 0;`，见 `attachEjsKeyboard`），
+     * 所以这里按能力探测决定挂不挂，挂上就跟着这次实例活。
+     */
+    this.detachEjsKeyboard = this.ejs?.simulate
+      ? attachEjsKeyboard(this.ejs.simulate, () => this.bindings)
+      : null;
     this.currentRom = {
       name: file.name,
       console: consoleType,
@@ -889,9 +1381,15 @@ export class EmulatorController {
    * 抓一份快照交给调用方。
    * **存哪儿不归引擎管** —— 存档槽（每 ROM 五份、超出顶掉最早的）由 lib/saves.ts 负责，
    * 引擎只做两件事：产出一份 Blob、吃下一份 Blob。
+   *
+   * ⚠️ 两条路**不能合并**：EJS 核（NDS）的快照**不进文件系统** —— 核心把它留在 wasm
+   * 堆上并告诉我们「多大、在哪」（见 `createEjsControl`），而 Nostalgist 的
+   * `saveState()` 是「发 SAVE_STATE 命令 + 等一个 `.state` 文件出现」，在 NDS 上
+   * 那个文件永远不会出现（实测：界面一直挂在「本地保存…」）。
    */
   async saveState(): Promise<Blob | null> {
     if (!this.instance) return null;
+    if (this.ejs) return this.ejs.saveState();
     const { state } = await this.instance.saveState();
     return state;
   }
@@ -900,10 +1398,21 @@ export class EmulatorController {
    * 载入一份快照。存档槽里存的就是 Blob（`lib/saves.ts` 不做 base64 膨胀）。
    * 入参留着 `ArrayBuffer` 是因为 Nostalgist 的 `loadState` 两种都收，
    * 现在实际只会走 Blob 这一条（面板上的「导入 .state」2026-10-09 已撤）。
+   *
+   * EJS 核（NDS）反过来**只认文件**：先把字节写进虚拟文件系统、再让核心去读那个文件
+   * （`_load_state`，见 `createEjsControl`）—— 它没有 Nostalgist 会发的 `LOAD_STATE`。
    */
   async loadStateFrom(data: Blob | ArrayBuffer): Promise<boolean> {
     if (!this.instance) return false;
     try {
+      if (this.ejs) {
+        this.ejs.loadState(
+          data instanceof Blob
+            ? new Uint8Array(await data.arrayBuffer())
+            : new Uint8Array(data)
+        );
+        return true;
+      }
       await this.instance.loadState(data);
       return true;
     } catch (e) {
@@ -917,18 +1426,33 @@ export class EmulatorController {
    *
    * 面板上那个「导出」按钮 2026-10-09 撤了，现在只剩一个调用点：
    * 存档时 IndexedDB 不可用（隐私模式等）的**兜底** —— 存不进去就退化成下载。
+   *
+   * 抓快照一律走本类的 `saveState()`（它会按核心分路），别再直接问 Nostalgist。
    */
   async downloadState(blob?: Blob): Promise<void> {
     if (!this.instance || !this.currentRom) return;
-  const state = blob ?? (await this.instance.saveState()).state;
-  downloadFile(
-    new Blob([state], { type: 'application/octet-stream' }),
-    `${this.currentRom.name.replace(/\.[^.]+$/, '')}.state`
-  );
+    const state = blob ?? (await this.saveState());
+    if (!state) return;
+    downloadFile(
+      new Blob([state], { type: 'application/octet-stream' }),
+      `${this.currentRom.name.replace(/\.[^.]+$/, '')}.state`
+    );
   }
 
+  /**
+   * 暂停 / 继续。
+   *
+   * EJS 核（NDS）**没有 PAUSE_TOGGLE 那条命令**，它的暂停是「停主循环」
+   * （`toggleMainLoop(0)`，EJS 前端自己的暂停钮就是调它）—— 走 Nostalgist 的
+   * `pause()` 在 NDS 上按了没反应，见 `createEjsControl`。
+   */
   async togglePause(): Promise<void> {
     if (!this.instance) return;
+    if (this.ejs) {
+      this.paused = !this.paused;
+      this.ejs.setPaused(this.paused);
+      return;
+    }
     // pause / resume 是同步的，返回 void
     if (this.paused) {
       this.instance.resume();
@@ -939,8 +1463,17 @@ export class EmulatorController {
     }
   }
 
+  /**
+   * 重置（回到刚插上卡带那一刻）。
+   *
+   * EJS 核同理没有 `_cmd_reset`，走它自己的 `system_restart()`。
+   */
   async reset(): Promise<void> {
     if (!this.instance) return;
+    if (this.ejs) {
+      this.ejs.restart();
+      return;
+    }
     // Nostalgist 暴露的是 restart()，并没有 reset()
     this.instance.restart();
   }
@@ -985,10 +1518,17 @@ export class EmulatorController {
   }
 
   /**
-   * 把某个手柄钮按下 / 松开。联机时用来把**对方**的输入打进本机的另一个玩家位。
+   * 把某个手柄钮按下 / 松开。两处用得上：
    *
-   * 钮名 → 键名的换算由 `overrideInjectionKeyMap` 换过的那份解码器负责（启动时装的），
-   * 所以这里喂进来的钮名只要在键位表里，就一定能合成出核心认的那个键。
+   *   · 联机时把**对方**的输入打进本机的另一个玩家位；
+   *   · 掌机 / 触屏上那几颗虚拟钮（本机的 1P）。
+   *
+   * 其余 12 个机种走 Nostalgist：钮名 → 键名的换算由 `overrideInjectionKeyMap` 换过的
+   * 那份解码器负责（启动时装的），所以喂进来的钮名只要在键位表里，就一定能合成出核心认的键。
+   *
+   * ⚠️ **EJS 核（NDS）不能走那条**：Nostalgist 的注入是把合成的键盘事件直接交给核心
+   *    注册的键盘回调，而 EJS 核的键盘回调只用来喂它的键盘设备（查表那条被掏空了，
+   *    见 `attachEjsKeyboard`）。它认的是 `simulate_input`，所以这里分一支直接打过去。
    *
    * 注意这是事件级注入（Nostalgist 没有帧级钩子），所以只能做到「对方一按这边就跟着按」，
    * 做不到逐帧锁步。局域网内 RTT 通常在个位数毫秒，实际手感够用；
@@ -997,6 +1537,22 @@ export class EmulatorController {
   pressButton(button: string, player: number, down: boolean): void {
     const instance = this.instance;
     if (!instance) return;
+
+    const simulate = this.ejs?.simulate;
+    if (simulate) {
+      /*
+       * 喂进来的是 `string`（联机那头从网络上收的），得先确认它真是我们认识的钮名
+       * —— 未知的钮名在下面那条路上会被解码器静默丢掉，这里也一样要丢掉。
+       * 用 `hasOwnProperty` 而不是 `in`：`in` 认原型链，`'toString' in 那张表` 是 true。
+       *
+       * `player` 在本类里是 **1 基**（Nostalgist 的约定，`pressDown(button, player=1)`），
+       * `simulate_input` 那边是 **0 基**，所以要减一。
+       */
+      if (!Object.prototype.hasOwnProperty.call(EJS_JOYPAD_ID, button)) return;
+      simulate(player - 1, button as ButtonName, down);
+      return;
+    }
+
     // 必须传对象形式 `{ button, player }`。
     // 上层 Nostalgist.pressDown 只接受**一个**参数：
     //   pressDown(options) {
@@ -1013,11 +1569,19 @@ export class EmulatorController {
   async exit(): Promise<void> {
     const instance = this.instance;
 
-    // 先把引用清干净再动手：下面任何一步抛异常，控制器也不会留着一个半死的实例，
-    // isRunning 立刻变 false，界面不会卡在「还插着卡带」的状态。
+    /*
+     * 先把引用清干净再动手：下面任何一步抛异常，控制器也不会留着一个半死的实例，
+     * isRunning 立刻变 false，界面不会卡在「还插着卡带」的状态。
+     *
+     * 键盘桥也要一起拆 —— 它挂在 `window` 上（不归 Nostalgist 管），
+     * 留着的话下一盘游戏按同一个键会被两只手同时改状态。
+     */
+    this.detachEjsKeyboard?.();
+    this.detachEjsKeyboard = null;
     this.instance = null;
     this.currentRom = null;
     this.paused = false;
+    this.ejs = null;
 
     if (!instance) return;
 

@@ -1414,6 +1414,23 @@ export default function ConsoleScene({
           }
         }
         /*
+         * 机种定了，键位也跟着定 —— 用户**没自定义过**的话，NDS 要换成它自己那套
+         * （见 lib/keybindings.ts 的 `defaultBindingsFor`：十字键在方向键、A/B/X/Y
+         * 在 Z X / A S、肩键在 Q E / R W，和全站那套街机布局完全不同）。
+         *
+         * ⚠️ 必须在**启动之前**做：`bindingsToRetroArch(this.bindings)` 是 `loadRom`
+         * 里一次性写进 RetroArch 配置的，核心起来之后再改就得重载卡带。
+         * 也不能靠 `rom.console` 那个 React state —— 它要等这次 `loadRom` 回来才设，
+         * 那时候核心已经拿着旧键位起来了。
+         *
+         * `loadBindings(机种)` 的语义是「存过就用存的那份」，所以真改过键位的人
+         * 一个字都不会被冲掉。
+         */
+        const resolved = loadBindings(consoleType);
+        setBindings(resolved);
+        controller.setBindings(resolved);
+
+        /*
          * 每 1% 才更新一次 state：几 MB 的核心包会有几百个 chunk，
          * 每个都 setState 会把整个场景重渲染几百次。
          *
@@ -3633,8 +3650,22 @@ export default function ConsoleScene({
 
         {/* ==================== 组 ②：游戏 ==================== */}
 
-        {/* 在线游戏库。点开是个全屏弹窗，选一盘直接载入 */}
-        <button
+        {/*
+          ⚠️ 2026-10-15：**这颗钮注释掉了 —— 房间里的游戏库入口收掉**（用户要求
+          「/room 隐藏游戏库入口」）。
+
+          它点开的是那个全屏在线游戏库弹窗；小屏抽屉里那一行「游戏库」就是**同一个
+          DOM**（`.rail-games` 那个类只负责在抽屉里排 order，见 globals.css），
+          所以一处注释掉，大屏竖排和抽屉两处一起没了。
+          同一套一共三样，恢复时一起往回放：这颗钮 + 下面掌机的 `onOpenLibrary` +
+          ConsoleScreen 待机层里那两行「从游戏库载入」提示。
+
+          弹窗组件（`GameLibraryPanel`）和 `libraryOpen` 这个 state **没动** ——
+          `?id=` 深链走的是另一个弹窗（`deepLinkGame`，刻意分开，见那边的注释），
+          而 `/play` 那页本来就没有游戏库。这次关掉的是「屋里这扇门」，不是那条路。
+          用户要的是**隐藏**而不是删掉，所以代码整块留着。
+        */}
+        {/* <button
           type="button"
           onClick={() => setLibraryOpen(true)}
           title={t('games.open')}
@@ -3642,9 +3673,9 @@ export default function ConsoleScene({
           className="rail-games pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
         >
           <StoreIcon size={16} />
-          {/* 抽屉那行「游戏库」就是右上角「游戏列表」那条的合并版，见 nav 顶上的注释 */}
+          抽屉那行「游戏库」就是右上角「游戏列表」那条的合并版，见 nav 顶上的注释
           <span className="row-label">{t('games.open')}</span>
-        </button>
+        </button> */}
 
         {/*
           联机。在房间里（等待或已连上）就一直亮着，免得关掉面板后忘了自己还在房。
@@ -3658,47 +3689,69 @@ export default function ConsoleScene({
           **流式的、贴着那行右端**（`.entries .rail-rtt`，见 globals.css），
           靠 `order` 从按钮前面挪到后面 —— 这里别为了好看改 DOM 顺序，
           大屏那侧靠的正是「读数在前、按钮在后」+ `right-full`。
+
+          ⚠️ **载入 NDS 卡带时整块不画**（2026-10-15 用户定的「nds 不支持双人」）：
+          它没有第二个手柄口，站里的联机也推不动它 —— 和游戏详情页那颗「联机游戏」
+          是同一个门禁。手打 `?room=` 进来的那条由 `PlayScene` / 这里各自忽略。
+
+          判据里 `status === 'idle'` 那半句**不能省**：房主先开房、再拖一盘 NDS 卡带
+          进来是完全可能的，那时候把入口收掉等于**把人关在房间里出不来** ——
+          「离开房间」那颗钮就在这个面板里。所以只收「本来就没在房间里」这一种。
         */}
-        <div className="rail-netplay relative">
-          {/*
-            延迟。只在**真的连上**且**测出值**时出现：`rtt` 是 ping 的往返时间，
-            连上到第一次 ping 回来之间有一小段空窗，那时不显示比显示个「--」干净。
-            用 font-pixel 的英文/数字（`123ms`），和面板里那一处读数同一套。
-          */}
-          {netplayState.status === 'connected' && netplayState.rtt !== null && (
-            <span className="rail-rtt absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[12px] text-accent">
-              {Math.round(netplayState.rtt)}ms
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => setNetplayOpen(true)}
-            title={t('netplay.open')}
-            aria-label={t('netplay.open')}
-            className={`pixel-edge pxw-2 p-1.5 transition-colors ${
-              netplayState.status !== 'idle'
-                ? 'pxc-accent bg-accent/20 text-accent'
-                : 'bg-ink-800 text-ink-300 hover:text-accent'
-            }`}
-          >
-            <PlayersIcon size={16} />
-            <span className="row-label">{t('netplay.open')}</span>
-          </button>
-        </div>
+        {!(rom?.console === 'nds' && netplayState.status === 'idle') && (
+          <div className="rail-netplay relative">
+            {/*
+              延迟。只在**真的连上**且**测出值**时出现：`rtt` 是 ping 的往返时间，
+              连上到第一次 ping 回来之间有一小段空窗，那时不显示比显示个「--」干净。
+              用 font-pixel 的英文/数字（`123ms`），和面板里那一处读数同一套。
+            */}
+            {netplayState.status === 'connected' && netplayState.rtt !== null && (
+              <span className="rail-rtt absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[12px] text-accent">
+                {Math.round(netplayState.rtt)}ms
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setNetplayOpen(true)}
+              title={t('netplay.open')}
+              aria-label={t('netplay.open')}
+              className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+                netplayState.status !== 'idle'
+                  ? 'pxc-accent bg-accent/20 text-accent'
+                  : 'bg-ink-800 text-ink-300 hover:text-accent'
+              }`}
+            >
+              <PlayersIcon size={16} />
+              <span className="row-label">{t('netplay.open')}</span>
+            </button>
+          </div>
+        )}
 
         {/* 自定义按键。单机双人也用得上，所以不跟着联机状态走。
             图标用手柄而不是键盘：这屋子里的按键本来就分手柄 / 键盘两条路，
-            手柄才是主角（见 icons.tsx 的 GamepadIcon）。 */}
-        <button
-          type="button"
-          onClick={() => setKeybindOpen(true)}
-          title={t('keybind.open')}
-          aria-label={t('keybind.open')}
-          className="rail-keybind pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
-        >
-          <GamepadIcon size={16} />
-          <span className="row-label">{t('keybind.open')}</span>
-        </button>
+            手柄才是主角（见 icons.tsx 的 GamepadIcon）。
+
+            ⚠️ **载入 NDS 卡带时这颗不画**（2026-10-15 用户要求「nds 游戏按钮编辑隐藏」）。
+            它开的是自定义按键面板；NDS 的键位是固定那套，给一颗点不出结果的入口
+            不如不给。和 `/play` 操作表里那颗「编辑」是同一个门禁（见 PlayScene）。
+
+            ⚠️ **只藏入口，不藏「按键说明」** —— 那扇门是另一颗钮（`.rail-legend`），
+            用户明确要它显示 NDS 那套 L / R 丝印，别跟着一起收。
+
+            面板本体（`KeyBindingsPanel`）和 `keybindOpen` 这个 state 都没动，
+            `soloOnly` 那套逻辑留着 —— 放回入口时不用重写。 */}
+        {rom?.console !== 'nds' && (
+          <button
+            type="button"
+            onClick={() => setKeybindOpen(true)}
+            title={t('keybind.open')}
+            aria-label={t('keybind.open')}
+            className="rail-keybind pixel-edge pxw-2 bg-ink-800 p-1.5 text-ink-300 transition-colors hover:text-accent"
+          >
+            <GamepadIcon size={16} />
+            <span className="row-label">{t('keybind.open')}</span>
+          </button>
+        )}
 
         {/*
           ⚠️ 这里原来还有一颗**账号钮**（`.rail-account`，`setUserOpen(true)`）——
@@ -3810,8 +3863,14 @@ export default function ConsoleScene({
           volume={volume}
           /* 加入者本机没有卡带，面键长几个得看房主那盘（见 HandheldConsole 的 FACE_ROWS） */
           remoteGameConsole={netplayState.remoteGame?.console ?? null}
-          /* 移动端点屏幕 = 打开在线游戏库（本机拖拽 / 选文件那条路手机上不存在） */
-          onOpenLibrary={() => setLibraryOpen(true)}
+          /*
+            ⚠️ 2026-10-15：**掌机「点屏幕开游戏库」这个入口一并收掉**（同上排那颗钮，
+            两处是一套）。不传 `onOpenLibrary` 之后，ConsoleScreen 那颗待机点击层
+            自己就不渲染了（`onTap` 没传就整层不画，见那边的注释）——
+            掌机没卡带时屏幕就是一块安静的黑屏，而不是一颗点了没反应的按钮。
+            要恢复：把这行放回来，再把上面那颗钮和 ConsoleScreen 里那两行提示放回来。
+          */
+          /* onOpenLibrary={() => setLibraryOpen(true)} */
           onButton={handleVirtualButton}
           onTogglePause={() => void togglePause()}
           onSave={() => void saveState()}
@@ -4242,10 +4301,14 @@ export default function ConsoleScene({
 
         `role` 还决定**页签锁在哪一组**：联机时只能改自己那组（两边都是 1P 那组），
         所以面板在房间里只画一个标签、不给切换。见 KeyBindingsPanel 的 lockedPlayer。
+
+        `consoleType` 管另外两件事：面板画哪几个钮、钮叫什么（NDS 是 A/B/X/Y + L/R +
+        L2/R2 + START/SELECT），以及**单人机也要收成一个页签**（NDS 不支持双人）。
       */}
       <KeyBindingsPanel
         open={keybindOpen}
         bindings={bindings}
+        consoleType={rom?.console ?? null}
         role={netplayState.role}
         localPlaying={rom !== null}
         onChange={applyBindings}
@@ -4460,8 +4523,19 @@ export default function ConsoleScene({
               `J`、`Enter` 混排出两种字形。
             */}
             <div className="flex flex-col gap-2 p-4 text-[12px] leading-relaxed text-ink-300">
-              <p>{playerLegend(bindings.p1, 1, t)}</p>
-              <p>{playerLegend(bindings.p2, 2, t)}</p>
+              {/*
+                `rom?.console` 一路传给 `playerLegend`：钮名要按机种给 —— NDS 那行得是
+                `I=L · O=R`（肩键）而不是街机叫法的 `I=Y · O=Z`，否则说明里根本
+                找不到 L / R 这两颗（2026-10-15 用户要求）。
+
+                **玩家 2 那一行单人机不画**（NDS）：它没有第二个手柄口，列一行
+                「2P …」等于告诉用户这台机器能双人。键位面板里的页签同理，见
+                KeyBindingsPanel 的 soloOnly。
+              */}
+              <p>{playerLegend(bindings.p1, 1, t, rom?.console ?? null)}</p>
+              {rom?.console !== 'nds' && (
+                <p>{playerLegend(bindings.p2, 2, t, rom?.console ?? null)}</p>
+              )}
               {/* 手柄不列键位 —— 它是固定的标准布局，改不了，见 lib/gamepad.ts */}
               <p>{t('legend.gamepad')}</p>
               {/*

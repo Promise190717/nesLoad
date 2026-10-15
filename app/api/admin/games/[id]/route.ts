@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
-import { CONSOLE_TYPES } from '@/lib/consoles';
+import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { deleteGame, findGameDuplicate, getGameRow, updateGame, type GamePatch } from '@/lib/server/games';
 import { deleteObject, keyFromPublicUrl } from '@/lib/server/r2';
@@ -77,16 +77,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (!row) return fail('not-found', '找不到这个游戏', 404);
 
     /*
-     * 判重（同名 + 同语言）—— 和「添加」用同一把尺子。
+     * 判重（同名 + 同机种 + 同语言）—— 和「添加」用同一把尺子。
      * 修改这边不判的话，「添加」那道闸门等于白设：加一条 A/中文，
      * 再把另一条改成 A/中文就绕过去了。
      *
-     * 第三个参数把**自己**排除掉：不排的话，改个年份都会撞上自己的名字。
+     * 第四个参数把**自己**排除掉：不排的话，改个年份都会撞上自己的名字。
+     * 第三个参数是机种（2026-10-15 加）—— **必须传这次要改成的那个机种**，
+     * 不是旧的：改机种本身就该按新机种重新判一遍。
      */
-    const duplicate = await findGameDuplicate(title, language, id);
+    const duplicate = await findGameDuplicate(title, language, consoleType, id);
     if (duplicate) {
       const langText = duplicate.language ? `语言：${duplicate.language}` : '语言未标注';
-      return fail('duplicate-title', `已存在同名同语言的游戏：「${duplicate.title}」（${langText}）`);
+      return fail(
+        'duplicate-title',
+        `已存在同名同机种同语言的游戏：「${duplicate.title}」（${CONSOLE_LABEL[consoleType]} · ${langText}）`
+      );
     }
 
     await updateGame(id, patch);

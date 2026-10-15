@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEve
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AdminLoading from './AdminLoading';
-import { useI18n } from './I18nProvider';
 
 /** `/api/admin/developers` 返回的条目。 */
 interface AdminDeveloper {
@@ -79,7 +78,6 @@ async function readError(res: Response, fallback: string): Promise<string> {
  * 所以这里新建一个、那边立刻就能选到 —— 两个 tab 之间靠这一张表串起来。
  */
 export default function AdminDevelopers() {
-  const { t, href: localeHref } = useI18n();
   const router = useRouter();
 
   const [list, setList] = useState<AdminDeveloper[]>([]);
@@ -258,14 +256,14 @@ export default function AdminDevelopers() {
 
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setModalNotice({ tone: 'error', text: t('admin.developers.nameRequired') });
+      setModalNotice({ tone: 'error', text: '请填写开发商名字。' });
       return;
     }
 
     const foundedText = foundedYear.trim();
     const parsedFounded = foundedText ? Number(foundedText) : null;
     if (parsedFounded !== null && !Number.isInteger(parsedFounded)) {
-      setModalNotice({ tone: 'error', text: t('admin.developers.badFounded') });
+      setModalNotice({ tone: 'error', text: '成立年份必须是整数。' });
       return;
     }
 
@@ -289,9 +287,9 @@ export default function AdminDevelopers() {
         isEditing ? `/api/admin/developers/${editingId}` : '/api/admin/developers',
         { method: isEditing ? 'PATCH' : 'POST', body: form }
       );
-      if (!res.ok) throw new Error(await readError(res, t('admin.developers.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
 
-      setPageNotice({ tone: 'ok', text: t('admin.developers.saved') });
+      setPageNotice({ tone: 'ok', text: '已保存。' });
       // 新建的排在最后一页（按创建时间倒序），但用户更可能立刻想给游戏选它 ——
       // 不跳页，留在原地，只在顶部提示一句就够了。
       reloadList();
@@ -302,7 +300,7 @@ export default function AdminDevelopers() {
     } catch (error) {
       setModalNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.developers.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusy(false);
@@ -311,17 +309,17 @@ export default function AdminDevelopers() {
 
   const remove = async (developer: AdminDeveloper) => {
     // 名下有游戏时接口会回 409 和一整句说明 —— 先问一句是防手滑，真正的把关在服务端
-    if (!window.confirm(t('admin.developers.deleteConfirm', { name: developer.name }))) return;
+    if (!window.confirm(`删除「${developer.name}」？此操作不可撤销。`)) return;
     try {
       const res = await fetch(`/api/admin/developers/${developer.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await readError(res, t('admin.developers.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       reloadList();
       setPageNotice(null);
       router.refresh();
     } catch (error) {
       setPageNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.developers.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     }
   };
@@ -330,7 +328,7 @@ export default function AdminDevelopers() {
     <div className="flex flex-col gap-6">
       <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
         <div className="mb-3 flex items-center gap-3">
-          <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.developers.title')}</h2>
+          <h2 className="shrink-0 text-[12px] text-ink-200">{'开发商'}</h2>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -341,14 +339,14 @@ export default function AdminDevelopers() {
             <input
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder={t('admin.developers.searchPlaceholder')}
+              placeholder={'搜索开发商名字 / 简介'}
               className={`${FIELD_CLASS} min-w-0 flex-1`}
             />
             <button
               type="submit"
               className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
-              {t('admin.search')}
+              {'搜索'}
             </button>
           </form>
           <button
@@ -356,7 +354,7 @@ export default function AdminDevelopers() {
             onClick={openAdd}
             className="pixel-edge pxw-3 pxc-600 shrink-0 bg-accent px-4 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
           >
-            {t('admin.add')}
+            {'添加'}
           </button>
         </div>
 
@@ -371,13 +369,13 @@ export default function AdminDevelopers() {
         )}
 
         {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
-        {listPending && <AdminLoading label={t('feedback.loading')} />}
+        {listPending && <AdminLoading label="载入中…" />}
 
         {listLoaded && list.length === 0 && !keyword && (
-          <p className="text-[12px] text-ink-500">{t('admin.developers.empty')}</p>
+          <p className="text-[12px] text-ink-500">{'还没有开发商。'}</p>
         )}
         {listLoaded && list.length === 0 && keyword && (
-          <p className="text-[12px] text-ink-500">{t('admin.noMatch')}</p>
+          <p className="text-[12px] text-ink-500">{'没有匹配的游戏。'}</p>
         )}
 
         {list.length > 0 && (
@@ -407,30 +405,30 @@ export default function AdminDevelopers() {
                 </span>
 
                 <span className="shrink-0 text-[12px] text-ink-500">
-                  {t('admin.developers.gameCount', { count: developer.gameCount })}
+                  {`${developer.gameCount} 款游戏`}
                 </span>
 
                 <Link
-                  href={localeHref(`/developers/${developer.id}`)}
+                  href={`/developers/${developer.id}`}
                   target="_blank"
                   rel="noreferrer"
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
-                  {t('admin.developers.view')}
+                  {'查看'}
                 </Link>
                 <button
                   type="button"
                   onClick={() => openEdit(developer)}
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
                 >
-                  {t('admin.edit')}
+                  {'编辑'}
                 </button>
                 <button
                   type="button"
                   onClick={() => void remove(developer)}
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-danger"
                 >
-                  {t('admin.delete')}
+                  {'删除'}
                 </button>
               </li>
             ))}
@@ -445,16 +443,16 @@ export default function AdminDevelopers() {
               onClick={goPrev}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {t('admin.prev')}
+              {'上一页'}
             </button>
-            <span className="text-[12px] text-ink-500">{t('admin.currentPage', { page })}</span>
+            <span className="text-[12px] text-ink-500">{`第 ${page} 页`}</span>
             <button
               type="button"
               disabled={!hasMore || !nextCursor}
               onClick={goNext}
               className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {t('admin.next')}
+              {'下一页'}
             </button>
           </div>
         )}
@@ -467,12 +465,12 @@ export default function AdminDevelopers() {
         >
           <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[620px] p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
-              {isEditing ? t('admin.developers.editTitle') : t('admin.developers.addTitle')}
+              {isEditing ? '编辑开发商' : '添加开发商'}
             </h2>
 
             <form onSubmit={(e) => void submit(e)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.name')}
+                {'名字'}
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -482,7 +480,7 @@ export default function AdminDevelopers() {
 
               {/* 英文字段（2026-10-13 加），紧挨中文那栏 —— 见 AdminGames 里同一段注释 */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.nameEn')}
+                {'名字 (EN)'}
                 <input
                   value={nameEn}
                   onChange={(e) => setNameEn(e.target.value)}
@@ -491,7 +489,7 @@ export default function AdminDevelopers() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.developers.field.founded')}
+                {'成立年份'}
                 <input
                   value={foundedYear}
                   onChange={(e) => setFoundedYear(e.target.value)}
@@ -501,7 +499,7 @@ export default function AdminDevelopers() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.developers.field.website')}
+                {'官网'}
                 <input
                   value={website}
                   onChange={(e) => setWebsite(e.target.value)}
@@ -515,7 +513,7 @@ export default function AdminDevelopers() {
                 旁边那行小字把「当前这张叫什么」写出来，用户才知道自己没把它删掉。
               */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.image')}
+                {'厂标 / 图片'}
                 <input
                   ref={imageRef}
                   type="file"
@@ -528,13 +526,13 @@ export default function AdminDevelopers() {
                 />
                 <span className="text-[12px] text-ink-600">
                   {imageLabel
-                    ? t('admin.developers.imageCurrent', { name: imageLabel })
-                    : t('admin.developers.imageHint')}
+                    ? `当前：${imageLabel}。留空表示不换。`
+                    : '选填。没有图时页面上用名字的第一个字占位。'}
                 </span>
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.summary')}
+                {'简介'}
                 <input
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
@@ -543,7 +541,7 @@ export default function AdminDevelopers() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.summaryEn')}
+                {'简介 (EN)'}
                 <input
                   value={summaryEn}
                   onChange={(e) => setSummaryEn(e.target.value)}
@@ -552,7 +550,7 @@ export default function AdminDevelopers() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.description')}
+                {'介绍'}
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -562,7 +560,7 @@ export default function AdminDevelopers() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.developers.field.descriptionEn')}
+                {'介绍 (EN)'}
                 <textarea
                   value={descriptionEn}
                   onChange={(e) => setDescriptionEn(e.target.value)}
@@ -577,7 +575,7 @@ export default function AdminDevelopers() {
                   disabled={busy}
                   className="pixel-edge pxw-3 pxc-600 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {busy ? t('admin.saving') : t('admin.save')}
+                  {busy ? '保存中…' : '保存'}
                 </button>
                 <button
                   type="button"
@@ -585,7 +583,7 @@ export default function AdminDevelopers() {
                   disabled={busy}
                   className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-4 py-2 text-[12px] text-ink-300 transition-colors enabled:hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {t('admin.cancel')}
+                  {'取消'}
                 </button>
                 {modalNotice && (
                   <span

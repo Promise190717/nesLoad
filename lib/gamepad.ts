@@ -28,8 +28,10 @@ import type { ButtonName } from './keybindings';
  * 「右键」（Xbox B / PS ○）才是 RetroPad 的 **A**。这是 RetroArch 的既定行为，实测过
  * （伪造手柄按下 `buttons[1]` 时，NES 的 A 键响应）。
  *
- * 站内只有 12 个钮（`ButtonName`），所以 l2/r2/l3/r3 和 guide（16）在这里是 `null` ——
- * 送过去房主也注入不了，`bindingsToRetroArch` 里没有对应的键位项，纯属白发包。
+ * 站内现在有 14 个钮（`ButtonName`，2026-10-15 起含 `l2` / `r2`），所以下标 6 / 7
+ * （LT / RT）**接上了** —— NDS 那套键位里 `L2` / `R2` 是真要按的。
+ * 剩下的 l3/r3（10 / 11）和 guide（16）仍是 `null`：站内没有对应的钮，
+ * `bindingsToRetroArch` 里也写不出键位项，送过去纯属白发包。
  *
  * ## 为什么不做 `mapping !== 'standard'` 的分支
  *
@@ -44,8 +46,8 @@ const BUTTONS_BY_INDEX: readonly (ButtonName | null)[] = [
   'x', // 3  上键（Xbox Y / PS △）
   'l', // 4  LB / L1
   'r', // 5  RB / R1
-  null, // 6  LT / L2 —— 站内没有这个钮
-  null, // 7  RT / R2 —— 同上
+  'l2', // 6  LT / L2
+  'r2', // 7  RT / R2
   'select', // 8  Back / Share
   'start', // 9  Start / Options
   null, // 10 L3 —— 没有

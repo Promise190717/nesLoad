@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { SCREEN_HEIGHT, SCREEN_WIDTH, VOLUME_MAX, type LoadedRom } from '@/lib/emulator';
 import { useI18n } from './I18nProvider';
 
@@ -101,11 +101,21 @@ interface ConsoleScreenProps {
   /** 系统文件正悬停在机身上（桌面端才有；移动端恒为 false） */
   fileOver: boolean;
   /**
-   * 待机提示用哪一套。两端都是两行：桌面端「点本地 / 从在线库启动」，移动端「只从库」——
-   * 移动端没有拖拽、也没有「选本地文件」那条路，见 lib/i18n.ts 的 `screen.mobile*`。
+   * 待机提示用哪一套。
+   *
+   * ⚠️ 2026-10-15 起**只有桌面端会真的渲染待机层**：房间里掌机那个「点屏幕开游戏库」
+   * 的入口收了（见 ConsoleScene 里那颗钮的注释），掌机不再传 `onTap`，那一层自己就不画。
+   * `variant` 现在只喂 `hot`（拖拽悬停那句 `RELEASE TO LOAD`）；掌机那边照旧传 `'mobile'`，
+   * 别因为「看着只剩一处用」就把它删掉。
    */
   variant: 'desktop' | 'mobile';
-  /** 点屏幕。桌面端 = 选本地 ROM 文件；移动端 = 打开在线游戏库 */
+  /**
+   * 点屏幕。桌面端 = 选本地 ROM 文件。
+   *
+   * ⚠️ 2026-10-15 起**不传就不画那颗待机点击层**（原先不传也画，只是点了没反应）——
+   * 房间掌机那个「点屏幕开游戏库」的入口撤掉之后，那一层在移动端再没有意义，
+   * 一颗点不动的按钮比一块安静的黑屏更糟。`/play` 那边靠 `hideHint` 本来就看不到它。
+   */
   onTap?: () => void;
   /**
    * 退出全屏。**不传就不画那个退出口** —— 移动端没有全屏入口（右侧那颗钮在移动端隐藏），
@@ -155,18 +165,76 @@ export default function ConsoleScreen({
     paused,
     remotePaused,
   });
+
+  /*
+   * 点一下游戏画面 → 藏掉鼠标光标，屏幕上只剩核心自己画的那颗笔尖。
+   *
+   * 为什么做：NDS 用鼠标模拟触控笔时，melonDS 核心自己会在下屏画一颗跟着鼠标走的
+   * 笔尖（核心二进制里没有任何能关掉它的 core option，翻过了），OS 的箭头再叠一颗
+   * 就是两个点 —— 藏掉箭头就不干扰了。
+   *
+   * ⚠️ 2026-10-15 从「所有机种统一启用」**收成 NDS 专属**：其余机种没有「核心自己画
+   * 指针」这回事，系统箭头就是唯一的指针，藏它只有害处。
+   *
+   * ⚠️ `cursor-none` 挂的是 **canvas**，不是整块屏幕 —— 这是 2026-10-15 修的那个
+   * 「点完画面光标就找不回来、只有 Esc 行」的根因，成因是**几何**：
+   *
+   *   `/play` 的屏幕盒子是 4:3，而 NDS 画面是 2:3 竖屏居中，两侧各留出**约四分之一盒子
+   *   宽度**的黑边 —— 盒子本身也是黑的，两种黑肉眼分不出来。类挂在整块盒子上时，「移出
+   *   画面」必须把鼠标挪过整条黑边、出了盒子才生效（1080 宽的盒子就是 270px，1440 宽是
+   *   360px），于是用户看到的就是「明明移出画面了，光标还在」，只剩 Esc 这一条路。
+   *   其余机种的画面都填满整个 4:3 盒子、没有这条黑边，所以**只有 NDS 会撞上**。
+   *   挂到 canvas 上之后：压在画面上才藏、一挪到黑边立刻恢复，和直觉一致。
+   *
+   * 恢复路径三条，都要留着：
+   *   ① 鼠标挪出画面（CSS 本身 —— 类挂在 canvas 上，不是屏幕上）；
+   *   ② 鼠标挪出整块屏幕 → 复位状态（根节点的 `onMouseLeave`）；
+   *   ③ Esc。
+   * 画面消失（弹卡带 / 联机画面切过来）时也自动复位，不留一块「永远没有光标」的屏幕。
+   *
+   * Esc 只管这里的状态，全屏退出仍归 PlayScene / ConsoleScene 自己的 keydown 管
+   * （两边互不拦截：全屏时按 Esc = 退全屏 + 光标一起回来，正好）。
+   *
+   * 查过但**排除**的另一条路（别再走一遍）：RetroArch 进全屏时会 grab 鼠标，而它这套
+   * 构建的 `rwebinput` 驱动把 grab 实现成 Pointer Lock（浏览器级的「藏光标 + 关住指针 +
+   * 只有 Esc 能解」）。但那条路要 `CMD_EVENT_FULLSCREEN_TOGGLE`，而它在本项目这套配置下
+   * 没有自动触发点、热键也被 Nostalgist 默认配置解绑了。详见 REFERENCE.md「光标」。
+   */
+  const [cursorHidden, setCursorHidden] = useState(false);
+  /**
+   * 只有 NDS 才藏光标 —— 见上面那段。房主推来的画面不算（那不是本机在跑 NDS，
+   * 而且那时 `rom` 是空的）。
+   */
+  const canHideCursor = rom?.console === 'nds';
+
+  useEffect(() => {
+    if (!cursorHidden) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCursorHidden(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cursorHidden]);
+
+  useEffect(() => {
+    if (!hasPicture) setCursorHidden(false);
+  }, [hasPicture]);
   /** 载入进度（整数百分比）。null = 拿不到字节数，屏幕上画一条不确定进度条 */
   const loadPct = loading && loading.ratio !== null ? Math.round(loading.ratio * 100) : null;
   /** 桌面端：拖拽悬停时那句 `RELEASE TO LOAD`（移动端没有拖拽，恒不出现） */
   const hot = fileOver && variant === 'desktop';
 
   /*
-   * 待机时「点屏幕」那颗钮的名字。两端的动作完全不同，所以两套：
-   * 桌面端是选本地文件，移动端是打开在线游戏库（`games.open` 就是「游戏库」三个字，
-   * 正好是这个按钮最准的名字，不必再起一个同义键）。
+   * 待机时「点屏幕」那颗钮的名字。
+   *
+   * ⚠️ 2026-10-15：**只剩桌面端这一套了**。原先按 `variant` 分两套 —— 移动端那颗点开的
+   * 是在线游戏库，名字直接借 `games.open`（「游戏库」三个字）。房间里的游戏库入口收掉之后
+   * （见 ConsoleScene 那颗钮的注释），移动端不再传 `onTap`，下面那颗按钮连同整个待机层
+   * 都不渲染，那一套文案也就无从落地。
+   * `games.open` 和 `screen.mobile*` 这几个键在 i18n 表里**留着没删** —— 恢复入口时还要用。
    */
-  const tapTitle = variant === 'desktop' ? t('screen.pick') : t('games.open');
-  const tapLabel = variant === 'desktop' ? t('screen.srLabel') : t('games.open');
+  const tapTitle = t('screen.pick');
+  const tapLabel = t('screen.srLabel');
 
   return (
     /*
@@ -188,6 +256,18 @@ export default function ConsoleScreen({
     <div
       ref={screenRef}
       data-tour="screen"
+      onMouseDown={() => {
+        // 有画面 + NDS 才藏：待机那下点击是「选 ROM 文件」，藏光标反而碍事
+        // （原先还兼「开游戏库」，那个入口 2026-10-15 收了，见 ConsoleScene 那颗钮的注释）
+        if (hasPicture && canHideCursor) setCursorHidden(true);
+      }}
+      /*
+        移出整块屏幕就复位。`cursor-none` 挂在 canvas 上，光标本身在挪出画面时就已经
+        回来了；这一条管的是**状态** —— 不清掉的话下次回到画面上会「无声无息又是藏着的」，
+        用户只会以为光标坏了。`mouseleave` 只在离开整块屏幕时触发，屏幕内部移动不触发
+        （所以「挪到黑边 → 挪回画面」之间不用重新点一下）。
+      */
+      onMouseLeave={() => setCursorHidden(false)}
       className={`screen crt relative overflow-hidden bg-black ${frameClassName}`}
     >
       {/*
@@ -199,6 +279,12 @@ export default function ConsoleScreen({
         例外是 `crtOff` 那 0.4 秒（弹出卡带的关机收缩）：**那最后一帧正是要用的东西**，
         所以这段时间里把它亮着，并套上 `.crt-off-picture` 让它纵向压成一条线。
         （`transform` 不参与布局，所以压扁不会惊动核心那个 ResizeObserver。）
+
+        最后那个 `cursor-none` 也挂在这上面（2026-10-15 从根节点挪过来的）：要藏的是
+        「压在游戏画面上」这一种情况，而画面只占屏幕盒子的一部分 —— NDS 两侧整片黑边，
+        挂根节点的话「移出画面」得挪出黑边才生效。挂 canvas 上 = 压画面才藏、挪到黑边
+        立刻恢复。`.crt` 那两层伪元素（扫描线 / 暗角）都是 `pointer-events: none`，
+        所以画面上的落点确实是 canvas，这个类生效。完整因果见上面 `cursorHidden` 那段。
       */}
       <canvas
         ref={canvasRef}
@@ -206,7 +292,7 @@ export default function ConsoleScreen({
         height={SCREEN_HEIGHT}
         className={`pixelated block h-full w-full ${
           (rom && !remoteStream) || crtOff ? '' : 'invisible'
-        } ${crtOff ? 'crt-off-picture' : ''}`}
+        } ${crtOff ? 'crt-off-picture' : ''} ${cursorHidden ? 'cursor-none' : ''}`}
       />
 
       {/*
@@ -233,7 +319,10 @@ export default function ConsoleScreen({
             机身描边这时也变成了 accent 色）；
           · 其余 → 怎么开始玩。
 
-        整块屏幕就是按钮，点它 = `onTap`（桌面端选 ROM 文件 / 移动端开游戏库）；
+        整块屏幕就是按钮，点它 = `onTap`（桌面端选 ROM 文件）；
+        ⚠️ 2026-10-15：**没传 `onTap` 就整层不画**（见下面那个三元）—— 房间掌机上那个
+        「点屏幕开游戏库」的入口收了之后（见 ConsoleScene 那颗钮的注释），移动端不再有
+        「点一下」这回事，画一颗点不动的按钮比一块安静的黑屏更糟。
         拖拽由外壳根元素的 onDrop 接，事件从这一层冒泡上去，这里不用管。
         载入中不显示 —— 那时屏幕里是进度条，两样东西叠在一起会打架。
 
@@ -257,7 +346,7 @@ export default function ConsoleScreen({
               {t('screen.waitingHost')}
             </span>
           </div>
-        ) : (
+        ) : onTap ? (
           <button
             type="button"
             onClick={onTap}
@@ -272,30 +361,18 @@ export default function ConsoleScreen({
                 </span>
               ) : (
                 <>
-                  <span className="flex flex-col items-center gap-[14px]">
-                    {variant === 'desktop' ? (
-                      <>
-                        <span className="screen-hint-sm font-pixel text-[12px] text-crt-ink-200">
-                          {t('screen.tapLoad')}
-                        </span>
-                        <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200">
-                          {t('screen.orLibrary')}
-                        </span>
-                      </>
-                    ) : (
-                      /*
-                        移动端只有两行 —— 这里**只能从在线游戏库载入**：手机上没有拖拽，
-                        点屏幕打开的就是游戏库本身，所以不再提「选文件」。
-                      */
-                      <>
-                        <span className="screen-hint-sm font-pixel text-[12px] text-crt-ink-200">
-                          {t('screen.mobileLibrary')}
-                        </span>
-                        <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200">
-                          {t('screen.mobileTap')}
-                        </span>
-                      </>
-                    )}
+                  {/*
+                    桌面端**只剩这一行**「点击从本地加载」。
+
+                    ⚠️ 2026-10-15：原先这里有两套、共四行 —— 桌面端的第二行
+                    `screen.orLibrary`（「或者从在线游戏库启动」）和移动端那两行
+                    `screen.mobileLibrary` / `screen.mobileTap`。房间里那扇游戏库的门
+                    收了之后（见 ConsoleScene 那颗钮的注释），这三行全是在给一个不存在的
+                    入口打广告，所以一并撤掉；移动端连这一层都不渲染了（上面 `onTap` 判据）。
+                    文案键没从 i18n 表里删 —— 恢复入口时照原样放回来即可。
+                  */}
+                  <span className="screen-hint-sm font-pixel text-[12px] text-crt-ink-200">
+                    {t('screen.tapLoad')}
                   </span>
                   {/*
                     待机光标。**方案 B 里「这台电视通着电、在等你」全靠它** ——
@@ -313,7 +390,7 @@ export default function ConsoleScreen({
               )}
             </span>
           </button>
-        ))}
+        ) : null)}
 
       {/*
         暂停提示。**必须在屏幕里**，光靠机身那颗 PWR 灯不够 —— 暂停之后画面是

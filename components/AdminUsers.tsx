@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { formatTime } from '@/lib/i18n';
 import AdminLoading from './AdminLoading';
-import { useI18n } from './I18nProvider';
 
 /**
  * `/api/admin/users` 返回的行。字段对齐 lib/server/app-users.ts 的 AppUserWithStats。
@@ -75,8 +74,6 @@ async function readError(res: Response, fallback: string): Promise<string> {
  * 「一条条处理」，滚着滚着自动续一屏反而让人分不清自己看到哪了。
  */
 export default function AdminUsers() {
-  const { t, locale } = useI18n();
-
   const [items, setItems] = useState<AppUserRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -134,7 +131,7 @@ export default function AdminUsers() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ banned: next }),
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.users.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       /*
        * PATCH 回的是**改完之后的完整用户** —— 从回包里拿 banned，别用本地算的 next
        * （两边今天是一致的，但以后服务端要是加了别的联动，本地这份就成了谎言）。
@@ -143,11 +140,11 @@ export default function AdminUsers() {
       setItems((prev) =>
         prev.map((r) => (r.id === row.id ? { ...r, banned: data.user?.banned ?? next } : r))
       );
-      setNotice({ tone: 'ok', text: t(next ? 'admin.users.banned' : 'admin.users.unbanned', { name: row.username }) });
+      setNotice({ tone: 'ok', text: next ? `已封禁 ${row.username}。` : `已解封 ${row.username}。` });
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.users.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusyId(null);
@@ -188,7 +185,7 @@ export default function AdminUsers() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vipExpiresAt: expiresAt }),
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.users.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       const data = (await res.json()) as {
         user?: { vip?: boolean; vipExpiresAt?: number | null };
       };
@@ -206,15 +203,12 @@ export default function AdminUsers() {
       setVipEditingId(null);
       setNotice({
         tone: 'ok',
-        text: t(
-          expiresAt === null ? 'admin.users.vipCleared' : 'admin.users.vipSaved',
-          { name: row.username }
-        ),
+        text: expiresAt === null ? `已取消 ${row.username} 的会员。` : `已更新 ${row.username} 的会员。`,
       });
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.users.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusyId(null);
@@ -232,7 +226,7 @@ export default function AdminUsers() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vipExpiresAt: null }),
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.users.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       const data = (await res.json()) as {
         user?: { vip?: boolean; vipExpiresAt?: number | null };
       };
@@ -244,11 +238,11 @@ export default function AdminUsers() {
         )
       );
       setVipEditingId(null);
-      setNotice({ tone: 'ok', text: t('admin.users.vipCleared', { name: row.username }) });
+      setNotice({ tone: 'ok', text: `已取消 ${row.username} 的会员。` });
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.users.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusyId(null);
@@ -269,14 +263,14 @@ export default function AdminUsers() {
     setNotice(null);
     try {
       const res = await fetch(`/api/admin/users/${row.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await readError(res, t('admin.users.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       // 删掉了就把它从列表里拿掉 —— 这条之后再也不会出现
       setItems((prev) => prev.filter((r) => r.id !== row.id));
-      setNotice({ tone: 'ok', text: t('admin.users.deleted', { name: row.username }) });
+      setNotice({ tone: 'ok', text: `已删除 ${row.username} 及其全部数据。` });
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.users.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusyId(null);
@@ -287,7 +281,7 @@ export default function AdminUsers() {
   return (
     <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
       <div className="mb-3 flex items-center gap-3">
-        <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.users.title')}</h2>
+        <h2 className="shrink-0 text-[12px] text-ink-200">{'用户'}</h2>
         {notice && (
           <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
@@ -299,12 +293,12 @@ export default function AdminUsers() {
         这一行说明是**必须的**：光看「用户」两个字，谁都会以为这是后台账号。
         写清楚「前台的、和后台账号无关」，省得有人在这里找自己的管理员账号在哪。
       */}
-      <p className="mb-3 text-[12px] leading-relaxed text-ink-500">{t('admin.users.hint')}</p>
+      <p className="mb-3 text-[12px] leading-relaxed text-ink-500">{'这里是前台注册用户，不是后台管理员账号（管理员用 scripts/create-user.mjs 手工建，没有界面）。'}</p>
 
-      {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
-      {state === 'error' && <p className="text-[12px] text-danger">{t('admin.users.failed')}</p>}
+      {state === 'loading' && <AdminLoading label="载入中…" />}
+      {state === 'error' && <p className="text-[12px] text-danger">{'请求失败。'}</p>}
       {state === 'ready' && items.length === 0 && (
-        <p className="text-[12px] text-ink-500">{t('admin.users.empty')}</p>
+        <p className="text-[12px] text-ink-500">{'还没有注册用户。'}</p>
       )}
 
       {items.length > 0 && (
@@ -321,7 +315,7 @@ export default function AdminUsers() {
                 {/* 封禁标记。正常的不显示 —— 一排绿标签只会让「谁被封了」更难扫出来 */}
                 {row.banned && (
                   <span className="pixel-edge pxw-2 pxc-danger shrink-0 bg-danger/20 px-1.5 py-0.5 text-[12px] text-danger">
-                    {t('admin.users.statusBanned')}
+                    {'已封禁'}
                   </span>
                 )}
 
@@ -330,27 +324,23 @@ export default function AdminUsers() {
                     要让「普通用户」也是个明确的说法） */}
                 {row.vip && (
                   <span className="pixel-edge pxw-2 pxc-accent shrink-0 bg-accent/15 px-1.5 py-0.5 text-[12px] text-accent">
-                    {t('admin.users.vipUntil', { time: formatTime(row.vipExpiresAt ?? 0, locale) })}
+                    {`VIP · 有效期至 ${formatTime(row.vipExpiresAt ?? 0, 'zh')}`}
                   </span>
                 )}
 
                 {/* 三块数据的条数 —— 扫一眼就知道这个号是空注册还是真在用 */}
                 <span className="shrink-0 font-pixel text-[12px] text-ink-400">
-                  {t('admin.users.stats', {
-                    history: String(row.historyCount),
-                    saves: String(row.saveCount),
-                    favorites: String(row.favoriteCount),
-                  })}
+                  {`历史 ${row.historyCount} · 存档 ${row.saveCount} · 收藏 ${row.favoriteCount}`}
                 </span>
 
                 {/* 注册时间 / 最近登录。两个都摆，一列文字最长也就 130px */}
                 <span className="shrink-0 text-[12px] text-ink-500">
-                  {t('admin.users.registered', { time: formatTime(row.createdAt, locale) })}
+                  {`注册于 ${formatTime(row.createdAt, 'zh')}`}
                 </span>
                 <span className="shrink-0 text-[12px] text-ink-500">
                   {row.lastLoginAt === null
-                    ? t('admin.users.neverLoggedIn')
-                    : t('admin.users.lastLogin', { time: formatTime(row.lastLoginAt, locale) })}
+                    ? '从未登录'
+                    : `最近登录 ${formatTime(row.lastLoginAt, 'zh')}`}
                 </span>
 
                 <span className="ml-auto flex shrink-0 items-center gap-2">
@@ -366,7 +356,7 @@ export default function AdminUsers() {
                     }
                     className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {t(vipEditingId === row.id ? 'admin.users.vipClose' : 'admin.users.vipSetup')}
+                    {vipEditingId === row.id ? '收起' : '设置 VIP'}
                   </button>
 
                   <button
@@ -375,7 +365,7 @@ export default function AdminUsers() {
                     onClick={() => void toggleBanned(row)}
                     className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {t(row.banned ? 'admin.users.unban' : 'admin.users.ban')}
+                    {row.banned ? '解封' : '封禁'}
                   </button>
 
                   {/*
@@ -396,7 +386,7 @@ export default function AdminUsers() {
                         : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
                     }`}
                   >
-                    {t(confirming ? 'admin.users.confirmDelete' : 'admin.users.delete')}
+                    {confirming ? '确认删除' : '删除'}
                   </button>
                 </span>
 
@@ -409,7 +399,7 @@ export default function AdminUsers() {
                   <div className="flex w-full flex-wrap items-center gap-2 bg-ink-900/60 px-2 py-2">
                     <label className="flex items-center gap-2">
                       <span className="text-[12px] text-ink-400">
-                        {t('admin.users.vipExpiresLabel')}
+                        {'会员有效期至'}
                       </span>
                       <input
                         type="date"
@@ -424,7 +414,7 @@ export default function AdminUsers() {
                       onClick={() => void saveVip(row)}
                       className="pixel-edge pxw-2 pxc-500 bg-accent px-2.5 py-1 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {t('admin.users.vipSave')}
+                      {'保存'}
                     </button>
                     {row.vip && (
                       <button
@@ -433,7 +423,7 @@ export default function AdminUsers() {
                         onClick={() => void clearVip(row)}
                         className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {t('admin.users.vipClear')}
+                        {'取消会员'}
                       </button>
                     )}
                   </div>
@@ -451,7 +441,7 @@ export default function AdminUsers() {
           onClick={loadMore}
           className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {moreState === 'loading' ? t('feedback.loading') : t('admin.feedback.loadMore')}
+          {moreState === 'loading' ? '载入中…' : '加载更多'}
         </button>
       )}
     </section>

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { formatTime } from '@/lib/i18n';
 import AdminLoading from './AdminLoading';
-import { useI18n } from './I18nProvider';
 
 /** `/api/admin/feedback` 返回的条目。 */
 interface FeedbackItem {
@@ -52,8 +51,6 @@ async function readError(res: Response, fallback: string): Promise<string> {
  * 滚着滚着自动续一屏反而会让人分不清自己看到哪了。
  */
 export default function AdminFeedback() {
-  const { t, locale } = useI18n();
-
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -104,13 +101,13 @@ export default function AdminFeedback() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resolved: next }),
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.feedback.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       // 就地翻标记，不重拉列表 —— 重拉会把已经翻过的页数打回第一页
       setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, resolved: next } : row)));
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.feedback.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusyId(null);
@@ -120,7 +117,7 @@ export default function AdminFeedback() {
   return (
     <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
       <div className="mb-3 flex items-center gap-3">
-        <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.feedback.title')}</h2>
+        <h2 className="shrink-0 text-[12px] text-ink-200">{'留言本'}</h2>
         {notice && (
           <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
             {notice.text}
@@ -128,10 +125,10 @@ export default function AdminFeedback() {
         )}
       </div>
 
-      {state === 'loading' && <AdminLoading label={t('feedback.loading')} />}
-      {state === 'error' && <p className="text-[12px] text-danger">{t('admin.feedback.failed')}</p>}
+      {state === 'loading' && <AdminLoading label="载入中…" />}
+      {state === 'error' && <p className="text-[12px] text-danger">{'请求失败。'}</p>}
       {state === 'ready' && items.length === 0 && (
-        <p className="text-[12px] text-ink-500">{t('admin.feedback.empty')}</p>
+        <p className="text-[12px] text-ink-500">{'还没有留言。'}</p>
       )}
 
       {items.length > 0 && (
@@ -147,10 +144,10 @@ export default function AdminFeedback() {
                   item.resolved ? 'bg-ok/20 text-ok' : 'bg-ink-700 text-ink-400'
                 }`}
               >
-                {t(item.resolved ? 'admin.feedback.resolved' : 'admin.feedback.unresolved')}
+                {item.resolved ? '已解决' : '未解决'}
               </span>
               <span className="w-[132px] shrink-0 text-right text-[12px] text-ink-500">
-                {formatTime(item.createdAt, locale)}
+                {formatTime(item.createdAt, 'zh')}
               </span>
               <button
                 type="button"
@@ -158,7 +155,7 @@ export default function AdminFeedback() {
                 onClick={() => void toggle(item)}
                 className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {t(item.resolved ? 'admin.feedback.markUnresolved' : 'admin.feedback.markResolved')}
+                {item.resolved ? '标记未解决' : '标记已解决'}
               </button>
             </li>
           ))}
@@ -172,7 +169,7 @@ export default function AdminFeedback() {
           onClick={loadMore}
           className="pixel-edge pxw-2 pxc-500 mt-3 bg-ink-700 px-3 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {moreState === 'loading' ? t('feedback.loading') : t('admin.feedback.loadMore')}
+          {moreState === 'loading' ? '载入中…' : '加载更多'}
         </button>
       )}
     </section>

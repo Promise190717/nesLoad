@@ -5,7 +5,8 @@
  * 浏览器直接 fetch 会被 CORS 挡下；上游还可能先给一次跳转。走服务端取就没这两个问题。
  *
  * ⚠️ 和 fetch-image 是**同一套 SSRF 防线**（见 lib/server/url-guard.ts），
- *    区别只在接受的内容类型与体积上限：ROM 是 zip / 裸二进制，比封面大得多。
+ *    区别只在接受的内容类型 —— ROM 是 zip / 裸二进制，比封面大得多，
+ *    也**不再有体积上限**（2026-10-15 取消 64MB，见下面那段）。
  *
  * ⚠️ 文件名从地址尾部取，回在响应头 `x-file-name` 里（URL 编码过）。
  *    **必须保留原始文件名** —— FBNeo 是拿 zip 文件名认驱动的，改名会让街机静默起不来
@@ -23,12 +24,17 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * 单个 ROM 上限 64MB。
+ * ⚠️ **单个 ROM 的体积上限已于 2026-10-15 取消**（用户要求）。
  *
- * 给得比封面（8MB）宽得多：SFC / GBA 卡带常见几 MB 到十几 MB，街机 romset 更大。
- * 再往上（比如 CD 镜像）就该手动传了 —— 代理下载既占服务端内存也占出口带宽。
+ * 原来卡在 64MB。移除的理由：上游那批 ROM 里有超过它的（NDS 卡带常见 128MB /
+ * 256MB，GBA 合集也常过 64MB），而这道闸门是**代理下载**那一趟 ——
+ * 上游文件本身下得动，是这里先把它拒了。
+ *
+ * ⚠️ 现在**只剩一道软约束**：`MAX_BYTES` 不存在了，所以声明与实际都不再看体积。
+ *    代价是「有人贴一个几百 MB 的地址」时服务端会照单吃下整个 `arrayBuffer` ——
+ *    这是**已知取舍**，因为只有登录过的管理员能调这个接口。真要防呆，
+ *    应该改成边读边截断（流式），而不是恢复一个写死的上限。
  */
-const MAX_BYTES = 64 * 1024 * 1024;
 
 /**
  * 明显是网页 / 报错的 content-type，一律当成「没拿到文件」。
@@ -81,11 +87,8 @@ export async function POST(request: Request) {
       return failJson('not-file', `那个地址回的不是文件（content-type: ${contentType}）`);
     }
 
-    const declared = Number(upstream.headers.get('content-length') ?? 0);
-    if (declared > MAX_BYTES) return failJson('too-large', '文件太大了（上限 64MB）', 413);
-
+    // 体积不再检查（见文件顶部那段）—— 直接读到底
     const buffer = await upstream.arrayBuffer();
-    if (buffer.byteLength > MAX_BYTES) return failJson('too-large', '文件太大了（上限 64MB）', 413);
 
     return new NextResponse(buffer, {
       headers: {

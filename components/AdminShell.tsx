@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { useI18n } from './I18nProvider';
 
 /**
  * 左侧那几个 tab。`href` 同时是**路由**和**高亮依据** —— 加了新页就往这里加一条。
@@ -18,14 +17,18 @@ import { useI18n } from './I18nProvider';
  * 量更小、而且只跟**某一款游戏**有关（见 db/schema.sql 里 `game_reports` 的注释）。
  * 用户（2026-10-13 加）排最后 —— 它是**低频**的运营页（看一眼有没有刷屏的号），
  * 和上面四条「日常维护内容」不是一路。
+ *
+ * ⚠️ **后台不走 i18n**（2026-10-15 用户要求「admin 后台整个不需要 i18n 只要中文就行了」）：
+ * 标签直接写中文，**别再改回 `t('admin.nav.x')`**。整棵 `app/admin/` 加全部 `Admin*.tsx`
+ * 都已不再 `useI18n()`，后台文案就是写死的字面量。
  */
 const TABS = [
-  { href: '/admin/games', key: 'admin.nav.games' },
-  { href: '/admin/developers', key: 'admin.nav.developers' },
-  { href: '/admin/consoles', key: 'admin.nav.consoles' },
-  { href: '/admin/feedback', key: 'admin.nav.feedback' },
-  { href: '/admin/reports', key: 'admin.nav.reports' },
-  { href: '/admin/users', key: 'admin.nav.users' },
+  { href: '/admin/games', label: '游戏列表' },
+  { href: '/admin/developers', label: '开发商' },
+  { href: '/admin/consoles', label: '机种库' },
+  { href: '/admin/feedback', label: '留言本' },
+  { href: '/admin/reports', label: '游戏反馈' },
+  { href: '/admin/users', label: '用户' },
 ] as const;
 
 /**
@@ -48,7 +51,6 @@ export default function AdminShell({
   username: string;
   children: ReactNode;
 }) {
-  const { t } = useI18n();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -66,14 +68,14 @@ export default function AdminShell({
       */}
       <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
         <header className="flex items-center gap-3">
-          <h1 className="text-[14px] text-ink-200">{t('admin.title')}</h1>
+          <h1 className="text-[14px] text-ink-200">后台</h1>
           <span className="text-[12px] text-ink-500">{username}</span>
           <button
             type="button"
             onClick={() => void logout()}
             className="pixel-edge pxw-2 pxc-500 ml-auto bg-ink-800 px-3 py-1.5 text-[12px] text-ink-300 transition-colors hover:text-danger"
           >
-            {t('admin.logout')}
+            退出登录
           </button>
         </header>
 
@@ -96,7 +98,7 @@ export default function AdminShell({
                     active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-300 hover:text-accent'
                   }`}
                 >
-                  {t(tab.key)}
+                  {tab.label}
                 </Link>
               );
             })}

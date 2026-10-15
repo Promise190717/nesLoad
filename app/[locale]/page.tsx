@@ -208,12 +208,28 @@ export default async function HomePage({
             {t('home.hero.lead')}
           </p>
 
+          {/*
+            Hero 的两颗钮（2026-10-15 用户要求加第二颗）。
+
+            左边进列表挑一盘（accent 实底 = 主按钮），右边进屋**加载自己的 ROM**
+            （描边、悬停才点亮 = 次按钮）——「从库里挑」和「带自己的文件来」是两条路，
+            摆在首屏一眼能分。
+
+            ⚠️ 右边那颗落点是 **`/room` 而不是 `/play`**：拖拽 / 选本地文件那条路只在
+               房间里（`/play` 是「一盘具体的游戏」的开局页，没有拖入，见 PlayScene 的注释）。
+          */}
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <Link
               href={localePath(locale, '/games')}
               className="inline-flex min-h-11 items-center justify-center bg-accent px-6 text-[13px] font-semibold text-ink-950 transition-colors hover:bg-accent/80"
             >
               {t('home.hero.browse')}
+            </Link>
+            <Link
+              href={localePath(locale, '/room')}
+              className="inline-flex min-h-11 items-center justify-center border border-ink-600 bg-ink-900 px-6 text-[13px] font-semibold text-ink-100 transition-colors hover:border-accent hover:bg-ink-800 hover:text-accent"
+            >
+              {t('home.hero.play')}
             </Link>
           </div>
 
@@ -425,15 +441,14 @@ export default async function HomePage({
         {/*
           页脚。**对爬虫比对人有用**：内容页之间靠它互相发现（和 `GamesShell` 那个页脚
           同一套落点）。这里**不放「首页」** —— 首页自己就是。
+
+          ⚠️ 2026-10-15：**原先打头的「回到房间」那条删了**（用户要求）。首屏 Hero 右侧
+          已经有「加载本地 ROM」直达 `/room` —— 同一个落点不必在首屏出现两遍。
+          同一天 `GamesShell` / `LegalPage` 两个页脚里那颗「回到房间」也一并删了（用户
+          要求），所以现在全站只剩 404 页正文下那颗钮还在用 `gamesPage.backHome`。
         */}
         <footer className="mt-14 border-t border-ink-800 pt-6">
           <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
-            <Link
-              href={localePath(locale, '/room')}
-              className="text-ink-400 transition-colors hover:text-accent"
-            >
-              {t('gamesPage.backHome')}
-            </Link>
             <Link
               href={localePath(locale, '/games')}
               className="text-ink-400 transition-colors hover:text-accent"

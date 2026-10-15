@@ -139,6 +139,25 @@ export default async function PlayPage({
   }
 
   /*
+   * 联机参数的门禁 —— **单人机（NDS）一律当没写过**。
+   *
+   * `?mode=host` / `?room=` 是可以手打进地址栏的，而游戏详情那颗「联机游戏」钮
+   * NDS 时已经不画了（见 `games/[id]/page.tsx`）—— 光拦那颗钮管不住手打地址，
+   * 用户 2026-10-15 明确要求「即使自己添加联机参数进来也要忽略」。
+   *
+   * 判据用**服务端预取到的那款**：它第一帧就在手上，所以不会先闪一下建房弹窗 /
+   * 自动加入再收回去。预取失败（`undefined`，走客户端兜底）时这里判不出来，
+   * 那时由 `PlayScene` 里那个跟着 `consoleType` 派生的 `mode` 兜住 —— 只是会晚几百毫秒。
+   */
+  const soloOnly = serverGame?.consoleType === 'nds';
+  const wantsHost = sp.mode === 'host';
+  const roomCode = typeof sp.room === 'string' ? sp.room.trim() : '';
+  /** 真正生效的房间码（NDS 时清空，等于没带）。 */
+  const effectiveRoom = soloOnly ? '' : roomCode;
+  /** 真正生效的模式。 */
+  const effectiveHost = wantsHost && !soloOnly;
+
+  /*
    * 外壳用 `GamesShell`（和 `/consoles/<机种>`、游戏详情页同一个）—— 2026-10-14 用户要求
    * 这一页的「背景（`.wall`）+ 右上一排入口（`TopBar`）+ 返回 + layout」和机种专题页长得像。
    * 外壳负责 `<main>` / `<h1>` 之外的一切公共部分，`PlayScene` 只画「屏幕 + 右列」。
@@ -179,9 +198,15 @@ export default async function PlayPage({
     >
       <PlayScene
         serverGame={serverGame}
-        initialMode={sp.mode === 'host' ? 'host' : 'solo'}
-        initialRoomCode={typeof sp.room === 'string' ? sp.room.trim() : ''}
-        autoStart={Boolean(id) && !sp.room && sp.mode !== 'host'}
+        initialMode={effectiveHost ? 'host' : 'solo'}
+        initialRoomCode={effectiveRoom}
+        /*
+          自动开跑：带了 `?id=`、又不是在走联机（加入 / 建房）时，进页面就自己下 ROM。
+          两个联机参数都按**生效值**判 —— NDS 把它们吃掉之后，`/play?id=<nds>&mode=host`
+          和 `/play?id=<nds>&room=X` 都会落回「带了 id 的单人」，也就是该自动开跑，
+          否则屏幕上什么按钮都没有（模式已经是单人、建房弹窗又不画）。
+        */
+        autoStart={Boolean(id) && !effectiveRoom && !effectiveHost}
       />
     </GamesShell>
   );

@@ -41,8 +41,8 @@
  * 后台**不做语言前缀**：`/admin` 是一套内部工具，路径固定、不进 sitemap、
  * 页面级 noindex，给它开一份 `/zh/admin` 只有坏处（多一个入口要守）。
  * 所以守卫分支**排在语言分支前面**，直接 return —— 但它照样要把语言写进请求头，
- * 因为后台的文案也跟语言走，而它的语言由 cookie（没设置过就按浏览器）决定
- * （不受路径影响，也不跳转）。
+ * 因为根布局要靠它出 `<html lang>`。⚠️ 2026-10-15 起后台整体不走 i18n
+ * （文案全是写死的中文，见 AdminShell 顶上那条注释），所以这里**一律盖 `zh`**。
  *
  * 后台接口（/api/admin/*）**故意不挂在这里**：Next 会把命中 middleware 的请求体
  * 整个缓冲并默认截断到 10MB，上传大 ROM 会因此解析失败。接口鉴权改由各自的
@@ -59,8 +59,6 @@ import {
   LOCALE_HEADER,
   LOCALE_PREFIX,
   isLocale,
-  parseAcceptLanguage,
-  resolveLocale,
   type Locale,
 } from '@/lib/i18n';
 
@@ -84,17 +82,14 @@ function savedLocale(request: NextRequest): Locale | null {
 }
 
 /**
- * **后台专用**的语言（只用于写请求头，不参与任何跳转）。
+ * 后台的语言 —— **固定中文**。
  *
- * 后台没有语言前缀，路径里读不出语言，所以这里保留 Accept-Language 兜底 ——
- * 中文管理员没主动切过语言时，看到的仍是中文后台，而不是冷不丁一个英文界面。
- * 它不引起跳转，所以「没设置过就别跳」那条规矩不受影响。
+ * 后台不走 i18n（2026-10-15 用户定），文案全是写死的中文；这里盖章的唯一用途是
+ * 让根布局出 `<html lang="zh-CN">`。不读 cookie 也不读 Accept-Language ——
+ * 以前那套「按管理员的浏览器语言变」的逻辑随双语后台一起废掉了。
  */
-function adminLocale(request: NextRequest): Locale {
-  return (
-    savedLocale(request) ??
-    resolveLocale(parseAcceptLanguage(request.headers.get('accept-language')))
-  );
+function adminLocale(): Locale {
+  return 'zh';
 }
 
 /**
@@ -155,8 +150,8 @@ export async function middleware(request: NextRequest) {
 
   // ---- 后台守卫：排在最前，整个绕开语言前缀 ----
   if (pathname === '/admin' || pathname.startsWith('/admin/')) {
-    // 后台的语言由 cookie（没设置过就按浏览器）定，但根布局同样需要那个请求头出 <html lang>
-    const headers = withLocale(request.headers, adminLocale(request));
+    // 后台固定中文（不走 i18n），这个头只给根布局出 <html lang> 用
+    const headers = withLocale(request.headers, adminLocale());
 
     if (PUBLIC_PATHS.has(pathname)) {
       return NextResponse.next({ request: { headers } });

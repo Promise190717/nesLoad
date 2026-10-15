@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { cardDelayMs } from '@/lib/card-stagger';
 import { localePath, type Locale } from '@/lib/i18n';
+import { gameLanguageLabel } from '@/lib/rom-lang';
 import { localizeGame, type Game } from '@/lib/server/games';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 
@@ -40,6 +41,18 @@ export default function GameCardGrid({
       {games.map((game, index) => {
         /* 卡片的文案（标题 / 开发商）按当前语言取一份 —— 见文件头那条 ⚠️ */
         const text = localizeGame(game, locale);
+        /*
+         * 封面右上角那个**语言角标**。文案走 `gameLanguageLabel`（全称：简体中文 /
+         * English / 日本語 / 한국어），认不出的自由文本原样显示 —— 见 lib/rom-lang.ts。
+         *
+         * ⚠️ 刻意**不写 `font-pixel`**：全称里既有小写（`English`）又有 CJK
+         *    （`简体中文` / `日本語` / `한국어`），Press Start 2P 都没有对应字形，
+         *    硬上会糊成方框或整个变大写。交给系统字体画，和房间库那个角标同一套。
+         *
+         * ⚠️ 底色用实心 `bg-accent` + `text-ink-950`（全站实心按钮的既有配色）——
+         *    角标压在任意封面上都要一眼看见，半透明底会随封面明暗飘。
+         */
+        const languageLabel = gameLanguageLabel(game.language);
         /*
          * 卡片下面那行：年份 · 开发商 · 机种。
          * 把机种放在**文字里**而不是封面角标上：角标是给「已经知道自己在看什么」的人认的，
@@ -88,6 +101,12 @@ export default function GameCardGrid({
                   loading="lazy"
                   className="h-full w-full object-cover"
                 />
+                {/* 语言角标：贴封面右上角。没有语言数据时整块不画 —— 不留空框 */}
+                {languageLabel && (
+                  <span className="absolute right-0 top-0 bg-accent px-1.5 py-0.5 text-[12px] font-medium leading-none text-ink-950">
+                    {languageLabel}
+                  </span>
+                )}
               </span>
               <span className="mt-2 block px-1">
                 <span className="block truncate text-[12px] text-ink-100">{text.title}</span>

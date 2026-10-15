@@ -2,14 +2,12 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useI18n } from '@/components/I18nProvider';
 
 const FIELD_CLASS =
   'pixel-edge pxw-2 pxc-500 w-full bg-ink-900 px-2 py-2 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none';
 
 /** 后台登录。令牌由 /api/admin/login 下发到 HttpOnly Cookie。 */
 export default function AdminLoginPage() {
-  const { t } = useI18n();
   const router = useRouter();
 
   const [username, setUsername] = useState('');
@@ -30,17 +28,17 @@ export default function AdminLoginPage() {
         body: JSON.stringify({ username, password }),
       });
       if (res.status === 401) {
-        setError(t('admin.login.error'));
+        setError('用户名或口令不对');
         return;
       }
       if (!res.ok) {
-        setError(t('admin.login.failed'));
+        setError('登录失败，请重试');
         return;
       }
       router.replace('/admin');
       router.refresh();
     } catch {
-      setError(t('admin.login.failed'));
+      setError('登录失败，请重试');
     } finally {
       setBusy(false);
     }
@@ -52,11 +50,11 @@ export default function AdminLoginPage() {
         onSubmit={(e) => void submit(e)}
         className="bg-ink-800 pixel-edge pxw-4 pxc-600 w-[360px] max-w-full p-5"
       >
-        <h1 className="mb-4 text-[13px] text-ink-200">{t('admin.login.title')}</h1>
+        <h1 className="mb-4 text-[13px] text-ink-200">{'后台登录'}</h1>
 
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-[12px] text-ink-400">
-            {t('admin.login.username')}
+            {'用户名'}
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -66,7 +64,7 @@ export default function AdminLoginPage() {
           </label>
 
           <label className="flex flex-col gap-1 text-[12px] text-ink-400">
-            {t('admin.login.password')}
+            {'口令'}
             <input
               type="password"
               value={password}
@@ -83,7 +81,7 @@ export default function AdminLoginPage() {
             disabled={busy || !username || !password}
             className="pixel-edge pxw-3 pxc-600 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {busy ? t('admin.login.submitting') : t('admin.login.submit')}
+            {busy ? '登录中…' : '登录'}
           </button>
           {error && <span className="text-[12px] text-danger">{error}</span>}
         </div>

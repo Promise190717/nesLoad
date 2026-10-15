@@ -6,7 +6,10 @@
  * /api/games/[id]/rom 回源代理），因为读是公开的，没必要带签名。
  */
 
+import http from 'node:http';
+import https from 'node:https';
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { parseProxyUrl, withProxy } from './proxy-agent';
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -15,6 +18,38 @@ function requireEnv(name: string): string {
 }
 
 let client: S3Client | null = null;
+
+/**
+ * 上传 / 删除要不要走本机代理（**可选**）。
+ *
+ * 为什么需要：国内直连 R2 的上传经常慢到没法用（几百 KB/s 甚至断），
+ * 而用户本机就有个 Clash / Mihomo 的混合端口（7897）。R2 的公网**读取**走的是
+ * `R2_PUBLIC_BASE` 那个独立域名、和这里无关，所以配了代理不会让前台变慢。
+ *
+ * ⚠️ S3 SDK 在 Node 下**不会**自动读 `HTTPS_PROXY` / `HTTP_PROXY` 环境变量 ——
+ *    必须显式把带隧道的 agent 塞进 `requestHandler`。
+ *
+ * ⚠️ **刻意用 `{ httpAgent, httpsAgent }` 这种「构造参数」形态，不 import
+ *    `@smithy/node-http-handler` 的类** —— 那个包只是 `@aws-sdk/client-s3` 的
+ *    传递依赖，根 `node_modules` 里没有它（pnpm 的隔离布局），直接 import 会
+ *    「模块找不到」。而 `requestHandler` 接受**构造参数对象**（SDK 自己会拿它去
+ *    造 NodeHttpHandler），所以根本不需要那个 import。
+ *
+ * ⚠️ 值形如 `http://127.0.0.1:7897`，用环境变量 `R2_PROXY`。
+ *    留空 = 直连（原行为）。
+ */
+function agentOverrides(): {
+  httpAgent?: http.Agent;
+  httpsAgent?: https.Agent;
+} {
+  const target = parseProxyUrl(process.env.R2_PROXY);
+  if (!target) return {};
+
+  return {
+    httpAgent: withProxy(new http.Agent({ keepAlive: true }), target),
+    httpsAgent: withProxy(new https.Agent({ keepAlive: true }), target),
+  };
+}
 
 function getClient(): S3Client {
   if (!client) {
@@ -25,6 +60,11 @@ function getClient(): S3Client {
         accessKeyId: requireEnv('R2_ACCESS_KEY_ID'),
         secretAccessKey: requireEnv('R2_SECRET_ACCESS_KEY'),
       },
+      /*
+       * 只有配了代理才动 requestHandler —— 不配时保持 SDK 默认，
+       * 别为了一个可选项把所有人的默认路径都换掉。
+       */
+      requestHandler: agentOverrides(),
     });
   }
   return client;

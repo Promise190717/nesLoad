@@ -127,9 +127,12 @@ const en = {
    * 玩什么（复古游戏）> 怎么玩（在线游戏库 / 拖自己的 ROM）> 免安装。
    *
    * ⚠️ 站内机种 **2026-10-14 从四个扩到十二个**（GB / GBC / MD / GG / SMS / 32X /
-   *    WonderSwan / Neo Geo Pocket）。文案里凡是要列举机种的地方，2026-10-14 起统一成
+   *    WonderSwan / Neo Geo Pocket），**2026-10-15 又加了 NDS（第十三个）**。
+   *    文案里凡是要列举机种的地方，2026-10-14 起统一成
    *    「**代表机型 + and more / 等**」——全列出来既读不通也超长，而且每加一个机种
    *    就得回来改一遍。所以下面那些列举看着不全，是**刻意的**，别当漏字补全。
+   *    ⚠️ 但**「等十余款机种」这个量词**（中文那几条）现在是准的：十三个 = 十余款。
+   *       再往上加就得换说法（「等十几款」/「等二十款」）。
    */
   /*
    * <title>：站名在前（品牌词是搜索时最容易命中的），冒号后是「这站能干什么」。
@@ -142,8 +145,9 @@ const en = {
    * description：长度按 **155 字符上下** 写（桌面端 Google 大约只显示这么多），
    * 前半句必须能独立成立 —— 后半句被截掉也不能读不通。
    *
-   * ⚠️ 机种那串**刻意只列代表机型、末尾加 and more**（2026-10-14 从四个扩到十二个时定的口径）：
-   *    十二个全列进来既读不通也超长，而每加一个机种就得回来改一遍。机种全名放下面
+   * ⚠️ 机种那串**刻意只列代表机型、末尾加 and more**（2026-10-14 从四个扩到十二个时定的口径，
+   *    2026-10-15 加 NDS 后仍照这套走 —— 不用回来改）：
+   *    十三个全列进来既读不通也超长，而每加一个机种就得回来改一遍。机种全名放下面
    *    `meta.keywords` 那条（逗号列表，越长越没关系）。
    */
   'meta.description':
@@ -154,7 +158,7 @@ const en = {
    * 机种多了之后这里是**唯一把所有机型写全**的地方，加机种顺手补一组词。
    */
   'meta.keywords':
-    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, Game Boy emulator, Game Boy Color emulator, Sega Mega Drive emulator, Sega Genesis emulator, Game Gear emulator, Master System emulator, Sega 32X emulator, WonderSwan emulator, Neo Geo Pocket emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
+    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, Game Boy emulator, Game Boy Color emulator, NDS emulator, Nintendo DS emulator, Sega Mega Drive emulator, Sega Genesis emulator, Game Gear emulator, Master System emulator, Sega 32X emulator, WonderSwan emulator, Neo Geo Pocket emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
   /*
    * 这里**没有** og:image 的 alt —— 不是漏了。
    * alt 由 app/opengraph-image.tsx 按文件约定导出，而那个导出必须是**静态值**，
@@ -211,8 +215,21 @@ const en = {
   'home.hero.title': 'Play classic retro games in your browser',
   'home.hero.lead':
     '{site} has NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more to play online, with two-player netplay.',
-  /* 首屏两颗钮：左边进屋子（真的开玩），右边进列表（先挑一挑） */
-  'home.hero.play': 'Enter the room',
+  /*
+   * 首屏那两颗钮：左边进列表（先挑一挑），右边进屋子（加载自己的 ROM）。
+   *
+   * ⚠️ 2026-10-15：右侧那颗是**同日加回来的**（用户要求），落点 `/room`，文案也从
+   *    「进入小屋」改成了这一句 —— 它点下去要做的正是这件事：进屋把自己的 ROM 文件
+   *    选 / 拖到电视机上（房间里的在线游戏库入口同日收掉了，见 ConsoleScene）。
+   *    顺序按 DOM：`browse` 在左、`play` 在右。
+   *
+   * ⚠️ 同一句话当天又改了一次，落在动词上：先写的是 "Play a local ROM"，两处不妥 ——
+   *    `title` / `lead` 满口「在线」，这一颗却喊「本地」，首屏两个词正面对撞；「游玩」
+   *    本身也虚。换成 "Load a local ROM" 之后**和房间里点进去第一眼那句同源**
+   *    （`screen.tapLoad` = "CLICK TO LOAD A LOCAL ROM"）：按钮说什么，落点第一句
+   *    就说什么，中间没有落差。"ROM" 字样是用户明确要留的（要一眼看出是拿本地文件玩）。
+   */
+  'home.hero.play': 'Load a local ROM',
   'home.hero.browse': 'Browse all games',
   'home.join.title': 'Play with a friend',
   'home.join.hint': 'Enter the 4-character room code shared by your friend.',
@@ -296,7 +313,7 @@ const en = {
    * 要能被直接搜到 —— 所以描述里都要带「能玩、能下载、免安装」这几个词。
    *
    * 详情页 / 下载页的两条带占位符：`{title}` 是游戏名、`{console}` 是机种
-   * （`CONSOLE_LABEL` 那十二个丝印词，不进文案表）。
+   * （`CONSOLE_LABEL` 那十三个丝印词，不进文案表）。
    * 列表页那条带 `{count}` —— 条数是现从库里读的，写死会在增减游戏后变成假话。
    */
   'seo.games.title': 'All games — Play NES, SNES, GBA & Arcade Online',
@@ -313,7 +330,7 @@ const en = {
   /*
    * 机种筛选（`/games?console=<机种>`，2026-10-13 加）。
    *
-   * `{console}` 是 `CONSOLE_LABEL` 那十二个丝印词（NES / SFC / GBA / ARC…）—— 和首页
+   * `{console}` 是 `CONSOLE_LABEL` 那十三个丝印词（NES / SFC / GBA / NDS / ARC…）—— 和首页
    * 「按机种浏览」那几张卡片用的是同一份，别在这里另写一套机种名（两套迟早对不上）。
    *
    * 这一页**可以收录**（和 `?q=` 的搜索页不同，见上面那两条的注释）：机种是一份有限、
@@ -417,15 +434,21 @@ const en = {
    * 第一行直接说点屏幕能干嘛（加载本地 ROM），第二行说在线游戏库。
    * 拖拽功能本身还在（外壳的 onDrop 没动），只是待机文案不再宣传它；
    * 悬停时那句 `screen.pick`（title）仍保留「或把文件拖到这里」的说法。
+   *
+   * ⚠️ 2026-10-15：`screen.orLibrary` 和下面那对 `screen.mobile*` **目前没有任何代码引用**
+   * —— 房间里的游戏库入口收了（用户要求，见 ConsoleScene 那颗钮的注释），
+   * ConsoleScreen 的待机层只剩桌面端那一行。键**故意留着不删**：恢复入口时原样放回去。
    */
   'screen.tapLoad': 'CLICK TO LOAD A LOCAL ROM',
   'screen.orLibrary': 'OR LAUNCH FROM THE ONLINE LIBRARY',
   'screen.release': 'RELEASE TO LOAD',
   /*
-   * 移动端的待机提示（2026-10-12）。移动端**只能从在线游戏库载入** ——
+   * 移动端的待机提示（2026-10-12）。原本移动端**只能从在线游戏库载入** ——
    * 手机上没有拖拽、也没有「选本地文件」那条路（点屏幕 = 打开游戏库），
-   * 所以措辞不再提文件，只说从库启动。
-   * 两行 + 光标，结构和桌面那套一一对应（主提示 `.screen-hint-sm`，副提示 `.screen-hint-xs`）。
+   * 所以措辞不提文件，只说从库启动。
+   * 两行 + 光标，和桌面那套一一对应（主提示 `.screen-hint-sm`，副提示 `.screen-hint-xs`）。
+   *
+   * ⚠️ 2026-10-15 起**未使用**：房间里掌机那个入口一并收了，掌机不再有待机层。
    */
   'screen.mobileLibrary': 'LAUNCH FROM LIBRARY',
   'screen.mobileTap': 'TAP THE SCREEN TO OPEN THE LIBRARY',
@@ -498,6 +521,14 @@ const en = {
    */
   'legend.needZip':
     'Format  FBNeo only reads .zip — this one looks like {ext}. Repack it, or grab a .zip build',
+  /*
+   * `/play` 专用（2026-10-15）：那一页的报错只有屏幕里一行 `notice`，
+   * 没有 room 那个「按键说明」弹窗可以挂 —— 格式这类「有准话可给」的失败只能并排摊着。
+   * ⚠️ 措辞刻意**不照抄** `legend.needZip`（那句说「FBNeo 只吃 .zip」）：这一页
+   *    认不出格式时未必是街机（NDS / PS1 的 7z / rar 也走这条路），提 FBNeo 会指错方向。
+   */
+  'play.needZip':
+    'Format  This ROM is a {ext} archive that could not be unpacked — try a .zip or a bare ROM',
   /*
    * 这盘街机卡带**看着像** Neo Geo 游戏，而 BIOS 本地和站点两份都没拿到。
    * （正常情况下 `ensureBios()` 会自动装站点自带的那份，这条根本不出现 ——
@@ -709,6 +740,12 @@ const en = {
     '{pressed} is already bound to the {button} button on player {player} — try another key.',
   'keybind.hint':
     'The keyboard map is read once, when a cartridge loads — reload it for changes to apply. The two players cannot share a key.',
+  /*
+   * 单人机（NDS）那一档的提示 —— 就是 `keybind.hint` 去掉「两位玩家不能共用同一个键」
+   * 那半句。那句话对单人机是错的：面板上根本没有玩家 2 可切，说了只会让人去找。
+   */
+  'keybind.soloHint':
+    'The keyboard map is read once, when a cartridge loads — reload it for changes to apply.',
   'keybind.hostHint':
     'You are the host: Player 1 is your own keys, Player 2 is what the guest’s input is injected as. They cannot share a key, or the injected input would also drive your Player 1. Reload a cartridge after changing.',
   'keybind.guestHint':
@@ -720,6 +757,9 @@ const en = {
    * 在线游戏库（服务端上传的那批游戏）。和本机历史是两回事：
    * 历史只记「这台机器从游戏库点开过哪几盘」（`library.*`，纯字符串记录），
    * 这里是 R2 + D1 里的公共库、全部游戏都在。
+   *
+   * ⚠️ 2026-10-15：`games.open`（那颗钮的名字）**暂时没有引用了** —— 房间里那个入口
+   * 收了（用户要求，见 ConsoleScene 那颗钮的注释）。键留着不删，恢复入口时放回来。
    */
   'games.open': 'Game library',
   'games.title': 'Game library',
@@ -1149,8 +1189,9 @@ const en = {
    * ⚠️ `legal.back` 原先是「Back to the game room」（2026-10-14 用户要求改文案 + 改行为）：
    *    左上那颗钮现在是**浏览器回退**（`BackLink`），不再承诺回那间屋子，所以文案走
    *    `common.back`（「返回」）—— 和内容页左上那颗统一。这一条**已删除**，别再加回来。
-   *    页脚那颗「返回游戏屋」的**真链接**仍在，落点 `/room`，文字也仍是那两个字的「返回游戏屋」，
-   *    写在 `gamesPage.backHome`（见 lib/legal.ts 那一页的用法）。见 components/LegalPage.tsx。
+   *    ⚠️ 2026-10-15：法务页页脚那颗「返回游戏屋」也删了（用户要求「其他页面底部的
+   *    回到房间也去除」）—— 这一页页脚现在只剩「隐私 ↔ 条款」互链和「游戏列表」。
+   *    见 components/LegalPage.tsx。
    */
   /* 页脚那个小标题，后面跟着邮箱 */
   'legal.contact': 'Contact us:',
@@ -1172,8 +1213,13 @@ const en = {
   'tour.screen.body':
     'Drag a ROM file (.nes, .sfc, .gba, .md, .gb …) or an arcade .zip onto the TV, or just click the screen to pick a file. No ROMs ship with this repo — bring your own.',
   'tour.rail.title': 'The switch rail',
+  /*
+   * ⚠️ 2026-10-15：这一句里**去掉了「游戏库」那一项** —— 房间里的游戏库入口收了
+   * （用户要求，见 components/ConsoleScene.tsx 那颗钮的注释）。指引是逐项念那一列开关的，
+   * 念到一个不存在的钮就是错的。恢复入口时把这一项放回来（中英两份一起改）。
+   */
   'tour.rail.body':
-    'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Library (online games and this machine’s history), Netplay, Key bindings. Help: Controls help, and the Guestbook.',
+    'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Netplay, Key bindings. Help: Controls help, and the Guestbook.',
 
   /* 后台（登录 + 录入），独立于房间界面。 */
   'admin.title': 'Admin',
@@ -1244,7 +1290,8 @@ const en = {
    */
   'admin.bulk.button': 'Import from list',
   'admin.bulk.title': 'Import from a list page',
-  'admin.bulk.hint': 'Paste a console list page — every game on it gets imported one by one.',
+  'admin.bulk.hint':
+    'Paste a console list page — every game on it gets imported one by one. A game with several language versions (Chinese / English / Japanese / Korean) is imported once per language.',
   'admin.bulk.placeholder': 'e.g. https://retrogamesnexus.com/zh/snes-games?page=1',
   'admin.bulk.read': 'Read list',
   'admin.bulk.reading': 'Reading…',
@@ -1262,7 +1309,40 @@ const en = {
   'admin.bulk.noTitle': 'That page has no title',
   'admin.bulk.noCover': 'That page has no cover image',
   'admin.bulk.noRom': 'That page has no ROM file',
-  'admin.bulk.duplicate': 'Already in the library (same title and language).',
+  'admin.bulk.duplicate': 'Already in the library (same console, title and language).',
+  /*
+   * 「自动爬取」（2026-10-15 加）：给一个分类页地址，一页页爬到最后一页、每页 5 款并发，
+   * 画面上那个控制台把「游戏名 · 语言 → 结果」一行行吐出来。见 components/AdminAutoCrawl。
+   */
+  'admin.crawl.button': 'Auto crawl',
+  'admin.crawl.title': 'Auto crawl a category',
+  'admin.crawl.hint':
+    'Paste a category page. It walks page by page to the last one, 5 games at a time, and imports every language version (Chinese / English / Japanese / Korean). The console below prints one line per version.',
+  'admin.crawl.placeholder': 'e.g. https://retrogamesnexus.com/zh/nds-games',
+  'admin.crawl.pagesLabel': 'Max pages',
+  'admin.crawl.pagesHint': 'Empty = crawl until the last page.',
+  'admin.crawl.start': 'Start crawling',
+  'admin.crawl.stop': 'Stop',
+  'admin.crawl.close': 'Close',
+  'admin.crawl.console': 'Console',
+  'admin.crawl.consoleNote':
+    'Only the last {count} lines are shown — the full log is in the browser console.',
+  'admin.crawl.progress': 'Page {page} · {done}/{total} on this page · {games} games total',
+  'admin.crawl.stat': 'Imported {ok} · Skipped {skip} · Failed {fail}',
+  'admin.crawl.logPage': '── Page {page} ── {count} games',
+  'admin.crawl.logDupes': '   ({count} already seen, skipped)',
+  'admin.crawl.logPageEmpty': 'Page {page} has no games — reached the end.',
+  'admin.crawl.logPageFailed': 'Could not read page {page}: {detail}',
+  'admin.crawl.statusOk': 'imported',
+  'admin.crawl.statusSkip': 'skipped',
+  'admin.crawl.statusFail': 'failed',
+  'admin.crawl.done': 'Crawl finished.',
+  'admin.crawl.stopped': 'Stopped early.',
+  'admin.crawl.summary':
+    '{pages} pages · {games} games → {ok} imported · {skip} skipped · {fail} failed',
+  'admin.crawl.summaryTime': 'Took {seconds}s.',
+  'admin.crawl.pageLimitHit': 'Stopped at the page limit ({pages}).',
+  'admin.crawl.needUrl': 'Enter a category page URL first.',
   /*
    * 拖拽提示（2026-10-13 加）：封面 / 游戏文件两个选择框都接受从资源管理器拖文件；
    * 封面**额外**接受从网页里拖一张图过来（那条路走 /api/admin/fetch-image 取字节）。
@@ -1505,8 +1585,13 @@ const en = {
   'gamesPage.prev': 'Prev',
   'gamesPage.next': 'Next',
   /*
-   * 页脚那颗「回到房间」（`/room` 那间屋子）。**内容页页脚**用它，**法务两页页脚**
-   * 也从 2026-10-14 起用它（原来那边是 `legal.back`，见下面 legal 那段的注释）。
+   * 「回到房间」（`/room` 那间屋子）。
+   *
+   * ⚠️ 2026-10-15：**三处页脚全都删了它**（用户要求「其他页面底部的回到房间也去除」，
+   *    首页那颗同日更早先删，内容页 / 法务页页脚随后也删了 —— 见 GamesShell 与
+   *    LegalPage 里各自的注释）。现在只剩 **404 页那两颗**在用它（左上角那颗真链接
+   *    + 正文下面那颗钮）—— 404 刻意不挂顶栏，那两颗就是迷路的人唯一的确定去处。
+   *    键留着，别跟着 404 一起删。
    */
   'gamesPage.backHome': 'Back to the room',
   'gamesPage.backToGames': 'All games',
@@ -1532,7 +1617,8 @@ const en = {
    */
   'common.back': 'Back',
   /*
-   * 页脚那颗「首页」（2026-10-13 加，和 `backHome` 并排放在内容页页脚里）。
+   * 页脚那颗「首页」（2026-10-13 加）。**2026-10-15 起它是页脚里唯一一条「回去的路」**
+   * —— 原先并排那颗「回到房间」删了（见 `backHome` 那条的注释）。
    *
    * `backHome` 说的是「回到房间」（`/room`，屋子里那台电视机），这一颗回的是**落地页**
    * （`/`）—— 2026-10-13 之后那是两个不同的地址、两件不同的事，所以是两个键。
@@ -1712,7 +1798,7 @@ const zh: Record<MessageKey, string> = {
   'meta.description':
     '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
   'meta.keywords':
-    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, NDS 模拟器, NDS 游戏, 任天堂 DS, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
   /* 房间页（`/room`）自己的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
   'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
   'seo.room.description':
@@ -1732,7 +1818,12 @@ const zh: Record<MessageKey, string> = {
    */
   'home.hero.lead':
     '{site}上在线玩 NES、SFC（超级任天堂）、GBA、世嘉 MD、Game Boy 和街机等十余款机种的游戏，支持联机对战。',
-  'home.hero.play': '进入小屋',
+  /*
+   * ⚠️ 2026-10-15：改成「加载本地 ROM」并挂回首屏右侧（原来叫「进入小屋」、已从首屏撤掉）。
+   *    「加载」这个动词和房间里点进去第一句是同一个词（`screen.tapLoad`「点击从本地加载」），
+   *    也就是 "LOAD A LOCAL ROM" 的直译。当天先写过「游玩本地 ROM」，弃用原因见 en 那份的注释。
+   */
+  'home.hero.play': '加载本地 ROM',
   'home.hero.browse': '浏览全部游戏',
   'home.join.title': '和朋友一起玩',
   'home.join.hint': '输入朋友分享的 4 位房间码，即可加入联机。',
@@ -1842,11 +1933,13 @@ const zh: Record<MessageKey, string> = {
   'screen.pick': '点击选择 ROM 文件，或把文件拖到这里',
   'screen.srLabel': '选择要运行的 ROM 文件',
 
-  /* 屏幕里那几句提示的可见文字（英文那侧全大写，中文不跟）。2026-10-13 从三行收成两行，见 en 那边的注释 */
+  /* 屏幕里那几句提示的可见文字（英文那侧全大写，中文不跟）。2026-10-13 从三行收成两行，见 en 那边的注释。
+     ⚠️ 2026-10-15：`screen.orLibrary` 和下面那一对 `screen.mobile*` 当前**没有代码引用**
+     —— 房间里的游戏库入口收了（见 ConsoleScene 那颗钮的注释）。键留着不删，恢复入口时放回来 */
   'screen.tapLoad': '点击从本地加载',
   'screen.orLibrary': '或者从在线游戏库启动',
   'screen.release': '松手载入',
-  /* 移动端的待机提示 —— 移动端只能从在线游戏库载入，见 en 那边同一段的注释 */
+  /* 移动端的待机提示 —— 原本移动端只能从在线游戏库载入，见 en 那边同一段的注释。⚠️ 2026-10-15 起未使用 */
   'screen.mobileLibrary': '从游戏库载入游戏',
   'screen.mobileTap': '点屏幕打开游戏库',
   'screen.waitingHost': '等待房主画面',
@@ -1887,6 +1980,8 @@ const zh: Record<MessageKey, string> = {
   'legend.title': '按键说明',
   'legend.close': '关闭',
   'legend.needZip': '格式  FBNeo 只吃 .zip —— 这个是 {ext}，重新打包一下（或换一个 .zip 版）',
+  /* `/play` 那条通道专用，来由和措辞的取舍见上面英文那份的注释。 */
+  'play.needZip': '格式  这个 ROM 是 {ext} 压缩包，没能解开 —— 换成 .zip 或裸 ROM 再试',
   /* Neo Geo 缺 BIOS 的提示，判据和措辞的来由见上面英文那份的注释。 */
   'legend.needBios':
     'BIOS  这盘看着像 Neo Geo 游戏（拳皇 / 合金弹头 / 侍魂…），需要 neogeo.zip —— 把它拖进页面就装上了。CPS1 / CPS2 那类不需要。',
@@ -2021,6 +2116,7 @@ const zh: Record<MessageKey, string> = {
   'keybind.conflictSame': '「{pressed}」已经绑给「{button}」钮了，换一个键。',
   'keybind.conflictOther': '「{pressed}」已经绑给玩家 {player} 的「{button}」钮了，换一个键。',
   'keybind.hint': '键盘映射只在插卡带时读一次，改完要重载卡带才生效。两位玩家不能共用同一个键。',
+  'keybind.soloHint': '键盘映射只在插卡带时读一次，改完要重载卡带才生效。',
   'keybind.hostHint':
     '你是房主：玩家 1 是你自己的键，玩家 2 是用来把加入者的输入注入本机的。两组不能共用一个键，否则注入会连带驱动你的玩家 1。改完要重载卡带。',
   'keybind.guestHint':
@@ -2028,6 +2124,7 @@ const zh: Record<MessageKey, string> = {
   'keybind.guestLocalHint':
     '你是加入者，本机还跑着一盘自己的卡带。你按的就是「玩家 1」那组：本机那盘按它读键盘，改完要重载卡带；发给房主的也是它，那部分立刻生效。',
 
+  /* ⚠️ 2026-10-15：这颗「打开游戏库」的钮文案当前没有引用，见 en 那边同一处的注释 */
   'games.open': '游戏库',
   'games.title': '游戏库',
   'games.close': '关闭',
@@ -2277,8 +2374,9 @@ const zh: Record<MessageKey, string> = {
   'tour.screen.body':
     '把 ROM 文件（.nes / .sfc / .gba / .md / .gb 等）或街机 .zip 拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
+  /* ⚠️ 2026-10-15：去掉了「游戏库」那一项，理由见 en 那份同一处的注释 */
   'tour.rail.body':
-    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：游戏库（在线库 + 本机历史）、联机、自定义按键。帮助：按键说明、留言本。',
+    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：联机、自定义按键。帮助：按键说明、留言本。',
 
   'admin.title': '后台',
   'admin.login.title': '后台登录',
@@ -2331,7 +2429,8 @@ const zh: Record<MessageKey, string> = {
   /* 「从列表导入」，见上面英文那份的注释 */
   'admin.bulk.button': '从列表导入',
   'admin.bulk.title': '从列表导入',
-  'admin.bulk.hint': '粘贴一个机种列表页 —— 那一页上的游戏会逐个导入。',
+  'admin.bulk.hint':
+    '粘贴一个机种列表页 —— 那一页上的游戏会逐个导入。一款有中 / 英 / 日 / 韩 多个语言版本的，每种语言各导一条。',
   'admin.bulk.placeholder': '例如 https://retrogamesnexus.com/zh/snes-games?page=1',
   'admin.bulk.read': '读取列表',
   'admin.bulk.reading': '读取中…',
@@ -2349,7 +2448,35 @@ const zh: Record<MessageKey, string> = {
   'admin.bulk.noTitle': '该页面没有标题',
   'admin.bulk.noCover': '该页面没有封面图',
   'admin.bulk.noRom': '该页面没有游戏文件',
-  'admin.bulk.duplicate': '库里已有同名同语言的游戏。',
+  'admin.bulk.duplicate': '库里已有同机种、同名、同语言的游戏。',
+  /* 「自动爬取」，见上面英文那份的注释 */
+  'admin.crawl.button': '自动爬取',
+  'admin.crawl.title': '自动爬取分类页',
+  'admin.crawl.hint':
+    '粘贴一个分类页地址。它会一页页爬到最后一页，每页 5 款并发；一款有几种语言版本就导几条（中 / 英 / 日 / 韩）。下面那个控制台每个语言版本打一行。',
+  'admin.crawl.placeholder': '例如 https://retrogamesnexus.com/zh/nds-games',
+  'admin.crawl.pagesLabel': '最多页数',
+  'admin.crawl.pagesHint': '留空 = 一直爬到最后一页。',
+  'admin.crawl.start': '开始爬取',
+  'admin.crawl.stop': '停止',
+  'admin.crawl.close': '关闭',
+  'admin.crawl.console': '控制台',
+  'admin.crawl.consoleNote': '只显示最近 {count} 行 —— 完整记录在浏览器控制台。',
+  'admin.crawl.progress': '第 {page} 页 · 本页 {done}/{total} · 累计 {games} 款',
+  'admin.crawl.stat': '成功 {ok} · 跳过 {skip} · 失败 {fail}',
+  'admin.crawl.logPage': '── 第 {page} 页 ── {count} 款',
+  'admin.crawl.logDupes': '   （其中 {count} 款前面见过，跳过）',
+  'admin.crawl.logPageEmpty': '第 {page} 页没有游戏 —— 到底了。',
+  'admin.crawl.logPageFailed': '第 {page} 页读取失败：{detail}',
+  'admin.crawl.statusOk': '成功',
+  'admin.crawl.statusSkip': '跳过',
+  'admin.crawl.statusFail': '失败',
+  'admin.crawl.done': '爬取结束。',
+  'admin.crawl.stopped': '已手动停止。',
+  'admin.crawl.summary': '共 {pages} 页 · {games} 款 → 成功 {ok} · 跳过 {skip} · 失败 {fail}',
+  'admin.crawl.summaryTime': '耗时 {seconds} 秒。',
+  'admin.crawl.pageLimitHit': '到了页数上限（{pages} 页），先停。',
+  'admin.crawl.needUrl': '请先填一个分类页地址。',
   /* 拖拽提示，见上面英文那份的注释 */
   'admin.drop.image': '把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。',
   'admin.drop.rom': '把游戏文件拖到这里，或点选文件。',
@@ -2525,11 +2652,7 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.searchEmpty': '没有匹配「{keyword}」的游戏，换个短一点的词，或者直接搜游戏名。',
   'gamesPage.prev': '上一页',
   'gamesPage.next': '下一页',
-  /*
-   * 页脚那颗「回到房间」。内容页页脚用它，**法务两页页脚也从 2026-10-14 起用它**
-   * （在此之前那边写的是「返回游戏屋」、占用的是已删除的 `legal.back`）。
-   * 两处都是回 `/room` 那间屋子，共用一条就行。
-   */
+  /* 「回到房间」。⚠️ 2026-10-15 起三处页脚都删了它，只剩 404 页那两颗在用，见 en 那份的注释 */
   'gamesPage.backHome': '回到房间',
   'gamesPage.backToGames': '全部游戏',
   /* `gamesPage.backToGame` 已删除，统一到 `common.back`，见英文表里那一段的说明 */

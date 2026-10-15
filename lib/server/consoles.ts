@@ -127,11 +127,11 @@ export const CONSOLES_PAGE_REVALIDATE_SECONDS = 43200;
  * `listConsoles` 的缓存版 —— **只给前台用**；后台必须走未缓存的那份。
  *
  * ⚠️ 改完机种资料要把键尾的版本号 +1：缓存条目不随部署失效，不换键前台要等一个 TTL
- *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2）。
+ *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2，2026-10-15 补 nds 图升到 v3）。
  */
 export const listConsolesCached = cached(
   async () => listConsoles(),
-  ['consoles:list', 'v2'],
+  ['consoles:list', 'v3'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
 

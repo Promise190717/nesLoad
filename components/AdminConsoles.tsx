@@ -12,7 +12,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AdminLoading from './AdminLoading';
 import { CONSOLE_LABEL } from './CartridgeSprite';
-import { useI18n } from './I18nProvider';
 
 /**
  * 后台 · 机种库 tab（2026-10-14 加）。
@@ -59,7 +58,6 @@ async function readError(res: Response, fallback: string): Promise<string> {
 }
 
 export default function AdminConsoles() {
-  const { t, href: localeHref } = useI18n();
   const router = useRouter();
 
   const [list, setList] = useState<AdminConsole[]>([]);
@@ -177,14 +175,14 @@ export default function AdminConsoles() {
 
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setModalNotice({ tone: 'error', text: t('admin.consoles.nameRequired') });
+      setModalNotice({ tone: 'error', text: '请填写机种名字。' });
       return;
     }
 
     const releasedText = releaseYear.trim();
     const parsedReleased = releasedText ? Number(releasedText) : null;
     if (parsedReleased !== null && !Number.isInteger(parsedReleased)) {
-      setModalNotice({ tone: 'error', text: t('admin.consoles.badReleased') });
+      setModalNotice({ tone: 'error', text: '发售年份必须是整数。' });
       return;
     }
 
@@ -206,9 +204,9 @@ export default function AdminConsoles() {
         method: 'PATCH',
         body: form,
       });
-      if (!res.ok) throw new Error(await readError(res, t('admin.consoles.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
 
-      setPageNotice({ tone: 'ok', text: t('admin.consoles.saved') });
+      setPageNotice({ tone: 'ok', text: '已保存。' });
       reloadList();
       resetForm();
       setModalOpen(false);
@@ -217,7 +215,7 @@ export default function AdminConsoles() {
     } catch (error) {
       setModalNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.consoles.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     } finally {
       setBusy(false);
@@ -226,17 +224,17 @@ export default function AdminConsoles() {
 
   const resetConsole = async (console: AdminConsole) => {
     // 重置 = 删资料行（前台退回默认名字），游戏不受影响 —— 接口的 404 说明「本来就没资料」
-    if (!window.confirm(t('admin.consoles.deleteConfirm', { name: console.name }))) return;
+    if (!window.confirm(`重置「${console.name}」？它的资料（名字 / 图片 / 介绍）会被清掉，前台退回内置默认信息。游戏本身不受影响。`)) return;
     try {
       const res = await fetch(`/api/admin/consoles/${console.type}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await readError(res, t('admin.consoles.failed')));
+      if (!res.ok) throw new Error(await readError(res, '请求失败。'));
       reloadList();
       setPageNotice(null);
       router.refresh();
     } catch (error) {
       setPageNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('admin.consoles.failed'),
+        text: error instanceof Error ? error.message : '请求失败。',
       });
     }
   };
@@ -245,7 +243,7 @@ export default function AdminConsoles() {
     <div className="flex flex-col gap-6">
       <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
         <div className="mb-3 flex items-center gap-3">
-          <h2 className="shrink-0 text-[12px] text-ink-200">{t('admin.consoles.title')}</h2>
+          <h2 className="shrink-0 text-[12px] text-ink-200">{'机种库'}</h2>
           {/* 机种清单是代码定死的四个：这里没有「添加」钮，也没有搜索框 */}
         </div>
 
@@ -259,10 +257,10 @@ export default function AdminConsoles() {
           </p>
         )}
 
-        {listPending && <AdminLoading label={t('feedback.loading')} />}
+        {listPending && <AdminLoading label="载入中…" />}
 
         {listLoaded && list.length === 0 && (
-          <p className="text-[12px] text-ink-500">{t('admin.consoles.failed')}</p>
+          <p className="text-[12px] text-ink-500">{'请求失败。'}</p>
         )}
 
         <ul className="flex flex-col divide-y-2 divide-ink-900">
@@ -293,30 +291,30 @@ export default function AdminConsoles() {
                 ) : (
                   !console.filled && (
                     <span className="truncate text-[12px] text-ink-600">
-                      {t('admin.consoles.unfilled')}
+                      {'还没填资料 —— 前台先用内置默认信息。'}
                     </span>
                   )
                 )}
               </span>
 
               <span className="shrink-0 text-[12px] text-ink-500">
-                {t('admin.consoles.gameCount', { count: console.gameCount })}
+                {`${console.gameCount} 款游戏`}
               </span>
 
               <Link
-                href={localeHref(`/consoles/${console.type}`)}
+                href={`/consoles/${console.type}`}
                 target="_blank"
                 rel="noreferrer"
                 className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
-                {t('admin.consoles.view')}
+                {'查看'}
               </Link>
               <button
                 type="button"
                 onClick={() => openEdit(console)}
                 className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
-                {t('admin.edit')}
+                {'编辑'}
               </button>
               {/* 只重置「已经填过资料」的行 —— 没资料时重置是个空操作，按钮就不画 */}
               {console.filled && (
@@ -325,7 +323,7 @@ export default function AdminConsoles() {
                   onClick={() => void resetConsole(console)}
                   className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-2.5 py-1 text-[12px] text-ink-200 transition-colors hover:text-danger"
                 >
-                  {t('admin.consoles.reset')}
+                  {'重置资料'}
                 </button>
               )}
             </li>
@@ -340,13 +338,13 @@ export default function AdminConsoles() {
         >
           <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[620px] p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
-              {t('admin.consoles.editTitle')}
+              {'编辑机种'}
               <span className="ml-2 font-pixel text-[10px] text-ink-500">{editingType}</span>
             </h2>
 
             <form onSubmit={(e) => void submit(e)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.name')}
+                {'名字'}
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -355,7 +353,7 @@ export default function AdminConsoles() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.nameEn')}
+                {'名字 (EN)'}
                 <input
                   value={nameEn}
                   onChange={(e) => setNameEn(e.target.value)}
@@ -364,7 +362,7 @@ export default function AdminConsoles() {
               </label>
 
               <label className={LABEL_CLASS}>
-                {t('admin.consoles.field.released')}
+                {'发售年份'}
                 <input
                   value={releaseYear}
                   onChange={(e) => setReleaseYear(e.target.value)}
@@ -378,7 +376,7 @@ export default function AdminConsoles() {
                 旁边那行小字把「当前这张叫什么」写出来。
               */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.image')}
+                {'机图 / 图片'}
                 <input
                   ref={imageRef}
                   type="file"
@@ -391,13 +389,13 @@ export default function AdminConsoles() {
                 />
                 <span className="text-[12px] text-ink-600">
                   {imageLabel
-                    ? t('admin.consoles.imageCurrent', { name: imageLabel })
-                    : t('admin.consoles.imageHint')}
+                    ? `当前：${imageLabel}。留空表示不换。`
+                    : '选填。没有图时前台用卡带丝印词（NES / SFC / GBA / ARC 等）占位。'}
                 </span>
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.summary')}
+                {'简介'}
                 <input
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
@@ -406,7 +404,7 @@ export default function AdminConsoles() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.summaryEn')}
+                {'简介 (EN)'}
                 <input
                   value={summaryEn}
                   onChange={(e) => setSummaryEn(e.target.value)}
@@ -415,7 +413,7 @@ export default function AdminConsoles() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.description')}
+                {'介绍'}
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -425,7 +423,7 @@ export default function AdminConsoles() {
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {t('admin.consoles.field.descriptionEn')}
+                {'介绍 (EN)'}
                 <textarea
                   value={descriptionEn}
                   onChange={(e) => setDescriptionEn(e.target.value)}
@@ -440,7 +438,7 @@ export default function AdminConsoles() {
                   disabled={busy}
                   className="pixel-edge pxw-3 pxc-600 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {busy ? t('admin.saving') : t('admin.save')}
+                  {busy ? '保存中…' : '保存'}
                 </button>
                 <button
                   type="button"
@@ -448,7 +446,7 @@ export default function AdminConsoles() {
                   disabled={busy}
                   className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-4 py-2 text-[12px] text-ink-300 transition-colors enabled:hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {t('admin.cancel')}
+                  {'取消'}
                 </button>
                 {modalNotice && (
                   <span

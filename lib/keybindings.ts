@@ -1,5 +1,6 @@
 'use client';
 
+import type { ConsoleType } from './emulator';
 import type { Translate } from './i18n';
 
 /**
@@ -53,7 +54,8 @@ import type { Translate } from './i18n';
  *
  * **这不是面板上显示的名字。** 面板走街机叫法（A B C X Y Z / 开始 / 投币），映射按街机惯例：
  * 面板 A→`b`、B→`a`、C→`y`、X→`x`、Y→`l`、Z→`r`、投币→`select`、开始→`start`。
- * 显示名在 `KeyBindingsPanel` 的 `BUTTON_LABELS` / `buttonLabel`。
+ * 显示名在 `KeyBindingsPanel` 的 `BUTTON_LABELS` / `buttonLabel`，**按机种还能再换一套**
+ * （见 `CONSOLE_BUTTON_LABELS` —— NDS 的丝印不是街机那套）。
  */
 export type ButtonName =
   | 'up'
@@ -66,11 +68,24 @@ export type ButtonName =
   | 'x'
   | 'l'
   | 'r'
+  | 'l2'
+  | 'r2'
   | 'select'
   | 'start';
 
-/** 面板上的展示顺序：方向 → 面键（A B C / X Y Z）→ 投币 / 开始。 */
-export const BUTTONS: readonly ButtonName[] = [
+/**
+ * 键位模型里的**全部**钮 —— 存盘、写 RetroArch 配置、查重一律按这一份走。
+ *
+ * `l2` / `r2` 是 2026-10-15 加的（NDS 那套键位表里有第二排肩键）。它们**不是每种机器
+ * 都有**，可键位表必须整份存在（`PlayerBindings` 是 `Record<ButtonName, string>`，
+ * 少一个钮就没法表达），所以「模型里有没有这个钮」和「面板上画不画它」是两件事：
+ *
+ *   · 存储 / 换算 / 查重 → 本表（14 个）；
+ *   · 面板与按键说明画哪几个 → `buttonsFor(consoleType)`。
+ *
+ * 顺序就是面板上的顺序（面板是两列，见 `KeyBindingsPanel` 的网格）。
+ */
+export const ALL_BUTTONS: readonly ButtonName[] = [
   'up',
   'down',
   'left',
@@ -81,11 +96,58 @@ export const BUTTONS: readonly ButtonName[] = [
   'x',
   'l',
   'r',
+  'l2',
+  'r2',
   'select',
   'start',
 ];
 
-/** 一个玩家 12 个钮的键位。值一律是 `KeyboardEvent.code`。 */
+/**
+ * 面板 / 按键说明**默认**画的那几个 —— 就是原来那 12 个，**不含 `l2` / `r2`**。
+ *
+ * 为什么默认不画那两颗：肩键的第二排到今天为止只有 NDS 那套键位用得上，其余机种
+ * 的面板一直是 12 行、两列正好配成「上/下、左/右、A/B、C/X、Y/Z、投币/开始」。
+ * 一起摊出来只会让 NES / 街机的面板凭空多两行用不着的东西。
+ */
+export const BUTTONS: readonly ButtonName[] = ALL_BUTTONS.filter(
+  (button) => button !== 'l2' && button !== 'r2'
+);
+
+/**
+ * 机种专属的钮表 —— 面板和按键说明按它画。**只列和默认那 12 个不一样的机种**。
+ *
+ * NDS（2026-10-15）：机身丝印是 A / B / X / Y 四颗面键、L / R / L2 / R2 两对肩键、
+ * START / SELECT，所以 14 个钮一个不少。
+ */
+const CONSOLE_BUTTONS: Partial<Record<ConsoleType, readonly ButtonName[]>> = {
+  nds: [
+    'up',
+    'down',
+    'left',
+    'right',
+    'b',
+    'a',
+    'y',
+    'x',
+    'l',
+    'r',
+    'l2',
+    'r2',
+    'select',
+    'start',
+  ],
+};
+
+/**
+ * 这个机种在面板 / 按键说明里画哪几个钮。
+ *
+ * 认不出机种（没插卡带 / 加入者还没连上）或机种没单独登记 → 退回 `BUTTONS`。
+ */
+export function buttonsFor(consoleType?: ConsoleType | null): readonly ButtonName[] {
+  return (consoleType ? CONSOLE_BUTTONS[consoleType] : undefined) ?? BUTTONS;
+}
+
+/** 一个玩家的键位表。值一律是 `KeyboardEvent.code`。 */
 export type PlayerBindings = Record<ButtonName, string>;
 
 export interface KeyBindings {
@@ -108,6 +170,12 @@ export interface KeyBindings {
  *     1 2 3      ← 面板 A B
  *
  * 这样六个面键在小键盘上是一块紧凑的 2×3 矩形，盲按不容易串行。
+ *
+ * `l2` / `r2`（2026-10-15 随 NDS 加）：**街机 / 红白机那几档根本用不上这两颗**
+ * （面板也不画，见 `BUTTONS`），但键位表是整份存的，必须给个不撞车的键填满。
+ * 挑的是没被占用的 `Q` / `E`（P1）和小键盘右列剩下的 `9` / `3`（P2）。
+ *
+ * ⚠️ **NDS 不用这一套** —— 它有自己的 `NDS_DEFAULT_BINDINGS`，见下面那段。
  */
 export const DEFAULT_BINDINGS: KeyBindings = {
   p1: {
@@ -121,6 +189,8 @@ export const DEFAULT_BINDINGS: KeyBindings = {
     x: 'KeyU',
     l: 'KeyI',
     r: 'KeyO',
+    l2: 'KeyQ',
+    r2: 'KeyE',
     select: 'KeyB',
     start: 'Enter',
   },
@@ -135,10 +205,84 @@ export const DEFAULT_BINDINGS: KeyBindings = {
     x: 'Numpad5',
     l: 'Numpad7',
     r: 'Numpad8',
+    l2: 'Numpad9',
+    r2: 'Numpad3',
     select: 'Delete',
     start: 'Numpad0',
   },
 };
+
+/**
+ * NDS 的默认键位 —— **单独一套**（2026-10-15 用户给的对照表）。
+ *
+ * 为什么不能沿用上面那套街机布局：NDS 是竖屏掌机，两只手的分工和街机完全不同 ——
+ * 十字键和四颗面键都归**右手拇指**（左边是屏、没有方向键），肩键归食指。用户那张表是：
+ *
+ *     十字键   ↑ ↓ ← →
+ *     A / B    Z / X
+ *     X / Y    A / S
+ *     L / R    Q / E
+ *     L2 / R2  R / W
+ *     START    Enter
+ *     SELECT   Shift
+ *
+ * 左边那一片摊在键盘上是
+ *
+ *     Q W E R     ← L / R2 / R / L2
+ *     A S         ← X / Y
+ *     Z X         ← A / B
+ *
+ * —— 左手食指到小指刚好盖住两排肩键和四颗面键，右手整只交给方向键。
+ *
+ * ⚠️ **P2 那组必须和 P1 完全不重叠。** NDS 是单人机、面板上根本不画玩家 2
+ * （见 `KeyBindingsPanel` 的 `soloOnly`），可 `conflictInOtherPlayer` 照样会拿 P2
+ * 拦人 —— 而 P1 已经把方向键占了，P2 要是还按全局默认用方向键，用户想给十字键换个
+ * 方向键都会被「已绑给玩家 2」挡下。所以 P2 整组挪到小键盘上（反正它不参与实际游戏）。
+ */
+export const NDS_DEFAULT_BINDINGS: KeyBindings = {
+  p1: {
+    up: 'ArrowUp',
+    down: 'ArrowDown',
+    left: 'ArrowLeft',
+    right: 'ArrowRight',
+    b: 'KeyX',
+    a: 'KeyZ',
+    y: 'KeyS',
+    x: 'KeyA',
+    l: 'KeyQ',
+    r: 'KeyE',
+    l2: 'KeyR',
+    r2: 'KeyW',
+    select: 'ShiftLeft',
+    start: 'Enter',
+  },
+  p2: {
+    up: 'Numpad8',
+    down: 'Numpad2',
+    left: 'Numpad4',
+    right: 'Numpad6',
+    b: 'Numpad1',
+    a: 'Numpad3',
+    y: 'Numpad7',
+    x: 'Numpad9',
+    l: 'NumpadDivide',
+    r: 'NumpadMultiply',
+    l2: 'NumpadSubtract',
+    r2: 'NumpadAdd',
+    select: 'NumpadDecimal',
+    start: 'NumpadEnter',
+  },
+};
+
+/**
+ * 这个机种在**没自定义过键位**时该用哪一套默认。
+ *
+ * 只有 NDS 有自己那套（见 `NDS_DEFAULT_BINDINGS` 那段），其余机种共用 `DEFAULT_BINDINGS`。
+ * 「自定义过没有」由 `loadBindings()` 判 —— 用户改过键位就整份用他的，跟机种无关。
+ */
+export function defaultBindingsFor(consoleType?: ConsoleType | null): KeyBindings {
+  return consoleType === 'nds' ? NDS_DEFAULT_BINDINGS : DEFAULT_BINDINGS;
+}
 
 /**
  * 历次发布过的默认键位。
@@ -151,10 +295,24 @@ export const DEFAULT_BINDINGS: KeyBindings = {
  * 那就跟着当前默认值走；只要动过一个键，就整份保留他的。
  *
  * **改 `DEFAULT_BINDINGS` 时把旧的那份挪进来**，老用户才会跟着升。
+ *
+ * ⚠️ `l2` / `r2` 是 2026-10-15 才进模型的，**这两项在历史版本里压根不存在**。
+ * 比对之前 `sanitizePlayer` 会先拿**当前全局默认**的这两项补上（它只补缺项、不补错项），
+ * 所以下面每一份历史表里的 `l2` / `r2` 都得写成**当前 `DEFAULT_BINDINGS` 的那两个值**，
+ * 否则「从没改过键位」就认不出来了。别改成当年那版真实存在过的值（当年没有值）。
  */
 const LEGACY_DEFAULTS: readonly KeyBindings[] = [
   {
-    // 街机布局之前那一版：P1 方向键 / Z X / A S / Q E / Shift / Enter
+    /*
+     * 街机布局的上上版（12 个钮）：P1 方向键 / Z X / A S / Q E / Shift / Enter
+     * 和 P2 的 I K J L / U O / N M / G H / 1 2。
+     *
+     * ⚠️ 这一份里 `l` 和 `l2` **都是 `KeyQ`**（`r` / `r2` 都是 `KeyE`），看着像抄错 ——
+     * 不是：当年 `l2` / `r2` 还不存在，这两项是按上面那条规矩**补**出来的当前默认值，
+     * 而当年 `l` / `r` 恰好就落在 Q / E 上。补出来的表要能和用户本地那份（同样是补出来的）
+     * 逐项对上，就不能「顺手去重」。真去重了，这批用户会被判成「自定义过键位」，
+     * 于是永远升不到新默认值 —— 而这个站里他们恰恰是从没改过键位的那批人。
+     */
     p1: {
       up: 'ArrowUp',
       down: 'ArrowDown',
@@ -166,6 +324,8 @@ const LEGACY_DEFAULTS: readonly KeyBindings[] = [
       x: 'KeyS',
       l: 'KeyQ',
       r: 'KeyE',
+      l2: 'KeyQ',
+      r2: 'KeyE',
       select: 'ShiftLeft',
       start: 'Enter',
     },
@@ -180,16 +340,56 @@ const LEGACY_DEFAULTS: readonly KeyBindings[] = [
       x: 'KeyM',
       l: 'KeyG',
       r: 'KeyH',
+      l2: 'Numpad9',
+      r2: 'Numpad3',
       select: 'Digit1',
       start: 'Digit2',
     },
   },
+  {
+    /*
+     * 街机布局那一版（12 个钮）—— 就是 2026-10-15 之前发布的 `DEFAULT_BINDINGS`，
+     * 只是没有 `l2` / `r2` 那两行（按上面那条规矩补成当前默认值）。
+     */
+    p1: {
+      up: 'KeyW',
+      down: 'KeyS',
+      left: 'KeyA',
+      right: 'KeyD',
+      b: 'KeyJ',
+      a: 'KeyK',
+      y: 'KeyL',
+      x: 'KeyU',
+      l: 'KeyI',
+      r: 'KeyO',
+      l2: 'KeyQ',
+      r2: 'KeyE',
+      select: 'KeyB',
+      start: 'Enter',
+    },
+    p2: {
+      up: 'ArrowUp',
+      down: 'ArrowDown',
+      left: 'ArrowLeft',
+      right: 'ArrowRight',
+      b: 'Numpad1',
+      a: 'Numpad2',
+      y: 'Numpad4',
+      x: 'Numpad5',
+      l: 'Numpad7',
+      r: 'Numpad8',
+      l2: 'Numpad9',
+      r2: 'Numpad3',
+      select: 'Delete',
+      start: 'Numpad0',
+    },
+  },
 ];
 
-/** 两份键位表是不是一模一样（12 个钮逐一比）。 */
+/** 两份键位表是不是一模一样（`ALL_BUTTONS` 逐一比，含 `l2` / `r2`）。 */
 function sameBindings(a: KeyBindings, b: KeyBindings): boolean {
   return (['p1', 'p2'] as const).every((player) =>
-    BUTTONS.every((button) => a[player][button] === b[player][button])
+    ALL_BUTTONS.every((button) => a[player][button] === b[player][button])
   );
 }
 
@@ -319,15 +519,18 @@ export function codeLabel(code: string): string {
 }
 
 /**
- * 面板上的钮名，走**街机叫法**：方向箭头 + A B C X Y Z + 开始 / 投币。
+ * 面板上的钮名**默认**走**街机叫法**：方向箭头 + A B C X Y Z + 开始 / 投币。
  *
- * 内部仍是 RetroArch 的 retropad 钮名（`b/a/y/x/l/r/select/start`，见 `ButtonName`），
+ * 内部仍是 RetroArch 的 retropad 钮名（`b/a/y/x/l/r/l2/r2/select/start`，见 `ButtonName`），
  * 面板 A→`b`、B→`a`、C→`y`、X→`x`、Y→`l`、Z→`r`。
  *
  * A B C X Y Z 和箭头是手柄丝印、**刻意不翻译**；开始 / 投币是词，跟着语言走
  * （`keybind.btnStart` / `keybind.btnCoin`），所以下面这两项只是英文兜底。
  *
  * 放在这里而不是面板组件里：页脚那行键位说明也要用它，两处必须同源。
+ *
+ * ⚠️ 这只是**默认**那一套。机种有自己的丝印时要走 `CONSOLE_BUTTON_LABELS`，
+ *    统一从 `buttonLabel(button, t, consoleType)` 取，别直接读这张表。
  */
 export const BUTTON_LABELS: Record<ButtonName, string> = {
   up: '↑',
@@ -340,22 +543,72 @@ export const BUTTON_LABELS: Record<ButtonName, string> = {
   x: 'X',
   l: 'Y',
   r: 'Z',
+  l2: 'L2',
+  r2: 'R2',
   select: 'COIN',
   start: 'START',
 };
 
-/** 取钮名：开始 / 投币 跟着语言走，其余固定。 */
-export function buttonLabel(button: ButtonName, t: Translate): string {
+/**
+ * 机种专属的钮名 —— **只列和街机叫法不一样的钮**。
+ *
+ * 为什么要有这一层：街机那套（A B C X Y Z）是给「一排六颗面键」的机器用的，
+ * 套到丝印完全不同的机器上就会出现**机器上根本不存在的字**。NDS 是最典型的
+ * （2026-10-15 用户报的）：它的面板写的是 A / B / X / Y 四颗面键 + L / R 肩键，
+ * 套街机叫法会长出「C」「Y」「Z」，而真正要按的 **L / R 反而看不见**。
+ *
+ * 开始 / 投币这两项也在这里覆盖：NDS 机身丝印是 START / SELECT，不该跟着语言
+ * 变成「开始 / 投币」（和 `CONSOLE_LABEL` 一样，丝印词不进文案表）。
+ */
+const CONSOLE_BUTTON_LABELS: Partial<
+  Record<ConsoleType, Partial<Record<ButtonName, string>>>
+> = {
+  nds: {
+    b: 'B',
+    a: 'A',
+    y: 'Y',
+    x: 'X',
+    l: 'L',
+    r: 'R',
+    select: 'SELECT',
+    start: 'START',
+  },
+};
+
+/**
+ * 取钮名。`consoleType` 决定用哪套丝印（不给就是街机那套）；
+ * 开始 / 投币 跟着语言走 —— 但机种表里写了字的话以机种为准。
+ */
+export function buttonLabel(
+  button: ButtonName,
+  t: Translate,
+  consoleType?: ConsoleType | null
+): string {
+  const own = consoleType ? CONSOLE_BUTTON_LABELS[consoleType]?.[button] : undefined;
+  if (own) return own;
   if (button === 'select') return t('keybind.btnCoin');
   if (button === 'start') return t('keybind.btnStart');
   return BUTTON_LABELS[button];
 }
 
-/** 面键在页脚 / 面板上的排列顺序：面板 A B C（下排）→ X Y Z（上排）。 */
-export const FACE_BUTTONS: readonly ButtonName[] = ['b', 'a', 'y', 'x', 'l', 'r'];
-
 /** 方向键在页脚里的排列顺序，对应键盘上「上左下右」的读法。 */
 export const DIRECTION_BUTTONS: readonly ButtonName[] = ['up', 'left', 'down', 'right'];
+
+/**
+ * 按键说明里「面键 + 肩键」那一段要列哪几个 —— 就是机种钮表去掉方向和 SELECT / START。
+ *
+ * 默认（非 NDS）正好是那 6 个：`b a y x l r` → 面板 A B C X Y Z。
+ * NDS 多两排肩键，会连 `l2` / `r2` 一起列出来。
+ *
+ * **不写死一张 `FACE_BUTTONS` 常量**：那样每加一个机种都要回来补一份，
+ * 而 `buttonsFor` 已经是「这个机种有哪几个钮」的唯一出处了。
+ */
+function faceButtonsFor(consoleType?: ConsoleType | null): readonly ButtonName[] {
+  return buttonsFor(consoleType).filter(
+    (button) =>
+      button !== 'select' && button !== 'start' && !DIRECTION_BUTTONS.includes(button)
+  );
+}
 
 /**
  * 把一位玩家的键位渲染成页脚那一行说明。
@@ -363,34 +616,42 @@ export const DIRECTION_BUTTONS: readonly ButtonName[] = ['up', 'left', 'down', '
  * **必须从实际的 bindings 生成，不能写死文案。** 写死过一次，代价是：页脚描述的是
  * `DEFAULT_BINDINGS`，而面板读的是 localStorage 里那份（改过默认值也不会自动跟随），
  * 于是老用户看到「页脚说 W/A/S/D、面板里却是方向键」——两边都觉得自己是对的。
+ *
+ * `consoleType` 只影响**钮名和列哪几个钮**（NDS 那套丝印见 `CONSOLE_BUTTON_LABELS`）；
+ * 键位本身始终来自 `table`，和机种无关。
  */
 export function playerLegend(
   table: PlayerBindings,
   player: 1 | 2,
-  t: Translate
+  t: Translate,
+  consoleType?: ConsoleType | null
 ): string {
   const moves = DIRECTION_BUTTONS.map((button) => codeLabel(table[button])).join('/');
-  const faces = FACE_BUTTONS.map(
-    (button) => `${codeLabel(table[button])}=${buttonLabel(button, t)}`
-  ).join(' · ');
+  const faces = faceButtonsFor(consoleType)
+    .map((button) => `${codeLabel(table[button])}=${buttonLabel(button, t, consoleType)}`)
+    .join(' · ');
   const coin = codeLabel(table.select);
   const start = codeLabel(table.start);
 
   return (
     `${player}P  ${moves} ${t('legend.moves')} · ${faces}` +
-    ` · ${coin}=${buttonLabel('select', t)} · ${start}=${buttonLabel('start', t)}`
+    ` · ${coin}=${buttonLabel('select', t, consoleType)} · ${start}=${buttonLabel('start', t, consoleType)}`
   );
 }
 
 /**
  * 键位表 → RetroArch 配置片段（`input_player1_up` 这种）。
  * 转不出名字的键会被跳过 —— 正常流程走不到（入口已校验），这里只是兜底。
+ *
+ * 遍历的是 `ALL_BUTTONS`（**含 `l2` / `r2`**），不是面板那份 `BUTTONS`：
+ * 面板不画不等于核心不用 —— NDS 那套键位里 `L2` / `R2` 是要真按的。
+ * 多写出去的 `input_playerN_l2` 对没有这两颗的机器是无害的（核心不读）。
  */
 export function bindingsToRetroArch(bindings: KeyBindings): Record<string, string> {
   const out: Record<string, string> = {};
   for (const player of [1, 2] as const) {
     const table = player === 1 ? bindings.p1 : bindings.p2;
-    for (const button of BUTTONS) {
+    for (const button of ALL_BUTTONS) {
       const name = codeToRetroArch(table[button]);
       if (name) out[`input_player${player}_${button}`] = name;
     }
@@ -410,7 +671,8 @@ export function bindingsToRetroArch(bindings: KeyBindings): Record<string, strin
  */
 export function codeToButton(table: PlayerBindings): Record<string, ButtonName> {
   const out: Record<string, ButtonName> = {};
-  for (const button of BUTTONS) out[table[button]] = button;
+  // 按 `ALL_BUTTONS` 走：加入者也可能按到 L2 / R2（NDS 那套），漏了就静默转发不出去
+  for (const button of ALL_BUTTONS) out[table[button]] = button;
   return out;
 }
 
@@ -421,7 +683,7 @@ export function codeToButton(table: PlayerBindings): Record<string, ButtonName> 
  * 这个是不带排除项的纯反查 —— 用来查**另一个玩家**那边是谁占了这个键。
  */
 export function buttonHolding(table: PlayerBindings, code: string): ButtonName | null {
-  for (const button of BUTTONS) {
+  for (const button of ALL_BUTTONS) {
     if (table[button] === code) return button;
   }
   return null;
@@ -436,7 +698,7 @@ export function conflictInPlayer(
   button: ButtonName,
   code: string
 ): ButtonName | null {
-  for (const other of BUTTONS) {
+  for (const other of ALL_BUTTONS) {
     if (other !== button && table[other] === code) return other;
   }
   return null;
@@ -455,7 +717,7 @@ export function conflictInOtherPlayer(
   code: string
 ): 'p1' | 'p2' | null {
   const other: 'p1' | 'p2' = player === 'p1' ? 'p2' : 'p1';
-  for (const button of BUTTONS) {
+  for (const button of ALL_BUTTONS) {
     if (bindings[other][button] === code) return other;
   }
   return null;
@@ -463,13 +725,27 @@ export function conflictInOtherPlayer(
 
 const STORAGE_KEY = 'nesload:keybindings';
 
-/** 校验一份玩家键位表：12 个钮齐全、值都是字符串、且 Nostalgist 认得出。 */
-function sanitizePlayer(input: unknown): PlayerBindings | null {
+/**
+ * 校验一份玩家键位表：钮齐全、值都是字符串、且 Nostalgist 认得出。
+ *
+ * `fallback` 是**缺项时的补值**，传的一律是 `DEFAULT_BINDINGS` 那一组（**不跟着机种走**）：
+ * `l2` / `r2` 是 2026-10-15 才进模型的，之前存下来的那份里没有这两项。补什么值必须和
+ * `LEGACY_DEFAULTS` 里写的一致，否则「从没改过键位」就认不出来、老用户会被当成
+ * 自定义过（他本地那份旧默认值就永远升不上来了）。
+ *
+ * 只补**缺项**，不补错项：值存在但 Nostalgist 认不出来，照样整份判脏。
+ */
+function sanitizePlayer(input: unknown, fallback: PlayerBindings): PlayerBindings | null {
   if (typeof input !== 'object' || input === null) return null;
   const record = input as Record<string, unknown>;
   const out = {} as PlayerBindings;
-  for (const button of BUTTONS) {
+  for (const button of ALL_BUTTONS) {
     const code = record[button];
+    // 老数据没有 l2 / r2 —— 只有这两项允许缺，别的钮缺一个就是脏数据
+    if (code === undefined && (button === 'l2' || button === 'r2')) {
+      out[button] = fallback[button];
+      continue;
+    }
     if (typeof code !== 'string' || !codeToRetroArch(code)) return null;
     out[button] = code;
   }
@@ -479,18 +755,23 @@ function sanitizePlayer(input: unknown): PlayerBindings | null {
 /**
  * 读键位。任何一处不合法就**整份**退回默认值，不做局部修补 ——
  * 半份自定义半份默认的组合比全默认更难排查。
+ *
+ * `consoleType` 只决定**退回默认值时退回哪一套**（NDS 有自己的那套，见
+ * `defaultBindingsFor`）。用户真改过键位的话，存的那份和机种无关、整份用他的 ——
+ * 所以载入 NDS 卡带时可以放心重新调一次这个函数，不会把用户改过的键位冲掉。
  */
-export function loadBindings(): KeyBindings {
-  if (typeof localStorage === 'undefined') return DEFAULT_BINDINGS;
+export function loadBindings(consoleType?: ConsoleType | null): KeyBindings {
+  const fallback = defaultBindingsFor(consoleType);
+  if (typeof localStorage === 'undefined') return fallback;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_BINDINGS;
+    if (!raw) return fallback;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_BINDINGS;
+    if (typeof parsed !== 'object' || parsed === null) return fallback;
     const record = parsed as Record<string, unknown>;
-    const p1 = sanitizePlayer(record.p1);
-    const p2 = sanitizePlayer(record.p2);
-    if (!p1 || !p2) return DEFAULT_BINDINGS;
+    const p1 = sanitizePlayer(record.p1, DEFAULT_BINDINGS.p1);
+    const p2 = sanitizePlayer(record.p2, DEFAULT_BINDINGS.p2);
+    if (!p1 || !p2) return fallback;
 
     const stored: KeyBindings = { p1, p2 };
     /*
@@ -498,11 +779,11 @@ export function loadBindings(): KeyBindings {
      * 这不算「覆盖用户设置」：一个键都没动过，那就不是他的设置，只是旧默认值的残留。
      */
     if (LEGACY_DEFAULTS.some((legacy) => sameBindings(stored, legacy))) {
-      return DEFAULT_BINDINGS;
+      return fallback;
     }
     return stored;
   } catch {
-    return DEFAULT_BINDINGS;
+    return fallback;
   }
 }
 
@@ -516,11 +797,12 @@ export function saveBindings(bindings: KeyBindings): void {
   }
 }
 
-/** 深拷一份默认值，避免调用方改到常量本身。 */
-export function cloneDefaultBindings(): KeyBindings {
+/** 深拷一份默认值，避免调用方改到常量本身。`consoleType` 决定拷哪一套（见 `defaultBindingsFor`）。 */
+export function cloneDefaultBindings(consoleType?: ConsoleType | null): KeyBindings {
+  const source = defaultBindingsFor(consoleType);
   return {
-    p1: { ...DEFAULT_BINDINGS.p1 },
-    p2: { ...DEFAULT_BINDINGS.p2 },
+    p1: { ...source.p1 },
+    p2: { ...source.p2 },
   };
 }
 
@@ -529,12 +811,21 @@ export function cloneDefaultBindings(): KeyBindings {
  *
  * 联机时用：面板上只给你自己那组（两边都是 1P），「恢复默认」要是把两组
  * 一起推回默认，就等于改了对面那组 —— 那是这个面板在联机下唯一不该碰的东西。
+ * 单机单人机（NDS）同理：玩家 2 那组面板上根本不画，也就没理由跟着一起推回默认。
+ *
+ * `consoleType` 决定推回**哪一套**默认（见 `defaultBindingsFor`）——
+ * NDS 要推回 NDS 那套，不是街机那套。
  *
  * 刻意写成两个分支而不是 `{ ...bindings, [which]: ... }`：计算属性名会让 TS
  * 把结果推成带索引签名的类型，对不上 `KeyBindings`。
  */
-export function resetPlayerBindings(bindings: KeyBindings, which: 'p1' | 'p2'): KeyBindings {
+export function resetPlayerBindings(
+  bindings: KeyBindings,
+  which: 'p1' | 'p2',
+  consoleType?: ConsoleType | null
+): KeyBindings {
+  const source = defaultBindingsFor(consoleType);
   return which === 'p1'
-    ? { ...bindings, p1: { ...DEFAULT_BINDINGS.p1 } }
-    : { ...bindings, p2: { ...DEFAULT_BINDINGS.p2 } };
+    ? { ...bindings, p1: { ...source.p1 } }
+    : { ...bindings, p2: { ...source.p2 } };
 }

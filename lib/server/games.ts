@@ -493,8 +493,8 @@ export const listLatestGamesCached = cached(
  * 一条 `GROUP BY` 就够（行数恒等于「库里有游戏的机种数」，最多十二行）。
  *
  * ⚠️ **`GROUP BY` 只返回「库里出现过」的机种** —— 某一档一款都没有时那一行压根不存在，
- *    调用方拿到 `undefined` 就会在界面上渲染出一个空洞。所以下面先铺满十二个 0 再填。
- *    加机种要同步这个初始化对象（`ConsoleType` 联合类型会在编译期提醒你）。
+ *    调用方拿到 `undefined` 就会在界面上渲染出一个空洞。所以下面先铺满全部机种（十三个）
+ *    的 0 再填。加机种要同步这个初始化对象（`ConsoleType` 联合类型会在编译期提醒你）。
  *
  * 排序不在这里定：**展示顺序是界面的事**（`lib/consoles.ts` 的 `CONSOLE_TYPES`），
  * 这里只回答「各有多少」。
@@ -510,6 +510,7 @@ export async function countGamesByConsole(): Promise<Record<ConsoleType, number>
     gb: 0,
     gbc: 0,
     gba: 0,
+    nds: 0,
     md: 0,
     gg: 0,
     sms: 0,
@@ -649,7 +650,7 @@ export const getGameRowCached = cached(
 );
 
 /**
- * 找「同名**且语言相同**」的那一条 —— 给后台「添加 / 修改游戏」判重用。
+ * 找「同名 **且同机种** 且语言相同」的那一条 —— 给后台「添加 / 修改游戏」判重用。
  *
  * 为什么判重必须落在服务端：列表是**分页**的，前端手里只有当前页，
  * 在浏览器里比名字一定会漏（同名的那条很可能在别的页上）。
@@ -658,12 +659,20 @@ export const getGameRowCached = cached(
  *  - `title` 精确匹配、但**忽略 ASCII 大小写**（`COLLATE NOCASE`）——
  *    英文名 `Castlevania` 与 `castlevania` 该算同名；中文不受影响（NOCASE 只作用于 ASCII）。
  *    传进来的名字先 trim 一次，别让首尾空格绕过去。
+ *  - `console_type` **也必须相同**才算重复（2026-10-15 加）：同名跨机种是**合法**的
+ *    —— 一堆游戏在 NES / SFC / GB / 街机上各有一版，而且那是真的几盘不同的 ROM。
+ *    只按名字拦会把它们全挡在门外（表现是「明明是新机种却说我重复了」）。
  *  - `language` **也必须相同**才算重复（2026-10-13 加）：同一款游戏的「日版 / 美版 /
  *    中文版」是几条合法记录，只按名字拦会把这些全挡在门外。
  *    两边都为空（老数据、没标语言的）算**相同** —— 都没标语言又同名，那就是重复。
  *  - **只比 `title`，不比 `title_en`** —— 「同名」按站内主名字（中文原文）算。
  *
- * `excludeId` 是给**修改**（PATCH）用的：那条记录当然和自己的名字 / 语言一致，
+ * `consoleType` 传 `null` 时**这一维不参与比较**（老调用方 / 还不知道机种的场合，
+ * 退回「同名 + 同语言」的旧口径，而不是把所有机种都算重复）。
+ * ⚠️ 新增的那两个调用方（POST / PATCH 后台游戏接口）**都传真实机种** ——
+ *    scrape-game 里那次预检也是（它此刻已经知道机种了）。
+ *
+ * `excludeId` 是给**修改**（PATCH）用的：那条记录当然和自己的名字 / 语言 / 机种一致，
  * 不排掉自己，改个年份都会被自己拦住。也正因为排掉了自己，**库里已经存在的重复行**
  * 不会把「把重复那条改名改掉」这条路堵死 —— 新名字查不到别人才放行。
  *
@@ -672,6 +681,7 @@ export const getGameRowCached = cached(
 export async function findGameDuplicate(
   title: string,
   language: string | null,
+  consoleType: ConsoleType | null = null,
   excludeId: string | null = null
 ): Promise<{ id: string; title: string; language: string | null } | null> {
   /*
@@ -683,6 +693,12 @@ export async function findGameDuplicate(
    */
   const conditions = ['title COLLATE NOCASE = ?'];
   const params: unknown[] = [title.trim()];
+
+  // 机种：给了就参与比较；null 表示「这一维不管」（见上面那段）
+  if (consoleType) {
+    conditions.push('console_type = ?');
+    params.push(consoleType);
+  }
 
   if (language) {
     conditions.push('language = ?');

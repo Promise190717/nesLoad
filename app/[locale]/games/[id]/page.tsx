@@ -21,6 +21,7 @@ import {
   type Locale,
   type MessageKey,
 } from '@/lib/i18n';
+import { gameLanguageLabel } from '@/lib/rom-lang';
 import { USER_SESSION_COOKIE, verifyUserSession } from '@/lib/server/app-session';
 import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
@@ -312,8 +313,17 @@ export default async function GameDetailPage({
         ]
       : []),
     ...(text.series ? [{ label: t('gamesPage.field.series'), value: text.series }] : []),
+    /*
+     * 「语言」那一行走**全称**（`简体中文` / `English` / `日本語` / `한국어`），
+     * 和列表卡片上的角标共用同一份文案 —— 2026-10-15 之前这里显示的是 `ZH` / `EN` 短码。
+     */
     ...(game.language
-      ? [{ label: t('gamesPage.field.language'), value: game.language.toUpperCase() }]
+      ? [
+          {
+            label: t('gamesPage.field.language'),
+            value: gameLanguageLabel(game.language) ?? game.language,
+          },
+        ]
       : []),
   ];
 
@@ -322,7 +332,8 @@ export default async function GameDetailPage({
    * 它要的是**纯文本** —— 不能拿上面那份 `facts` 去 join（值里有 `<Link>`，
    * join 出来会是 `[object Object]`），所以另拼一份。
    */
-  const introLine = [game.year ? String(game.year) : null, text.developer, text.series, game.language ? game.language.toUpperCase() : null]
+  /* 语言那截同样走全称（见上面 facts 里那条注释）—— `null` 会被 filter 掉 */
+  const introLine = [game.year ? String(game.year) : null, text.developer, text.series, gameLanguageLabel(game.language)]
     .filter(Boolean)
     .join(' · ');
 
@@ -363,6 +374,8 @@ export default async function GameDetailPage({
               原来的备注是「别再塞第 4 颗」，作废 —— 但**顺序**仍然有意：
               先「开始游戏」（唯一带强调色的），紧跟「联机游戏」（同样是「玩」这件事，
               只是换个地方），再是收藏、下载这两颗「把这盘带子怎么处置」的。
+              ⚠️ 2026-10-15：NDS 那一款只有**三颗** —— 它不支持双人，第二颗整颗不画
+                 （判据就在那颗钮自己的渲染处，别在这儿再写一遍）。
               尺寸 = 站内**紧凑钮**那一档：`py-2` + `12px` 字（同 AdminGames /
               GameLibraryPanel 里那批钮）。2026-10-13 用户说「上面三个按钮的尺寸缩小点」，
               从原来的 `py-2.5` + `13px` 降下来 —— 原来那档比全站任何一颗钮都大一号，
@@ -436,14 +449,24 @@ export default async function GameDetailPage({
               联机走的是和「下载 ROM」同一档的灰钮。图标用 `PlayersIcon`（16px svg，
               和下面第二层那两枚同一个尺寸档）——这一颗是「两个人一起玩」，
               用文字符号表不出来。
+
+              ⚠️ **NDS 不画这一颗**（2026-10-15 用户要求「nds 不支持双人了，
+                 在游戏详情隐藏入口」）：它没有第二个手柄口，站里的联机也推不动它。
+                 不画是**唯一**正确处置 —— 灰着还留着，用户只会当成「坏了」。
+
+                 这一颗只管「正常入口」。**手打地址栏照样能带上 `?mode=host` /
+                 `?room=`**，那两条由 `/play` 自己忽略（见 `play/page.tsx` 的门禁
+                 和 `PlayScene` 里派生的 `mode`）—— 所以这里藏钮不是唯一防线。
             */}
-            <Link
-              href={localePath(locale, `/play?id=${game.id}&mode=host`)}
-              className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
-            >
-              <PlayersIcon size={16} />
-              {t('gamesPage.playOnline')}
-            </Link>
+            {game.consoleType !== 'nds' && (
+              <Link
+                href={localePath(locale, `/play?id=${game.id}&mode=host`)}
+                className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
+              >
+                <PlayersIcon size={16} />
+                {t('gamesPage.playOnline')}
+              </Link>
+            )}
             <FavoriteButton gameId={game.id} count={favoriteCount} />
             <Link
               href={localePath(locale, `/games/${game.id}/download`)}

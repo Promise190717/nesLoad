@@ -123,15 +123,18 @@ export default function GamesShell({
    * 页脚那几个落点都得**现算**：语言是路径的一部分，写死 `/games` 会把中文用户
    * 从页脚送回英文房。
    *
-   * 2026-10-13 拆首页之后这里多了一层：`room` 是那间屋子（`/room` —— 2026-10-13
-   * 之前它就是 `/`），`home` 才是落地页（`/`）。页脚两个都要有：一颗「首页」回落地页、
-   * 一颗「回到房间」进屋，这是两件事。
+   * 2026-10-13 拆首页之后这里多了一层：`home` 是落地页（`/`），那间屋子是 `/room`。
+   *
+   * ⚠️ 2026-10-15：**页脚那颗「回到房间」删了**（用户要求「其他页面底部的回到房间
+   *    也去除」），于是 `room` 这个常量也一并没了 —— 它只喂那一颗。
+   *    回屋的路仍在，别怕：顶栏那颗「首页」（`TopBar`）、左上角那颗 `back`
+   *    （404 页传的就是写死落点 `/room` 的真链接）、以及 404 页正文下那颗钮。
+   *    **别把这一颗加回来**。
    *
    * ⚠️ `backToAllHref` 的默认值**不能写在参数解构里** —— 解构默认值在函数体之前
    * 求值，那一刻拿不到 `locale`。所以 `??` 只能挪到这儿。
    */
   const home = localePath(locale, '/');
-  const room = localePath(locale, '/room');
   const allGames = backToAllHref ?? localePath(locale, '/games');
 
   return (
@@ -224,15 +227,15 @@ export default function GamesShell({
           页脚互链。**对爬虫比对人有用**：这几页是靠 sitemap 之外的内链互相发现的，
           一页都不孤立。`/privacy` / `/terms` 也在这里，是因为房间右上角那行链接
           在窄窗口下会整块藏掉 —— 内容页得有一条不依赖房间的路径通到法务两页。
+
+          ⚠️ 2026-10-15 起页脚**不再有「回到房间」**（用户要求，见上面 `home` 那段）。
         */}
         <footer className="mt-12 border-t border-ink-800 pt-6">
           <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">
             <Link href={home} className="text-ink-400 transition-colors hover:text-accent">
               {t('common.home')}
             </Link>
-            <Link href={room} className="text-ink-400 transition-colors hover:text-accent">
-              {t('gamesPage.backHome')}
-            </Link>
+            {/* 「回到房间」（`/room`）那条 2026-10-15 删了，理由见上面 `home` 那段注释 */}
             {showAllGamesLink && (
               <Link href={allGames} className="text-ink-400 transition-colors hover:text-accent">
                 {t('gamesPage.backToGames')}

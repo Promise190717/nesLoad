@@ -37,6 +37,7 @@ export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   gb: 'GB',
   gbc: 'GBC',
   gba: 'GBA',
+  nds: 'NDS',
   md: 'MD',
   gg: 'GG',
   sms: 'SMS',
@@ -49,11 +50,12 @@ export const CONSOLE_LABEL: Record<ConsoleType, string> = {
 /**
  * 全部机种，**按界面上的展示顺序**。
  *
- * 顺序刻意按「阵营 + 年代」排：任天堂家用机 → Game Boy 一系掌机 → 世嘉 →
+ * 顺序刻意按「阵营 + 年代」排：任天堂家用机 → 任天堂掌机（GB 一系 + NDS）→ 世嘉 →
  * 其它掌机（万代 / SNK）→ 街机。首页那个「按机种浏览」区块和 `/games` 的机种筛选条
  * 共用这一份，两处各写一份迟早会漂。
  *
- * 12 个正好是首页四列网格的**三整行**（`grid-cols-2 sm:grid-cols-4`）。
+ * ⚠️ 2026-10-15 加到十三个（NDS）。原来十二个正好是首页四列网格的三整行，现在末尾
+ *    会**只剩一张卡**在第四行 —— 这是刻意的取舍，不为此再补一个机种凑数。
  */
 export const CONSOLE_TYPES: readonly ConsoleType[] = [
   'nes',
@@ -61,6 +63,7 @@ export const CONSOLE_TYPES: readonly ConsoleType[] = [
   'gb',
   'gbc',
   'gba',
+  'nds',
   'md',
   'gg',
   'sms',
@@ -75,7 +78,7 @@ export const CONSOLE_TYPES: readonly ConsoleType[] = [
  *
  * 只用在卡带 sprite 那条 5px 的竖条上（见 `CartridgeSprite`），所以取的都是
  * 低饱和的中间调 —— 饱和度高一点就会从那块灰阶界面里跳出来。
- * 十二个色相彼此拉开，但刻意不要求「认色识机种」，那件事由旁边的丝印词负责。
+ * 十三个色相彼此拉开，但刻意不要求「认色识机种」，那件事由旁边的丝印词负责。
  */
 export const CONSOLE_TINT: Record<ConsoleType, string> = {
   nes: '#d16c70',
@@ -83,6 +86,8 @@ export const CONSOLE_TINT: Record<ConsoleType, string> = {
   gb: '#7fa05f',
   gbc: '#b57fa8',
   gba: '#8f7bd6',
+  // NDS：双屏时代那台银色翻盖机，取一个偏冷的浅灰蓝 —— 和上面 GBA 的紫刻意拉开
+  nds: '#9aa3b8',
   md: '#3f74b0',
   gg: '#8a8f6f',
   sms: '#4fa39c',

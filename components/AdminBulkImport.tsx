@@ -1,94 +1,34 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConsoleType } from '@/lib/emulator';
-import { romLangToFormValue } from '@/lib/rom-lang';
+import { fetchDeveloperOptions, fetchList, importGame, type ImportOutcome, type ListResult } from '@/lib/admin-import';
 import { FIELD_CLASS } from './adminStyles';
 import { CONSOLE_LABEL } from './CartridgeSprite';
-import { useI18n } from './I18nProvider';
 
-/** `/api/admin/scrape-list` 回的一条。 */
-interface ListGame {
-  slug: string;
-  title: string | null;
-}
-
-/** `/api/admin/scrape-list` 的响应。 */
-interface ListResult {
-  path: string;
-  page: number;
-  consoleType: ConsoleType | null;
-  total: number;
-  games: ListGame[];
-}
-
-/** `/api/admin/developers/options` 回的一项。 */
-interface DeveloperOption {
-  id: string;
-  name: string;
-}
-
-/** 一条的结局：成功 / 跳过（库里已有同名同语言）/ 失败。 */
-interface Outcome {
-  title: string;
-  status: 'ok' | 'duplicate' | 'failed';
-  /** 跳过或失败时的说明，直接来自服务端的 detail */
-  reason?: string;
-}
-
-/**
- * 从失败响应里挖出**机器码**与说明。
- *
- * 和 AdminGames 那个 readError 不同：那边只关心给人看的 detail，这里还要靠 `error`
- * 分辨「同名同语言，已经导过了」（跳过，不算失败）与「真失败」（要报出来）。
+/*
+ * 抓取 / 取字节 / 上传那一条链路的**公共管道在 `lib/admin-import.ts`** ——
+ * 本组件与「自动爬取」（AdminAutoCrawl）共用同一份，字段名漏一个就是静默丢数据，
+ * 所以这里只放「从列表导入」这个入口自己的东西（读列表、串行跑、进度与失败清单）。
  */
-async function readFailure(
-  res: Response,
-  fallback: string
-): Promise<{ code: string; detail: string }> {
-  try {
-    const data = (await res.json()) as { error?: string; detail?: string };
-    return { code: data.error ?? 'unknown', detail: data.detail ?? fallback };
-  } catch {
-    return { code: 'unknown', detail: fallback };
-  }
-}
-
-/**
- * 经服务端代理把一个外链资源取回来（跨域 + CORS，见 /api/admin/fetch-image 与 fetch-rom）。
- * `fallbackName` 是拿不到响应头 `x-file-name` 时的兜底文件名。
- */
-async function fetchAsset(endpoint: string, url: string, fallbackName: string): Promise<File> {
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-  if (!res.ok) throw new Error((await readFailure(res, endpoint)).detail);
-
-  const blob = await res.blob();
-  // ROM 的原始文件名在响应头里 —— FBNeo 认 zip 文件名当驱动名，改不得
-  const header = res.headers.get('x-file-name');
-  const fromUrl = decodeURIComponent(new URL(url).pathname.split('/').pop() || '');
-  const name = (header ? decodeURIComponent(header) : '') || fallbackName || fromUrl || 'file';
-  return new File([blob], name, { type: blob.type || 'application/octet-stream' });
-}
 
 /**
  * 后台 · 「从列表导入」—— 把一个机种列表页上的游戏**整页**导进来。
  *
  * 三段式：读列表（只拿 slug）→ 逐条抓详情 + 取封面 / ROM → 上传入库。
- * 每一条走的都是和手动添加**完全相同**的那条链路（scrape-game → fetch-image /
- * fetch-rom → POST /api/admin/games），所以这里不重写解析，也不碰 R2 / D1。
+ * 后两段走的是 `lib/admin-import.ts` 的公共管道（和「自动爬取」、和手动添加**同一条**），
+ * 这里只管这个入口自己的东西：读列表、串行跑、进度条与失败清单。
  *
- * ⚠️ **逐条串行，不并发**：单条里已经有一次封面 + 一次 ROM 下载，并发几个就是
- *    十几 MB 同时在跑 —— 既容易招上游限流，也让「第几条了」这个进度失去意义。
+ * ⚠️ **一款游戏可能入库好几条**（2026-10-15 用户要求「有多语言都要导入」）：
+ *    一款有几个语言版本就导几条，所以「条数」与「款数」是两回事 ——
+ *    **进度条的分母是款数**，统计与失败清单按条算（否则一款四条会把进度顶到 400%）。
+ *
+ * ⚠️ **逐条串行，不并发**（要并发的那个入口是「自动爬取」，它自己开 5 个 worker）：
+ *    单条里已经有一次封面 + 一次 ROM 下载，并发几个就是十几 MB 同时在跑 ——
+ *    既容易招上游限流，也让「第几条了」这个进度失去意义。
  *
  * 按钮与弹框都在这一个组件里（弹框是 fixed，挂在列表头部不影响它定位）。
  */
 export default function AdminBulkImport({ onImported }: { onImported: () => void }) {
-  const { t } = useI18n();
-
   const [open, setOpen] = useState(false);
   const [listUrl, setListUrl] = useState('');
   const [reading, setReading] = useState(false);
@@ -96,9 +36,17 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
   const [list, setList] = useState<ListResult | null>(null);
 
   const [running, setRunning] = useState(false);
-  /** 已经处理完的条目（含跳过与失败）—— 条数就是进度，别另开一个 state 记。 */
-  const [outcomes, setOutcomes] = useState<Outcome[]>([]);
-  /** 正在导入的那一条：标题读列表时就拿到了，不用等详情页。 */
+  /**
+   * 已经处理完的**条**（含跳过与失败）—— 一款多语言时就是好几条，
+   * 失败清单与成功 / 跳过 / 失败三个计数都照着它算。
+   */
+  const [outcomes, setOutcomes] = useState<ImportOutcome[]>([]);
+  /**
+   * 已经**整款**处理完的款数 —— 进度条与「N / 总数」的分母是款数（见文件头 ⚠️）。
+   * 单独开一个 state 而不是拿 `outcomes.length` 顶：一款四条时那个数会越过总数。
+   */
+  const [gamesDone, setGamesDone] = useState(0);
+  /** 正在导入的那一款：标题读列表时就拿到了，不用等详情页。 */
   const [current, setCurrent] = useState('');
 
   /** 点了「停止」置位；循环每轮开头看一眼。用 ref 是因为循环闭包里读到的是快照。 */
@@ -111,6 +59,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
     setReadError(null);
     setList(null);
     setOutcomes([]);
+    setGamesDone(0);
     setCurrent('');
     stopRef.current = false;
   }, []);
@@ -142,120 +91,14 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
     setList(null);
     setOutcomes([]);
     try {
-      const res = await fetch('/api/admin/scrape-list', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      if (!res.ok) throw new Error((await readFailure(res, t('admin.bulk.readFailed'))).detail);
-
-      const data = (await res.json()) as ListResult;
+      // 不传 page：地址里带 `?page=N` 就按那个来（见 lib/admin-import.ts 的 fetchList）
+      const data = await fetchList(url, undefined);
       setList(data);
-      if (data.total === 0) setReadError(t('admin.bulk.empty'));
+      if (data.total === 0) setReadError('那一页没有找到游戏。');
     } catch (error) {
-      setReadError(error instanceof Error ? error.message : t('admin.bulk.readFailed'));
+      setReadError(error instanceof Error ? error.message : '读取该列表页失败。');
     } finally {
       setReading(false);
-    }
-  };
-
-  /**
-   * 导入一条：抓详情 → 取封面 / ROM → 上传。
-   * **返回结局而不是抛错** —— 循环里要接着跑下一条，不能一条失败就整批中断。
-   */
-  const importOne = async (
-    game: ListGame,
-    fallbackConsole: ConsoleType | null
-  ): Promise<Outcome> => {
-    const label = game.title ?? game.slug;
-    try {
-      const metaRes = await fetch('/api/admin/scrape-game', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: game.slug }),
-      });
-      if (!metaRes.ok) {
-        throw new Error((await readFailure(metaRes, t('admin.scrape.failed'))).detail);
-      }
-
-      const meta = (await metaRes.json()) as {
-        title?: string | null;
-        titleEn?: string | null;
-        consoleType?: ConsoleType | null;
-        year?: number | null;
-        developer?: string | null;
-        series?: string | null;
-        seriesEn?: string | null;
-        description?: string | null;
-        descriptionEn?: string | null;
-        imageUrl?: string | null;
-        romUrl?: string | null;
-        romName?: string | null;
-        romLang?: string | null;
-        /** 库里已有同名同语言的一条 —— 服务端抓取时顺手预检的结果，用它跳过下载 */
-        duplicate?: boolean;
-      };
-
-      const title = (meta.title ?? game.title ?? '').trim();
-      if (!title) throw new Error(t('admin.bulk.noTitle'));
-
-      // 语言先算出来：上传那一栏要用它（判重也是拿它算的，服务端那边同一套规则）
-      const language = romLangToFormValue(meta.romLang) ?? '';
-
-      /*
-       * **先查重、再下载**：封面 + ROM 加起来几 MB，是整条链路里最慢的一段。
-       * 库里已有同名同语言的直接跳过，不白下载一遍再被上传那一步拒掉。
-       * 判据来自服务端（抓取时顺手做的，和上传那一步是同一个 findGameDuplicate）。
-       */
-      if (meta.duplicate) {
-        return { title, status: 'duplicate', reason: t('admin.bulk.duplicate') };
-      }
-
-      if (!meta.imageUrl) throw new Error(t('admin.bulk.noCover'));
-      if (!meta.romUrl) throw new Error(t('admin.bulk.noRom'));
-
-      // 封面与 ROM 的字节：各自走服务端代理，并行取（互不依赖）
-      const [cover, rom] = await Promise.all([
-        fetchAsset('/api/admin/fetch-image', meta.imageUrl, ''),
-        fetchAsset('/api/admin/fetch-rom', meta.romUrl, meta.romName ?? ''),
-      ]);
-
-      /*
-       * 字段名与手动添加那条**必须一致**（见 app/api/admin/games 的 POST）。
-       * 机种：详情页认不出来时退到列表页那一档（`/zh/snes-games` → snes）。
-       */
-      const form = new FormData();
-      form.set('title', title);
-      form.set('title_en', meta.titleEn ?? '');
-      form.set('console_type', meta.consoleType ?? fallbackConsole ?? 'nes');
-      form.set('language', language);
-      form.set('series', meta.series ?? '');
-      form.set('series_en', meta.seriesEn ?? '');
-      form.set('year', meta.year == null ? '' : String(meta.year));
-      // 下拉框认的是 developers.id，而接口回的是**名字** —— 查一次映射，查不到就留空
-      form.set('developer_id', (meta.developer && developersRef.current.get(meta.developer)) || '');
-      form.set('description', meta.description ?? '');
-      form.set('description_en', meta.descriptionEn ?? '');
-      form.set('image', cover);
-      form.set('rom', rom);
-
-      const res = await fetch('/api/admin/games', { method: 'POST', body: form });
-      if (!res.ok) {
-        const failure = await readFailure(res, t('admin.upload.failed'));
-        // 同名 + 同语言 = 库里已经有了，算「跳过」不算失败（判重见 /api/admin/games）
-        return {
-          title,
-          status: failure.code === 'duplicate-title' ? 'duplicate' : 'failed',
-          reason: failure.detail,
-        };
-      }
-      return { title, status: 'ok' };
-    } catch (error) {
-      return {
-        title: label,
-        status: 'failed',
-        reason: error instanceof Error ? error.message : String(error),
-      };
     }
   };
 
@@ -264,24 +107,31 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
 
     setRunning(true);
     setOutcomes([]);
+    setGamesDone(0);
     setCurrent('');
     stopRef.current = false;
 
     // 开发商映射：整批只拉一次。拉失败就当没有（那几栏留空），不拦住整批导入
-    try {
-      const res = await fetch('/api/admin/developers/options');
-      const data = res.ok ? ((await res.json()) as { developers?: DeveloperOption[] }) : {};
-      developersRef.current = new Map((data.developers ?? []).map((item) => [item.name, item.id]));
-    } catch {
-      developersRef.current = new Map();
-    }
+    developersRef.current = await fetchDeveloperOptions();
 
-    const collected: Outcome[] = [];
+    const collected: ImportOutcome[] = [];
+    let done = 0;
     for (const game of list.games) {
       if (stopRef.current) break;
       setCurrent(game.title ?? game.slug);
-      collected.push(await importOne(game, list.consoleType));
-      // 每完成一条刷一次 —— 进度条与统计都是照着它算的
+      // 一款可能回好几条（一种语言一条）—— 条数进统计，款数进进度
+      collected.push(
+        ...(await importGame(game, {
+          fallbackConsole: list.consoleType,
+          developerIds: developersRef.current,
+          t,
+          // 「停止」要能在**一款的几种语言之间**也生效（见公共管道里的 shouldStop）
+          shouldStop: () => stopRef.current,
+        }))
+      );
+      done += 1;
+      // 每完成一款刷一次 —— 进度条按款算，统计与失败清单按条算
+      setGamesDone(done);
       setOutcomes([...collected]);
     }
 
@@ -291,14 +141,16 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
   };
 
   const total = list?.total ?? 0;
-  const processed = outcomes.length;
+  // ⚠️ 下面三个计数与失败清单都是按**条**算的（一款多语言时条数 > 款数），
+  //    进度条却必须按**款**算 —— 见 percent 那行
   const okCount = outcomes.filter((item) => item.status === 'ok').length;
   const skippedCount = outcomes.filter((item) => item.status === 'duplicate').length;
   const failedCount = outcomes.filter((item) => item.status === 'failed').length;
   /** 没进库的那些（跳过 + 失败），收尾时列出来 */
   const problems = outcomes.filter((item) => item.status !== 'ok');
-  const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
-  const done = !running && processed > 0;
+  // ⚠️ 分母是**款数**：一款四语言会回四条，拿条数算进度会冲到 400%
+  const percent = total > 0 ? Math.round((gamesDone / total) * 100) : 0;
+  const done = !running && gamesDone > 0;
 
   return (
     <>
@@ -307,7 +159,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
         onClick={() => setOpen(true)}
         className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
       >
-        {t('admin.bulk.button')}
+        {'从列表导入'}
       </button>
 
       {open && (
@@ -318,9 +170,9 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950/80 p-6"
         >
           <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 max-h-[85vh] w-full max-w-[560px] overflow-y-auto p-4">
-            <h2 className="mb-3 text-[12px] text-ink-200">{t('admin.bulk.title')}</h2>
+            <h2 className="mb-3 text-[12px] text-ink-200">{'从列表导入'}</h2>
 
-            <p className="mb-2 text-[12px] text-ink-500">{t('admin.bulk.hint')}</p>
+            <p className="mb-2 text-[12px] text-ink-500">{'粘贴一个机种列表页 —— 那一页上的游戏会逐个导入。一款有中 / 英 / 日 / 韩 多个语言版本的，每种语言各导一条。'}</p>
 
             {/* 输入框与按钮**不进 form** —— 在里头按回车不该顺手把别的提交了 */}
             <div className="flex items-center gap-2">
@@ -333,7 +185,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
                     void readList();
                   }
                 }}
-                placeholder={t('admin.bulk.placeholder')}
+                placeholder={'例如 https://retrogamesnexus.com/zh/snes-games?page=1'}
                 disabled={reading || running}
                 className={`${FIELD_CLASS} min-w-0 flex-1`}
               />
@@ -343,7 +195,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
                 disabled={reading || running}
                 className="pixel-edge pxw-2 pxc-500 shrink-0 bg-ink-700 px-3 py-2 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {reading ? t('admin.bulk.reading') : t('admin.bulk.read')}
+                {reading ? '读取中…' : '读取列表'}
               </button>
             </div>
 
@@ -352,12 +204,12 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
             {list && list.total > 0 && (
               <div className="mt-3 flex flex-col gap-2">
                 <p className="text-[12px] text-ink-100">
-                  {t('admin.bulk.total', { count: list.total })}
+                  {`本页共 ${list.total} 款游戏`}
                   {list.consoleType ? ` · ${CONSOLE_LABEL[list.consoleType]}` : ''}
                   {` · P${list.page}`}
                 </p>
 
-                {/* 进度条：分母是本页条数，分子是已经处理完的（含跳过 / 失败） */}
+                {/* 进度条：分母是**本页款数**，分子是已经处理完的款数（含跳过 / 失败） */}
                 <div className="h-2 w-full bg-ink-900">
                   <div
                     className="h-full bg-accent transition-[width] duration-200"
@@ -366,29 +218,25 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
                 </div>
 
                 <p className="text-[12px] text-ink-400">
-                  {processed} / {total} ·{' '}
-                  {t('admin.bulk.stat', {
-                    ok: okCount,
-                    skipped: skippedCount,
-                    failed: failedCount,
-                  })}
+                  {gamesDone} / {total} ·{' '}
+                  {`成功 ${okCount} · 跳过 ${skippedCount} · 失败 ${failedCount}`}
                 </p>
 
                 {running && current && (
                   <p className="truncate text-[12px] text-accent">
-                    {t('admin.bulk.now', { title: current })}
+                    {`正在导入：${current}`}
                   </p>
                 )}
 
                 {done && (
                   <p className="text-[12px] text-ink-200">
-                    {stopRef.current ? t('admin.bulk.stopped') : t('admin.bulk.done')}
+                    {stopRef.current ? '已提前停止。' : '导入完成。'}
                   </p>
                 )}
 
                 {problems.length > 0 && (
                   <div className="mt-1">
-                    <p className="mb-1 text-[12px] text-ink-500">{t('admin.bulk.failures')}</p>
+                    <p className="mb-1 text-[12px] text-ink-500">{'未导入'}</p>
                     <ul className="flex max-h-[160px] flex-col gap-0.5 overflow-y-auto">
                       {problems.map((item, index) => (
                         <li key={`${item.title}-${index}`} className="text-[12px] text-ink-400">
@@ -411,7 +259,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
                   }}
                   className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-4 py-2 text-[12px] text-ink-200 transition-colors hover:text-danger"
                 >
-                  {t('admin.bulk.stop')}
+                  {'停止'}
                 </button>
               ) : (
                 <button
@@ -420,7 +268,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
                   disabled={!list || list.total === 0}
                   className="pixel-edge pxw-3 pxc-600 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors enabled:hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {t('admin.bulk.start')}
+                  {'开始导入'}
                 </button>
               )}
               <button
@@ -429,7 +277,7 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
                 disabled={running}
                 className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-4 py-2 text-[12px] text-ink-300 transition-colors enabled:hover:text-ink-100 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {t('admin.bulk.close')}
+                {'关闭'}
               </button>
             </div>
           </div>

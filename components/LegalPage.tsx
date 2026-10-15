@@ -45,16 +45,15 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
   }).format(new Date(doc.updated));
 
   /*
-   * 页脚那几个落点都要带语言前缀，不然中文页点一下就掉回英文。
+   * 这个常量是 `/room`（那间屋子，2026-10-13 之前它就是 `/`），**不是**落地页 `/`。
    *
-   * 2026-10-13 起它指的是**那间屋子**（`/room`，原来就是 `/`）—— 这一页**页脚**那颗
-   * 「返回游戏屋」走的就是它，落点得跟着屋子走，所以变量名从 `home` 改成了 `room`。
-   * 首页（`/`）是另一件事，这一页不需要它。
+   * 历史：2026-10-13 页脚那颗「返回游戏屋」走的是它，所以变量名从 `home` 改成了
+   * `room`；2026-10-14 左上角那颗钮改走 `BackLink`（浏览器回退）之后，它只剩兜底用途。
    *
-   * ⚠️ **左上角那颗钮 2026-10-14 起不用这个变量了**：用户要求它「就是返回上一页」，
-   *    改走 `BackLink`（浏览器回退），文案统一成 `common.back`（「返回」）——
-   *    回退不承诺落点，就不能再写「返回游戏屋」。这里传的 `href` 只是**兜底**：
-   *    直接打开这一页（分享链接 / 爬虫）时 history 里没有上一站，退到 `/room`。
+   * ⚠️ 2026-10-15 页脚那颗也删了（用户要求「其他页面底部的回到房间也去除」），
+   *    于是它现在**唯一的用途**就是下面那颗 `BackLink` 的兜底 `href`：直接打开这一页
+   *    （分享链接 / 爬虫）时 history 里没有上一站，退到 `/room`。
+   *    页脚那几个落点仍要带语言前缀 —— 不带的话中文页点一下就掉回英文。
    */
   const room = localePath(locale, '/room');
 
@@ -131,14 +130,14 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
               {t(other === 'privacy' ? 'legal.privacy' : 'legal.terms')}
             </Link>
             {/*
-              页脚这颗**仍是真链接**（不是回退）：落脚点就是那间屋子，所以文案照旧写死落点
-              「返回游戏屋」—— 借 `gamesPage.backHome`（内容页页脚那颗「回到房间」也是它，
-              见 GamesShell）。原先它和左上角那颗共用一个 `legal.back`，2026-10-14 左上角
-              改成回退并统一到 `common.back` 之后，这一颗单独留下来了。
+              ⚠️ 2026-10-15：**页脚这颗「返回游戏屋」删了**（用户要求「其他页面底部的
+              回到房间也去除」）—— 内容页页脚那颗同一天也删了（见 GamesShell）。
+              这一页现在页脚只剩「隐私 ↔ 条款」互链和「游戏列表」。
+
+              `room` 这个常量**留着**：左上角那颗 `BackLink` 的兜底 `href` 还在用它
+              （直接打开这一页时 history 里没有上一站，退到 `/room`，见上面那段注释）。
+              `gamesPage.backHome` 这个键也留着 —— 404 页正文下那颗钮还在用。
             */}
-            <Link href={room} className="text-ink-400 transition-colors hover:text-accent">
-              {t('gamesPage.backHome')}
-            </Link>
             {/*
               游戏列表也放一条。**这一条主要是给爬虫的**：房间右上角那一行
               （游戏列表 / 隐私政策 / 服务条款）在移动端是 `display: none`

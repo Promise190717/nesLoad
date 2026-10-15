@@ -13,8 +13,14 @@
  *   · https://retrogamesnexus.com/zh/sega-game-gear-games   （多段拼的机种也认）
  *   · https://retrogamesnexus.com/zh/games           （全部游戏）
  *   · 干脆只给 /zh/snes-games
- * 认得出机种段、但那台站内跑不了的（`nds-games` / `playstation-games`…）回
+ * 认得出机种段、但那台站内跑不了的（`n64-games` / `playstation-games`…）回
  * `unsupported-console` —— 见 POST 里那段注释。
+ * ⚠️ NDS 2026-10-15 起**能跑了**（本站自带 melonds 核心），`nds-games` 现在会被放行。
+ *
+ * ⚠️ **页码可以由调用方递进来**（body 里带 `page`，盖掉地址里那个 `page=`）——
+ *    「自动爬取」靠它一页页往下翻（见 components/AdminAutoCrawl）。
+ *    翻到头的判据是**这一页 0 条**：实测上游每页固定 18 条，超出范围仍回 HTTP 200 + 0 条
+ *    （NDS 分类实测 21 页 / 372 款，第 22 页起 0 条），所以不会靠 404 报错。
  *
  * 鉴权自查（本目录的接口都不挂 middleware，原因见 admin-guard.ts）。
  */
@@ -51,13 +57,13 @@ interface ListTarget {
   path: string;
   /** 路径里那个机种段（`snes` / `sega-game-gear`）；`/games`（全部游戏）没有就是 null */
   consoleSegment: string | null;
-  /** 这一页的机种；认不出、或认得出但我们跑不了（`nds` / `playstation`…）就是 null */
+  /** 这一页的机种；认不出、或认得出但我们跑不了（`n64` / `playstation`…）就是 null */
   consoleType: ConsoleType | null;
   page: number;
 }
 
 /** 从任意形态的输入里拆出列表页目标；认不出返回 null。 */
-function parseListTarget(raw: string): ListTarget | null {
+function parseListTarget(raw: string, pageOverride?: number): ListTarget | null {
   const text = raw.trim();
   if (!text) return null;
 
@@ -80,7 +86,12 @@ function parseListTarget(raw: string): ListTarget | null {
   const consoleMatch = segment.match(CONSOLE_SEGMENT);
   if (!consoleMatch && segment !== 'games') return null;
 
-  const page = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '', 10) || 1);
+  /*
+   * 页码：**调用方递进来的优先**（「自动爬取」一页页往下走，地址里往往不带 `?page=`），
+   * 没给才看地址里那个（「从列表导入」就是直接粘一个带 page 的地址）。
+   */
+  const fromUrl = Math.max(1, Number.parseInt(url.searchParams.get('page') ?? '', 10) || 1);
+  const page = pageOverride && pageOverride > 0 ? pageOverride : fromUrl;
 
   return {
     path: `/${locale}/${segment}${page > 1 ? `?page=${page}` : ''}`,
@@ -138,23 +149,32 @@ export async function POST(request: Request) {
   const denied = await assertAdmin();
   if (denied) return denied;
 
-  let body: { url?: unknown };
+  let body: { url?: unknown; page?: unknown };
   try {
-    body = (await request.json()) as { url?: unknown };
+    body = (await request.json()) as { url?: unknown; page?: unknown };
   } catch {
     return failJson('bad-request', '请求体不是合法 JSON');
   }
 
-  const target = parseListTarget(typeof body.url === 'string' ? body.url : '');
+  /*
+   * 页码可以**由调用方递进来**（盖掉地址里那个 `page=`）—— 「自动爬取」靠它一页页往下走，
+   * 用户粘的地址里通常只有分类页、不带 `?page=`。没给就按地址里的算（老行为不变）。
+   */
+  const pageParam = Number(body.page);
+  const target = parseListTarget(
+    typeof body.url === 'string' ? body.url : '',
+    Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : undefined
+  );
   if (!target) return failJson('bad-url', '认不出这个列表页地址（形如 /zh/snes-games?page=1）');
 
   /*
    * 机种段认得出来、但我们没有对应核心的，**直接拒**，别放进来。
    *
    * 放进来会怎样：列表页这一趟拿不到机种（consoleType = null），逐条抓详情也拿不到，
-   * 最后落到 `form.set('console_type', … ?? 'nes')` —— 一整页 NDS / PS1 / 土星的游戏
+   * 最后落到 `form.set('console_type', … ?? 'nes')` —— 一整页 N64 / PS1 / 土星的游戏
    * 会被静默记成红白机。宁可在这儿报错，也不要往库里灌错机种。
    * `/games`（全部游戏）没有机种段，仍按原样放行（那种页面本来就是混着的）。
+   * ⚠️ NDS 2026-10-15 起在 `toConsoleType` 里认得出，所以不会再落到这道闸门。
    */
   if (target.consoleSegment && !target.consoleType) {
     return failJson(
