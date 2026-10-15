@@ -725,12 +725,105 @@ const EJS_JOYPAD_ID: Record<ButtonName, number> = {
   r2: 13,
 };
 
+/**
+ * 虚拟文件系统里那点我们需要的接口（Emscripten 的 `Module.FS`）。
+ * 只列用到的四样，避免把整个 FS 类型拖进来。
+ */
+interface EmscriptenFs {
+  readdir(path: string): string[];
+  stat(path: string): { mode: number; size: number };
+  isDir(mode: number): boolean;
+  readFile(path: string): Uint8Array;
+}
+
+/**
+ * RetroArch 系的电池存档扩展名：`.srm` 是默认叫法，其余是各核心自己的。
+ * 只用来「在文件系统里认出存档文件」，不参与任何格式解析 —— 字节原样搬。
+ */
+const SRAM_EXTENSIONS = ['srm', 'sav', 'dsv', 'fla', 'eep'];
+
+/**
+ * 找不到 Nostalgist 算出来的那个路径时的兜底搜索根。
+ * 正经 RetroArch 构建落第一个；EJS 构建（melonds）的目录约定不一样，所以多列几个
+ * —— 虚拟文件系统很小，扫一遍很便宜。
+ */
+const SRAM_SEARCH_ROOTS = [
+  '/home/web_user/retroarch/userdata/saves',
+  '/home/web_user/retroarch/userdata',
+  '/retroarch/userdata/saves',
+  '/retroarch/userdata',
+  '/data',
+];
+
+/** 兜底搜索的深度上限 —— 存档就落在 `saves/<核心名>/` 那一两层里。 */
+const SRAM_SEARCH_DEPTH = 4;
+
+/** 读一个已知路径；文件不在、或者是个空文件（等于没有存档），都返回 null。 */
+function readIfExists(fs: EmscriptenFs, path: string): Uint8Array | null {
+  try {
+    if (fs.stat(path).size <= 0) return null;
+    return fs.readFile(path);
+  } catch {
+    return null;
+  }
+}
+
+/** 依次试每个根目录，第一个找到的就是它。 */
+function findSaveFile(fs: EmscriptenFs, roots: string[]): Uint8Array | null {
+  for (const root of roots) {
+    const found = searchSaveFile(fs, root, SRAM_SEARCH_DEPTH);
+    if (found) return found;
+  }
+  return null;
+}
+
+function searchSaveFile(
+  fs: EmscriptenFs,
+  dir: string,
+  depth: number
+): Uint8Array | null {
+  let names: string[];
+  try {
+    names = fs.readdir(dir);
+  } catch {
+    return null; // 这个目录不存在，换下一个根
+  }
+  for (const name of names) {
+    if (name === '.' || name === '..') continue;
+    const path = `${dir}/${name}`;
+    let stat: { mode: number };
+    try {
+      stat = fs.stat(path);
+    } catch {
+      continue;
+    }
+    if (fs.isDir(stat.mode)) {
+      if (depth <= 0) continue;
+      const nested = searchSaveFile(fs, path, depth - 1);
+      if (nested) return nested;
+      continue;
+    }
+    const dot = name.lastIndexOf('.');
+    if (dot < 0) continue;
+    if (!SRAM_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase())) continue;
+    const bytes = readIfExists(fs, path);
+    if (bytes) return bytes;
+  }
+  return null;
+}
+
 /** 见 `createEjsControl`。几个方法都是**同步**的 —— 核心那几个导出本来就是同步调用。 */
 interface EjsControl {
   setPaused(paused: boolean): void;
-  saveState(): Blob;
-  loadState(bytes: Uint8Array): void;
   restart(): void;
+  /**
+   * 让核心重新读一遍虚拟文件系统里的存档文件（EJS 的 `_refresh_save_files`）。
+   *
+   * ⚠️ 只有 melonds 导出了它，其余 7 个本地核没有 ⇒ `null`。判空的那一头是
+   * `loadRom` 里「开局带存档」那一步：没有它就只能靠 Nostalgist 在**启动前**
+   * 把文件放好（`stageBatterySave` 那条路本来就是启动前放的，所以它只是保险）。
+   */
+  refreshSaveFiles: (() => void) | null;
   /**
    * 把某个钮按下 / 松开（EJS 的 `simulate_input`）。**`player` 是 0 基** ——
    * 它的那张表就是 `down_1`…`down_4` 四个槽，0 号对应本机的 1P。
@@ -742,16 +835,6 @@ interface EjsControl {
 }
 
 /**
- * 状态在虚拟文件系统里的落脚点。
- *
- * 照抄 EJS 前端（`GameManager.loadState`）：**写根目录的绝对路径、按相对名读回来**。
- * 名字固定 `game.state`，和 ROM 名无关 —— 它是每次读档时现写现读的临时文件，不像
- * RetroArch 自己那套 `<ROM 名>.state` 需要和内容文件名对得上。
- */
-const EJS_STATE_PATH = '/game.state';
-const EJS_STATE_NAME = 'game.state';
-
-/**
  * EJS 核的运行时控制面。
  *
  * **为什么要另开一条路**（2026-10-15）：`public/cores/melonds_libretro.{js,wasm}` 是从
@@ -761,21 +844,25 @@ const EJS_STATE_NAME = 'game.state';
  * `restart()` 恰恰只会发这三条命令（`sendCommand()` 里那张
  * `PAUSE_TOGGLE → _cmd_toggle_pause` 表）；这三条打不到核心，就只剩「字符串队列」
  * 那条退路 —— 而它在 NDS 上也是打不通的（2026-10-15 实测：暂停按了没动静、存档
- * 一直卡着、重置也没用）。存档还多一层：Nostalgist 的 `saveState()` 等的是虚拟文件
- * 系统里的 `<ROM 名>.state`，而 EJS 核的快照**根本不落盘**（见下），那个文件永远不会出现。
+ * 一直卡着、重置也没用）。当时存档还多一层：Nostalgist 的 `saveState()` 等的是虚拟
+ * 文件系统里的 `<ROM 名>.state`，而 EJS 核的快照根本不落盘，那个文件永远不会出现。
+ * （**快照那套 2026-10-15 下午已整体换成电池存档**，所以「存档」这一项现在两条路
+ * 是一致的，见 `saveBattery`；下面这份导出面对照表仍然适用于暂停 / 重置 / 输入。）
  *
  * 它自己有另一套，也就是 EJS 前端 `GameManager.js` 用的那套：
  *
- *   `save_state_info()`        → `"<字节数>|<堆偏移>|<成功标志>"`，
- *                                状态本体**就留在 wasm 堆上**，根本不进文件系统
- *   `load_state(名字, 槽位)`   → 反过来，从文件系统读一个文件当状态
  *   `toggleMainLoop(0 / 1)`    → 停 / 起主循环 —— **EJS 的「暂停」就是它**
  *   `system_restart()`         → 重置
+ *   `_refresh_save_files()`    → 让核心重新读一遍存档文件（开局带存档时补一刀）
  *
  * （导出面对照表见 `.workbuddy-ai/memory/REFERENCE.md` 的「NDS 的 melonds 是 EJS 构建」。）
  *
- * ⚠️ 判据是**能力探测**而不是机种名：这三样只有 melonds 有，其余 7 个本地核一处都没有。
+ * ⚠️ 判据是**能力探测**而不是机种名：上面两样只有 melonds 有，其余 7 个本地核一处都没有。
  * 所以非 EJS 核一律返回 null，调用方原样退回 Nostalgist 那套，其余 12 个机种零影响。
+ *
+ * ⚠️ 它的 `save_state_info()` / `load_state()`（快照那套）**2026-10-15 起不再调用** ——
+ * 存档整体换成了电池存档（见 `saveBattery`），快照不再是同步单位。那两个导出留在核心里
+ * 没动（改 core 文件风险更大），但本文件不再有读者。
  */
 function createEjsControl(nostalgist: Nostalgist): EjsControl | null {
   const emulator = nostalgist.getEmulator() as unknown as {
@@ -785,25 +872,28 @@ function createEjsControl(nostalgist: Nostalgist): EjsControl | null {
   if (!wasm) return null;
 
   const exported = (name: string) => typeof wasm[`_${name}`] === 'function';
-  if (
-    !exported('toggleMainLoop') ||
-    !exported('save_state_info') ||
-    !exported('load_state')
-  )
-    return null;
+  if (!exported('toggleMainLoop') || !exported('save_state_info')) return null;
 
   /*
    * 按名字取函数（和 EJS 前端同一手法）：`cwrap('toggleMainLoop', …)` 找的就是
-   * `_toggleMainLoop`。上面已经确认过这三样在，所以 cwrap 不会抛。
+   * `_toggleMainLoop`。上面已经确认过这两样在，所以 cwrap 不会抛。
+   *
+   * ⚠️ `save_state_info` 只当**身份标记**用（它才是 EJS 构建独有的那个导出，
+   *    其余 7 个本地核只有 `_cmd_save_state`），**不再调用** —— 快照那套已停用。
    */
   const wrap = (name: string, returnType: string, argTypes: string[]) =>
     wasm.cwrap(name, returnType, argTypes);
   const toggleMainLoop = wrap('toggleMainLoop', 'null', ['number']);
-  const saveStateInfo = wrap('save_state_info', 'string', []);
-  const loadState = wrap('load_state', 'number', ['string', 'number']);
-  /** `system_restart` 是 EJS 核顺手带的第四样；万一没有就不给重置（调用方会看到空操作） */
+  /** `system_restart` 是 EJS 核顺手带的；万一没有就不给重置（调用方会看到空操作） */
   const restart = exported('system_restart')
     ? wrap('system_restart', 'null', [])
+    : null;
+  /*
+   * 存档刷新只有 melonds 有，所以它**不进上面那条判据**：少了它这个核照样是 EJS 核，
+   * 暂停 / 重置该走 EJS 那套还得走，只是「开局带存档」少一道保险。
+   */
+  const refreshSaveFiles = exported('refresh_save_files')
+    ? wrap('refresh_save_files', 'null', [])
     : null;
   /*
    * `simulate_input` 是 EJS 核的输入口（见 `attachEjsKeyboard`）。同样是「有就接、
@@ -818,37 +908,7 @@ function createEjsControl(nostalgist: Nostalgist): EjsControl | null {
     setPaused: (paused) => {
       toggleMainLoop(paused ? 0 : 1);
     },
-    saveState: () => {
-      /*
-       * 三段：字节数 / 堆偏移 / 成功标志。**先看第三段** —— 失败时第一段是一句错误话，
-       * 后两段根本没有（EJS 前端 `getState()` 也是这么拆的）。
-       */
-      const [sizeText, offsetText, ok] = String(saveStateInfo()).split('|');
-      const size = Number.parseInt(sizeText, 10);
-      const offset = Number.parseInt(offsetText, 10);
-      if (
-        ok !== '1' ||
-        !Number.isFinite(size) ||
-        !Number.isFinite(offset) ||
-        size <= 0
-      )
-        throw new Error(sizeText || 'save_state_info 没有给出可用的快照');
-      /*
-       * 用 `slice` 而不是 `subarray`：前者把字节**拷出堆**。堆是核心的公共内存，
-       * 核心继续跑就会覆盖它（下一次存档、加载别的资源都算）。
-       */
-      const bytes = wasm.HEAPU8.slice(offset, offset + size);
-      return new Blob([bytes], { type: 'application/octet-stream' });
-    },
-    loadState: (bytes) => {
-      try {
-        wasm.FS.unlink(EJS_STATE_PATH);
-      } catch {
-        // 没有这个文件是常态（这一局的第一次读档），unlink 会抛，忽略即可
-      }
-      wasm.FS.writeFile(EJS_STATE_PATH, bytes);
-      loadState(EJS_STATE_NAME, 0);
-    },
+    refreshSaveFiles: refreshSaveFiles ? () => refreshSaveFiles() : null,
     restart: () => {
       restart?.();
     },
@@ -1047,6 +1107,15 @@ export class EmulatorController {
   private volumeDb = levelToDb(VOLUME_MAX);
   private muted = false;
 
+  /**
+   * 下一局开局要带的电池存档（`.srm` 的字节）。
+   *
+   * `stageBatterySave()` 写进来、`loadRom` 消费一次就清空 —— 因为核心只在**启动时**
+   * 读一遍卡带记忆，运行中把文件换掉它不会回头再读。所以这套里「读档」就是
+   * 「带着存档重新插一次卡带」（见 `stageBatterySave`）。
+   */
+  private pendingSram: Uint8Array | null = null;
+
   get rom() {
     return this.currentRom;
   }
@@ -1065,6 +1134,19 @@ export class EmulatorController {
    */
   setBindings(bindings: KeyBindings): void {
     this.bindings = bindings;
+  }
+
+  /**
+   * 让**下一个** `loadRom` 带上这份电池存档（`.srm` 的字节）。传 `null` 清掉。
+   *
+   * 这就是「读档」的全部实现。核心只在启动时把卡带记忆读进内存，运行中改文件
+   * 它不会回头再读 —— 所以读档必然是「重新插一次卡带」，**不是**在当前这一局上打补丁。
+   *
+   * 存哪儿、叫什么名字不归调用方管：字节会在启动前被写进虚拟文件系统，
+   * 文件名的唯一来源是 Nostalgist 按内容名算出来的那个 `sramFilePath`。
+   */
+  stageBatterySave(bytes: Uint8Array | null): void {
+    this.pendingSram = bytes;
   }
 
   /**
@@ -1227,6 +1309,13 @@ export class EmulatorController {
      */
     const stopWatching = onProgress ? watchCoreDownload(onProgress) : null;
 
+    /*
+     * 消费一次就清空：存档只对**这一次启动**有效。留着的话下一局（比如换一盘游戏）
+     * 会莫名其妙带着上一盘的存档开局。
+     */
+    const sram = this.pendingSram;
+    this.pendingSram = null;
+
     // 用 `| null` 初值而不是裸声明：catch 分支必然 rethrow，赋值一定发生，
     // 但这样写省得跟 TS 的 try/catch 控制流分析较劲。
     let nostalgist: Nostalgist | null = null;
@@ -1263,6 +1352,14 @@ export class EmulatorController {
          * （nostalgist.d.ts 里那段注释写成 `filename` 是笔误，实现读的是 `fileName`。）
          */
         bios: bios ? { fileName: NEOGEO_BIOS_NAME, fileContent: bios } : undefined,
+        /*
+         * 电池存档在**启动前**写进虚拟文件系统，核心 boot 时读进内存 ——
+         * 这就是「读档」落地的地方（见 `stageBatterySave`）。
+         *
+         * 只给字节不给文件名：落点和文件名由 Nostalgist 按内容名算
+         *（`sramFilePath`，即 `…/retroarch/userdata/saves/<核心>/<ROM 名>.srm`）。
+         */
+        sram: sram ?? undefined,
         retroarchConfig: {
           ...bindingsToRetroArch(this.bindings),
           video_aspect_ratio_auto: true,
@@ -1293,20 +1390,17 @@ export class EmulatorController {
            * （`getDefaultRetroarchConfig()`），而 `retroarchConfig` 是**深合并**
            * 进那份默认里的（nostalgist.js 的 `merge`），不写这一行就等于开着。
            *
-           * 开着时 `instance.saveState()` 会
-           * `Promise.all([waitForFile('.state'), waitForFile('.state.png')])`
-           * （nostalgist.js 的 `saveState()`）—— **两个文件都到齐才返回**，
-           * 最坏 120 次重试 ≈ 59 秒后才抛 `fs timeout`。而存档面板的
-           * 「本地保存…」是个**刻意没有超时兜底**的进行中态（见 PlaySaveControls），
-           * 于是这将近一分钟界面就一直挂在「本地保存…」上，看起来像卡死。
+           * 开着时 Nostalgist 的 `saveSRAM()` / `saveState()` 会连缩略图一起等
+           * （`Promise.all([waitForFile(...), waitForFile('...png')])`，**两个文件都到齐
+           * 才返回**，最坏 120 次退避重试 ≈ 59 秒后才抛 `fs timeout`），而面板上那个
+           * 进行中态是**刻意没有超时兜底**的（见 PlaySaveControls）—— 于是这将近一分钟
+           * 界面就一直挂着，看起来像卡死。
            *
-           * 缩略图全站一个地方都没用：本文件的 `saveState()` 只解构 `state`，
-           * 存档槽 `lib/saves.ts` 也只收那个 Blob。关掉对 13 个机种都只有好处
-           * （少写一个 PNG）。
+           * 缩略图全站一个地方都不用（存档换成电池存档之后更用不上）。
            *
            * ⚠️ **NDS 尤其需要这一行**：它的 melonds 是 EmulatorJS 构建，命令导出面
            * 和其余 7 个 `retroarch-emscripten-build` 核心不一样（见下面 `LOCAL_CORE_DIR`），
-           * 那一版很可能根本不产 `.state.png` —— 那样 NDS 每次存档都必然撞上这 59 秒。
+           * 那一版很可能根本不产 `.state.png`。
            */
           savestate_thumbnail_enable: false,
         },
@@ -1357,6 +1451,12 @@ export class EmulatorController {
      */
     this.ejs = createEjsControl(nostalgist);
     /*
+     * 带着存档开的那一局，再让 EJS 核自己读一遍文件：melonds 是 EJS 构建，目录约定
+     * 和正经 RetroArch 构建不一样，它未必会去 Nostalgist 放文件的那个位置找。
+     * 只有它有 `_refresh_save_files`（能力探测在 `createEjsControl` 里），其余 12 台是 null。
+     */
+    if (sram) this.ejs?.refreshSaveFiles?.();
+    /*
      * EJS 核的键盘也得我们自己接：核心那条路在它身上是空的
      * （`rwebinput_is_pressed()` 被掏成 `return 0;`，见 `attachEjsKeyboard`），
      * 所以这里按能力探测决定挂不挂，挂上就跟着这次实例活。
@@ -1378,64 +1478,74 @@ export class EmulatorController {
   }
 
   /**
-   * 抓一份快照交给调用方。
-   * **存哪儿不归引擎管** —— 存档槽（每 ROM 五份、超出顶掉最早的）由 lib/saves.ts 负责，
-   * 引擎只做两件事：产出一份 Blob、吃下一份 Blob。
+   * 抓一份**电池存档** —— 游戏自己在存盘菜单里写的那份「卡带记忆」。
    *
-   * ⚠️ 两条路**不能合并**：EJS 核（NDS）的快照**不进文件系统** —— 核心把它留在 wasm
-   * 堆上并告诉我们「多大、在哪」（见 `createEjsControl`），而 Nostalgist 的
-   * `saveState()` 是「发 SAVE_STATE 命令 + 等一个 `.state` 文件出现」，在 NDS 上
-   * 那个文件永远不会出现（实测：界面一直挂在「本地保存…」）。
+   * 13 个机种一个写法：喊一声 `_cmd_savefiles`（核心把内存里的 SRAM 刷成虚拟文件
+   * 系统里的 `<ROM 名>.srm`），再把那个文件读出来。**EJS 构建的 melonds 也带这条
+   * 命令**，所以「NDS 得另走一套」那段历史到这里结束。
+   *
+   * 为什么不用 Nostalgist 现成的 `saveSRAM()`：它**先 unlink 再等文件出现**
+   * （`waitForFile`，最多退避重试 120 次）。玩家这一局还没在游戏里存过盘时压根没有
+   * SRAM，那个文件永远不会出现 ⇒ 界面要干等将近一分钟才等到报错。自己读文件则是
+   * 「有就是有、没有立刻回 null」。
+   *
+   * ⚠️ 返回 `null` = **这一局还没有存档可拿**（没在游戏里存过盘），不是错误 ——
+   *    调用方该提示「先在游戏里存一次盘」，别当成失败处理。
+   *
+   * **存哪儿不归引擎管**：本机那份由 `lib/saves.ts` 落到 IndexedDB，云端那份走
+   * `/api/user/saves`。引擎只做两件事：产出一份 Blob、吃下一份字节。
    */
-  async saveState(): Promise<Blob | null> {
+  async saveBattery(): Promise<Blob | null> {
     if (!this.instance) return null;
-    if (this.ejs) return this.ejs.saveState();
-    const { state } = await this.instance.saveState();
-    return state;
-  }
+    /*
+     * 这两样在 Nostalgist 的 d.ts 里都挂着 `private`（`sramFilePath` / `callCommand`），
+     * 运行期却实实在在存在。用结构类型绕过去，别去改库。
+     * `callCommand` 的实现就是 `Module[command]?.()` —— 我们的 13 个核心都导出
+     * `_cmd_savefiles`，所以这一条对 EJS 核同样成立。
+     */
+    const emulator = this.instance as unknown as {
+      sramFilePath?: string;
+      callCommand?(command: string): void;
+    };
+    const fs = (
+      this.instance.getEmscripten() as unknown as { Module?: { FS?: EmscriptenFs } }
+    ).Module?.FS;
+    if (!fs) return null;
 
-  /**
-   * 载入一份快照。存档槽里存的就是 Blob（`lib/saves.ts` 不做 base64 膨胀）。
-   * 入参留着 `ArrayBuffer` 是因为 Nostalgist 的 `loadState` 两种都收，
-   * 现在实际只会走 Blob 这一条（面板上的「导入 .state」2026-10-09 已撤）。
-   *
-   * EJS 核（NDS）反过来**只认文件**：先把字节写进虚拟文件系统、再让核心去读那个文件
-   * （`_load_state`，见 `createEjsControl`）—— 它没有 Nostalgist 会发的 `LOAD_STATE`。
-   */
-  async loadStateFrom(data: Blob | ArrayBuffer): Promise<boolean> {
-    if (!this.instance) return false;
     try {
-      if (this.ejs) {
-        this.ejs.loadState(
-          data instanceof Blob
-            ? new Uint8Array(await data.arrayBuffer())
-            : new Uint8Array(data)
-        );
-        return true;
-      }
-      await this.instance.loadState(data);
-      return true;
+      emulator.callCommand?.('_cmd_savefiles');
     } catch (e) {
-      console.error('读取存档失败', e);
-      return false;
+      // 刷盘失败不代表读不到 —— 有些核心自己会定期把 SRAM 写下去，继续往下试
+      console.warn('电池存档刷盘失败', e);
     }
+
+    /*
+     * 先看 Nostalgist 按 RetroArch 约定算出来的那个路径（非 EJS 核就落在那儿），
+     * 拿不到再兜底扫一遍 —— melonds 是 EJS 构建，目录约定未必一样。
+     */
+    const direct = emulator.sramFilePath;
+    const bytes =
+      (direct ? readIfExists(fs, direct) : null) ?? findSaveFile(fs, SRAM_SEARCH_ROOTS);
+    if (!bytes) return null;
+    // 拷一份再包 Blob：`readFile` 给的是 FS 自己的缓冲，别让它跟着核心的写操作变
+    return new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' });
   }
 
   /**
-   * 把快照下载成 `.state` 文件。传入已有的快照可避免重复抓取。
+   * 把电池存档下载成 `.srm` 文件。传入已有的字节可避免重复抓取。
    *
-   * 面板上那个「导出」按钮 2026-10-09 撤了，现在只剩一个调用点：
-   * 存档时 IndexedDB 不可用（隐私模式等）的**兜底** —— 存不进去就退化成下载。
+   * 现在只有一个调用点：存档时 IndexedDB 不可用（隐私模式等）的**兜底** ——
+   * 存不进去就退化成下载，否则那一下存档就白按了。
    *
-   * 抓快照一律走本类的 `saveState()`（它会按核心分路），别再直接问 Nostalgist。
+   * 抓存档一律走本类的 `saveBattery()`，别再直接问 Nostalgist。
    */
-  async downloadState(blob?: Blob): Promise<void> {
+  async downloadBattery(blob?: Blob): Promise<void> {
     if (!this.instance || !this.currentRom) return;
-    const state = blob ?? (await this.saveState());
-    if (!state) return;
+    const bytes = blob ?? (await this.saveBattery());
+    if (!bytes) return;
     downloadFile(
-      new Blob([state], { type: 'application/octet-stream' }),
-      `${this.currentRom.name.replace(/\.[^.]+$/, '')}.state`
+      new Blob([bytes], { type: 'application/octet-stream' }),
+      `${this.currentRom.name.replace(/\.[^.]+$/, '')}.srm`
     );
   }
 

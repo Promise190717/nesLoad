@@ -283,9 +283,16 @@ export default function PlayScene({
   const [keybindOpen, setKeybindOpen] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [savesOpen, setSavesOpen] = useState(false);
-  const [keysPlayer, setKeysPlayer] = useState<'p1' | 'p2'>(
-    initialRoomCode ? 'p2' : 'p1'
-  );
+  /**
+   * 右侧按键表当前看的是哪一组。**只在单机（`mode === 'solo'`）下有意义** ——
+   * 联机和单人机都锁在 1P 上（见下面 `keysLocked`），那时这个 state 被整个绕过。
+   *
+   * 初值恒定 `'p1'`。原来写的是 `initialRoomCode ? 'p2' : 'p1'`（邀请链接进来默认
+   * 停在玩家 2），那是按「加入者在游戏里是 2P」猜的，可**联机时他手上按的仍是自己
+   * 那套 1P 键位** —— 转发就按 `bindings.p1` 反查（见 lib/keybindings.ts 的
+   * `codeToButton`）。表上写 2P、实际按 1P，属于说一套做一套，删掉。
+   */
+  const [keysPlayer, setKeysPlayer] = useState<'p1' | 'p2'>('p1');
   /*
    * 预挂载值只能是`PLAY_DEFAULT_SCREEN_SIZE`（中）：服务端没有 localStorage，
    * 首屏那份**用户真实偏好**由下面的 effect 从 `<html data-tv>` 读回来后补上。
@@ -312,6 +319,20 @@ export default function PlayScene({
    * 时走客户端兜底），派生出来的一定跟着变，不会留下一个已经点开了的建房弹窗。
    */
   const mode: PlayMode = soloOnly ? 'solo' : rawMode;
+  /**
+   * 右侧那张按键表是不是**锁在 1P**、并且不画 P1 / P2 切换。两种情况锁的是同一组：
+   *
+   *   · **单人机（NDS）**：它不支持双人，摆一颗「玩家 2」出来等于告诉用户「这台机器
+   *     能双人」（2026-10-15 用户要求）—— 和 `KeyBindingsPanel` 的 `soloOnly` 同一个理由。
+   *   · **联机（房主 / 加入者）**：两位玩家各在自己的设备前，用的都是**自己那套 1P 键位**。
+   *     房主本机跑模拟器，核心只读 `input_player1_*`；加入者转发按键也按自己的
+   *     `bindings.p1` 反查（见 lib/keybindings.ts 的 `codeToButton`）。P2 那组在联机里
+   *     是**对面输入落地的位置**（房主侧注入），压根不是本机能配的东西。
+   *
+   * 判据用派生的 `mode` 而不是 `netplayState.role`：后者要连上才有，而地址上带了
+   * `?room=` / `?mode=host` 进来时，**进页面那一刻起**两边用的就都是 1P 键位了。
+   */
+  const keysLocked = soloOnly || mode !== 'solo';
   /**
    * 房间卡「刚出现」的高亮。建好房 / 加入成功那一刻置 true，几秒后自己落回 ——
    * 对应卡片边框闪主题色（`play-room-flash`），提醒用户看右栏。
@@ -684,6 +705,25 @@ export default function PlayScene({
     setLoadCancelled(true);
     abortRef.current?.abort();
   }, []);
+
+  /**
+   * 读档：把存档交给引擎，再**带着它重新插一次卡带**。
+   *
+   * 为什么非要重插：核心只在启动时把卡带记忆读进内存，运行中把文件换掉它不会回头
+   * 再读（见 `EmulatorController.stageBatterySave`）。
+   *
+   * 重插走的是 `load(lastRomRef.current)` —— 文件已经在手上，不会再下一次 ROM；
+   * 拿不到就是还没插过卡带，直接放弃。
+   */
+  const applySave = useCallback(
+    async (bytes: Uint8Array) => {
+      const file = lastRomRef.current;
+      if (!file) return;
+      controller.stageBatterySave(bytes);
+      await load(file);
+    },
+    [controller, load]
+  );
 
   /* ---------------- 联机 ---------------- */
 
@@ -1477,17 +1517,15 @@ export default function PlayScene({
               )}
             </div>
             {/*
-              P1 / P2 切换只在**单机双人**时才画。
+              P1 / P2 切换**只在单机**时才画（`keysLocked` 为假）。
 
-              单人机（NDS）整块不画：它不支持双人，摆一颗「玩家 2」出来等于告诉用户
-              「这台机器能双人」（2026-10-15 用户要求）。键位面板里那颗同理，见
-              `KeyBindingsPanel` 的 `soloOnly`。
+              联机和单人机两种情况都不画，且锁的是同一组（1P），理由见 `keysLocked`：
+              联机时两人各用自己的 1P，切到 2P 显示的是**对面输入落地的位置**、不是本机
+              能配的东西；NDS 则根本不支持双人。
 
-              ⚠️ 不画的同时**下面那张表也得跟着锁到 1P** —— `keysPlayer` 的初值可能是
-              `'p2'`（手打 `?room=` 进来时，见那个 useState），不锁的话用户看到的是
-              一整套「玩家 2」的键，却没有地方切回去。
+              ⚠️ 不画的同时**下面那张表也跟着锁到 1P** —— 两处是同一个判据，别只改一处。
             */}
-            {!soloOnly && (
+            {!keysLocked && (
               <div
                 className="mb-3 flex gap-2"
                 role="group"
@@ -1522,17 +1560,12 @@ export default function PlayScene({
                   </dt>
                   <dd className="min-w-0 text-right">
                     <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
-                      {codeLabel(bindings[soloOnly ? 'p1' : keysPlayer][button])}
+                      {codeLabel(bindings[keysLocked ? 'p1' : keysPlayer][button])}
                     </kbd>
                   </dd>
                 </div>
               ))}
             </dl>
-            {netplayState.role && (
-              <p className="mt-3 text-[12px] leading-5 text-ink-300">
-                {t('play.netplayKeysHint')}
-              </p>
-            )}
           </section>
 
           <section className="play-control-panel pixel-edge pxw-2 pxc-700">
@@ -1589,6 +1622,7 @@ export default function PlayScene({
                 disabled={busy || saveBusy}
                 onBusy={setSaveBusy}
                 onOpen={setSavesOpen}
+                onApplySave={applySave}
               />
               <Row label={t('play.volume')} wide>
                 <span
@@ -1666,12 +1700,16 @@ export default function PlayScene({
         房主天然是 true，加入者是 false（他没有本机模拟器，改完立刻生效）。
 
         `consoleType` 决定面板画哪几个钮、钮叫什么、以及是不是单人机（NDS 收成一个页签）。
+
+        `online` 让面板在**还没连上**时就锁 1P 页签（`mode !== 'solo'`）—— `role` 要连上
+        才有值，而右侧那张表从进页面起就已经是 1P 了，面板不该慢半拍还亮两个页签。
       */}
       <KeyBindingsPanel
         open={keybindOpen}
         bindings={bindings}
         consoleType={consoleType}
         role={netplayState.role}
+        online={mode !== 'solo'}
         localPlaying={Boolean(rom)}
         onChange={(next) => {
           setBindings(next);

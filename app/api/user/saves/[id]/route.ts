@@ -2,20 +2,19 @@
  * 单份云端存档（`/api/user/saves/<id>`）。
  *
  *   GET    把这一份的**字节**流回浏览器（服务端回源代理），
- *          前端直接 `res.blob()` 交给 `controller.loadStateFrom`
+ *          前端拿到直接交给引擎重插卡带（见 `EmulatorController.stageBatterySave`）
  *   DELETE 删掉这一份（行 + R2 对象）
  *
  * ⚠️ **GET 为什么是代理而不是回一个 R2 公网地址**（2026-10-13 改）：
  *    以前回的是 `{ slot, url }`，前端拿 url 再直连 R2。实测那条路走不通 ——
  *    浏览器跨域 `fetch` 会被 R2 桶的 CORS 挡掉，报 `TypeError: Failed to fetch`。
  *    ROM 那条路（`/api/games/[id]/rom`）当初就是为同一个理由走的服务端回源，
- *    存档这里补上。代价是这几 MB 要穿过一次 Node 进程，换取「一次请求拿到字节」。
+ *    存档这里补上。代价是这几十 KB~几 MB 要穿过一次 Node 进程，换取「一次请求拿到字节」。
  *    （原来那段「靠 key 不可猜、不靠鉴权」的取舍说明见 lib/server/user-data.ts
  *    的 `getUserSaveUrl`，仍然成立 —— 这里只是把最后的取字节挪到了服务端。）
  *
- * ⚠️ **没有「更新」**：本地那套也是「每次存档开一个新槽」（时间是唯一区分方式，
- *    见 lib/saves.ts 的 saveSlot），云端照抄同一个规则。槽位满了由写入方淘汰
- *    （createUserSave 里那份），这里不需要 PATCH。
+ * ⚠️ **没有「更新」**：存档是电池存档，一款只有一份 —— 再存就是**新插一行、旧行被淘汰**
+ *    （见 `lib/server/user-data.ts` 的 `SAVES_PER_GAME`），所以这里不需要 PATCH。
  *
  * 归属校验全在 `lib/server/user-data.ts` 里（每个查询都带 `WHERE user_id = ?`）——
  * 猜到别人的 save id 也没用，那道 WHERE 过不去。

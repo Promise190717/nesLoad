@@ -9,7 +9,6 @@ import type { AccountTab } from '@/lib/account-tabs';
 import type { ConsoleType } from '@/lib/emulator';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { MAX_CARTRIDGES } from '@/lib/library';
-import { MAX_SAVES } from '@/lib/saves';
 import BackLink from './BackLink';
 import { CONSOLE_LABEL } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
@@ -1131,11 +1130,12 @@ function SavesTab() {
       </ul>
 
       {/*
-        上限说明。这一页是**总览**，用户会好奇「为什么只能存这么多」——
-        答案在 lib/saves.ts 的 MAX_SAVES（每款 5 份，本地云端一致）。
+        存档制式说明。这一页是**总览**，用户会好奇「为什么只剩一份了」——
+        答案在 lib/saves.ts：存档是电池存档（游戏自己的卡带记忆），一款本来就只有一份，
+        再存就是覆盖。文案里不写死「1」，免得哪天规则变了这里说谎。
       */}
       <p className="text-[12px] leading-relaxed text-ink-500">
-        {t('account.savesHint', { max: MAX_SAVES })}
+        {t('account.savesHint')}
       </p>
     </div>
   );

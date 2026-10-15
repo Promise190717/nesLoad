@@ -5,7 +5,7 @@
  *
  * 两个调用点：下载页那颗钮（components/RomDownloadGate.tsx，地址是同源代理
  * `/api/games/<id>/rom`）、以及存档写不进 IndexedDB 时那份兜底
- * （lib/emulator.ts 的 downloadState）。以后再要「下载个什么」，也走这里 ——
+ * （lib/emulator.ts 的 downloadBattery）。以后再要「下载个什么」，也走这里 ——
  * **别自己再造一个 `<a download>`**，理由见下面这一段。
  *
  * ⚠️⚠️ **为什么必须掐掉冒泡**（这个函数存在的全部理由）：

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 卡带库与存档槽共用同一个 IndexedDB。
+ * 卡带库、存档、BIOS 共用同一个 IndexedDB。
  *
  * 打开逻辑必须集中在这里：一个数据库只有一个版本号，若两个模块各自
  * `indexedDB.open('nesload', 1)` 和 `('nesload', 2)`，版本对不上的那一次会直接抛
@@ -65,7 +65,7 @@ export function openDb(): Promise<IDBDatabase | null> {
       }
       if (!db.objectStoreNames.contains(STORE_SAVES)) {
         const store = db.createObjectStore(STORE_SAVES, { keyPath: 'id' });
-        // 存档是按 ROM 文件名分组的，列表要靠这个索引按游戏取。
+        // 存档按 ROM 文件名分组（一款一份，见 lib/saves.ts），取的时候走这个索引。
         store.createIndex('romName', 'romName');
       }
       if (!db.objectStoreNames.contains(STORE_BIOS)) {

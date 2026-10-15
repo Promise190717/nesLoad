@@ -21,7 +21,17 @@
 import { randomUUID } from 'node:crypto';
 import { query } from './d1';
 import { deleteObject, uploadObject, publicUrl } from './r2';
-import { MAX_SAVES } from '@/lib/saves';
+
+/**
+ * 每款游戏在云端保留的份数。
+ *
+ * ⚠️ **1**：存档是电池存档（游戏自己那份卡带记忆），一款本来就只有一份 ——
+ * 再存就是覆盖。以前是 5（快照槽位制，见 `lib/saves.ts` 的文件头），2026-10-15 随
+ * 存档换制式一起收紧。
+ *
+ * 淘汰逻辑本身**留着不是装饰**：它会顺手清掉换制式之前留下的老快照行，连 R2 对象一起删。
+ */
+const SAVES_PER_GAME = 1;
 
 /* ================================================================== *
  * 历史
@@ -190,8 +200,11 @@ export async function removeUserHistory(userId: string, gameId: string): Promise
  * 存档
  * ================================================================== */
 
-/** 一块存档的大小上限（字节）。20 MB 足够任何核心的 save state，同时挡住恶意大包。 */
-export const MAX_SAVE_BYTES = 20 * 1024 * 1024;
+/**
+ * 存档体积上限。定义搬到 `lib/save-limit.ts` 了（客户端发送前也要预检，两边必须同一个数），
+ * 这里原样转出去，免得 `app/api/user/saves/route.ts` 跟着改 import。
+ */
+export { MAX_SAVE_BYTES } from '../save-limit';
 
 /** 对外结构（列表只读元信息，本体按需另取）。 */
 export interface UserSaveSlot {
@@ -273,9 +286,9 @@ export interface SaveInput {
  *   ③ 最后淘汰。淘汰时**必须同时删 R2 对象**，否则对象存储里会攒一堆孤儿
  *      （行没了就再也没人知道那些 key，连人工清理都无从下手）。
  *
- * 淘汰规则和本地 lib/saves.ts 完全一致：写完之后按时间倒序只留前 MAX_SAVES 条。
- * 每一款游戏的上限 —— 云端没有配额一说，但**不该比本地更宽松**，
- * 否则用户会发现「本地只能存 5 个、云端却能存 20 个」，两边行为漂了。
+ * 淘汰规则和本机 `lib/saves.ts` 完全一致：写完之后按时间倒序只留前 `SAVES_PER_GAME` 条
+ * —— 也就是**一款只有一份**。两边的口径必须一致，否则用户会发现「本机覆盖了、云端还留着
+ * 旧的那份」，读回来的进度和看到的对不上。
  */
 export async function createUserSave(userId: string, input: SaveInput): Promise<UserSaveSlot> {
   const id = randomUUID();
@@ -290,10 +303,10 @@ export async function createUserSave(userId: string, input: SaveInput): Promise<
   );
 
   /*
-   * 淘汰：留下最近 MAX_SAVES 条，把更早的删掉（连 R2 对象一起清）。
+   * 淘汰：留下最近 SAVES_PER_GAME 条，把更早的删掉（连 R2 对象一起清）。
    *
    * 一条 `DELETE … RETURNING` 搞定：删除条件是「同一 (user, romName) 下、
-   * 不在最新 MAX_SAVES 条里的那些行」，RETURNING 把 state_key 带回来，
+   * 不在最新 SAVES_PER_GAME 条里的那些行」，RETURNING 把 state_key 带回来，
    * 供下面删 R2 用。过去是「SELECT 淘汰名单 → 逐行 DELETE」＝ 1 + N 次查询，
    * 现在恒为 1 次。
    */
@@ -307,7 +320,7 @@ export async function createUserSave(userId: string, input: SaveInput): Promise<
            LIMIT ?
         )
       RETURNING state_key`,
-    [userId, input.romName, userId, input.romName, MAX_SAVES]
+    [userId, input.romName, userId, input.romName, SAVES_PER_GAME]
   );
   for (const row of stale) {
     // 尽力而为：R2 删失败不该让「存档已存下」这件事变成错误

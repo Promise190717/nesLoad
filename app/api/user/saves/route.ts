@@ -1,16 +1,18 @@
 /*
  * 云端存档（`/api/user/saves`）。
  *
+ * 存的是**电池存档**（游戏自己那份卡带记忆 `.srm`，2026-10-15 之前是快照），
  * 本体走 R2（见 lib/server/user-data.ts 的注释），这张路由只做三件事：
- *   GET    列出某个 ROM 名下的存档槽（`?romName=`，前端打开存档列表时调）
+ *   GET    列出某个 ROM 名下的云端存档（`?romName=`，前端打开存档列表时调）
  *   POST   传一份新存档（multipart：`state` 文件 + `gameId` / `romName` / `title`）
- *   DELETE 清空这一款的全部云端槽（`?romName=`）
+ *   DELETE 清空这一款的全部云端存档（`?romName=`）
  *
  * ⚠️ **不挂 middleware**（见 middleware.ts 的 matcher）：它会缓冲整个请求体并
- *    默认截断到 10MB，一块 save state 正好在那个尺码上。所以这里自己调 `assertUser`。
+ *    默认截断到 10MB。所以这里自己调 `assertUser`。
  *
- * 单个存档的大小由 `MAX_SAVE_BYTES` 卡（20MB），同时也兜住上面那个截断上限 ——
- * 没有 Next 的 body 限制兜底（不走 middleware 就没那道），只能自己查。
+ * 单个存档的大小由 `MAX_SAVE_BYTES` 卡（20MB，见 lib/save-limit.ts）——它同时也是
+ * 客户端发送前的预检口径。⚠️ 真正的天花板在平台那边：Cloudflare 的**请求体硬限
+ * 100MB**，超了在边缘就回 413、**根本进不到这里**（电池存档只有 KB~MB 级，撞不到）。
  */
 
 import { NextResponse } from 'next/server';
@@ -26,13 +28,16 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** `?romName=` 必填 —— 槽位是按 ROM 文件名分组的（和本地 lib/saves.ts 一致）。 */
+/** `?romName=` 必填 —— 存档是按 ROM 文件名认的（和本机 lib/saves.ts 同一把钥匙）。 */
 function romNameOf(request: Request): string {
   return new URL(request.url).searchParams.get('romName')?.trim() ?? '';
 }
 
 /**
- * 列出某一款的云端存档槽。
+ * 列出某一款的云端存档。
+ *
+ * ⚠️ 阵容换成电池存档之后**一款只有一份**，所以这里回的数组实际长度恒为 0 或 1
+ *    —— 数组形状留着不动（前端只取第一份），省得为语义变化改协议。
  *
  * 只认 `romName`，**不校验游戏还在不在库**：存档是「当时那份状态」，
  * 游戏下架了它也该列得出来（前端据此把条目置灰）。这一条和「收藏用 JOIN 过滤下架」
@@ -56,7 +61,7 @@ export async function GET(request: Request) {
 /**
  * 传一份新存档。
  *
- * ⚠️ **用 multipart 而不是 JSON + base64**：一块 save state 几 MB，
+ * ⚠️ **用 multipart 而不是 JSON + base64**：存档是二进制块（NDS 的卡带存档能到 MB 级），
  *    base64 要白涨 33%，而且浏览器端还得先在内存里转一遍字符串。
  *    `FormData` 直达，前端直接 append 一个 `Blob`。
  *
@@ -99,7 +104,7 @@ export async function POST(request: Request) {
      * ⚠️ 这里**只校验存在性、不覆盖 title**：gameId 是我们信得过的（刚查过），
      *    但 title 是从表单来的（前端展示用的那一份），而它只是存档列表上的
      *    一行文字。真要严谨可以像历史那样一律从 games 取 —— 但存档的 title
-     *    是**跟着槽位一起存下去的**，即使用户改名了也不影响正确性。
+     *    是**跟着存档一起存下去的**，即使用户改名了也不影响正确性。
      *    这里只用 games 表做「这一款还在不在」的判定。
      */
     const game = await getGame(gameId);

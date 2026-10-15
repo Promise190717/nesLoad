@@ -63,7 +63,8 @@ import {
   type Cartridge,
   type RemoteRom,
 } from '@/lib/library';
-import { listSaves, readSave, saveSlot, MAX_SAVES, type SaveSlot } from '@/lib/saves';
+import { readSave, writeSave, type SaveInfo } from '@/lib/saves';
+import { MAX_SAVE_BYTES } from '@/lib/save-limit';
 import { isSeason, nextSeason } from '@/lib/season';
 import type { Game } from '@/lib/server/games';
 import { DEFAULT_TV_SIZE, isTvSize, TV_SIZES, type TvSize } from '@/lib/tv-size';
@@ -318,13 +319,13 @@ function romFromGame(game: LibraryGame, locale: Locale): RemoteRom {
 }
 
 /**
- * 一份**云端**存档槽的元信息（二进制本体在 R2，这里只有描述）。
+ * 一份**云端**存档的元信息（二进制本体在 R2，这里只有描述）。
  *
- * 字段和本地的 `SaveSlot`（`lib/saves.ts`）刻意错开：那份只有 `id` / `romName` /
- * `createdAt`，这份多了 `title` 和 `size` —— 云端列表要给用户看「这是哪款游戏的多少 KB」，
- * 而本地那份是不带标题的（存档面板本来就开着当前这款游戏，标题是废话）。
+ * 字段和本机那份（`lib/saves.ts` 的 `SaveInfo`）刻意错开：那份只有 `data` / `createdAt`，
+ * 这份多了 `title` 和 `size` —— 接口本来就这么回，而且 `id` 是 `user_saves.id`（UUID），
+ * 读 / 删都拿它当路径参数。
  *
- * `id` 是 `user_saves.id`（UUID），读 / 删都拿它当路径参数。
+ * ⚠️ 存档换成电池存档之后一款只有一份，所以调用方只取 `items[0]`（见 `listCloudSaves`）。
  */
 type CloudSaveSlot = {
   id: string;
@@ -336,20 +337,23 @@ type CloudSaveSlot = {
 };
 
 /**
- * 拉一份 ROM 在云端的存档列表（没登录会 401，返回空数组）。
+ * 拉这一款在云端的存档（没登录会 401，返回 null）。
  *
  * 模块级函数而不是组件内：它和 `romFromGame` 一样是纯取数，跟组件的 state 无关。
- * **永不抛错** —— 调用方在 `saveState` / `openLoad` 里都只想拿到一个可用的数组，
- * 云端拉不到不该让「本地存档也读不出来」。失败一律退化成空数组。
+ * **永不抛错** —— 调用方在 `saveGame` / `openLoad` 里都只想拿到一份能用的东西，
+ * 云端拉不到不该让「本机那份也读不出来」。失败一律退化成 null。
+ *
+ * ⚠️ 存档换成电池存档之后**一款只有一份**，所以这里取 `items[0]` —— 接口仍然回数组
+ * （服务端不必为这个语义改动），但界面只认第一份。
  */
-async function listCloudSaves(romName: string): Promise<CloudSaveSlot[]> {
+async function listCloudSaves(romName: string): Promise<CloudSaveSlot | null> {
   try {
     const res = await fetch(`/api/user/saves?romName=${encodeURIComponent(romName)}`);
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const data = (await res.json()) as { items?: CloudSaveSlot[] };
-    return data.items ?? [];
+    return data.items?.[0] ?? null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -526,22 +530,24 @@ export default function ConsoleScene({
    * 存档 / 读档也会把它置起来，而那些操作不该在屏幕上冒出进度条。
    */
   const [loading, setLoading] = useState<{ ratio: number | null } | null>(null);
-  // 当前这盘卡带的存档槽，新的在前。「有没有存档可读」就是 saves.length > 0，
-  // 不再单独维护一个布尔 —— 两份状态迟早会对不上。
-  const [saves, setSaves] = useState<SaveSlot[]>([]);
+  /*
+   * 当前这盘卡带的本机存档 —— **一款一份**（`lib/saves.ts` 的主键就是 ROM 文件名）。
+   * 「有没有存档可读」就是 `localSave !== null`，不再单独维护一个布尔 ——
+   * 两份状态迟早会对不上。
+   */
+  const [localSave, setLocalSave] = useState<SaveInfo | null>(null);
   /**
-   * **云端**存档槽（登录了才有）。和 `saves`（本地 IndexedDB）并列，不是替代。
+   * **云端**那一份存档（登录了才有）。和 `localSave`（本地 IndexedDB）并列，不是替代。
    *
    * 两者刻意都留着：本地那份是「断网 / 不登录也能存」的保底，云端那份是
    * 「换个浏览器还在」。存档列表把两组一起画出来，用户不必知道区别。
    */
-  const [cloudSaves, setCloudSaves] = useState<CloudSaveSlot[]>([]);
+  const [cloudSave, setCloudSave] = useState<CloudSaveSlot | null>(null);
   /**
-   * 正在读取的**云端**存档槽 id（读本地档没有这个状态 —— IndexedDB 基本瞬回，
+   * 正在读取**云端**那一份（读本机没有这个状态 —— IndexedDB 基本瞬回，
    * 云端要过本站代理再回源 R2，肉眼可感，值得转个圈）。
-   * 记 id 而不是布尔：列表里只有那一行该转，别的行照常显示。
    */
-  const [loadingCloudId, setLoadingCloudId] = useState<string | null>(null);
+  const [loadingCloud, setLoadingCloud] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   /**
    * 存档面板正在拉列表（2026-10-13 加）。
@@ -1464,8 +1470,8 @@ export default function ConsoleScene({
         setSaveOpen(false);
 
         if (loaded) {
-          // 换了一盘卡带，存档列表也要跟着换 —— 槽位是按 ROM 文件名分的
-          setSaves(await listSaves(loaded.name));
+          // 换了一盘卡带，存档也要跟着换 —— 一份存档是按 ROM 文件名认的
+          setLocalSave(await readSave(loaded.name));
 
           /*
            * 这盘文件攥在手上：「改完键位重载」靠它重新插一次，不必再回 IndexedDB 取。
@@ -1502,7 +1508,7 @@ export default function ConsoleScene({
          */
         if (consoleType === null) setArchiveHint(await unsupportedArchive(file));
         setRom(null);
-        setSaves([]);
+        setLocalSave(null);
         setActiveId(null);
         setGameId(null);
         // 没插上就不该留着上一盘的文件 —— 重载拿它去插只会再失败一次
@@ -1517,14 +1523,15 @@ export default function ConsoleScene({
   );
 
   /**
-   * 重载当前卡带 —— 「改完键位要重新插一次卡带」这件事的一键版。
+   * 重新插一次卡带。**「改完键位重载」和「读档」两条路共用**这一段。
    *
    * 为什么必须整个重来：RetroArch 的键盘映射只在核心启动时读一次，而 Nostalgist
    * **没有公开的「写配置」接口**（`getCurrentRetroarchConfig` 在 Emulator 上是 private，
    * `restart()` 只会拿旧配置重启核心），所以新键位只能靠重新 launch 带进去。
    *
-   * 重来之前先把当前进度存成快照、回来再读回去：改个键位就把游戏打回标题画面太亏。
-   * 读档失败不算致命 —— 最差就是回到标题画面，卡带还是插着的。
+   * 读档也走它，理由同类：核心只在启动时把卡带记忆读进内存，**换一份存档同样只能靠
+   * 重插**（见 `EmulatorController.stageBatterySave`）。带上哪一份由调用方先 stage，
+   * 这里只负责重插。
    *
    * 用的文件是 `lastRomRef` 里攥着的那盘，**不再回 IndexedDB 取**（2026-10-12）：
    * 历史现在只存字符串，本地拖入的文件更是没有记录 —— 只有攥着本体才能两种来源通吃。
@@ -1533,26 +1540,55 @@ export default function ConsoleScene({
    * 他本来就插不了卡带，也就无所谓重载。房主不受影响 —— `remotePlaying` 是加入者
    * 才有的状态（只有加入者会收到 `'s'` 消息）。
    */
-  const reloadRom = useCallback(async () => {
+  const remountRom = useCallback(async () => {
     const file = lastRomRef.current;
-    if (!controller.isRunning || !file) return;
+    if (!file) return;
+    /*
+     * loadFile 会把「当前是历史里哪一盘」清掉（它不认识来源，见那边注释），
+     * 重载完补回来 —— 否则按一次重载，历史里那行的高亮就没了。
+     */
+    const keepId = activeId;
+    await loadFile(file);
+    if (keepId) setActiveId(keepId);
+  }, [activeId, loadFile]);
+
+  /**
+   * 重载当前卡带 —— 「改完键位要重新插一次卡带」这件事的一键版。
+   *
+   * 重来之前先把**当前这份电池存档**交给引擎，重插之后核心会在开局读回内存 ——
+   * 「改个键位就把进度打回标题画面」就是这么避免的。
+   *
+   * ⚠️ `saveBattery()` 必须在 `loadFile()` **之前**：实例一换就抓不到旧的那份了。
+   *    拿不到（还没在游戏里存过盘）就裸重载 —— 最差回到标题画面，卡带还是插着的。
+   */
+  const reloadRom = useCallback(async () => {
+    if (!controller.isRunning || !lastRomRef.current) return;
     setBusy(true);
     try {
-      const snapshot = await controller.saveState();
-      /*
-       * loadFile 会把「当前是历史里哪一盘」清掉（它不认识来源，见那边注释），
-       * 重载完补回来 —— 否则按一次重载，历史里那行的高亮就没了。
-       */
-      const keepId = activeId;
-      await loadFile(file);
-      if (keepId) setActiveId(keepId);
-      if (snapshot && controller.isRunning) await controller.loadStateFrom(snapshot);
+      const sram = await controller.saveBattery();
+      if (sram) controller.stageBatterySave(new Uint8Array(await sram.arrayBuffer()));
+      await remountRom();
     } catch (e) {
       console.warn('重载卡带失败', e);
     } finally {
       setBusy(false);
     }
-  }, [controller, activeId, loadFile]);
+  }, [controller, remountRom]);
+
+  /** 读档：把**指定的那一份**存档 stage 好再重插（本机 / 云端两条路共用）。 */
+  const reloadWithSave = useCallback(
+    async (data: Blob) => {
+      /*
+       * ⚠️ **先确认攥着文件，再 stage**。反过来写会漏：stage 完 `remountRom` 发现没文件
+       *    直接返回，而 stage 进去的那份**还挂在引擎上** —— 下一局（用户换一盘游戏）
+       *    就会莫名其妙带着这份存档开局。
+       */
+      if (!lastRomRef.current) return;
+      controller.stageBatterySave(new Uint8Array(await data.arrayBuffer()));
+      await remountRom();
+    },
+    [controller, remountRom]
+  );
 
   /**
    * 收起深链那颗弹窗（`deepLinkOpen` + `deepLinkGame`）。
@@ -1752,8 +1788,8 @@ export default function ConsoleScene({
     await controller.exit();
     setRom(null);
     setPaused(false);
-    setSaves([]);
-    setCloudSaves([]);
+    setLocalSave(null);
+    setCloudSave(null);
     setSaveOpen(false);
     setActiveId(null);
     setGameId(null);
@@ -1820,73 +1856,90 @@ export default function ConsoleScene({
   /**
    * 上传一份存档到云端。
    *
-   * 单独抽出来是因为它有**三个早退条件**（没登录 / 没有 game / 没有 rom），
-   * 塞在 saveState 里会让那个函数变成一团。这里自己 catch 掉所有错误，
+   * 单独抽出来是因为它有**几个早退条件**（没登录 / 没有 game / 超上限），
+   * 塞在 saveGame 里会让那个函数变成一团。这里自己 catch 掉所有错误，
    * 调用方 `void` 它就完事。
    *
-   * ⚠️ **声明位置在 saveState 之前**：`saveState` 的 useCallback 依赖里引用了它。
+   * ⚠️ **声明位置在 saveGame 之前**：`saveGame` 的 useCallback 依赖里引用了它。
    *    `const` 有暂时性死区，虽然回调要等调用时才求值、运行期没问题，
    *    但 eslint 的 react-hooks/immutability 会在**编译期**判「访问了还没声明的变量」。
-   *    所以顺序是 `uploadCloudSave` → `saveState`，别对调。
    */
   const uploadCloudSave = useCallback(
     async (gameId: string | null, romName: string, blob: Blob) => {
       if (!gameId) return;
+      /*
+       * ⚠️ **发送前先量体积**（2026-10-15 加）：Cloudflare 的请求体硬限是 100MB，
+       * 超了**在边缘**就回 413、请求根本进不到函数 —— 白传一趟，而且界面上看不出原因
+       * （这里本来就没有显示错误的位子）。电池存档正常只有 KB~MB 级，走到这一步
+       * 基本意味着出了别的问题，量一下就能省掉一趟白传。
+       */
+      if (blob.size > MAX_SAVE_BYTES) {
+        console.warn(
+          `[nesload] 存档 ${blob.size} 字节超过云端上限 ${MAX_SAVE_BYTES}，只留在本机`
+        );
+        return;
+      }
       try {
         const form = new FormData();
         form.append('gameId', gameId);
         form.append('romName', romName);
         form.append('title', rom?.name ?? romName);
         /*
-         * state 得有个文件名 —— R2 那边不 care，但 FormData 的 `File` 需要一个名字。
-         * 用 `.state` 是为了和本机那份下载下来的文件同名（用户导出 / 导入时认得）。
+         * 那个文件得有个名字 —— R2 那边不 care，但 FormData 的 `File` 需要一个名字。
+         * 用 `.srm` 是为了和本机那份下载下来的文件同名（用户导出 / 导入时认得）。
          */
-        form.append('state', blob, `${romName}.state`);
+        form.append('state', blob, `${romName}.srm`);
         const res = await fetch('/api/user/saves', { method: 'POST', body: form });
         if (!res.ok) throw new Error(String(res.status));
       } catch (error) {
-        console.warn('[nesload] 云端存档上传失败（本地那份还在）：', error);
+        console.warn('[nesload] 云端存档上传失败（本机那份还在）：', error);
       }
     },
     [rom]
   );
 
   /**
-   * 存档 = 开一个新槽。写满 MAX_SAVES 份之后再存会顶掉最早的那份
-   * （淘汰规则在 lib/saves.ts 里，这里不重复判断）。
+   * 存档 = 把游戏在存盘菜单里写的那份**卡带记忆**抓下来，本机存一份、云端再传一份。
+   *
+   * ⚠️ **一款只有一份**，后面覆盖前面（`lib/saves.ts` 的主键就是 ROM 文件名）——
+   * 这也是整个存档从「快照槽位制」换成电池存档的直接结果。
    */
-  const saveState = useCallback(async () => {
+  const saveGame = useCallback(async () => {
     if (!controller.isRunning || !rom) return;
     setBusy(true);
     try {
-      const blob = await controller.saveState();
-      if (!blob) return;
+      const blob = await controller.saveBattery();
+      /*
+       * `null` = 玩家还没在游戏里存过盘，核心那边根本没有卡带记忆可拿。
+       * 这**不是错误**，而面板上也没有显示错误的位子（存档列表是离开游戏画面才打开的
+       * 面板，弹提示会挡着游戏），所以只留一行日志。
+       */
+      if (!blob) {
+        console.warn('[nesload] 还没有存档可拿：先在游戏里存一次盘');
+        return;
+      }
 
-      // 先试着落进槽位；IndexedDB 用不了（隐私模式等）时退回下载 .state 文件，
+      // 先落本机；IndexedDB 用不了（隐私模式等）时退回下载 .srm 文件，
       // 否则这一下存档就白按了。
-      const slot = await saveSlot(rom.name, blob);
-      if (slot) setSaves(await listSaves(rom.name));
-      else await controller.downloadState(blob);
+      if (await writeSave(rom.name, blob)) setLocalSave(await readSave(rom.name));
+      else await controller.downloadBattery(blob);
 
       /*
-       * 云端存档（登录了才传）。**和本地那份并存**，不是二选一 ——
-       * 本地那份保证「断网 / 不登录也能存」，云端那份保证「换个浏览器还在」。
+       * 云端那份（登录了才传）。**和本机那份并存**，不是二选一 ——
+       * 本机那份保证「断网 / 不登录也能存」，云端那份保证「换个浏览器还在」。
        *
-       * ⚠️ **用同一块 blob**：`saveSlot` 已经把它写进 IndexedDB 了，这里再读一次
-       *    是白费（`saveState()` 出来的这块钱就在手上）。所以云上传放在本地写完**之后**，
-       *    而不是让它去抢 blob 的所有权。
+       * ⚠️ **用同一块 blob**：`writeSave` 已经把它写进 IndexedDB 了，这里再读一次
+       *    是白费（刚抓下来的这块钱就在手上）。所以云上传放在本机写完**之后**。
        *
-       * ⚠️ **失败不打断**：云端传不上去（没登录 / 断网 / 超上限）时本地那份还在，
-       *    用户的存档没有丢。只留一行日志 —— 屏幕上没有地方显示这个错（存档列表是
-       *    离开游戏画面才打开的面板，弹提示会挡着游戏）。
+       * ⚠️ **失败不打断**：云端传不上去（没登录 / 断网 / 超上限）时本机那份还在，
+       *    用户的存档没有丢。`uploadCloudSave` 自己 catch。
        *
-       * romName 必须带上：云端也按 ROM 文件名分组（和本地 lib/saves.ts 一致）。
-       * title 给存档列表显示用，拿的是当前这盘的 `rom.name`（和本地同一份）。
+       * romName 必须带上：云端也按 ROM 文件名分组（和 lib/saves.ts 一致）。
        */
       if (user) void uploadCloudSave(game, rom.name, blob);
 
-      // 列表要跟着刷新 —— 云端槽会立刻出现在「打开存档」里
-      setCloudSaves(await listCloudSaves(rom.name));
+      // 状态要跟着刷新 —— 云端那份会立刻出现在「打开存档」里
+      setCloudSave(await listCloudSaves(rom.name));
     } catch (e) {
       console.warn('存档失败', e);
     } finally {
@@ -1898,48 +1951,48 @@ export default function ConsoleScene({
    * 打开存档列表。**先把面板弹出来、再取数**（2026-10-13 改）。
    *
    * 以前是「取完、有东西才开」—— 点了没存档时按钮看着像坏的。现在立刻开、
-   * 里面转圈，两边都空就明说一句「还没有存档」。列表每次重拉一遍，免得时间是过期的。
+   * 里面转圈，两边都空就明说一句「还没有存档」。每次重拉一遍，免得时间是过期的。
    */
   const openLoad = useCallback(async () => {
     if (!controller.isRunning || !rom) return;
     setSaveOpen(true);
     setSavesLoading(true);
     try {
-      // 本地 + 云端**并行**拉：两边互不依赖，串着等是白等
-      const [items, cloud] = await Promise.all([
-        listSaves(rom.name),
+      // 本机 + 云端**并行**拉：两边互不依赖，串着等是白等
+      const [local, cloud] = await Promise.all([
+        readSave(rom.name),
         listCloudSaves(rom.name),
       ]);
-      setSaves(items);
-      setCloudSaves(cloud);
+      setLocalSave(local);
+      setCloudSave(cloud);
     } catch (e) {
-      // 列表拉不到不该把面板卡在转圈上 —— 退化成「空」也是一种可用的状态
-      console.warn('读取存档列表失败', e);
+      // 拉不到不该把面板卡在转圈上 —— 退化成「空」也是一种可用的状态
+      console.warn('读取存档失败', e);
     } finally {
       setSavesLoading(false);
     }
   }, [controller, rom]);
 
-  const loadSlot = useCallback(
-    async (id: string) => {
-      if (!controller.isRunning) return;
-      setBusy(true);
-      try {
-        const blob = await readSave(id);
-        if (!blob) return;
-        await controller.loadStateFrom(blob);
-        setSaveOpen(false);
-      } catch (e) {
-        console.warn('读档失败', e);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [controller]
-  );
+  /**
+   * 读**本机**那一份存档。
+   *
+   * 读档 = 带着它重新插一次卡带（见 `reloadWithSave`）—— 不是在本局上打补丁。
+   */
+  const loadLocalSave = useCallback(async () => {
+    if (!controller.isRunning || !localSave) return;
+    setBusy(true);
+    try {
+      await reloadWithSave(localSave.data);
+      setSaveOpen(false);
+    } catch (e) {
+      console.warn('读档失败', e);
+    } finally {
+      setBusy(false);
+    }
+  }, [controller, localSave, reloadWithSave]);
 
   /**
-   * 读一份**云端**存档：从本站接口取字节 → 交给核心。
+   * 读**云端**那一份存档：从本站接口取字节 → 带着它重插卡带。
    *
    * ⚠️ **字节必须经本站代理，不能让浏览器直连 R2**（2026-10-13 改）。
    * 以前这里拿服务端回的 R2 公网地址再 `fetch(url)`，实测报
@@ -1947,46 +2000,42 @@ export default function ConsoleScene({
    * ROM 那条路早就因为同一个理由走了服务端回源（见 `/api/games/[id]/rom` 的注释），
    * 存档这里当初漏了。现在 GET 直接把字节流回来，一次请求到底。
    */
-  const loadCloudSlot = useCallback(
-    async (id: string) => {
-      if (!controller.isRunning) return;
-      setBusy(true);
-      setLoadingCloudId(id);
-      try {
-        // 顺带做归属校验 —— 不是自己的那一份服务端会回 404
-        const res = await fetch(`/api/user/saves/${encodeURIComponent(id)}`);
-        if (!res.ok) throw new Error(String(res.status));
-        const blob = await res.blob();
+  const loadCloudSave = useCallback(async () => {
+    if (!controller.isRunning || !cloudSave) return;
+    setBusy(true);
+    setLoadingCloud(true);
+    try {
+      // 顺带做归属校验 —— 不是自己的那一份服务端会回 404
+      const res = await fetch(`/api/user/saves/${encodeURIComponent(cloudSave.id)}`);
+      if (!res.ok) throw new Error(String(res.status));
 
-        await controller.loadStateFrom(blob);
-        setSaveOpen(false);
-      } catch (e) {
-        console.warn('云端读档失败', e);
-      } finally {
-        setBusy(false);
-        setLoadingCloudId(null);
-      }
-    },
-    [controller]
-  );
+      await reloadWithSave(await res.blob());
+      setSaveOpen(false);
+    } catch (e) {
+      console.warn('云端读档失败', e);
+    } finally {
+      setBusy(false);
+      setLoadingCloud(false);
+    }
+  }, [controller, cloudSave, reloadWithSave]);
 
-  /** 删一份云端存档。行和 R2 对象一起清（服务端负责），这里只更新列表。 */
-  const removeCloudSlot = useCallback(
-    async (id: string) => {
-      if (!rom) return;
-      setBusy(true);
-      try {
-        const res = await fetch(`/api/user/saves/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error(String(res.status));
-        setCloudSaves(await listCloudSaves(rom.name));
-      } catch (e) {
-        console.warn('删云端存档失败', e);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [rom]
-  );
+  /** 删云端那一份。行和 R2 对象一起清（服务端负责），这里只更新状态。 */
+  const removeCloudSave = useCallback(async () => {
+    if (!cloudSave) return;
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/user/saves/${encodeURIComponent(cloudSave.id)}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      setCloudSave(await listCloudSaves(rom?.name ?? cloudSave.romName));
+    } catch (e) {
+      console.warn('删云端存档失败', e);
+    } finally {
+      setBusy(false);
+    }
+  }, [rom, cloudSave]);
 
   /** 档位由 controller 夹紧后返回，界面上显示的永远是真正生效的那一档 */
   const changeVolume = useCallback(
@@ -3855,11 +3904,11 @@ export default function ConsoleScene({
           busy={busy}
           loading={loading}
           /*
-            登录了就得让「读档」点得动 —— 本地一条没有也可能有云端的（换了台机器）。
-            `cloudSaves` 这时多半还是空的（只在存档 / 开面板时才拉），所以判据是**登录态**
-            而不是它；点下去 `openLoad` 会把本地和云端一起重新拉一遍。
+            登录了就得让「读档」点得动 —— 本机没有也可能有云端的（换了台机器）。
+            `cloudSave` 这时多半还是 null（只在存档 / 开面板时才拉），所以判据是**登录态**
+            而不是它；点下去 `openLoad` 会把本机和云端一起重新拉一遍。
           */
-          canLoad={saves.length > 0 || user !== null}
+          canLoad={localSave !== null || user !== null}
           volume={volume}
           /* 加入者本机没有卡带，面键长几个得看房主那盘（见 HandheldConsole 的 FACE_ROWS） */
           remoteGameConsole={netplayState.remoteGame?.console ?? null}
@@ -3873,7 +3922,7 @@ export default function ConsoleScene({
           /* onOpenLibrary={() => setLibraryOpen(true)} */
           onButton={handleVirtualButton}
           onTogglePause={() => void togglePause()}
-          onSave={() => void saveState()}
+          onSave={() => void saveGame()}
           onLoad={() => void openLoad()}
           onReload={() => void reset()}
           onEject={() => void eject()}
@@ -4016,8 +4065,8 @@ export default function ConsoleScene({
               paused={paused}
               busy={busy}
               loading={loading}
-              /* 同掌机那处：登录态也算「可读」——本地空不代表云端空 */
-              canLoad={saves.length > 0 || user !== null}
+              /* 同掌机那处：登录态也算「可读」——本机空不代表云端空 */
+              canLoad={localSave !== null || user !== null}
               volume={volume}
               fileOver={fileOver}
               onPickFile={() => romInputRef.current?.click()}
@@ -4025,7 +4074,7 @@ export default function ConsoleScene({
               onDragLeave={() => setFileOver(false)}
               onDropFile={handleDropFile}
               onTogglePause={() => void togglePause()}
-              onSave={() => void saveState()}
+              onSave={() => void saveGame()}
               onLoad={() => void openLoad()}
               onReload={() => void reset()}
               onEject={() => void eject()}
@@ -4135,11 +4184,11 @@ export default function ConsoleScene({
           >
             <div className="flex items-center gap-3 border-b-2 border-ink-900 bg-ink-850 px-4 py-3">
               <span className="text-[12px] text-ink-200">{t('saves.title')}</span>
-              {/* 计数走 font-pixel：全是数字，没有掉字形的问题。只数本机那组 ——
-                  云端那份有 20MB/份的硬上限，条数上限本来就是另一个维度 */}
-              <span className="ml-auto font-pixel text-[12px] text-ink-400">
-                {String(saves.length).padStart(2, '0')}/{String(MAX_SAVES).padStart(2, '0')}
-              </span>
+              {/*
+                ⚠️ 这里原本有个 `00/05` 的槽位计数，**2026-10-15 撤掉**：存档换成电池存档
+                之后一款只有一份（`lib/saves.ts` 的主键就是 ROM 文件名），没有「几份」
+                这个维度了。留着反而在暗示「你还能再存 4 份」。
+              */}
               <button
                 type="button"
                 aria-label={t('saves.close')}
@@ -4155,33 +4204,30 @@ export default function ConsoleScene({
               <div className="px-4 py-6 text-center text-[12px] text-ink-400">
                 {t('saves.loading')}
               </div>
-            ) : saves.length === 0 && cloudSaves.length === 0 ? (
+            ) : !localSave && !cloudSave ? (
               /* 两边都空。面板既然已经弹出来了，就得说一句 —— 只剩一个标题会像坏了 */
               <div className="px-4 py-6 text-center text-[12px] text-ink-400">
                 {t('saves.empty')}
               </div>
             ) : (
               <>
-                {/* 本机那一组。一条都没有就整组不画（第一次玩这一款时就是这种情况，
+                {/* 本机那一份。没有就整组不画（第一次玩这一款时就是这种情况，
                     「没有本机存档」本身不值得占一行） */}
-                {saves.length > 0 && (
+                {localSave && (
                   <>
                     <div className="border-b-2 border-ink-900 bg-ink-850/60 px-4 py-1.5 text-[12px] text-ink-400">
                       {t('saves.groupLocal')}
                     </div>
                     <div className="flex flex-col">
-                      {saves.map((slot) => (
-                        <button
-                          key={slot.id}
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void loadSlot(slot.id)}
-                          className="flex items-center justify-between gap-4 border-b-2 border-ink-900 px-4 py-3 text-left text-[12px] text-ink-200 transition-colors last:border-b-0 enabled:hover:bg-ink-700 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
-                        >
-                          <span>{formatTime(slot.createdAt, locale)}</span>
-                          <span className="shrink-0 text-[12px] opacity-60">{t('saves.load')}</span>
-                        </button>
-                      ))}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void loadLocalSave()}
+                        className="flex items-center justify-between gap-4 border-b-2 border-ink-900 px-4 py-3 text-left text-[12px] text-ink-200 transition-colors last:border-b-0 enabled:hover:bg-ink-700 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <span>{formatTime(localSave.createdAt, locale)}</span>
+                        <span className="shrink-0 text-[12px] opacity-60">{t('saves.load')}</span>
+                      </button>
                     </div>
                   </>
                 )}
@@ -4190,76 +4236,71 @@ export default function ConsoleScene({
                     和后台「删用户」同一个防手滑思路 —— 这一下删的是 R2 上的对象，没法撤。
                     ⚠️ 这一行的 `gap-4` 是 2026-10-13 从 `gap-2` 调大的：原本「加载」
                     两个字紧贴着右边那个删除 ✕，想读档很容易点到删除 */}
-                {cloudSaves.length > 0 && (
+                {cloudSave && (
                   <>
                     <div className="border-b-2 border-ink-900 bg-ink-850/60 px-4 py-1.5 text-[12px] text-ink-400">
                       {t('saves.groupCloud')}
                     </div>
                     <div className="flex flex-col">
-                      {cloudSaves.map((slot) => (
-                        <div
-                          key={slot.id}
-                          className="flex items-center gap-4 border-b-2 border-ink-900 py-3 pl-4 pr-3 last:border-b-0"
+                      <div className="flex items-center gap-4 border-b-2 border-ink-900 py-3 pl-4 pr-3 last:border-b-0">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void loadCloudSave()}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
                         >
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void loadCloudSlot(slot.id)}
-                            className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-35"
-                          >
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate">{formatTime(slot.createdAt, locale)}</span>
-                              {/* 小云朵：区分这条是云端槽（和上面「本机」组的时间裸排对照） */}
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate">{formatTime(cloudSave.createdAt, locale)}</span>
+                            {/* 小云朵：区分这行是云端那份（和上面「本机」组的时间裸排对照） */}
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="currentColor"
+                              aria-hidden="true"
+                              className="h-3 w-3 shrink-0 text-ink-400 opacity-80"
+                            >
+                              <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" />
+                            </svg>
+                          </span>
+                          {/* 读取中这行的「加载」文字换成转圈 —— 外层 span 留着占位，布局不跳 */}
+                          <span className="flex shrink-0 items-center text-[12px] opacity-60">
+                            {loadingCloud ? (
                               <svg
                                 viewBox="0 0 24 24"
-                                fill="currentColor"
+                                fill="none"
                                 aria-hidden="true"
-                                className="h-3 w-3 shrink-0 text-ink-400 opacity-80"
+                                className="h-3.5 w-3.5 animate-spin"
                               >
-                                <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" />
+                                <circle
+                                  cx="12"
+                                  cy="12"
+                                  r="9"
+                                  stroke="currentColor"
+                                  strokeOpacity="0.25"
+                                  strokeWidth="3"
+                                />
+                                <path
+                                  d="M21 12a9 9 0 0 0-9-9"
+                                  stroke="currentColor"
+                                  strokeWidth="3"
+                                  strokeLinecap="round"
+                                />
                               </svg>
-                            </span>
-                            {/* 读取中这行的「加载」文字换成转圈 —— 外层 span 留着占位，布局不跳 */}
-                            <span className="flex shrink-0 items-center text-[12px] opacity-60">
-                              {loadingCloudId === slot.id ? (
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  aria-hidden="true"
-                                  className="h-3.5 w-3.5 animate-spin"
-                                >
-                                  <circle
-                                    cx="12"
-                                    cy="12"
-                                    r="9"
-                                    stroke="currentColor"
-                                    strokeOpacity="0.25"
-                                    strokeWidth="3"
-                                  />
-                                  <path
-                                    d="M21 12a9 9 0 0 0-9-9"
-                                    stroke="currentColor"
-                                    strokeWidth="3"
-                                    strokeLinecap="round"
-                                  />
-                                </svg>
-                              ) : (
-                                t('saves.load')
-                              )}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            aria-label={t('saves.deleteCloud')}
-                            title={t('saves.deleteCloud')}
-                            onClick={() => void removeCloudSlot(slot.id)}
-                            className="pixel-edge pxw-1 pxc-500 flex h-[16px] w-[16px] shrink-0 items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-300 transition-colors enabled:hover:bg-danger enabled:hover:text-ink-950 disabled:cursor-not-allowed disabled:opacity-35"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
+                            ) : (
+                              t('saves.load')
+                            )}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={t('saves.deleteCloud')}
+                          title={t('saves.deleteCloud')}
+                          onClick={() => void removeCloudSave()}
+                          className="pixel-edge pxw-1 pxc-500 flex h-[16px] w-[16px] shrink-0 items-center justify-center bg-ink-700 text-[12px] leading-none text-ink-300 transition-colors enabled:hover:bg-danger enabled:hover:text-ink-950 disabled:cursor-not-allowed disabled:opacity-35"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}

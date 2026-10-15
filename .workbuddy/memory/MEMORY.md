@@ -42,6 +42,7 @@
 - ⭐ **`/play` = `/room` 的另一个壳**：`components/PlayScene.tsx` + `app/[locale]/play/page.tsx`。**引擎侧只有一份**：两边共用 `EmulatorController` / `NetplayController` / `lib/http.ts`（`readBodyWithProgress`+`isAbortError`）/ `lib/bios.ts`，屏幕复用 `ConsoleScreen`。功能面是房间的子集（无存档/历史/云端/拖本地文件/彩蛋/抽屉）。布局 = **左一块屏幕 + 右一列**（顶上照抄 `/consoles/<机种>` 的资料块、中间平铺操作表、底下一颗「编辑」开 `KeyBindingsPanel`）；开局选择（单人/创建/加入 + 链路 + 画质）在屏里那层叠层上。
 - ⚠️⚠️ **`/play` 视觉必须和网站整体一致**：描边用 `pixel-edge pxw-* pxc-*`，屏里那层用 `crt-*`（底永远黑）。「不要 room 的样式」= **别搬房间的布景/电视机/抽屉/键帽**，不是另搞一套 1px 细边。外壳 = `GamesShell`（`showHeader={false}` + `fill`，**这两个 prop 只有它用**）。屏宽上限 `min(100%, calc((100vh - 320px) * 4/3))`，⚠️ **别给 `.screen` 挂 max-h**（和 aspect-ratio 打架）。
 - ⚠️ **`?id=` 语义两页不同**：`/room?id=` 自动下载开玩；**`/play?id=` 不自动载入**。入口 = 详情页动作区那颗「联机游戏」（`gamesPage.playOnline`）+ **首页 Hero 的房间号表单**（`<form action=/play method=get name=room>`；⚠️ `name="room"`/`maxLength=4` 写死）。sitemap 给 0.6。
+- ⚠️ **`/play` 联机（host/join）右侧按键表一律锁 1P**：`PlayScene` 的 `keysLocked = soloOnly || mode !== 'solo'` 一个判据同时管「不画 P1/P2 切换」与「取值锁 `bindings.p1`」；`KeyBindingsPanel` 靠可选 `online`（= `mode !== 'solo'`）做到**进页面就锁页签**，别只等 `role`。判据一律用**派生的 `mode`**，**不是 `netplayState.role`**。`play.netplayKeysHint` 那句提示已删（i18n 键留着、暂无引用）。
 - ⚠️ `ConsoleScreen` 三个**可选** prop（`frameClassName` / `hideHint` / `onTap`）默认值 = 原行为（room/掌机不受影响）。
 - ⚠️ **缓存唯一出口 = `lib/server/cache.ts` 的 `cached()`**：开发模式（`NODE_ENV !== 'production'`）**直接透传查库**，线上才吃 `unstable_cache`。「同请求内只查一次」用 React 的 `cache()` 自己包，不是一回事。
 - ⚠️⚠️ **缓存条目不随部署失效**（落在 `.next/cache`）。改数据 / 改查询形态 **必须把键尾版本号 +1**；返回 `Record<ConsoleType, X>` 的地方**必须运行时补键**（老条目少键 ⇒ 页面印 `undefined`）。
@@ -53,6 +54,15 @@
 - 单条数据走 `getGame(id)`，只有首页深链走 HTTP；sitemap 从 `listGameStubs()` 现读。深链开窗判据是 `deepLinkOpen`；`setDeepLinkOpen(true)` 必须包 `Promise.resolve().then()`。
 - 列表唯一入口 `listGamesPage(offset, limit, {keyword, consoleType, developerId})`，排序 `created_at DESC, id DESC`；搜索只匹配 title/developer/series（**刻意不含 language/description**），关键词是第 1 个绑定参数。
 - `GameLibraryPanel` 的 tab/筛选/页码/滚动在模块级单例 `libraryMemory`；`settledKey === queryKey` 守卫别改成 useRef；卡片错峰唯一出口 `lib/card-stagger.ts`。
+
+## 存档（2026-10-15 换制式）
+
+- ⭐⭐ **存档 = 电池存档（`.srm`，游戏自己那份卡带记忆），一款一份**；快照（save state）那套**已整体停用**。原因：快照绑死核心版本、NDS 的 melonds 快照 >100MB 撞 CF 的 100MB 请求体硬限。**动手前先读 `DETAILS.md` 的「云存档」一节。**
+- 引擎唯一出口：`EmulatorController.saveBattery()`（`_cmd_savefiles` + 在虚拟文件系统里读 `.srm`）与 `stageBatterySave(bytes)`。**`saveState` / `loadStateFrom` / `downloadState` 已删**，别再加回来。
+- ⚠️⚠️ **读档 = 带着存档重新插一次卡带**（核心只在启动时读卡带记忆）⇒ `/room` 走 `remountRom()`，`/play` 走 `applySave`。**stage 之前必须先确认手里攥着 ROM 文件**，否则存档会漏到下一局。
+- 本机存储 `lib/saves.ts`（`readSave`/`writeSave`/`deleteSave`，**主键就是 ROM 文件名**）；云端淘汰 `SAVES_PER_GAME = 1`；体积上限唯一来源 `lib/save-limit.ts` 的 `MAX_SAVE_BYTES`。
+- ⚠️ **老快照数据一律不迁移、读到就清**（快照字节当 `.srm` 注入会毁掉游戏内存档）。
+- ⚠️ **NDS 的落盘目录未实测**（`_cmd_savefiles` 有导出，但落哪儿没验）；`SRAM_SEARCH_ROOTS` 那层扫描就是兜底。
 
 ## 近况（2026-10-15，细节见当日 log）
 

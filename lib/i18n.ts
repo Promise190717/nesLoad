@@ -199,7 +199,7 @@ const en = {
    */
   'seo.login.title': 'Sign in',
   'seo.login.description':
-    'Sign in to your account to keep save states, game history and favorites in sync across devices.',
+    'Sign in to your account to keep saves, game history and favorites in sync across devices.',
 
   /*
    * 首页落地页（2026-10-13 加）—— `app/[locale]/page.tsx`。
@@ -470,9 +470,12 @@ const en = {
   'volume.set': 'Set volume to {level} of {max}',
 
   /*
-   * 存档槽。列表浮在房间上，不在屏幕里 —— 屏幕里跑的是游戏画面。
+   * 存档。列表浮在房间上，不在屏幕里 —— 屏幕里跑的是游戏画面。
+   *
+   * 2026-10-15：存档已从「快照槽位制」换成**电池存档**（一款一份），所以文案里不再有
+   * 「状态 / state」这个说法，也不再提份数。
    */
-  'saves.title': 'Load state',
+  'saves.title': 'Load save',
   'saves.load': 'Load',
   'saves.close': 'Close',
   /*
@@ -489,8 +492,8 @@ const en = {
   'saves.login': 'Sign in',
   /* 面板刚弹出来、列表还在路上时的那一行（openLoad 先开面板再取数） */
   'saves.loading': 'Loading…',
-  /* 本机 + 云端一条都没有 */
-  'saves.empty': 'No saves yet',
+  /* 本机 + 云端一份都没有 */
+  'saves.empty': 'No save yet',
 
   /* 卡带架 2026-10-09 撤掉，历史改在游戏库弹窗里（见 games.tabHistory）。 */
   'library.removeLabel': 'Remove {name}',
@@ -687,6 +690,10 @@ const en = {
   'play.localSaving': 'Saving…',
   'play.uploading': 'Uploading…',
   'play.cloudFailed': 'Cloud sync failed.',
+  /* 游戏里还没存过盘 —— 没有卡带记忆可拿。**不是错误**，别写成失败口吻 */
+  'play.noSave': 'Save in game first',
+  /* 超过云端上限，压根没发出去（本机那份是好的） */
+  'play.tooLarge': 'Save too large',
   'play.theme': 'Theme',
   'play.saveFailed': 'Could not save the game. Please try again.',
   'play.loadFailed': 'Could not load the save. Please try again.',
@@ -856,7 +863,7 @@ const en = {
   'user.signOut': 'Sign out',
   'user.signedInAs': 'Signed in as {name}.',
   'user.cloudHint':
-    'Your game history, save states and favorites are stored in your account — open any game from the online library and they sync automatically.',
+    'Your game history, saves and favorites are stored in your account — open any game from the online library and they sync automatically.',
   /*
    * 表单里那句「登录了能干什么」（2026-10-13 用户要求加回表单 —— 用的是 login.lead 的措辞）。
    * 和 `login.lead` 的区别：这句是**纯好处**，不带「还没有账号？去注册」（表单自己就有
@@ -864,7 +871,7 @@ const en = {
    * 不渲染 —— 见 `AuthForm` 的 prop。
    */
   'user.formLead':
-    'Sign in and your save states, game history and favorites are kept in the cloud — play anytime, anywhere!',
+    'Sign in and your saves, game history and favorites are kept in the cloud — play anytime, anywhere!',
   /*
    * 表单下面那句法律声明（2026-10-13 加，用户要求「表单下方增加…」）。
    *
@@ -931,7 +938,7 @@ const en = {
    *     + 随时随地即刻开玩**（用户给的措辞）。云存档确实是这么工作的，不是空话。
    */
   'login.lead':
-    'Sign in and your save states, game history and favorites are kept in the cloud — play anytime, anywhere. No account yet? Create one.',
+    'Sign in and your saves, game history and favorites are kept in the cloud — play anytime, anywhere. No account yet? Create one.',
 
   /*
    * 个人中心（`/account`，2026-10-13 加）。三个 tab：收藏 / 存档 / 资料。
@@ -971,7 +978,7 @@ const en = {
    */
   'account.favoritesLoading': 'Loading favorites…',
   'account.historyLoading': 'Loading history…',
-  'account.savesLoading': 'Loading save states…',
+  'account.savesLoading': 'Loading saves…',
 
   'account.favoritesEmpty':
     'No favorites yet — open the game library in the room and tap the star on a cover.',
@@ -992,23 +999,23 @@ const en = {
   'account.historyHint':
     'History keeps your {max} most recently played games — playing an older one again moves it back to the top.',
 
-  'account.savesEmpty': 'No cloud save states yet.',
-  'account.savesCount': '{count} save states in total',
+  'account.savesEmpty': 'No cloud save yet.',
+  'account.savesCount': '{count} saves in total',
   /*
    * 树视图里每个游戏行右侧的存档份数（点开游戏行才看到具体存档）。
    */
-  'account.savesGroupCount': '{count} save state(s)',
+  'account.savesGroupCount': '{count} save',
   'account.viewGame': 'View {name}',
   /*
-   * 每款游戏的上限说明。`{max}` 从 lib/saves.ts 的 MAX_SAVES 传进来（本地云端一致），
-   * **不要在文案里写死 5** —— 那个数改了这里就会说谎。
+   * 存档制式说明（2026-10-15 改写）。存档是**电池存档**——游戏自己那份卡带记忆 ——
+   * 所以一款只有一份，再存就是覆盖。**不要在文案里写死数字**，规则会变。
    */
   'account.savesHint':
-    'Up to {max} save states are kept per game — the oldest one is dropped when you save again. Same limit locally and in the cloud.',
-  'account.saveDeleted': 'Save state deleted.',
+    'One save per game — saving again overwrites it. The same applies locally and in the cloud.',
+  'account.saveDeleted': 'Save deleted.',
   'account.clearSaves': 'Clear all',
   'account.confirmClearSaves': 'Really clear all?',
-  'account.savesCleared': 'Cleared {count} save state(s).',
+  'account.savesCleared': 'Cleared {count} save(s).',
   'account.delete': 'Delete',
   'account.confirmDelete': 'Really delete?',
 
@@ -1958,6 +1965,7 @@ const zh: Record<MessageKey, string> = {
   'volume.up': '音量加一档',
   'volume.set': '把音量设为第 {level} 档（共 {max} 档）',
 
+  /* 见上面英文表里的说明：存档换成电池存档（一款一份），文案不再提「状态 / 份数」 */
   'saves.title': '读档',
   'saves.load': '加载',
   'saves.close': '关闭',
@@ -1971,7 +1979,6 @@ const zh: Record<MessageKey, string> = {
   'saves.login': '去登录',
   'saves.loading': '读取中…',
   'saves.empty': '还没有存档',
-
   'library.removeLabel': '移除 {name}',
 
   'legend.moves': '移动',
@@ -2079,6 +2086,10 @@ const zh: Record<MessageKey, string> = {
   'play.localSaving': '本地保存…',
   'play.uploading': '上传云端…',
   'play.cloudFailed': '云端同步失败',
+  /* 游戏里还没存过盘 —— 没有卡带记忆可拿。**不是错误**，别写成失败口吻 */
+  'play.noSave': '游戏里先存档',
+  /* 超过云端上限，压根没发出去（本机那份是好的） */
+  'play.tooLarge': '存档过大',
   'play.theme': '模式',
   'play.saveFailed': '存档失败，请重试',
   'play.loadFailed': '读档失败，请重试',
@@ -2242,7 +2253,7 @@ const zh: Record<MessageKey, string> = {
   'account.savesGroupCount': '{count} 份存档',
   'account.viewGame': '查看《{name}》',
   'account.savesHint':
-    '每款游戏最多保留 {max} 份存档，再存会顶掉最早的那份。本机和云端的上限一致。',
+    '每款游戏只保留一份存档，再存会覆盖前一份。本机和云端一致。',
   'account.saveDeleted': '存档已删除。',
   'account.clearSaves': '全部清空',
   'account.confirmClearSaves': '确认清空？',

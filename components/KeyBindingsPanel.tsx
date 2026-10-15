@@ -57,6 +57,15 @@ interface KeyBindingsPanelProps {
    */
   role: NetplayRole | null;
   /**
+   * 这一局是不是**联机局**（可能还没连上）。
+   *
+   * 和 `role` 的区别只在**时机**：`role` 要建房 / 加入成功之后才有值，而地址上带了
+   * `?room=` / `?mode=host` 进来时，用户**从进页面那一刻起**用的就是 1P 键位了 ——
+   * 所以锁定页签这件事不能只等 `role`。`/play` 传它（`mode !== 'solo'`），`/room`
+   * 不传（那边联机面板本来就只在房间里开）。
+   */
+  online?: boolean;
+  /**
    * 本机是否跑着一盘自己的卡带。
    *
    * 房主天然是 true（他就是在本机跑模拟器的那个人），所以只对**加入者**有意义：
@@ -96,6 +105,7 @@ export default function KeyBindingsPanel({
   bindings,
   consoleType,
   role,
+  online = false,
   localPlaying,
   onChange,
   onReload,
@@ -122,8 +132,11 @@ export default function KeyBindingsPanel({
    *
    * 用「派生」而不是在 effect 里改 state：角色在面板开着的时候也会变（建房 / 进房 /
    * 离房），派生出来的一定跟着变，不会留下一个改不动的旧页签。
+   *
+   * `online` 是同一件事的**更早**判据（见那个 prop 的注释）：地址上带了联机参数进来、
+   * 还没连上的那一段也一样锁 1P，页签不会先亮出两个再收成一个。
    */
-  const lockedPlayer = role ? 'p1' : null;
+  const lockedPlayer = role || online ? 'p1' : null;
 
   /**
    * 单人机 —— 现在只有 NDS（2026-10-15 用户定的：「nds 不支持双人了」）。

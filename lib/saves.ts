@@ -3,136 +3,130 @@
 import { openDb, run, STORE_SAVES } from './db';
 
 /**
- * 每个游戏最多留这么多份存档。再存一份就顶掉最早的那份 ——
- * 淘汰规则就是「写入后按时间倒序只保留前 MAX_SAVES 条」，
- * 所以「覆盖最早的一个」是这条规则的推论，不需要另外判重。
+ * 一个游戏一份**电池存档**（`.srm`）—— 就是游戏自己在存盘菜单里写的那份卡带记忆。
+ *
+ * **为什么不再是「每 ROM 五份快照槽」**（2026-10-15 换）：快照是整机状态，体积从
+ * KB 级（NES 13.8KB）一路到上百 MB（NDS 的 melonds 快照 >100MB，直接撞 Cloudflare
+ * 的 100MB 请求体硬限，见 `.workbuddy/memory/DETAILS.md`），而且**绑死核心版本**。
+ * 电池存档只有 KB~MB 级、跨核心版本跨设备都通用 —— 于是「一款一份、后面覆盖前面」
+ * 既够用，也不用再看管淘汰规则。
+ *
+ * ⚠️ **主键就是 ROM 文件名**（`id = romName`）：所以「一款一份」不是靠淘汰规则维持的，
+ *    而是结构上不可能有第二份 —— `put` 天生覆盖。这也是这里不再有 `MAX_SAVES` 的原因。
  */
-export const MAX_SAVES = 5;
 
-/** 槽位元信息。列表只读这个，快照本体不跟着进内存。 */
-export interface SaveSlot {
-  id: string;
-  romName: string;
+/** 读出来的一份存档：字节 + 落盘时间（列表上要显示「什么时候存的」）。 */
+export interface SaveInfo {
+  data: Blob;
   createdAt: number;
 }
 
-interface SaveRecord extends SaveSlot {
+/** 库里的一条记录。`id` 恒等于 `romName`，重复写一份只是为了索引读起来直观。 */interface StoredSave {
+  id: string;
+  romName: string;
+  createdAt: number;
+  /** 存档字节。存 Blob 而不是 base64：后者要膨胀 33%，而 IndexedDB 本来就支持 Blob。 */
+  data?: Blob;
   /**
-   * 快照本体。存 Blob 而不是 base64：后者要膨胀 33%，
-   * 而 IndexedDB 本来就支持 Blob，没必要绕一圈。
+   * 槽位制时代的字段名，那时候一条记录是一份**快照**、id 是 UUID、一个 ROM 可以有几条。
+   *
+   * ⚠️ 它**不参与迁移**：快照的字节不是电池存档的字节，硬当成 `.srm` 注入回去会毁掉
+   *    玩家游戏里的存档（比丢掉它更糟）。所以见到这种老记录一律清掉。
    */
-  state: Blob;
+  state?: Blob;
 }
 
 /**
- * 早期版本把存档按 `nesload:state:<ROM 文件名>` 存在 localStorage 里，每个游戏只有一份。
- * 升级成槽位制之后读列表时顺手把它搬进来，免得旧存档凭空消失。
- * 只在「这个游戏一个槽都没有」时搬，搬完就删掉旧键（已经没有读者了）。
+ * 更早的存法：整份快照塞在 localStorage 的 `nesload:state:<ROM 文件名>` 里。
+ * 同样**不迁移**（理由同上），读到某个游戏时顺手把这个键清掉。
  */
 const LEGACY_PREFIX = 'nesload:state:';
 
-/** crypto.randomUUID 需要安全上下文（localhost 也算）；没有就退回时间戳 + 随机数。 */
-function newId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function base64ToBytes(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-
-function toSlot(record: SaveRecord): SaveSlot {
-  return { id: record.id, romName: record.romName, createdAt: record.createdAt };
-}
-
-async function readRecords(db: IDBDatabase, romName: string): Promise<SaveRecord[]> {
-  const records = await run<SaveRecord[]>(db, STORE_SAVES, 'readonly', (store) =>
+async function readRecords(db: IDBDatabase, romName: string): Promise<StoredSave[]> {
+  const records = await run<StoredSave[]>(db, STORE_SAVES, 'readonly', (store) =>
     store.index('romName').getAll(romName)
   );
   return records ?? [];
 }
 
-/** 新的在前 —— 列表和淘汰都用这个顺序。 */
-function byNewest(records: SaveRecord[]): SaveRecord[] {
-  return [...records].sort((a, b) => b.createdAt - a.createdAt);
-}
-
 /**
- * 某个游戏的全部存档槽，新的在前。
- * 第一次读某个游戏时若发现它一个槽都没有，会先尝试把旧格式的存档搬过来。
+ * 取这个游戏的那一份存档，没有就返回 `null`。
+ *
+ * 顺带做两件收尾：清掉槽位制时代留下的老记录、清掉 localStorage 里那个老键。
+ * 放在读的时候做，是因为它只在玩家真的打开某个游戏的存档时才付这笔代价。
  */
-export async function listSaves(romName: string): Promise<SaveSlot[]> {
+export async function readSave(romName: string): Promise<SaveInfo | null> {
   const db = await openDb();
-  if (!db) return [];
+  if (!db) return null;
 
-  let records = await readRecords(db, romName);
-  if (records.length === 0) {
-    await migrateLegacy(romName);
-    records = await readRecords(db, romName);
+  const records = await readRecords(db, romName);
+  let found: SaveInfo | null = null;
+  for (const record of byNewest(records)) {
+    if (!record.data) {
+      // 老快照 —— 丢掉，别让它被当成电池存档注入（见 StoredSave.state 的注释）
+      await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(record.id));
+      continue;
+    }
+    if (!found) found = { data: record.data, createdAt: record.createdAt };
+    else await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(record.id));
   }
-  return byNewest(records).map(toSlot);
-}
 
-async function migrateLegacy(romName: string): Promise<void> {
-  let legacy: string | null = null;
   try {
-    legacy = localStorage.getItem(LEGACY_PREFIX + romName);
+    localStorage.removeItem(LEGACY_PREFIX + romName);
   } catch {
-    return; // 隐私模式下连读都读不了，当作没有旧存档
+    // 隐私模式下连删都删不了，留着也无害
   }
-  if (!legacy) return;
-
-  try {
-    const bytes = base64ToBytes(legacy);
-    const saved = await saveSlot(romName, new Blob([bytes], { type: 'application/octet-stream' }));
-    // 存不下就把旧键留着 —— 下次还有机会，总比直接丢掉强
-    if (saved) localStorage.removeItem(LEGACY_PREFIX + romName);
-  } catch (e) {
-    console.warn('旧存档迁移失败', e);
-  }
+  return found;
 }
 
 /**
- * 写一份新存档，并把超出上限的最旧几份淘汰掉。
- * 每次存档都开一个新槽（时间是唯一的区分方式），不做同名覆盖。
+ * 写入这一款游戏的存档，覆盖上一份。返回是否落盘成功 ——
+ * 拿不到 IndexedDB（隐私模式等）时是 `false`，调用方据此退化成「下载成文件」。
  */
-export async function saveSlot(romName: string, state: Blob): Promise<SaveSlot | null> {
+export async function writeSave(romName: string, data: Blob): Promise<boolean> {
   const db = await openDb();
-  if (!db) return null;
+  if (!db) return false;
 
-  const record: SaveRecord = { id: newId(), romName, createdAt: Date.now(), state };
-  const written = await run<IDBValidKey>(db, STORE_SAVES, 'readwrite', (store) => store.put(record));
-  if (written === null) return null;
+  const record: StoredSave = { id: romName, romName, createdAt: Date.now(), data };
+  const written = await run<IDBValidKey>(db, STORE_SAVES, 'readwrite', (store) =>
+    store.put(record)
+  );
+  if (written === null) return false;
 
-  // 淘汰：byNewest 之后 slice(MAX_SAVES) 拿到的就是最早的那几份
-  for (const stale of byNewest(await readRecords(db, romName)).slice(MAX_SAVES)) {
-    await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(stale.id));
+  /*
+   * 主键已经保证只有一条，这里清的是**槽位制时代的老记录**：它们 id 是 UUID，
+   * 按 romName 索引照样查得到，不清掉下次读时又会被翻出来。
+   */
+  for (const stale of await readRecords(db, romName)) {
+    if (stale.id !== romName) {
+      await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(stale.id));
+    }
   }
-
-  return toSlot(record);
-}
-
-/** 取出某一份快照，交给模拟器载入。 */
-export async function readSave(id: string): Promise<Blob | null> {
-  const db = await openDb();
-  if (!db) return null;
-  const record = await run<SaveRecord>(db, STORE_SAVES, 'readonly', (store) => store.get(id));
-  return record?.state ?? null;
+  return true;
 }
 
 /**
- * 删掉本机的某一份存档槽（快照本体跟着记录一起走）。
+ * 删掉这一款的本机存档（连同老记录一起）。拿不到 IndexedDB 时返回 `false`。
+ *
  * 云端那份的删除走 `/api/user/saves/<id>` DELETE，两套存储互不知晓 ——
  * 和写入时「本机为主、云端补充」是同一条分界线。
  */
-export async function deleteSave(id: string): Promise<boolean> {
+export async function deleteSave(romName: string): Promise<boolean> {
   const db = await openDb();
   if (!db) return false;
-  const result = await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(id));
-  return result !== null;
+
+  for (const stale of await readRecords(db, romName)) {
+    await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(stale.id));
+  }
+  try {
+    localStorage.removeItem(LEGACY_PREFIX + romName);
+  } catch {
+    // 同上，删不掉也无害
+  }
+  return true;
+}
+
+/** 新的在前。老记录混在新记录里时，靠它挑出真正该留下的那一条。 */
+function byNewest(records: StoredSave[]): StoredSave[] {
+  return [...records].sort((a, b) => b.createdAt - a.createdAt);
 }

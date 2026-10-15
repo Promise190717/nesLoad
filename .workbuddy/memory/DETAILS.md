@@ -6,9 +6,48 @@
 
 - 来源：`melonds_libretro.{js,wasm}` 从 EmulatorJS 的 `melonds-wasm.data`（7z 壳）解出，不是 `retroarch-emscripten-build` 那个 tag（它没有 NDS）。
 - ① **js 里有 `nost-compat` 补丁，不能换成 CDN 原样那份**：让 Nostalgist 走 `isEsmScript` 分支 + 暴露 `libretro_melonds`/`melonds` 工厂名 + `findEventTarget` 认 `!canvas`/`!parent` 哨兵。
-- ② **运行时控制面和其余本地核不是一套**：它没有 `_cmd_toggle_pause`/`_cmd_load_state`/`_cmd_reset` ⇒ Nostalgist 的 `pause()`/`loadState()`/`restart()` 在 NDS 上全打不到核心，`saveState()` 等的是核心永远不会写的 `.state` 文件。已在 `lib/emulator.ts` 的 `createEjsControl()` 按**能力探测**分路：暂停→`toggleMainLoop(0/1)`、存档→`save_state_info()`（快照在 wasm 堆上，`HEAPU8.slice` 抠出来）、读档→写 `/game.state` + `load_state('game.state',0)`、重置→`system_restart()`。
+- ② **运行时控制面和其余本地核不是一套**：它没有 `_cmd_toggle_pause`/`_cmd_load_state`/`_cmd_reset` ⇒ Nostalgist 的 `pause()`/`loadState()`/`restart()` 在 NDS 上全打不到核心，`saveState()` 等的是核心永远不会写的 `.state` 文件。已在 `lib/emulator.ts` 的 `createEjsControl()` 按**能力探测**分路：暂停→`toggleMainLoop(0/1)`、重置→`system_restart()`、开局带存档→`_refresh_save_files()`。⚠️ **2026-10-15 下午起快照那套整体停用**（存档换成电池存档，见下面「云存档」一节），`save_state_info()`/`load_state()` **不再被调用** —— `save_state_info` 只留着当 EJS 身份标记（它才是 EJS 构建独有的导出）。
 - ③ **输入面也换了一套**：EJS 那支输入驱动（`input/drivers/emulatorjs_input.c`）把上游 `rwebinput_input.c` 的 `rwebinput_is_pressed()` 掏成了 `return 0;` ⇒ 写进 `retroarch.cfg` 的 `input_playerN_*` **一个钮也点不动**（别去开 `ejs_set_keyboard_enabled`，那是喂核心键盘设备的）。它认 `simulate_input(user, id, value)`：**user 0 基**；id = RetroPad 编号 `0b 1y 2select 3start 4up 5down 6left 7right 8a 9x 10l 11r 12l2 13r2`（见 `EJS_JOYPAD_ID`，**顺序和 `ALL_BUTTONS` 不一样**）。已在 `attachEjsKeyboard()` 里自接 `window` 的 keydown/keyup/blur → `simulate_input`（**只在 `this.ejs?.simulate` 非 null 时挂**，探测别并进 ② 那三样）；`pressButton()` 加了 EJS 分支（**它收 1 基 player，要减一**）⇒ 联机注入 + 掌机虚拟钮一起通。
 - ⚠️ **以后再引 EJS 核就照这三条走，别只在 `CORE_MAP` 里加个名字。**
+
+## 云存档（电池存档 / 平台上限）
+
+- ⭐⭐ **2026-10-15 起：存档 = 电池存档（`.srm`，游戏自己那份卡带记忆），一款只有一份。**
+  之前是 save state（整机快照），换掉的原因是体积 —— 快照**绑死核心版本**且跟机种强相关，
+  NDS 的 melonds 快照 **>100MB**，撞上下面那条平台硬限直接 413。量级对照（换制式前的实测 /
+  官方数，留作背景）：NES 解压 13,800 B → RZIP 压缩 1,697 B；snes9x 官方 421KB；
+  melonDS standalone 约 18MB。电池存档反过来是 **8KB（NES/SFC）~ 1MB（NDS）** 量级。
+- ⚠️⚠️ **平台那条硬限仍在**：Cloudflare（Pages Functions）**请求体硬限 100MB**（Free/Pro），
+  超了在**边缘**回 `413 Request Entity Too Large`，请求**根本进不到** `POST /api/user/saves`
+  ⇒ D1 无行、R2 无对象、日志也没有。自定的 `MAX_SAVE_BYTES`（20MB，唯一来源 `lib/save-limit.ts`）
+  现在只是一道纯保险（客户端发送前也用它预检 `blob.size`），正常流程永远碰不到。
+- **读写机制（13 个机种统一，EJS 核不再例外）**：
+  - **取** `EmulatorController.saveBattery()`：`callCommand('_cmd_savefiles')`（核心把内存里的 SRAM
+    刷成虚拟文件系统里的 `<ROM 名>.srm`）→ 读那个文件 → Blob。
+    ⚠️ **刻意不用 Nostalgist 的 `saveSRAM()`**：它先 `unlink` 再 `waitForFile`（最多退避重试 120 次），
+    玩家还没在游戏里存过盘时那个文件永远不出现 ⇒ 界面要干等近一分钟。自己读文件是「没有就立刻回 null」。
+  - **放** `stageBatterySave(bytes)`：下一个 `loadRom` 通过 Nostalgist 的 `sram` 启动项写进 FS
+    （EJS 核额外补一刀 `_refresh_save_files()`）。**消费一次就清空**，别粘到下一局。
+  - ⚠️⚠️ **读档 = 带着存档重新插一次卡带**（核心只在启动时读卡带记忆，运行中换文件它不回头再看）
+    ⇒ `/room` 走 `ConsoleScene` 的 `remountRom()` 重跑 `loadFile`，`/play` 走 `PlayScene` 的
+    `applySave` 重跑 `load()`。⚠️ **stage 之前要先确认「手里攥着 ROM 文件」**，否则那份存档会漏到下一局。
+- 路径：Nostalgist 算出来的是 `…/retroarch/userdata/saves/<coreFullName>/<romBaseName>.srm`
+  （`sramType` 默认 `srm`，`userdataDirectory = /home/web_user/retroarch/userdata`）。
+  `saveBattery()` 先认这条路，认不到再扫 `SRAM_SEARCH_ROOTS`（虚拟文件系统很小，扫一遍很便宜）。
+- 存储：本机 `lib/saves.ts`（IndexedDB，**主键就是 ROM 文件名** ⇒ 结构上不可能有第二份）；
+  云端 `user_saves` 行 + R2 对象，淘汰规则 `SAVES_PER_GAME = 1`（`lib/server/user-data.ts`，
+  写入方负责连 R2 一起删，顺带清掉换制式前的老快照行）。
+- ⚠️ **老数据不迁移**：槽位制时代的快照记录（id 是 UUID、字节是快照）读到就**清掉**，
+  localStorage 的 `nesload:state:*` 也清 —— 快照字节当成 `.srm` 注入**会毁掉游戏内存档**，比丢掉更糟。
+- 报错口径（2026-10-15 修的）：`PlaySaveControls` 以前**不看 `res.ok`** ⇒ 413 也显示「保存成功」
+  （房间侧有检查但只 `console.warn`）。现在两边都在发送前看 `blob.size`、发送后看 `res.ok`；
+  ⚠️ `saveBattery()` 回 `null` = **还没在游戏里存过盘**，不是失败（文案 `play.noSave`）。
+- 排查口径：`/account?tab=saves` 看不到 ≠ 页坏了。先查 D1 `user_saves` 有没有行（个人中心那条
+  `listUserSaveOverview` 还会 `JOIN games` 过滤掉游戏已删的孤儿行），再看 R2 `saves/` 有没有对象。
+- ⚠️ **NDS 那条路还没实测**：`_cmd_savefiles` / `_refresh_save_files` 在 melonds 的 js 里**确有导出**
+  （`Module["_cmd_savefiles"]=wasmExports["gi"]`，grep 确认，**未运行时验证**），但**它把存档落在哪个
+  目录没验证过**（EJS 构建的目录约定可能和正经 RetroArch 不同）—— 那层 `SRAM_SEARCH_ROOTS` 兜底就是
+  为它准备的。**带存档开局**同理，靠 `_refresh_save_files()` 补刀。
 
 ## 操作入口 / 抽屉
 
