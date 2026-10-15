@@ -2,7 +2,8 @@
 
 import { Nostalgist } from 'nostalgist';
 import { resolveArcadeCore } from './arcade-core';
-import { installAudioTap } from './audio-tap';
+import { installAudioTap, trackEmulatorAudio } from './audio-tap';
+import { releaseEmulatorRuntime, trackCanvasRuntime, trackRuntimeListeners, type EmulatorRuntime } from './emulator-runtime';
 import { NEOGEO_BIOS_NAME } from './bios';
 import { downloadFile } from './download';
 import { captureEjsState, restoreEjsState } from './emulator-state';
@@ -1116,6 +1117,7 @@ export class EmulatorController {
    * 「带着存档重新插一次卡带」（见 `stageBatterySave`）。
    */
   private pendingSram: Uint8Array | null = null;
+  private releaseResources: (() => Promise<void>) | null = null;
 
   get rom() {
     return this.currentRom;
@@ -1320,8 +1322,33 @@ export class EmulatorController {
     // 用 `| null` 初值而不是裸声明：catch 分支必然 rethrow，赋值一定发生，
     // 但这样写省得跟 TS 的 try/catch 控制流分析较劲。
     let nostalgist: Nostalgist | null = null;
+    let starting: Nostalgist | null = null;
+    const audio = trackEmulatorAudio();
+    const releaseCanvas = trackCanvasRuntime(canvas);
+    let listeners: ReturnType<typeof trackRuntimeListeners> | null = null;
+    const stopListening = () => listeners?.stop();
+    const releaseResources = async () => {
+      listeners?.dispose();
+      // Read the runtime before exit: some builds destroy its accessors on exit.
+      let runtime: EmulatorRuntime | null = null;
+      try { runtime = (nostalgist ?? starting)?.getEmscripten() ?? null; } catch { /* Not initialized. */ }
+      try { (nostalgist ?? starting)?.exit({ removeCanvas: false }); } catch { /* Continue cleanup. */ }
+      try { if (runtime) await releaseEmulatorRuntime(runtime); }
+      finally {
+        releaseCanvas();
+        await audio.dispose();
+      }
+      starting = null;
+      nostalgist = null;
+      listeners = null;
+    };
     try {
       nostalgist = await Nostalgist.launch({
+        beforeLaunch: (instance) => {
+          starting = instance;
+          listeners = trackRuntimeListeners([window, document, canvas]);
+        },
+        onLaunch: stopListening,
         element: canvas,
         core,
         /*
@@ -1426,6 +1453,7 @@ export class EmulatorController {
         },
       });
     } catch (e) {
+      await releaseResources();
       /*
        * 屏幕里没有任何地方能报错，日志是唯一的排查入口 —— 少了它，
        * 「拖进去没反应」就只剩雪花屏这一条线索。
@@ -1436,10 +1464,12 @@ export class EmulatorController {
       );
       throw e;
     } finally {
+      stopListening();
       stopWatching?.();
     }
 
     this.instance = nostalgist;
+    this.releaseResources = releaseResources;
     /*
      * 注入用的解码器在这里换掉（见 `overrideInjectionKeyMap`）。
      * 快照必须**在这里**取：`this.bindings` 之后随时会被键位面板改掉，
@@ -1673,6 +1703,8 @@ export class EmulatorController {
 
   async exit(): Promise<void> {
     const instance = this.instance;
+    const releaseResources = this.releaseResources;
+    this.releaseResources = null;
 
     /*
      * 先把引用清干净再动手：下面任何一步抛异常，控制器也不会留着一个半死的实例，
@@ -1688,7 +1720,10 @@ export class EmulatorController {
     this.paused = false;
     this.ejs = null;
 
-    if (!instance) return;
+    if (!instance) {
+      await releaseResources?.();
+      return;
+    }
 
     try {
       // 先发一次 PAUSE_TOGGLE 再退出。
@@ -1704,7 +1739,12 @@ export class EmulatorController {
     try {
       // removeCanvas 必须为 false：canvas 由 React 渲染和管理，
       // 若让 Nostalgist 把它从 DOM 移除，React 后续会拿到脱离文档的节点。
-      instance.exit({ removeCanvas: false });
+      if (releaseResources) await releaseResources();
+      else {
+        const runtime = instance.getEmscripten();
+        try { instance.exit({ removeCanvas: false }); }
+        finally { await releaseEmulatorRuntime(runtime); }
+      }
     } catch (e) {
       console.warn('退出模拟器时出错', e);
     }

@@ -10,7 +10,7 @@ export async function packState(state: Blob): Promise<Blob> {
 /** Older battery saves remain readable; they must never be passed to loadState. */
 export async function unpackSave(bytes: Uint8Array): Promise<{ kind: 'state' | 'battery'; bytes: Uint8Array }> {
   if (STATE_HEADER.every((value, index) => bytes[index] === value)) {
-    const compressed = new Blob([new Uint8Array(bytes.slice(STATE_HEADER.length))]);
+    const compressed = new Blob([new Uint8Array(bytes.subarray(STATE_HEADER.length))]);
     const state = await new Response(compressed.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
     return { kind: 'state', bytes: new Uint8Array(state) };
   }

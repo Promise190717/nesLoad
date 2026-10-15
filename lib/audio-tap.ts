@@ -31,6 +31,31 @@ let latest: MediaStreamAudioDestinationNode | null = null;
  * 但它没有真实输出设备，也就没有这个方法。
  */
 const taps = new WeakMap<AudioContext, MediaStreamAudioDestinationNode>();
+const sessions = new Set<Set<AudioContext>>();
+
+/** Own the contexts created by one launch, including launches that fail midway. */
+export function trackEmulatorAudio() {
+  const contexts = new Set<AudioContext>();
+  sessions.add(contexts);
+  return {
+    async dispose() {
+      sessions.delete(contexts);
+      const closing: Promise<void>[] = [];
+      for (const context of contexts) {
+        const tap = taps.get(context);
+        if (tap) {
+          for (const track of tap.stream.getTracks()) track.stop();
+          tap.disconnect();
+          taps.delete(context);
+          if (latest === tap) latest = null;
+        }
+        if (context.state !== 'closed') closing.push(context.close().catch(() => undefined));
+      }
+      contexts.clear();
+      await Promise.all(closing);
+    },
+  };
+}
 
 /**
  * 取（或建）某个 context 的旁路节点。
@@ -48,6 +73,7 @@ function ensureTap(context: BaseAudioContext): MediaStreamAudioDestinationNode |
     taps.set(context, tap);
   }
   latest = tap;
+  for (const contexts of sessions) contexts.add(context);
   return tap;
 }
 

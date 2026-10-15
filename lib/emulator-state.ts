@@ -16,7 +16,7 @@ export function captureEjsState(wasm: EjsStateModule): Blob {
     throw new Error('Unable to capture emulator state');
   }
   // Read the current heap after serialization, which can grow WASM memory.
-  return new Blob([new Uint8Array(wasm.HEAPU8.slice(pointer, pointer + size))]);
+  return new Blob([new Uint8Array(wasm.HEAPU8.subarray(pointer, pointer + size))]);
 }
 
 export function restoreEjsState(wasm: EjsStateModule, bytes: Uint8Array): void {
