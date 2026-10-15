@@ -2,18 +2,7 @@
 
 import { openDb, run, STORE_SAVES } from './db';
 
-/**
- * 一个游戏一份**电池存档**（`.srm`）—— 就是游戏自己在存盘菜单里写的那份卡带记忆。
- *
- * **为什么不再是「每 ROM 五份快照槽」**（2026-10-15 换）：快照是整机状态，体积从
- * KB 级（NES 13.8KB）一路到上百 MB（NDS 的 melonds 快照 >100MB，直接撞 Cloudflare
- * 的 100MB 请求体硬限，见 `.workbuddy/memory/DETAILS.md`），而且**绑死核心版本**。
- * 电池存档只有 KB~MB 级、跨核心版本跨设备都通用 —— 于是「一款一份、后面覆盖前面」
- * 既够用，也不用再看管淘汰规则。
- *
- * ⚠️ **主键就是 ROM 文件名**（`id = romName`）：所以「一款一份」不是靠淘汰规则维持的，
- *    而是结构上不可能有第二份 —— `put` 天生覆盖。这也是这里不再有 `MAX_SAVES` 的原因。
- */
+/** 每个 ROM 保留一份存档，主键为 ROM 文件名；put 覆盖旧档。新存档为压缩快照。 */
 
 /** 读出来的一份存档：字节 + 落盘时间（列表上要显示「什么时候存的」）。 */
 export interface SaveInfo {
@@ -21,24 +10,20 @@ export interface SaveInfo {
   createdAt: number;
 }
 
-/** 库里的一条记录。`id` 恒等于 `romName`，重复写一份只是为了索引读起来直观。 */interface StoredSave {
+/** 新记录的 id 恒等于 romName；老槽位记录可能使用 UUID。 */
+interface StoredSave {
   id: string;
   romName: string;
   createdAt: number;
   /** 存档字节。存 Blob 而不是 base64：后者要膨胀 33%，而 IndexedDB 本来就支持 Blob。 */
   data?: Blob;
-  /**
-   * 槽位制时代的字段名，那时候一条记录是一份**快照**、id 是 UUID、一个 ROM 可以有几条。
-   *
-   * ⚠️ 它**不参与迁移**：快照的字节不是电池存档的字节，硬当成 `.srm` 注入回去会毁掉
-   *    玩家游戏里的存档（比丢掉它更糟）。所以见到这种老记录一律清掉。
-   */
+  /** 兼容早期快照槽位的字段名。 */
   state?: Blob;
 }
 
 /**
  * 更早的存法：整份快照塞在 localStorage 的 `nesload:state:<ROM 文件名>` 里。
- * 同样**不迁移**（理由同上），读到某个游戏时顺手把这个键清掉。
+ * 显式删除该游戏存档时同时清理这个旧键。
  */
 const LEGACY_PREFIX = 'nesload:state:';
 
@@ -52,8 +37,7 @@ async function readRecords(db: IDBDatabase, romName: string): Promise<StoredSave
 /**
  * 取这个游戏的那一份存档，没有就返回 `null`。
  *
- * 顺带做两件收尾：清掉槽位制时代留下的老记录、清掉 localStorage 里那个老键。
- * 放在读的时候做，是因为它只在玩家真的打开某个游戏的存档时才付这笔代价。
+ * 兼容槽位制的快照字段；旧记录只在成功写入新存档后清理。
  */
 export async function readSave(romName: string): Promise<SaveInfo | null> {
   const db = await openDb();
@@ -62,20 +46,13 @@ export async function readSave(romName: string): Promise<SaveInfo | null> {
   const records = await readRecords(db, romName);
   let found: SaveInfo | null = null;
   for (const record of byNewest(records)) {
-    if (!record.data) {
-      // 老快照 —— 丢掉，别让它被当成电池存档注入（见 StoredSave.state 的注释）
-      await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(record.id));
-      continue;
+    const data = record.data ?? record.state;
+    if (data) {
+      found = { data, createdAt: record.createdAt };
+      break;
     }
-    if (!found) found = { data: record.data, createdAt: record.createdAt };
-    else await run<undefined>(db, STORE_SAVES, 'readwrite', (store) => store.delete(record.id));
   }
 
-  try {
-    localStorage.removeItem(LEGACY_PREFIX + romName);
-  } catch {
-    // 隐私模式下连删都删不了，留着也无害
-  }
   return found;
 }
 

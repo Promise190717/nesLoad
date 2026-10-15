@@ -25,7 +25,7 @@ import { deleteObject, uploadObject, publicUrl } from './r2';
 /**
  * 每款游戏在云端保留的份数。
  *
- * ⚠️ **1**：存档是电池存档（游戏自己那份卡带记忆），一款本来就只有一份 ——
+ * ⚠️ **1**：每个游戏只保留最新一份即时存档 ——
  * 再存就是覆盖。以前是 5（快照槽位制，见 `lib/saves.ts` 的文件头），2026-10-15 随
  * 存档换制式一起收紧。
  *
@@ -252,7 +252,7 @@ export async function listUserSaves(userId: string, romName: string): Promise<Us
     `SELECT id, user_id, game_id, rom_name, title, state_key, size, created_at
        FROM user_saves
       WHERE user_id = ? AND rom_name = ?
-      ORDER BY created_at DESC`,
+      ORDER BY created_at DESC, rowid DESC`,
     [userId, romName]
   );
   return rows.map(toSaveSlot);
@@ -316,7 +316,7 @@ export async function createUserSave(userId: string, input: SaveInput): Promise<
         AND id NOT IN (
           SELECT id FROM user_saves
            WHERE user_id = ? AND rom_name = ?
-           ORDER BY created_at DESC
+           ORDER BY created_at DESC, rowid DESC
            LIMIT ?
         )
       RETURNING state_key`,

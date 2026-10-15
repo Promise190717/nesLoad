@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTopLoader } from 'nextjs-toploader';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
 import type { AccountTab } from '@/lib/account-tabs';
 import type { ConsoleType } from '@/lib/emulator';
@@ -887,8 +887,6 @@ function SavesTab() {
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const requestId = useRef(0);
-  /** 树视图：当前展开的是哪些游戏（gameId 集合）。点游戏行切换，默认全部收起。 */
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
   /* 首屏拉一次。setState 一律放 .then/.catch（理由同 FavoritesTab 那个 effect）。 */
   useEffect(() => {
@@ -955,35 +953,6 @@ function SavesTab() {
     }
   };
 
-  /*
-   * 树视图：把平铺的存档按游戏聚成组。顺序沿用服务端那份（按存档时间倒序），
-   * 所以「最近存过档的游戏」排最前；组内第一份就是该游戏最新的一份。
-   * 删掉某游戏的最后一份后，组会随 `items` 更新自动消失。
-   */
-  const groups = useMemo(() => {
-    const byGame = new Map<string, SaveOverviewItem[]>();
-    for (const item of items) {
-      const list = byGame.get(item.gameId);
-      if (list) list.push(item);
-      else byGame.set(item.gameId, [item]);
-    }
-    return Array.from(byGame.entries()).map(([gameId, saves]) => ({
-      gameId,
-      saves,
-      /** 组头取第一份：封面 / 机种 / 标题三样在组内所有份上都一样 */
-      head: saves[0],
-    }));
-  }, [items]);
-
-  const toggleGroup = (gameId: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(gameId)) next.delete(gameId);
-      else next.add(gameId);
-      return next;
-    });
-  };
-
   if (state === 'loading') {
     return <ListRowSkeleton label={t('account.savesLoading')} />;
   }
@@ -1032,98 +1001,43 @@ function SavesTab() {
         </button>
       </div>
 
-      {/*
-        树视图：一层是游戏（点行展开 / 收起），二层才是具体存档。
-        游戏行的封面 / 机种 / 标题取该组第一份（组内这些字段全一样）。
-      */}
       <ul className="flex flex-col divide-y-2 divide-ink-800">
-        {groups.map(({ gameId, saves, head }) => {
-          const open = expanded.has(gameId);
-          const title = locale === 'zh' ? head.gameTitle : head.gameTitleEn || head.gameTitle;
+        {items.map((item) => {
+          const title = locale === 'zh' ? item.gameTitle : item.gameTitleEn || item.gameTitle;
+          const confirming = confirmingId === item.id;
           return (
-            <li key={gameId}>
-              <div className="-mx-2 flex items-center gap-3 px-2 py-2.5 transition-colors hover:bg-ink-850">
-                {/* 游戏行本体是一颗切换钮：点它展开这组存档 */}
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  onClick={() => toggleGroup(gameId)}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <span className="block h-[52px] w-[38px] shrink-0 overflow-hidden bg-ink-900">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={head.imageUrl}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-cover"
-                    />
+            <li key={item.id} className="-mx-2 flex items-center gap-3 px-2 py-2.5 transition-colors hover:bg-ink-850">
+              <Link
+                href={localeHref(`/games/${item.gameId}`)}
+                aria-label={t('account.viewGame', { name: title })}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left hover:text-accent"
+              >
+                <span className="block h-[52px] w-[38px] shrink-0 overflow-hidden bg-ink-900">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={item.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
+                </span>
+                <span className="shrink-0 font-pixel text-[12px] text-ink-500">
+                  {CONSOLE_LABEL[item.consoleType]}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12px] text-ink-100">{title}</span>
+                  <span className="block truncate text-[12px] text-ink-500">
+                    {formatTime(item.createdAt, locale)} · {formatBytes(item.size)}
                   </span>
-
-                  <span className="shrink-0 font-pixel text-[12px] text-ink-500">
-                    {CONSOLE_LABEL[head.consoleType]}
-                  </span>
-
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] text-ink-100">{title}</span>
-                    <span className="block truncate text-[12px] text-ink-500">
-                      {t('account.savesGroupCount', { count: saves.length })}
-                    </span>
-                  </span>
-
-                  {/* 展开 / 收起的箭头。像素风里用纯文本三角，不引图标 */}
-                  <span aria-hidden="true" className="shrink-0 text-[10px] text-ink-500">
-                    {open ? '▼' : '▶'}
-                  </span>
-                </button>
-
-                {/*
-                  游戏详情页入口保留（树收起来之后仍能跳过去看这款游戏）。
-                  它是切换钮的**兄弟**而不是子元素 —— `<button>` 里不能嵌 `<a>`，
-                  套路同收藏 tab 那颗星标。
-                */}
-                <Link
-                  href={localeHref(`/games/${gameId}`)}
-                  aria-label={t('account.viewGame', { name: title })}
-                  title={t('account.viewGame', { name: title })}
-                  className="shrink-0 px-1 text-[16px] leading-none text-ink-500 transition-colors hover:text-accent"
-                >
-                  ↗
-                </Link>
-              </div>
-
-              {/* 二层：这款游戏下的所有存档。往右缩进 + 一条竖线，跟一层拉开关系 */}
-              {open && (
-                <ul className="mb-2 ml-[14px] flex flex-col divide-y-2 divide-ink-800 border-l-2 border-ink-700 pl-3">
-                  {saves.map((item) => {
-                    const confirming = confirmingId === item.id;
-                    return (
-                      <li
-                        key={item.id}
-                        className="-mx-2 flex items-center gap-3 px-2 py-2 transition-colors hover:bg-ink-850"
-                      >
-                        {/* 时间是这份存档的身份（一份存档=存的那一刻），大小跟在后面 */}
-                        <span className="min-w-0 flex-1 truncate text-[12px] text-ink-300">
-                          {formatTime(item.createdAt, locale)} · {formatBytes(item.size)}
-                        </span>
-
-                        <button
-                          type="button"
-                          disabled={busyId !== null}
-                          onClick={() => (confirming ? void confirmDelete(item) : requestDelete(item))}
-                          className={`pixel-edge pxw-1 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                            confirming
-                              ? 'bg-danger text-ink-950 hover:bg-danger/80'
-                              : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
-                          }`}
-                        >
-                          {t(confirming ? 'account.confirmDelete' : 'account.delete')}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+                </span>
+              </Link>
+              <button
+                type="button"
+                disabled={busyId !== null}
+                onClick={() => (confirming ? void confirmDelete(item) : requestDelete(item))}
+                className={`pixel-edge pxw-1 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  confirming
+                    ? 'bg-danger text-ink-950 hover:bg-danger/80'
+                    : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
+                }`}
+              >
+                {t(confirming ? 'account.confirmDelete' : 'account.delete')}
+              </button>
             </li>
           );
         })}
@@ -1131,7 +1045,7 @@ function SavesTab() {
 
       {/*
         存档制式说明。这一页是**总览**，用户会好奇「为什么只剩一份了」——
-        答案在 lib/saves.ts：存档是电池存档（游戏自己的卡带记忆），一款本来就只有一份，
+        答案在 lib/saves.ts：每款游戏只保留最新一份即时存档，
         再存就是覆盖。文案里不写死「1」，免得哪天规则变了这里说谎。
       */}
       <p className="text-[12px] leading-relaxed text-ink-500">

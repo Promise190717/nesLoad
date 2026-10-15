@@ -35,7 +35,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
 
   // 第一步：按 (userId, saveId) 查出这一份 —— 顺带就是归属校验
-  let found: { url: string } | null;
+  let found: Awaited<ReturnType<typeof getUserSaveUrl>>;
   try {
     found = await getUserSaveUrl(guard.user.uid, id);
   } catch (error) {
@@ -59,6 +59,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   return new Response(upstream.body, {
     headers: {
       'Content-Type': 'application/octet-stream',
+      'Content-Length': String(found.slot.size),
       // 存档是账号私有数据，别让中间层缓存（同 ROM 那条不同：ROM 是公开的）
       'Cache-Control': 'no-store',
     },

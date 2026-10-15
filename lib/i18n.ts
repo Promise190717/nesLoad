@@ -492,6 +492,8 @@ const en = {
   'saves.login': 'Sign in',
   /* 面板刚弹出来、列表还在路上时的那一行（openLoad 先开面板再取数） */
   'saves.loading': 'Loading…',
+  'saves.downloading': 'Downloading cloud save…',
+  'saves.restoring': 'Restoring game…',
   /* 本机 + 云端一份都没有 */
   'saves.empty': 'No save yet',
 
@@ -691,7 +693,6 @@ const en = {
   'play.uploading': 'Uploading…',
   'play.cloudFailed': 'Cloud sync failed.',
   /* 游戏里还没存过盘 —— 没有卡带记忆可拿。**不是错误**，别写成失败口吻 */
-  'play.noSave': 'Save in game first',
   /* 超过云端上限，压根没发出去（本机那份是好的） */
   'play.tooLarge': 'Save too large',
   'play.theme': 'Theme',
@@ -1007,7 +1008,7 @@ const en = {
   'account.savesGroupCount': '{count} save',
   'account.viewGame': 'View {name}',
   /*
-   * 存档制式说明（2026-10-15 改写）。存档是**电池存档**——游戏自己那份卡带记忆 ——
+   * 存档制式说明。即时存档保存当前模拟器状态，
    * 所以一款只有一份，再存就是覆盖。**不要在文案里写死数字**，规则会变。
    */
   'account.savesHint':
@@ -1978,6 +1979,8 @@ const zh: Record<MessageKey, string> = {
   'saves.loginHint': '登录后可用云端存档，换台设备也能接着玩。',
   'saves.login': '去登录',
   'saves.loading': '读取中…',
+  'saves.downloading': '正在下载云端存档…',
+  'saves.restoring': '正在恢复游戏进度…',
   'saves.empty': '还没有存档',
   'library.removeLabel': '移除 {name}',
 
@@ -2087,7 +2090,6 @@ const zh: Record<MessageKey, string> = {
   'play.uploading': '上传云端…',
   'play.cloudFailed': '云端同步失败',
   /* 游戏里还没存过盘 —— 没有卡带记忆可拿。**不是错误**，别写成失败口吻 */
-  'play.noSave': '游戏里先存档',
   /* 超过云端上限，压根没发出去（本机那份是好的） */
   'play.tooLarge': '存档过大',
   'play.theme': '模式',

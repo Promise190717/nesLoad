@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import type { EmulatorController, LoadedRom } from '@/lib/emulator';
 import { deleteSave, readSave, writeSave, type SaveInfo } from '@/lib/saves';
 import { MAX_SAVE_BYTES } from '@/lib/save-limit';
+import { packState } from '@/lib/state-file';
+import { readBodyWithProgress } from '@/lib/http';
 import { localePath } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
-/** 云端那一份的元信息。电池存档一款只有一份，所以这里不是数组。 */
+/** 每个游戏只保留最新一份即时存档。 */
 type CloudSave = { id: string; createdAt: number };
 
 /**
@@ -51,11 +53,8 @@ function CloudIcon() {
 /**
  * `/play` 的存档控件。
  *
- * **存档 = 电池存档（`.srm`）**，不是快照（2026-10-15 换）。带来两条界面上的差别：
- *
- *   - 一款只有一份，所以没有「槽位」这回事，也没有 5 份的计数；
- *   - **读档 = 带着存档重新插一次卡带**（核心只在启动时读卡带记忆），所以要向父组件
- *     借 `onApplySave` —— 这一点由父组件重新跑一遍 `load()` 完成。
+ * 保存当前模拟器状态，不依赖游戏内的存盘功能。
+ * 本机和云端各保留一份，重复保存覆盖旧档。
  */
 export default function PlaySaveControls({ controller, rom, gameId, disabled, onBusy, onOpen, onApplySave }: {
   controller: EmulatorController;
@@ -64,12 +63,13 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
   disabled: boolean;
   onBusy: (busy: boolean) => void;
   onOpen: (open: boolean) => void;
-  /** 把一份存档交给引擎，并重新插一次卡带（父组件负责重跑 `load()`）。 */
+  /** 恢复即时存档；父组件同时兼容旧的电池存档。 */
   onApplySave: (bytes: Uint8Array) => Promise<void>;
 }) {
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
+  const [download, setDownload] = useState<{ ratio: number | null; restoring: boolean } | null>(null);
   const [local, setLocal] = useState<SaveInfo | null>(null);
   const [cloud, setCloud] = useState<CloudSave | null>(null);
   const [cloudAuthed, setCloudAuthed] = useState(true);
@@ -80,7 +80,6 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
    *   saved       本机 + 云端都完成 —— 终态
    *   cloudFailed 本机存好了但云端没传上 —— 终态（warn 色，不算失败）
    *   tooLarge    存档超过云端上限，压根没发 —— 终态（warn 色，本机那份是好的）
-   *   noSave      游戏里还没存过盘，没有卡带记忆可拿 —— 终态（warn 色，不是错误）
    *   saveFailed  本机都没存上 —— 终态（danger）
    *   loadFailed  只在弹窗里说
    * 文案刻意都压在四五个字：标签那格是半栏宽，长了就被 truncate 成「…」。
@@ -91,7 +90,6 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
     | 'saved'
     | 'cloudFailed'
     | 'tooLarge'
-    | 'noSave'
     | 'saveFailed'
     | 'loadFailed'
     | null
@@ -132,32 +130,27 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
     if (!rom) return;
     try {
       setMessage('localSaving');
-      const blob = await controller.saveBattery();
-      /*
-       * `null` = 玩家还没在游戏里存过盘，于是核心那边根本没有卡带记忆可拿。
-       * 这**不是错误**，得说出来 —— 否则用户看到「存档失败」会以为是我们坏了。
-       */
-      if (!blob) { setMessage('noSave'); return; }
+      const blob = await packState(await controller.saveState());
 
       /*
-       * 先落本机；IndexedDB 用不了（隐私模式等）时退回下载 `.srm` 文件，
+       * 先落本机；IndexedDB 用不了（隐私模式等）时退回下载 `.state` 文件，
        * 否则这一下存档就白按了。本机那份不设体积限制。
        */
-      if (!(await writeSave(rom.name, blob))) await controller.downloadBattery(blob);
+      if (!(await writeSave(rom.name, blob))) await controller.downloadState(blob);
       setLocal(await readSave(rom.name));
 
       /*
        * 云端那段（登录了才传）。**发送前先量体积**（2026-10-15 加）：Cloudflare 的
        * 请求体硬限是 100MB，超了在边缘就回 413、请求根本进不到函数 ——
        * 与其白传一趟再报个含糊的失败，不如当场告诉用户「这份只存在本机」。
-       * 电池存档正常只有 KB~MB 级，走到这一步基本意味着出了别的问题。
+       * 限制按压缩后的大小计算，本机仍会保留完整存档。
        */
       if (gameId) {
         if (blob.size > MAX_SAVE_BYTES) { setMessage('tooLarge'); return; }
         setMessage('uploading');
         const form = new FormData();
         form.append('gameId', gameId); form.append('romName', rom.name);
-        form.append('title', rom.name); form.append('state', blob, `${rom.name}.srm`);
+        form.append('title', rom.name); form.append('state', blob, `${rom.name}.state`);
         try {
           const response = await fetch('/api/user/saves', { method: 'POST', body: form });
           /*
@@ -191,22 +184,23 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
       if (remote) {
         const id = cloud?.id;
         if (!id) return;
+        setDownload({ ratio: 0, restoring: false });
         const response = await fetch(`/api/user/saves/${encodeURIComponent(id)}`);
         if (!response.ok) throw new Error('Cloud save unavailable');
-        data = await response.blob();
+        data = await readBodyWithProgress(response, (ratio) => {
+          setDownload({ ratio, restoring: false });
+        });
+        setDownload({ ratio: 1, restoring: true });
       } else {
         data = local?.data ?? null;
       }
       if (!data) throw new Error('No save');
 
-      /*
-       * ⚠️ 读档 = **带着存档重新插一次卡带**。核心只在启动时把卡带记忆读进内存，
-       * 运行中把文件换掉它不会回头再读（见 EmulatorController.stageBatterySave）——
-       * 所以这一步交给父组件重跑 `load()`，不是在本局上打补丁。
-       */
+      // 本机和云端经过相同的解压与恢复流程。
       await onApplySave(new Uint8Array(await data.arrayBuffer()));
       close();
     } catch { setMessage('loadFailed'); }
+    finally { setDownload(null); }
   });
 
   /*
@@ -240,7 +234,7 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
     inlineNotice === 'saved' ? 'text-ok'
       : inlineNotice === 'uploading' ? 'text-info'
         : inlineNotice === 'localSaving' ? 'text-ink-300'
-          : inlineNotice === 'cloudFailed' || inlineNotice === 'tooLarge' || inlineNotice === 'noSave'
+          : inlineNotice === 'cloudFailed' || inlineNotice === 'tooLarge'
             ? 'text-warn'
             : inlineNotice ? 'text-danger' : 'text-ink-300';
   return (
@@ -265,13 +259,34 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
         </div>
       </div>
       {open && (
-        <dialog ref={dialogRef} aria-labelledby="play-saves-title" onCancel={(event) => { event.preventDefault(); close(); }} className="play-quality-dialog">
+        <dialog ref={dialogRef} aria-labelledby="play-saves-title" onCancel={(event) => { event.preventDefault(); if (!lockRef.current) close(); }} className="play-quality-dialog">
           <div className="flex items-center justify-between gap-3">
             <h2 id="play-saves-title" className="text-[14px] font-semibold">{t('saves.title')}</h2>
-            <button type="button" onClick={close} className={buttonClass}>{t('saves.close')}</button>
+            <button type="button" disabled={pending} onClick={close} className={buttonClass}>{t('saves.close')}</button>
           </div>
           {message && <p role="alert" className="mt-3 text-[12px] text-danger">{t(`play.${message}`)}</p>}
-          {pending ? <p role="status" className="py-4 text-[12px]">{t('saves.loading')}</p> : (
+          {pending ? download ? (
+            <div className="space-y-3 py-4">
+              <div role="status" className="flex items-center justify-between gap-3 text-[12px] text-ink-200">
+                <span>{t(download.restoring ? 'saves.restoring' : 'saves.downloading')}</span>
+                {download.ratio !== null && <span>{Math.round(download.ratio * 100)}%</span>}
+              </div>
+              <div
+                role="progressbar"
+                aria-label={t('saves.downloading')}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={download.ratio === null ? undefined : Math.round(download.ratio * 100)}
+                className="relative h-2 overflow-hidden border border-ink-500 bg-ink-950"
+              >
+                {download.ratio === null ? (
+                  <span className="load-slide absolute inset-y-0 left-0 w-1/3 bg-accent" />
+                ) : (
+                  <span className="absolute inset-y-0 left-0 bg-accent transition-[width] duration-150" style={{ width: `${download.ratio * 100}%` }} />
+                )}
+              </div>
+            </div>
+          ) : <p role="status" className="py-4 text-[12px]">{t('saves.loading')}</p> : (
             <div className="mt-3 space-y-3">
               {!local && !cloud && cloudAuthed && <p className="text-[12px] text-ink-300">{t('saves.empty')}</p>}
               {local && (

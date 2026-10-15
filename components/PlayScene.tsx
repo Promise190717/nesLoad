@@ -51,6 +51,7 @@ import { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import PlaySaveControls from './PlaySaveControls';
+import { unpackSave } from '@/lib/state-file';
 import { MobileGamepad } from './HandheldConsole';
 import { ExpandIcon, PlayMoonIcon, ReloadIcon, SunIcon } from './icons';
 import { TV_SIZES, type TvSize } from '@/lib/tv-size';
@@ -707,19 +708,18 @@ export default function PlayScene({
   }, []);
 
   /**
-   * 读档：把存档交给引擎，再**带着它重新插一次卡带**。
-   *
-   * 为什么非要重插：核心只在启动时把卡带记忆读进内存，运行中把文件换掉它不会回头
-   * 再读（见 `EmulatorController.stageBatterySave`）。
-   *
-   * 重插走的是 `load(lastRomRef.current)` —— 文件已经在手上，不会再下一次 ROM；
-   * 拿不到就是还没插过卡带，直接放弃。
+   * 即时存档恢复当前模拟器状态；旧电池存档仍通过重启核心读取。
    */
   const applySave = useCallback(
     async (bytes: Uint8Array) => {
+      const save = await unpackSave(bytes);
+      if (save.kind === 'state') {
+        await controller.loadState(save.bytes);
+        return;
+      }
       const file = lastRomRef.current;
-      if (!file) return;
-      controller.stageBatterySave(bytes);
+      if (!file) throw new Error('No loaded ROM');
+      controller.stageBatterySave(save.bytes);
       await load(file);
     },
     [controller, load]
@@ -1953,14 +1953,14 @@ function LoadingCard({
               </span>
             )}
             {subtitle && (
-              <span className="text-[10px] text-crt-ink-500">{subtitle}</span>
+              <span className="text-[10px] text-crt-ink-200">{subtitle}</span>
             )}
-            <span className="text-[10px] text-crt-ink-400">{phaseLabel}</span>
+            <span className="text-[10px] text-crt-ink-200">{phaseLabel}</span>
           </div>
         </div>
       )}
       {!(image || title) && (
-        <span className="text-[11px] text-crt-ink-300">{phaseLabel}</span>
+        <span className="text-[11px] text-crt-ink-200">{phaseLabel}</span>
       )}
 
       {/* 长条：到 100% 恰好填满。`ratio` 为 null 时画来回滑的「不确定」条 */}
