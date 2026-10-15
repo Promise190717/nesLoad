@@ -1111,12 +1111,12 @@ export default function PlayScene({
       {/*
         这一行的根**不是 `<main>`**：`.wall` 背景、右上一排入口、返回、页脚全在
         `GamesShell` 里（见 `app/[locale]/play/page.tsx`），`<main>` 由外层出。
-        这里 `flex-1` + `lg:items-stretch` 是为了「吃掉外壳剩下来的纵向空间」——
-        `GamesShell` 传了 `fill`，页脚因此被压到视口最底部（2026-10-14 用户要求）。
+        工作区按游戏区域的实际高度布局，不拉伸填满外壳的剩余空间。
       */}
       <div
         ref={workspaceRef}
-        className="play-workspace flex w-full flex-1 flex-col gap-8 lg:flex-row lg:items-stretch"
+        className="play-workspace w-full"
+        data-screen-size={screenSize}
       >
         {/*
           这一页没有可见的大标题（用户要的就是干净），但**不能没有 h1** ——
@@ -1132,17 +1132,12 @@ export default function PlayScene({
           用户定的：右侧不再有设置卡片，开局要做的选择（单人 / 创建房间 / 加入 + 链路 +
           画质）全在黑区上做完，进了房那层就换成房间码 / 分享 / 状态 / 离开。
 
-          这块**吃满左栏的高度、屏幕在里面上下居中**（`items-center`，用户要求）。
-          宽度要**同时**受两边约束：左栏给多宽就用多宽，但不能高过可用高度 —— 屏幕是
-          写死 4:3 的盒子，宽度不被卡住时会撑出视口。所以里面那层卡宽度
-          = min(左栏 100%, 可用高度 × 4/3)，那个 320px 是外壳（顶栏 / 返回 / 页脚）
-          + 屏幕外框 + 页边距的估计值。
-          ⚠️ 别改成给屏幕挂 `max-h`（或 `h-full`）—— 会和 `aspect-ratio` 打架：
-          宽度还是 100%、高度被截短，而 canvas 是 `h-full w-full`，画面会被压扁。
+          左栏由游戏区域撑开，不使用 flex-1 分配剩余空间。
+          屏幕尺寸由 updateSize() 和 .play-display 的样式共同控制。
         */}
         <section
           ref={stageRef}
-          className="play-stage flex min-w-0 flex-1 items-center justify-center"
+          className="play-stage flex min-w-0 items-center justify-center"
         >
           <div className="play-screen-area">
             <div

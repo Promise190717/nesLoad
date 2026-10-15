@@ -21,6 +21,15 @@
 .play-display { --play-size-scale: 1; width: 100%; height: calc(var(--play-display-height, 80dvh) * var(--play-size-scale)); max-width: min(100%, var(--play-display-max-width, calc((100dvh - 160px) * 4 / 3))); }
 .play-display[data-screen-size='small'] { --play-size-scale: .75; width: 75%; max-width: min(75%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .75)); }
 .play-display[data-screen-size='medium'] { --play-size-scale: .88; width: 88%; max-width: min(88%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .88)); }
+@media (min-width: 1024px) {
+  .play-workspace { --play-size-scale: 1; --play-stage-width: calc(var(--play-display-max-width, 1100px) * var(--play-size-scale)); width: calc(var(--play-stage-width) + 300px); max-width: 100%; grid-template-columns: minmax(0, var(--play-stage-width)) 280px; }
+  .play-workspace[data-screen-size='small'] { --play-size-scale: .75; }
+  .play-workspace[data-screen-size='medium'] { --play-size-scale: .88; }
+  .play-screen-area { height: auto; }
+  .play-display,
+  .play-display[data-screen-size='small'],
+  .play-display[data-screen-size='medium'] { width: 100%; max-width: none; height: auto; aspect-ratio: 4 / 3; }
+}
 /*
 ⚠️ **这个页面的尺寸真源在 JS，不在 CSS**：`--play-display-max-width` 是 `PlayScene.tsx`
 的 `updateSize()` 算好、以内联自定义属性写在元素上的，上面这些 `var(..., 兜底值)`
