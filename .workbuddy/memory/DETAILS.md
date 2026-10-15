@@ -2,6 +2,14 @@
 
 > 只放「改这块之前必须知道」的细节；总纲与硬约束见 `MEMORY.md`。
 
+## NDS / EJS 核（melonds）
+
+- 来源：`melonds_libretro.{js,wasm}` 从 EmulatorJS 的 `melonds-wasm.data`（7z 壳）解出，不是 `retroarch-emscripten-build` 那个 tag（它没有 NDS）。
+- ① **js 里有 `nost-compat` 补丁，不能换成 CDN 原样那份**：让 Nostalgist 走 `isEsmScript` 分支 + 暴露 `libretro_melonds`/`melonds` 工厂名 + `findEventTarget` 认 `!canvas`/`!parent` 哨兵。
+- ② **运行时控制面和其余本地核不是一套**：它没有 `_cmd_toggle_pause`/`_cmd_load_state`/`_cmd_reset` ⇒ Nostalgist 的 `pause()`/`loadState()`/`restart()` 在 NDS 上全打不到核心，`saveState()` 等的是核心永远不会写的 `.state` 文件。已在 `lib/emulator.ts` 的 `createEjsControl()` 按**能力探测**分路：暂停→`toggleMainLoop(0/1)`、存档→`save_state_info()`（快照在 wasm 堆上，`HEAPU8.slice` 抠出来）、读档→写 `/game.state` + `load_state('game.state',0)`、重置→`system_restart()`。
+- ③ **输入面也换了一套**：EJS 那支输入驱动（`input/drivers/emulatorjs_input.c`）把上游 `rwebinput_input.c` 的 `rwebinput_is_pressed()` 掏成了 `return 0;` ⇒ 写进 `retroarch.cfg` 的 `input_playerN_*` **一个钮也点不动**（别去开 `ejs_set_keyboard_enabled`，那是喂核心键盘设备的）。它认 `simulate_input(user, id, value)`：**user 0 基**；id = RetroPad 编号 `0b 1y 2select 3start 4up 5down 6left 7right 8a 9x 10l 11r 12l2 13r2`（见 `EJS_JOYPAD_ID`，**顺序和 `ALL_BUTTONS` 不一样**）。已在 `attachEjsKeyboard()` 里自接 `window` 的 keydown/keyup/blur → `simulate_input`（**只在 `this.ejs?.simulate` 非 null 时挂**，探测别并进 ② 那三样）；`pressButton()` 加了 EJS 分支（**它收 1 基 player，要减一**）⇒ 联机注入 + 掌机虚拟钮一起通。
+- ⚠️ **以后再引 EJS 核就照这三条走，别只在 `CORE_MAP` 里加个名字。**
+
 ## 操作入口 / 抽屉
 
 - **两处入口 = 一份 DOM、两套布局**：`.top-links` + 右侧 `.rail` 都包在 `.entries`；大屏 `.entries` 是 `display: contents`，小屏变右侧滑出抽屉。

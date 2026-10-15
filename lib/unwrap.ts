@@ -234,9 +234,17 @@ function extractSevenZip(
   });
 }
 
-/** worker 回来的是 HEAP 上的 `Uint8Array`（也可能是 `ArrayBuffer`），两种都收。 */
-function toBytes(data: Uint8Array | ArrayBuffer): Uint8Array {
-  return data instanceof Uint8Array ? data : new Uint8Array(data);
+/**
+ * worker 回来的是 HEAP 上的 `Uint8Array`（也可能是 `ArrayBuffer`），两种都收。
+ *
+ * ⚠️ 返回类型写死 `Uint8Array<ArrayBuffer>` 而不是默认的 `ArrayBufferLike`，
+ * 是给下面 `new File([...])` 用的：TS 5.7 起 `BlobPart` 只收背后是**独占**
+ * `ArrayBuffer` 的视图，而 `ArrayBufferLike` 还含 `SharedArrayBuffer`（拿它建 File
+ * 运行时会抛）。这里的字节是 worker **结构化克隆**回来的，到手的 buffer 一定独占，
+ * 所以断言成立 —— 改写成 `.slice()` 也能过类型，但那要多复制一份整盘 ROM。
+ */
+function toBytes(data: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer> {
+  return (data instanceof Uint8Array ? data : new Uint8Array(data)) as Uint8Array<ArrayBuffer>;
 }
 
 /**

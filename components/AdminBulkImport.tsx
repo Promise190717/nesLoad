@@ -124,7 +124,6 @@ export default function AdminBulkImport({ onImported }: { onImported: () => void
         ...(await importGame(game, {
           fallbackConsole: list.consoleType,
           developerIds: developersRef.current,
-          t,
           // 「停止」要能在**一款的几种语言之间**也生效（见公共管道里的 shouldStop）
           shouldStop: () => stopRef.current,
         }))
