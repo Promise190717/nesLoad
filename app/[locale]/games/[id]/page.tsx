@@ -16,7 +16,7 @@ import {
   htmlLang,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type Locale,
   type MessageKey,
@@ -147,7 +147,7 @@ export async function generateMetadata({
       /* 直接用 R2 上那张封面当分享图（绝对地址，本来就公网可读） */
       images: [{ url: game.imageUrl, alt: text.title }],
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
   };
 }
@@ -163,7 +163,7 @@ export async function generateMetadata({
  * 结构化数据与页面内容不一致（写了页面上没有的年份）是会被判作弊的。
  *
  * 序列化后把 `<` 换成 `\u003c` —— 内联 `<script>` 里出现 `</script>` 就能提前闭合标签。
- * 这里的 game.title / developer 是**后台可控**的字符串，比 layout 那份更需要这一行。
+ * 这里的 `text.title` / `text.developer` 是**后台可控**的字符串，比 layout 那份更需要这一行。
  *
  * ⚠️ 结构化数据的名字 / 描述 / 作者**一律用当前语言那一份**（`LocalizedGameText`）——
  *    和页面上显示的内容必须一致（不一致是会被判作弊的）。

@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
+import { CONTENT_LOCALES, EMPTY_GAME_TEXT, type ContentLocale, type GameText, type GameTexts } from '@/lib/game-text';
 import { GAME_LANGUAGES, GAME_LANGUAGE_LABEL, romLangToFormValue } from '@/lib/rom-lang';
 import { unwrapRom } from '@/lib/unwrap';
 import AdminAutoCrawl from './AdminAutoCrawl';
@@ -21,28 +22,48 @@ import AdminLoading from './AdminLoading';
 import { FIELD_CLASS } from './adminStyles';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from './CartridgeSprite';
 
-/** `/api/admin/games` 返回的条目。 */
+/**
+ * `/api/admin/games` 返回的条目（= lib/server/games.ts 的 `AdminGame`，也就是
+ * `Game` 再多一个 `groupSize`）。
+ */
 interface AdminGame {
   id: string;
-  title: string;
-  /** 英文名（可空）。2026-10-13 加，英文站取它、空了回退 `title`。 */
-  titleEn: string | null;
+  /**
+   * 文案按语言索引（`game_texts` 侧表，见 lib/game-text.ts）。
+   * 表单读写**四个语言**（zh / en / ja / ko —— 日韩两栏 2026-10-16 加）；
+   * 列表那一行显示的仍是**中文原文**（见下面 `zhText`）—— 那一栏是「原始资料」，
+   * 不跟着界面语言变。
+   *
+   * ⚠️ 这份文案挂的是**同款**（`games.group_key`）不是这一盘 ROM ⇒ 同款几个语言版本
+   *    读的是同一份，改一次 = 改整款（见编辑弹窗里那句提醒）。
+   */
+  texts: GameTexts;
   imageUrl: string;
   consoleType: ConsoleType;
   language: string | null;
-  series: string | null;
-  seriesEn: string | null;
   year: number | null;
-  developer: string | null;
-  developerEn: string | null;
   /**
    * 开发商外键（2026-10-12 加）。表单里那个下拉框选的就是它 —— 名字由服务端反查，
-   * 所以这里编辑时只认 id；`developer` 那列文字只在列表上显示用。
+   * 所以这里编辑时只认 id；厂名文字在 `texts.*.developer` 里，只在列表上显示用。
    */
   developerId: string | null;
-  description: string | null;
-  descriptionEn: string | null;
   createdAt: number;
+  /** 与这一行共用同一份文案的 ROM 条数（含自己，2026-10-16 加）。1 = 库里只有这一盘。 */
+  groupSize: number;
+}
+
+/**
+ * 后台列表 / 编辑表单读的**中文原文**那一份。
+ *
+ * 改动前这里直接读 `games.title` / `games.series` / `games.developer` / `games.description`
+ * 那几列（都是中文原文），行为保持一致 —— 后台界面虽然会跟着 cookie 切中英，
+ * 但「游戏资料」这一栏一直只显示原文。
+ *
+ * 兜一层 `EMPTY_GAME_TEXT`：真出现一条没有中文行的脏数据时显示空白，而不是把
+ * `undefined` 塞进 JSX（那会直接崩）。
+ */
+function zhText(game: AdminGame): GameText {
+  return game.texts.zh ?? EMPTY_GAME_TEXT;
 }
 
 /** `/api/admin/developers/options` 返回的下拉项。 */
@@ -99,6 +120,55 @@ function languageLabel(value: string | null): string | null {
 
 /** 每个字段外层那个 label（纵向排列 + 小字标签）。`FIELD_CLASS` 在 ./adminStyles（两个组件共用）。 */
 const LABEL_CLASS = 'flex flex-col gap-1 text-[12px] text-ink-400';
+
+/**
+ * 表单里**一份语言**的三个可编辑字段。全是字符串（空串 = 没填）—— 直接绑在 input 上，
+ * 提交时才收敛成 `null`（和后台其它选填字段同一套写法）。
+ */
+interface FormText {
+  title: string;
+  series: string;
+  description: string;
+}
+
+/** 四个语言的表单值，按语言索引。 */
+type FormTexts = Record<ContentLocale, FormText>;
+
+/**
+ * 一份全新的空表单。
+ *
+ * ⚠️ 写成**工厂函数**而不是共享常量：`patchText` 是浅拷贝改写，共享一个对象的话
+ *    「重置表单」拿到的是上一轮改过的那份，等于没重置。
+ *
+ * ⚠️ 循环 `CONTENT_LOCALES` 生成：加语言只改 `lib/game-text.ts` 一处 —— 这正是这次
+ *    重构的目的（原来 12 个 `useState` + 12 段 JSX 都是四个语言各抄一遍）。
+ */
+function emptyFormTexts(): FormTexts {
+  return Object.fromEntries(
+    CONTENT_LOCALES.map((locale) => [locale, { title: '', series: '', description: '' }])
+  ) as FormTexts;
+}
+
+/** 语言块的标题。`satisfies` 保证「`CONTENT_LOCALES` 加了语言却漏了标签」编译期就报错。 */
+const CONTENT_LOCALE_LABEL = {
+  zh: '中文',
+  en: 'English (EN)',
+  ja: '日本語 (JA)',
+  ko: '한국어 (KO)',
+} satisfies Record<ContentLocale, string>;
+
+/**
+ * 提交时文案字段的**键名后缀**。两条路的命名规则不一样，所以是两张表：
+ *   · POST（multipart）—— 蛇形：`title` / `title_en` / `series_en` / `description_en`；
+ *   · PATCH（JSON）    —— 驼峰：`title` / `titleEn` / `seriesEn` / `descriptionEn`。
+ *
+ * ⚠️ 这是**接口契约的一部分**，改名要连着接口一起改 —— 两边分别是
+ *    `app/api/admin/games/route.ts` 的 `flatTexts()` 与 `[id]/route.ts` 的 `patch`。
+ *    刻意不写成「`_${locale}` / 首字母大写」那种推导：显式列出来，改动才看得见
+ *    （同时 `satisfies` 保证加语言时这里漏了会编译报错）。
+ */
+const FORM_SUFFIX = { zh: '', en: '_en', ja: '_ja', ko: '_ko' } satisfies Record<ContentLocale, string>;
+const PATCH_SUFFIX = { zh: '', en: 'En', ja: 'Ja', ko: 'Ko' } satisfies Record<ContentLocale, string>;
 
 /**
  * 拉取**一页**列表。抽成模块级函数，便于 effect 与增删改后共用。
@@ -213,17 +283,20 @@ export default function AdminGames() {
   const [modalNotice, setModalNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // 表单字段：新增与编辑共用一套
-  const [title, setTitle] = useState('');
   /*
-   * 英文字段（2026-10-13 加）。库里文案字段成对出现（无后缀 = 中文，`_en` = 英文），
-   * 英文站取 `_en`、空了回退中文 —— 所以这几栏都是**选填**。
+   * 表单字段：新增与编辑共用一套。
+   *
+   * 文案部分**按语言分组**存一份 `texts`（2026-10-16 重构）—— 顶替掉原来 12 个
+   * `useState`（`title` / `titleEn` / `titleJa` / `titleKo`，系列与说明同理）。
+   * 原来那套是**按字段**分组、四个语言各抄一遍，加语言要动十几处；现在循环
+   * `CONTENT_LOCALES` 生成，加语言只改 `lib/game-text.ts` 一处。
+   *
+   * 中文那三个字段必填（`title` 是这一款的主名字，也是 `games.title` 那列的值，
+   * 反查同款与判重都拿它当判据）；其余三个语言选填、留空**逐字段**回退中文。
    */
-  const [titleEn, setTitleEn] = useState('');
+  const [texts, setTexts] = useState<FormTexts>(emptyFormTexts);
   const [consoleType, setConsoleType] = useState<ConsoleType>('nes');
   const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
-  const [series, setSeries] = useState('');
-  const [seriesEn, setSeriesEn] = useState('');
   const [year, setYear] = useState('');
   /*
    * 开发商：从 2026-10-12 起是**下拉框**（值 = developers.id），不再手填文字。
@@ -237,13 +310,7 @@ export default function AdminGames() {
    * 否则用户看不见数据没了。迁移之后理论上不该再有这种行，留着是防意外。
    */
   const [unlinkedDeveloper, setUnlinkedDeveloper] = useState('');
-  /*
-   * 说明 / 简介。**唯一一个多行字段**（其余全是单行 input）—— 用 textarea 而不是
-   * `input`：它是给用户看的一两句介绍，会写整句中文，单行框里往回拖着看很难受。
-   * 可空：老记录补列之后都是 NULL，留空就存 NULL（后台所有选填字段同一套写法）。
-   */
-  const [description, setDescription] = useState('');
-  const [descriptionEn, setDescriptionEn] = useState('');
+  /* 说明 / 简介也在 `texts` 里（每个语言一个多行字段，见下面语言块那个 textarea）。 */
   const [image, setImage] = useState<File | null>(null);
   const [rom, setRom] = useState<File | null>(null);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -265,6 +332,15 @@ export default function AdminGames() {
   const [romDrag, setRomDrag] = useState(false);
 
   const isEditing = editingId !== null;
+
+  /**
+   * 正在编辑那一条的**同款盘数**（含它自己）。从当前页的列表里现取，不再发请求 ——
+   * `editingId` 只可能来自这一页的行，而每次保存后都 `reloadList()`，所以它一直是最新的。
+   * 取不到（理论上不会）时按 1 算，提示那句退化成不带数字的版本。
+   */
+  const editingGroupSize = isEditing
+    ? (games.find((item) => item.id === editingId)?.groupSize ?? 1)
+    : 1;
 
   /** 本页的入口游标（从栈里取；第一页恒为 null）。effect 的唯一翻页开关。 */
   const cursor = cursorHistory[page - 1] ?? null;
@@ -391,18 +467,17 @@ export default function AdminGames() {
     setPage(1);
   };
 
+  /** 改某个语言里的某个字段。整份换新对象 —— React 靠引用比，别就地改 `texts[locale]`。 */
+  const patchText = (locale: ContentLocale, key: keyof FormText, value: string) =>
+    setTexts((prev) => ({ ...prev, [locale]: { ...prev[locale], [key]: value } }));
+
   const resetForm = () => {
-    setTitle('');
-    setTitleEn('');
+    setTexts(emptyFormTexts());
     setConsoleType('nes');
     setLanguage(DEFAULT_LANGUAGE);
-    setSeries('');
-    setSeriesEn('');
     setYear('');
     setDeveloperId('');
     setUnlinkedDeveloper('');
-    setDescription('');
-    setDescriptionEn('');
     setImage(null);
     setRom(null);
     setScrapeUrl('');
@@ -419,19 +494,37 @@ export default function AdminGames() {
   };
 
   const openEdit = (game: AdminGame) => {
+    /*
+     * 四个语言都读出来回填。
+     *
+     * ⚠️ **缺的那几份要给空串**：只填了中文的游戏没有 `en` / `ja` / `ko` 行，读成空串
+     *    提交回去正好等于「这几栏还是空的」，不会把已有文案弄丢
+     *    （`writeTexts` 对「传进来的空的一份」是删行，不是写空行）。
+     * ⚠️ 语言清单走 `CONTENT_LOCALES`，别在这儿手抄四个 key。
+     */
+    const zh = game.texts.zh ?? EMPTY_GAME_TEXT;
     setEditingId(game.id);
-    setTitle(game.title);
-    setTitleEn(game.titleEn ?? '');
+    setTexts(
+      Object.fromEntries(
+        CONTENT_LOCALES.map((locale) => {
+          const text = game.texts[locale] ?? EMPTY_GAME_TEXT;
+          return [
+            locale,
+            {
+              title: text.title ?? '',
+              series: text.series ?? '',
+              description: text.description ?? '',
+            },
+          ];
+        })
+      ) as FormTexts
+    );
     setConsoleType(game.consoleType);
     setLanguage(game.language ?? '');
-    setSeries(game.series ?? '');
-    setSeriesEn(game.seriesEn ?? '');
     setYear(game.year === null ? '' : String(game.year));
     // 老记录（迁移前上传、或开发商那列是自由文本的）可能没有 id，那就退成「未指定」
     setDeveloperId(game.developerId ?? '');
-    setUnlinkedDeveloper(game.developerId ? '' : game.developer ?? '');
-    setDescription(game.description ?? '');
-    setDescriptionEn(game.descriptionEn ?? '');
+    setUnlinkedDeveloper(game.developerId ? '' : zh.developer ?? '');
     setImage(null);
     setRom(null);
     setModalNotice(null);
@@ -595,14 +688,21 @@ export default function AdminGames() {
         romLang?: string | null;
       };
 
-      if (data.title) setTitle(data.title);
-      if (data.titleEn) setTitleEn(data.titleEn);
+      /*
+       * 文案：接口只回**中英**两份（字段是 `title` / `titleEn` / `seriesEn` / `descriptionEn`），
+       * 日韩两份上游不给 —— 留空即可，读取时逐字段回退中文，不影响显示。
+       *
+       * ⚠️ 一律走 `patchText`（函数式 setState）：连着调六次，每次都基于上一次的结果，
+       *    直接 `setTexts({...})` 会让后写的把先写的整个盖掉。
+       */
+      if (data.title) patchText('zh', 'title', data.title);
+      if (data.series) patchText('zh', 'series', data.series);
+      if (data.description) patchText('zh', 'description', data.description);
+      if (data.titleEn) patchText('en', 'title', data.titleEn);
+      if (data.seriesEn) patchText('en', 'series', data.seriesEn);
+      if (data.descriptionEn) patchText('en', 'description', data.descriptionEn);
       if (data.consoleType) setConsoleType(data.consoleType);
       if (data.year) setYear(String(data.year));
-      if (data.series) setSeries(data.series);
-      if (data.seriesEn) setSeriesEn(data.seriesEn);
-      if (data.description) setDescription(data.description);
-      if (data.descriptionEn) setDescriptionEn(data.descriptionEn);
 
       /*
        * 语言：跟着**选中那个 ROM 的版本**填（上游 `fileName` 的 key）。
@@ -664,9 +764,14 @@ export default function AdminGames() {
     e.preventDefault();
     if (busy) return;
 
-    const trimmedTitle = title.trim();
+    /*
+     * 中文名必填 —— 它既是这一款的**主名字**（也是 `games.title` 那列 NOT NULL 的值），
+     * 又是 `resolveGroupKey` 反查同款、`findGameDuplicate` 判重时用的那一份。
+     * 所以校验的是 `texts.zh.title`，不是「四个语言里随便有一个」。
+     */
+    const trimmedTitle = texts.zh.title.trim();
     if (!trimmedTitle) {
-      setModalNotice({ tone: 'error', text: '请填写游戏名。' });
+      setModalNotice({ tone: 'error', text: '请填写中文游戏名。' });
       return;
     }
 
@@ -687,43 +792,83 @@ export default function AdminGames() {
 
     try {
       if (isEditing) {
+        /*
+         * 文案字段按 `PATCH_SUFFIX` 拼（驼峰）。**四个语言一律带上** ——
+         * `updateGame` 的语义是「只动传进来的语言」，漏掉 `ja` 就等于「日文那几行
+         * 原样不动」，那样用户把日文清空之后旧文案还在（接口那边也是同一口径）。
+         */
+        const body: Record<string, unknown> = {
+          consoleType,
+          language: language || null,
+          year: parsedYear,
+          // 下拉框给的是 developers.id；名字由服务端反查后写进 developer 那列
+          developerId: developerId || null,
+        };
+        for (const locale of CONTENT_LOCALES) {
+          const text = texts[locale];
+          const suffix = PATCH_SUFFIX[locale];
+          // 中文名用 trim 过的那份（上面刚校验过非空）
+          body[`title${suffix}`] = (locale === 'zh' ? trimmedTitle : text.title.trim()) || null;
+          body[`series${suffix}`] = text.series.trim() || null;
+          body[`description${suffix}`] = text.description.trim() || null;
+        }
+
         const res = await fetch(`/api/admin/games/${editingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: trimmedTitle,
-            titleEn: titleEn.trim() || null,
-            consoleType,
-            language: language || null,
-            series: series.trim() || null,
-            seriesEn: seriesEn.trim() || null,
-            year: parsedYear,
-            // 下拉框给的是 developers.id；名字由服务端反查后写进 developer 那列
-            developerId: developerId || null,
-            description: description.trim() || null,
-            descriptionEn: descriptionEn.trim() || null,
-          }),
+          body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error(await readError(res, '请求失败。'));
+        /*
+         * 与 POST 那条路的「已归入《XXX》」对称：编辑没有归组动作（PATCH 刻意不重算
+         * `group_key`），但「改的是整款、几条 ROM 一起更新」这个事实要讲出来 ——
+         * 否则用户会以为只动了当前这一盘。盘数用编辑前那个值（保存不影响它）。
+         */
+        setPageNotice({
+          tone: 'ok',
+          text:
+            editingGroupSize > 1
+              ? `已保存 —— 这一款共 ${editingGroupSize} 盘 ROM，文案已一起更新。`
+              : '已保存。',
+        });
       } else {
+        // 文案字段按 `FORM_SUFFIX` 拼（蛇形）—— 与接口的 `flatTexts()` 一一对应
         const form = new FormData();
-        form.set('title', trimmedTitle);
-        form.set('title_en', titleEn.trim());
+        for (const locale of CONTENT_LOCALES) {
+          const text = texts[locale];
+          const suffix = FORM_SUFFIX[locale];
+          form.set(`title${suffix}`, locale === 'zh' ? trimmedTitle : text.title.trim());
+          form.set(`series${suffix}`, text.series.trim());
+          form.set(`description${suffix}`, text.description.trim());
+        }
         form.set('console_type', consoleType);
         form.set('language', language);
-        form.set('series', series.trim());
-        form.set('series_en', seriesEn.trim());
         form.set('year', yearText);
         form.set('developer_id', developerId);
-        form.set('description', description.trim());
-        form.set('description_en', descriptionEn.trim());
         form.set('image', image as File);
         form.set('rom', rom as File);
 
         const res = await fetch('/api/admin/games', { method: 'POST', body: form });
         // 失败时把服务端细节原样抛出来，交给 catch 显示
         if (!res.ok) throw new Error(await readError(res, '上传失败。'));
-        setPageNotice({ tone: 'ok', text: '已上传。' });
+        /*
+         * ⚠️ 解析失败要兜住：上传**已经成功**了，不能因为读不出响应体就让用户看到
+         *    「上传失败」（那会诱使他重传一遍，撞上判重更困惑）。
+         */
+        const data = (await res.json().catch(() => ({}))) as {
+          group?: { reusedTitle: string | null };
+        };
+        /*
+         * 归到**已有的一款**上时明说是哪一款，而不是只回一句「已上传」。
+         * 这是「中文名打错一个字就另开一款、文案从此存两份」唯一能在当时看出来的地方
+         * —— `group_key` 由服务端自动算，录制的人本来完全看不见归组结果。
+         */
+        setPageNotice({
+          tone: 'ok',
+          text: data.group?.reusedTitle
+            ? `已上传，并归入已有的一款《${data.group.reusedTitle}》—— 这盘 ROM 与它共用同一份文案。`
+            : '已上传。',
+        });
         // 列表按 created_at 倒序，新条目在第一页 —— 跳回去才看得到刚传的那条。
         // 本来就在第一页时 setPage 不改值、effect 也不会重跑，所以另加一次版本号。
         setPage(1);
@@ -746,7 +891,7 @@ export default function AdminGames() {
   };
 
   const remove = async (game: AdminGame) => {
-    if (!window.confirm(`删除「${game.title}」？此操作不可撤销。`)) return;
+    if (!window.confirm(`删除「${zhText(game).title ?? ''}」？此操作不可撤销。`)) return;
     try {
       const res = await fetch(`/api/admin/games/${game.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await readError(res, '请求失败。'));
@@ -842,16 +987,23 @@ export default function AdminGames() {
                   填了说明的那几条会比别的高一点，列表本来就不是等高的表格。
                 */}
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[12px] text-ink-100">{game.title}</span>
-                  {game.description && (
-                    <span className="truncate text-[12px] text-ink-500">{game.description}</span>
+                  <span className="truncate text-[12px] text-ink-100">{zhText(game).title}</span>
+                  {zhText(game).description && (
+                    <span className="truncate text-[12px] text-ink-500">
+                      {zhText(game).description}
+                    </span>
                   )}
                 </span>
                 <span className="shrink-0 font-pixel text-[12px] text-accent">
                   {CONSOLE_LABEL[game.consoleType]}
                 </span>
                 <span className="w-[150px] shrink-0 truncate text-right text-[12px] text-ink-500">
-                  {[game.year, game.developer, languageLabel(game.language), game.series]
+                  {[
+                    game.year,
+                    zhText(game).developer,
+                    languageLabel(game.language),
+                    zhText(game).series,
+                  ]
                     .filter(Boolean)
                     .join(' · ')}
                 </span>
@@ -919,6 +1071,20 @@ export default function AdminGames() {
             </h2>
 
             {/*
+              编辑态的一句提醒：文案挂的是**同款**（`games.group_key`），不是这一盘 ROM
+              —— 所以改的是整款、同款那几个语言版本会一起变。盘数取自列表里现成的
+              `groupSize`（后台列表为此多带了一列），不必再请求一次。
+              只在编辑态出现：新增那条路本来就是新开一款，没有「改了会波及别人」这回事。
+            */}
+            {isEditing && (
+              <p className="mb-3 text-[12px] text-ink-500">
+                {editingGroupSize > 1
+                  ? `下面写的文案是这一款共用的 —— 库里还有同款 ${editingGroupSize - 1} 盘 ROM，保存后它们的显示一起变。`
+                  : '下面写的文案是这一款共用的 —— 之后给这一款补其他语言版本时，它们读的也是这一份。'}
+              </p>
+            )}
+
+            {/*
               从链接自动填充：只在**新增**时出现 —— 编辑时封面 / ROM 都锁着，
               这条也帮不上忙（接口只回元数据）。输入框与按钮**不进主表单**，
               否则在里面按回车会直接把游戏提交了。
@@ -959,221 +1125,224 @@ export default function AdminGames() {
               </div>
             )}
 
-            <form
-              onSubmit={(e) => void submit(e)}
-              className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-            >
+            <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
               {/*
-                中英两栏**并排一行**（2026-10-13 用户要求「游戏名中英合并成一行」）——
-                填的时候一眼能对上；下面那行小字统一说明「留空回退中文」这条规则。
+                公共区：与语言无关的那几栏（类型 / 年份 / 语言 / 开发商）。
+                文案**不在这儿** —— 它们按语言分块排在下面（见 `CONTENT_LOCALES.map`）。
+
+                ⚠️ 2026-10-16 重构前这里和下面是**按字段**分组的（四个「游戏名」挨在一起、
+                四个「说明」挨在一起），等于把「文案属于整款、四个语言各存一份」这件事
+                藏起来了；而且四个语言的 12 个字段全是手抄的，加语言要动十几处。
               */}
-              <label className={LABEL_CLASS}>
-                {'游戏名'}
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </label>
-
-              <label className={LABEL_CLASS}>
-                {'游戏名 (EN)'}
-                <input
-                  value={titleEn}
-                  onChange={(e) => setTitleEn(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </label>
-
-              <label className={LABEL_CLASS}>
-                {'类型'}
-                <select
-                  value={consoleType}
-                  onChange={(e) => setConsoleType(e.target.value as ConsoleType)}
-                  className={FIELD_CLASS}
-                >
-                  {CONSOLE_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {CONSOLE_LABEL[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className={LABEL_CLASS}>
-                {'年份'}
-                <input
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  inputMode="numeric"
-                  className={FIELD_CLASS}
-                />
-              </label>
-
-              <label className={LABEL_CLASS}>
-                {'语言'}
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className={FIELD_CLASS}
-                >
-                  <option value="">{'未指定'}</option>
-                  {LANGUAGE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {/*
-                开发商：**下拉框**（2026-10-12 用户要求「添加游戏时发行商改成下拉形式」）。
-                选项来自开发商库（`/api/admin/developers/options`），选中值就是
-                `developers.id` —— 服务端拿到 id 再反查名字写进 `games.developer`，
-                所以「点开发商看他名下所有游戏」这条链是稳的（名字改了也断不了）。
-                下面那行小字指路：选项里没有想要的，就去开发商库新建一个。
-                （2026-10-13 起与「语言」并排一行。）
-              */}
-              <label className={LABEL_CLASS}>
-                {'开发商'}
-                <select
-                  value={developerId}
-                  onChange={(e) => setDeveloperId(e.target.value)}
-                  className={FIELD_CLASS}
-                >
-                  <option value="">{'未指定'}</option>
-                  {developerOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[12px] text-ink-600">
-                  {'列表里没有？先去'}{' '}
-                  <Link
-                    href="/admin/developers"
-                    className="text-ink-400 underline transition-colors hover:text-accent"
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className={LABEL_CLASS}>
+                  {'类型'}
+                  <select
+                    value={consoleType}
+                    onChange={(e) => setConsoleType(e.target.value as ConsoleType)}
+                    className={FIELD_CLASS}
                   >
-                    {'开发商'}
-                  </Link>
-                </span>
-                {unlinkedDeveloper && (
-                  <span className="text-[12px] text-danger">
-                    {`这条游戏现在写着「${unlinkedDeveloper}」，但它没接上开发商。请在下面选一个，否则保存后这行字会被清掉。`}
+                    {CONSOLE_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {CONSOLE_LABEL[value]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className={LABEL_CLASS}>
+                  {'年份'}
+                  <input
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                    inputMode="numeric"
+                    className={FIELD_CLASS}
+                  />
+                </label>
+
+                <label className={LABEL_CLASS}>
+                  {'语言'}
+                  <select
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    className={FIELD_CLASS}
+                  >
+                    <option value="">{'未指定'}</option>
+                    {LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {/*
+                  开发商：**下拉框**（2026-10-12 用户要求「添加游戏时发行商改成下拉形式」）。
+                  选项来自开发商库（`/api/admin/developers/options`），选中值就是
+                  `developers.id` —— 服务端拿到 id 再反查名字写进 `games.developer`，
+                  所以「点开发商看他名下所有游戏」这条链是稳的（名字改了也断不了）。
+                  下面那行小字指路：选项里没有想要的，就去开发商库新建一个。
+                */}
+                <label className={LABEL_CLASS}>
+                  {'开发商'}
+                  <select
+                    value={developerId}
+                    onChange={(e) => setDeveloperId(e.target.value)}
+                    className={FIELD_CLASS}
+                  >
+                    <option value="">{'未指定'}</option>
+                    {developerOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[12px] text-ink-600">
+                    {'列表里没有？先去'}{' '}
+                    <Link
+                      href="/admin/developers"
+                      className="text-ink-400 underline transition-colors hover:text-accent"
+                    >
+                      {'开发商'}
+                    </Link>
                   </span>
-                )}
-              </label>
+                  {unlinkedDeveloper && (
+                    <span className="text-[12px] text-danger">
+                      {`这条游戏现在写着「${unlinkedDeveloper}」，但它没接上开发商。请在下面选一个，否则保存后这行字会被清掉。`}
+                    </span>
+                  )}
+                </label>
+              </div>
 
-              <label className={LABEL_CLASS}>
-                {'系列'}
-                <input
-                  value={series}
-                  onChange={(e) => setSeries(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </label>
+              {/*
+                封面图片：只有**新增**时可设 —— 换封面等于换一份内容，删了重加更干净。
+                整块都是落点（从资源管理器拖文件、或从网页里拖一张图过来），高亮挂在
+                包裹层上 —— 挂在 input 上没意义（它本身不是落点）。
+              */}
+              {!isEditing && (
+                <label className={LABEL_CLASS}>
+                  {'封面图片'}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setImageDrag(true);
+                    }}
+                    onDragLeave={() => setImageDrag(false)}
+                    onDrop={(e) => void onImageDrop(e)}
+                    className={`flex flex-col gap-1 p-1 transition-colors ${
+                      imageDrag ? 'bg-accent/15' : ''
+                    }`}
+                  >
+                    <input
+                      ref={imageRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setImage(e.target.files?.[0] ?? null)}
+                      className={FIELD_CLASS}
+                    />
+                    <span className="text-[12px] text-ink-600">{'把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。'}</span>
+                    {image && (
+                      <span className="truncate text-[12px] text-ink-400">{image.name}</span>
+                    )}
+                  </div>
+                </label>
+              )}
 
-              <label className={LABEL_CLASS}>
-                {'系列 (EN)'}
-                <input
-                  value={seriesEn}
-                  onChange={(e) => setSeriesEn(e.target.value)}
-                  className={FIELD_CLASS}
-                />
-              </label>
+              {/*
+                文案区：**按语言分块**（2026-10-16 重构）—— 和 `game_texts` 的结构对齐
+                （一行 = 这一款在某个语言下的文案）。四个块由 `CONTENT_LOCALES` 生成，
+                加语言只改 `lib/game-text.ts` 一处。
 
-              {/* 英文字段的统一说明，横跨整行，压在几组中英并排字段的下面 */}
-              <p className={`${LABEL_CLASS} text-ink-600 sm:col-span-2`}>
-                {'选填。英文站显示这一份；留空则回退到中文。'}
-              </p>
+                中文那份**必填**：它是这一款的主名字，也是 `resolveGroupKey` 反查同款、
+                `findGameDuplicate` 判重时用的那一份。其余三份选填、留空**逐字段**回退中文。
+              */}
+              {CONTENT_LOCALES.map((locale) => {
+                const isZh = locale === 'zh';
+                return (
+                  <div
+                    key={locale}
+                    className="bg-ink-900 pixel-edge pxw-2 pxc-700 flex flex-col gap-3 p-3"
+                  >
+                    <h3 className="flex flex-wrap items-baseline gap-2 text-[12px] text-ink-300">
+                      {CONTENT_LOCALE_LABEL[locale]}
+                      <span className="text-[12px] text-ink-600">
+                        {isZh ? '必填 —— 这一款的主名字' : '选填，留空回退中文'}
+                      </span>
+                    </h3>
 
-              {/* 说明：本表唯一一个多行字段，`resize-y` 让它可以往下拉高一点写长句 */}
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {'说明'}
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                  placeholder={'选填。鼠标停在游戏库那张卡片上时会显示这行字。'}
-                  className={`${FIELD_CLASS} resize-y`}
-                />
-              </label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <label className={LABEL_CLASS}>
+                        {'名字'}
+                        <input
+                          value={texts[locale].title}
+                          onChange={(e) => patchText(locale, 'title', e.target.value)}
+                          className={FIELD_CLASS}
+                        />
+                      </label>
 
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
-                {'说明 (EN)'}
-                <textarea
-                  value={descriptionEn}
-                  onChange={(e) => setDescriptionEn(e.target.value)}
-                  rows={3}
-                  className={`${FIELD_CLASS} resize-y`}
-                />
-              </label>
+                      <label className={LABEL_CLASS}>
+                        {'系列'}
+                        <input
+                          value={texts[locale].series}
+                          onChange={(e) => patchText(locale, 'series', e.target.value)}
+                          className={FIELD_CLASS}
+                        />
+                      </label>
+
+                      {/*
+                        说明是本表**唯一的多行字段**（其余都是单行 input）：它是给人看的
+                        一两句介绍，会写整句中文，单行框里往回拖着看很难受。
+                        可空 —— 留空就存 NULL（后台所有选填字段同一套写法）。
+                      */}
+                      <label className={`${LABEL_CLASS} sm:col-span-2`}>
+                        {'说明'}
+                        <textarea
+                          value={texts[locale].description}
+                          onChange={(e) => patchText(locale, 'description', e.target.value)}
+                          rows={2}
+                          placeholder={
+                            isZh ? '选填。鼠标停在游戏库那张卡片上时会显示这行字。' : undefined
+                          }
+                          className={`${FIELD_CLASS} resize-y`}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
 
               {isEditing ? (
-                <p className="text-[12px] text-ink-500 sm:col-span-2">
+                <p className="text-[12px] text-ink-500">
                   {'封面与游戏文件仅在添加时设置 —— 如需更换请删除后重新添加。'}
                 </p>
               ) : (
-                <>
-                  <label className={LABEL_CLASS}>
-                    {'封面图片'}
-                    {/*
-                      整块都是落点：从资源管理器拖文件、或从网页里拖一张图过来。
-                      高亮挂在包裹层上 —— 挂在 input 上没意义（它本身不是落点）。
-                    */}
-                    <div
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setImageDrag(true);
-                      }}
-                      onDragLeave={() => setImageDrag(false)}
-                      onDrop={(e) => void onImageDrop(e)}
-                      className={`flex flex-col gap-1 p-1 transition-colors ${
-                        imageDrag ? 'bg-accent/15' : ''
-                      }`}
-                    >
-                      <input
-                        ref={imageRef}
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
-                        className={FIELD_CLASS}
-                      />
-                      <span className="text-[12px] text-ink-600">{'把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。'}</span>
-                      {image && (
-                        <span className="truncate text-[12px] text-ink-400">{image.name}</span>
-                      )}
-                    </div>
-                  </label>
-
-                  <label className={LABEL_CLASS}>
-                    {'游戏文件'}
-                    <div
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setRomDrag(true);
-                      }}
-                      onDragLeave={() => setRomDrag(false)}
-                      onDrop={(e) => void onRomDrop(e)}
-                      className={`flex flex-col gap-1 p-1 transition-colors ${
-                        romDrag ? 'bg-accent/15' : ''
-                      }`}
-                    >
-                      <input
-                        ref={romRef}
-                        type="file"
-                        accept=".nes,.fds,.unf,.unif,.sfc,.smc,.swc,.fig,.bs,.gba,.agb,.zip"
-                        onChange={(e) => void onRomChange(e)}
-                        className={FIELD_CLASS}
-                      />
-                      <span className="text-[12px] text-ink-600">{'把游戏文件拖到这里，或点选文件。'}</span>
-                      {rom && <span className="truncate text-[12px] text-ink-400">{rom.name}</span>}
-                    </div>
-                  </label>
-                </>
+                <label className={LABEL_CLASS}>
+                  {'游戏文件'}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setRomDrag(true);
+                    }}
+                    onDragLeave={() => setRomDrag(false)}
+                    onDrop={(e) => void onRomDrop(e)}
+                    className={`flex flex-col gap-1 p-1 transition-colors ${
+                      romDrag ? 'bg-accent/15' : ''
+                    }`}
+                  >
+                    <input
+                      ref={romRef}
+                      type="file"
+                      accept=".nes,.fds,.unf,.unif,.sfc,.smc,.swc,.fig,.bs,.gba,.agb,.zip"
+                      onChange={(e) => void onRomChange(e)}
+                      className={FIELD_CLASS}
+                    />
+                    <span className="text-[12px] text-ink-600">{'把游戏文件拖到这里，或点选文件。'}</span>
+                    {rom && <span className="truncate text-[12px] text-ink-400">{rom.name}</span>}
+                  </div>
+                </label>
               )}
 
-              <div className="flex items-center gap-3 sm:col-span-2">
+              <div className="flex items-center gap-3">
                 <button
                   type="submit"
                   disabled={busy}

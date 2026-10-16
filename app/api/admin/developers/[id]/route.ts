@@ -98,14 +98,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     await updateDeveloper(id, {
-      name,
-      // 英文字段（可空），见 lib/server/developers.ts
-      nameEn: optionalText(form.get('name_en')),
+      texts: {
+        zh: { name, summary: optionalText(form.get('summary')), description: optionalText(form.get('description')) },
+        en: { name: optionalText(form.get('name_en')), summary: optionalText(form.get('summary_en')), description: optionalText(form.get('description_en')) },
+        ja: { name: optionalText(form.get('name_ja')), summary: optionalText(form.get('summary_ja')), description: optionalText(form.get('description_ja')) },
+        ko: { name: optionalText(form.get('name_ko')), summary: optionalText(form.get('summary_ko')), description: optionalText(form.get('description_ko')) },
+      },
       imageUrl,
-      summary: optionalText(form.get('summary')),
-      summaryEn: optionalText(form.get('summary_en')),
-      description: optionalText(form.get('description')),
-      descriptionEn: optionalText(form.get('description_en')),
       foundedYear,
       website: normalizeWebsite(form.get('website')),
     });
@@ -119,7 +118,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     return NextResponse.json({
       ok: true,
-      developer: { id, name, nameEn: optionalText(form.get('name_en')), imageUrl },
+      developer: { id, name, imageUrl },
     });
   } catch (error) {
     console.error('[admin] 修改开发商失败', error);

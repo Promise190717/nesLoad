@@ -5,8 +5,8 @@ import { DEFAULT_LOCALE, LOCALE_COOKIE, LOCALE_HEADER, isLocale, type Locale } f
 /*
  * 「当前这次请求该用哪种语言」。
  *
- * 2026-10-13 起语言是**路径说了算**（英文无前缀、中文 `/zh`），而前缀的搬运在
- * middleware 里 —— 它把结果写进请求头，这里只负责把它读出来。所以**首屏的
+ * 2026-10-13 起语言是**路径说了算**（英文无前缀、中文 `/zh`、日文 `/ja`、韩文 `/ko`），
+ * 而前缀的搬运在 middleware 里 —— 它把结果写进请求头，这里只负责把它读出来。所以**首屏的
  * 语言不再靠猜**：`/zh/games` 一定是中文，跟 cookie、浏览器设置都无关。
  *
  * 页面自己该用 `readLocaleParam(params)`（`app/[locale]/` 给的路由参数，更显式）；
@@ -26,7 +26,7 @@ import { DEFAULT_LOCALE, LOCALE_COOKIE, LOCALE_HEADER, isLocale, type Locale } f
  *
  * 兜底到 `DEFAULT_LOCALE`（英文）**理论上跑不到**：middleware 的 matcher 覆盖了
  * 所有页面路径。留着是因为它是零成本的保险 —— matcher 哪天被改窄了，页面会退回成
- * 英文，而不是所有中文用户一起看到英文。唯一真正会走到它的地方是
+ * 英文，而不是所有非英文用户一起看到英文。唯一真正会走到它的地方是
  * `app/opengraph-image.tsx` / `app/twitter-image.tsx`（分享图，被 matcher 排除，
  * 见 middleware.ts），那里拿到的就是英文 —— 也对，图上本来只有英文。
  *
@@ -55,7 +55,7 @@ export async function readLocale(): Promise<Locale> {
  * 做两件事：把 `params` 解出来（Next 15 起是 Promise），把 `string` 收窄成 `Locale`。
  *
  * **为什么要校验**：`[locale]` 是动态段，Next 对它没有任何取值约束。middleware
- * 保证了正常流量里只会是 `en` / `zh`，但 `app/[locale]/layout.tsx` 的注释里
+ * 保证了正常流量里只会是 `en` / `zh` / `ja` / `ko`，但 `app/[locale]/layout.tsx` 的注释里
  * 说明了不校验的后果 —— `translate('de', …)` 会在运行时炸。
  * layout 里已经挡了一道，这里是**类型层面**的收窄：不写 `if (!isLocale(...))`，
  * 页面里的 `locale` 就是 `string`，传给 `translate` 直接编译报错。

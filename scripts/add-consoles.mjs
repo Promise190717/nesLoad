@@ -107,7 +107,8 @@ console.log('① consoles 表：就绪（已存在则原样保留）。');
  *
  * 顺序跟着 `lib/consoles.ts` 的 `CONSOLE_TYPES`（展示顺序）。前四个 2026-10-14 之前
  * 就在库里了，`INSERT OR IGNORE` 会跳过它们；后八个是当天随新机种补的，
- * nds 是 2026-10-15 补的（`nds` 插在 `gba` 后面，跟着展示顺序排）。
+ * nds 是 2026-10-15 补的，ps1 是 2026-10-16 补的（都插在末尾，跟着展示顺序排）。
+ * ⚠️ 库里已有的行一律不动 —— 加机种时**这个脚本只负责把缺的那一行补上**。
  *
  * `releaseYear` 是可空的（街机那种没有单一年份的留 null）。它只在机种专题页的
  * 资料表里显示，填错不影响功能，后台随时改。
@@ -218,6 +219,16 @@ const DEFAULT_CONSOLES = [
     summary: 'SNK 1998 年推出的掌上游戏机，街机游戏的家用掌上版。',
     summaryEn: "SNK's handheld from 1998 — the pocket-sized version of the Neo Geo.",
     releaseYear: 1998,
+  },
+
+  /* ——— 2026-10-16 新增：PS1（本站第一台光盘机种）——— */
+  {
+    type: 'ps1',
+    name: '索尼 PlayStation（PS1）',
+    nameEn: 'Sony PlayStation',
+    summary: '索尼 1994 年推出的 32 位家用游戏机，第一台出货量破亿的家用机，也是 CD-ROM 成为主流的开端。',
+    summaryEn: "Sony's 32-bit console from 1994 — the first home console to ship over 100 million units, and the one that made CD-ROM the standard.",
+    releaseYear: 1994,
   },
 ];
 

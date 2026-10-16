@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getGame } from '@/lib/server/games';
+import { getGame, localizeTexts } from '@/lib/server/games';
 import { REPORT_MAX_LENGTH, insertReport } from '@/lib/server/reports';
 
 export const runtime = 'nodejs';
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     const game = await getGame(gameId);
     if (!game) return fail('not-found', '找不到这款游戏', 404);
 
-    const item = await insertReport({ gameId, gameTitle: game.title, content });
+    const item = await insertReport({ gameId, gameTitle: localizeTexts(game.texts, 'zh').title, content });
     return NextResponse.json({ ok: true, item });
   } catch (error) {
     console.error('[game-reports] 提交失败', error);

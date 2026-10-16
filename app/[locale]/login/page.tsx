@@ -11,7 +11,7 @@ import {
   alternatesFor,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type MessageKey,
 } from '@/lib/i18n';
@@ -66,7 +66,7 @@ export async function generateMetadata({
       title,
       description,
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
   };
 }
@@ -141,8 +141,9 @@ export default async function LoginPage({
         **内层套一个和正文列同宽的 `max-w-md` 右对齐** —— 右缘和表单对齐，
         和首页顶栏「对齐内容容器」是同一个口径（2026-10-14 用户反馈：直接
         `right-6` 钉视口边缘太靠边了）。顺序和 TopBar 一致（语言在首页之前）。
-        落点是当前页的另一种语言地址（`useI18n()` 的 `altHref`，含 `?next=`，
-        和内容页同一套）。上下偏移对齐 `main` 自己的 `py-6`（sm:py-12）。
+        落点是当前页在所选语言下的地址（`LocaleSwitcher` 内部走 `useI18n()` 的
+        `hrefIn()`，含 `?next=`，和内容页同一套）。上下偏移对齐 `main` 自己的
+        `py-6`（sm:py-12）。
       */}
       <div className="absolute inset-x-6 top-6 z-10 sm:top-12">
         <div className="mx-auto flex w-full max-w-md items-center justify-end gap-3">

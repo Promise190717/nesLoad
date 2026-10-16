@@ -118,9 +118,30 @@ export const BUTTONS: readonly ButtonName[] = ALL_BUTTONS.filter(
  *
  * NDS（2026-10-15）：机身丝印是 A / B / X / Y 四颗面键、L / R / L2 / R2 两对肩键、
  * START / SELECT，所以 14 个钮一个不少。
+ *
+ * PS1（2026-10-16）：同理 —— △ ○ × □ 四颗面键 + L1 / L2 / R1 / R2 两对肩键 +
+ * SELECT / START，也是 14 个。**注意 PS1 还有 L3 / R3（摇杆按下去）**，那两颗不在
+ * `ButtonName` 里（模型只有 14 个钮），所以面板上不画、也键不了 —— 少数游戏会用到，
+ * 属于已知缺口。
  */
 const CONSOLE_BUTTONS: Partial<Record<ConsoleType, readonly ButtonName[]>> = {
   nds: [
+    'up',
+    'down',
+    'left',
+    'right',
+    'b',
+    'a',
+    'y',
+    'x',
+    'l',
+    'r',
+    'l2',
+    'r2',
+    'select',
+    'start',
+  ],
+  ps1: [
     'up',
     'down',
     'left',
@@ -275,13 +296,73 @@ export const NDS_DEFAULT_BINDINGS: KeyBindings = {
 };
 
 /**
+ * PS1 的默认键位 —— **单独一套**（2026-10-16 加，用户拍板的「菱形方案」）。
+ *
+ * ## 为什么不能沿用街机那套
+ *
+ * `DEFAULT_BINDINGS` 是给「一排六颗面键」的机器排的（`J K L` 一排 + `U I O` 一排）。
+ * 套到 PS1 上四颗面键会落成 `U=△ / J=× / K=○ / L=□` —— △ 跑到 `J` 的**正上方**，
+ * 而手柄上 △ 在 □ 和 ○ 的**正中间上方**。看着能用，菱形是歪的。
+ *
+ * ## 这一套按语义对齐（△=上 / □=左 / ×=下 / ○=右，和十字键同构）
+ *
+ *     十字键    W A S D          ← 上 / 左 / 下 / 右
+ *     △ / □     I / J            ← 上 / 左
+ *     × / ○     K / L            ← 下 / 右
+ *     L1 / L2   U / Q
+ *     R1 / R2   O / E
+ *     START     Enter
+ *     SELECT    B
+ *
+ * 于是 `I J K L` 在键盘上正好是一个小十字（`I` 正在 `K` 正上方），和 PS1 手柄的
+ * △□×○ 菱形对得上；同时它又是「WASD 那一块整体右移一格」的镜像 —— 左手管方向、
+ * 右手管四颗面键，两只手的分工和握着手柄时一致。
+ *
+ * ⚠️ **肩键换过位**：`l` / `r` 从街机那套的 `I` / `O` 挪到 `U` / `O` —— `I` 让给 △
+ *    之后必须换，`U` 是右手上方那颗，食指够得着。`l2` / `r2` 仍是 `Q` / `E`（没动）。
+ *
+ * ⚠️ **P2 那组直接沿用全局默认**（方向键 + 小键盘）：PS1 支持双人，而这一套 P1
+ *    用的是 `WASD` + `IJKL` + `Q/E`，和全局 P2 那组一个键都不撞 —— 单机双人时
+ *    两人共用一块键盘不会互相抢键（`conflictInOtherPlayer` 会拦重叠的）。
+ *    NDS 那套 P2 之所以要另排，是因为 NDS 是单人机、P1 把方向键占了（见那边注释）。
+ */
+export const PS1_DEFAULT_BINDINGS: KeyBindings = {
+  p1: {
+    up: 'KeyW',
+    down: 'KeyS',
+    left: 'KeyA',
+    right: 'KeyD',
+    b: 'KeyK', // ×（下）
+    a: 'KeyL', // ○（右）
+    y: 'KeyJ', // □（左）
+    x: 'KeyI', // △（上）
+    l: 'KeyU', // L1
+    r: 'KeyO', // R1
+    l2: 'KeyQ', // L2
+    r2: 'KeyE', // R2
+    select: 'KeyB',
+    start: 'Enter',
+  },
+  p2: { ...DEFAULT_BINDINGS.p2 },
+};
+
+/**
  * 这个机种在**没自定义过键位**时该用哪一套默认。
  *
- * 只有 NDS 有自己那套（见 `NDS_DEFAULT_BINDINGS` 那段），其余机种共用 `DEFAULT_BINDINGS`。
- * 「自定义过没有」由 `loadBindings()` 判 —— 用户改过键位就整份用他的，跟机种无关。
+ * NDS 和 PS1 各有自己那套（见 `NDS_DEFAULT_BINDINGS` / `PS1_DEFAULT_BINDINGS`），
+ * 其余机种共用 `DEFAULT_BINDINGS`。「自定义过没有」由 `loadBindings()` 判 ——
+ * 用户改过键位就整份用他的，跟机种无关。
+ *
+ * ⚠️ 这两套机种专属默认**不进 `LEGACY_DEFAULTS`** —— 那张表认的是「**历史**默认值」，
+ *    用来判「这个用户从没改过键位」。机种专属这几套是**当前**默认，放进去没有意义。
+ *    副作用（既有设计，NDS 那次就带上了）：本地那份 `nesload:keybindings` 是**全机种共用
+ *    一份**，所以在 PS1 上改过一个键之后，再去玩 NES 用的也是那份 —— 改键位是全局的，
+ *    想分开只能改存储模型（见 `.workbuddy-ai/memory/REFERENCE.md` 的 PS1 一节）。
  */
 export function defaultBindingsFor(consoleType?: ConsoleType | null): KeyBindings {
-  return consoleType === 'nds' ? NDS_DEFAULT_BINDINGS : DEFAULT_BINDINGS;
+  if (consoleType === 'nds') return NDS_DEFAULT_BINDINGS;
+  if (consoleType === 'ps1') return PS1_DEFAULT_BINDINGS;
+  return DEFAULT_BINDINGS;
 }
 
 /**
@@ -559,6 +640,21 @@ export const BUTTON_LABELS: Record<ButtonName, string> = {
  *
  * 开始 / 投币这两项也在这里覆盖：NDS 机身丝印是 START / SELECT，不该跟着语言
  * 变成「开始 / 投币」（和 `CONSOLE_LABEL` 一样，丝印词不进文案表）。
+ *
+ * PS1（2026-10-16）：△ ○ × □ 四颗面键 + L1 / L2 / R1 / R2。
+ * ⚠️ 换算**不是**「按丝印顺序对齐」，而是照 libretro 对 PS1 的标准映射：
+ *
+ *     retropad B → ×    retropad A → ○    retropad Y → □    retropad X → △
+ *     L / R → L1 / R1    L2 / R2 → L2 / R2    select / start → SELECT / START
+ *
+ * 所以面板上「×」落在 `b`、「○」落在 `a`、「□」落在 `y`、「△」落在 `x` ——
+ * 看着像打乱，其实是这套机器的标准（pcsx_rearmed 也是这一套）。
+ *
+ * ⚠️ PS1 这四颗的**值只是「哪颗符号」的记号，不是拿去当文字画的**：`×`(U+00D7) 和
+ *    `○`(U+25CB) / `□`(U+25A1) / `△`(U+25B3) 分属两个 Unicode 区，落到两种字体上、
+ *    同字号下一颗小、三颗大（2026-10-16 用户报「圈叉三角正方形大小都不是统一的」）。
+ *    渲染处一律过 `components/PadGlyph.tsx` 换成**图形** —— 这里保留原字符只是为了
+ *    纯文本场合（aria-label、`playerLegend` 的字符串）还能读出「哪一颗」。
  */
 const CONSOLE_BUTTON_LABELS: Partial<
   Record<ConsoleType, Partial<Record<ButtonName, string>>>
@@ -570,6 +666,18 @@ const CONSOLE_BUTTON_LABELS: Partial<
     x: 'X',
     l: 'L',
     r: 'R',
+    select: 'SELECT',
+    start: 'START',
+  },
+  ps1: {
+    b: '×',
+    a: '○',
+    y: '□',
+    x: '△',
+    l: 'L1',
+    r: 'R1',
+    l2: 'L2',
+    r2: 'R2',
     select: 'SELECT',
     start: 'START',
   },
@@ -756,9 +864,9 @@ function sanitizePlayer(input: unknown, fallback: PlayerBindings): PlayerBinding
  * 读键位。任何一处不合法就**整份**退回默认值，不做局部修补 ——
  * 半份自定义半份默认的组合比全默认更难排查。
  *
- * `consoleType` 只决定**退回默认值时退回哪一套**（NDS 有自己的那套，见
+ * `consoleType` 只决定**退回默认值时退回哪一套**（NDS / PS1 各有自己那套，见
  * `defaultBindingsFor`）。用户真改过键位的话，存的那份和机种无关、整份用他的 ——
- * 所以载入 NDS 卡带时可以放心重新调一次这个函数，不会把用户改过的键位冲掉。
+ * 所以载入卡带时可以放心重新调一次这个函数，不会把用户改过的键位冲掉。
  */
 export function loadBindings(consoleType?: ConsoleType | null): KeyBindings {
   const fallback = defaultBindingsFor(consoleType);

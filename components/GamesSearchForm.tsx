@@ -22,6 +22,7 @@ export default function GamesSearchForm({
   locale,
   keyword,
   consoleType,
+  languageParam = '',
   actionPath = '/games',
 }: {
   locale: Locale;
@@ -29,6 +30,17 @@ export default function GamesSearchForm({
   keyword: string;
   /** 当前筛着的机种 —— 提交时要跟着表单一起带回去，别把筛选条件搜丢了。 */
   consoleType: ConsoleType | null;
+  /**
+   * 当前筛着的**语种**，而且要是**「写进地址的那个形态」**：不筛语种（「全部」，也就是
+   * 页面默认那份）是空串（整段不写）、其余是 `zh` / `en` / `ja` / `ko`。
+   *
+   * 为什么不传「筛的是哪个语种」让本组件自己算：归一化只有页面里那一处
+   * （机种专题页的 `languageParamOf`），组件只管把拿到的这一串原样带回去。
+   *
+   * ⚠️ **不传 = 空串**（`/games` 那边就是），于是 hidden input 与「清除」链接都不带它 ——
+   *    和加这个 prop 之前一字不差。
+   */
+  languageParam?: string;
   actionPath?: string;
 }) {
   const router = useRouter();
@@ -49,19 +61,28 @@ export default function GamesSearchForm({
 
   const t = (key: MessageKey) => translate(locale, key);
 
+  /**
+   * 搜索之外还要原样带回去的筛选条件。**顺序就是规范顺序**（服务端按地址字符串
+   * 比对是否规范，顺序不对就等于多一跳 307）：`console` 在前、`lang` 在后 ——
+   * 和 `gamesHref` / 机种专题页那个 `consoleHref` 拼法一致（`q` 永远排头）。
+   */
+  const keepParams: [string, string][] = [];
+  if (consoleType) keepParams.push(['console', consoleType]);
+  if (languageParam) keepParams.push(['lang', languageParam]);
+
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (pending) return;
 
     /*
-     * 落点与 `gamesHref` 同一条规范顺序：`q` → `console`（`page` 永远从第 1 页搜起，
-     * 空的参数直接省略 —— 别拼出 `?q=` 这种会让服务端多走一跳 307 的形态）。
+     * 落点与 `gamesHref` 同一条规范顺序：`q` → `console` → `lang`（`page` 永远从第 1 页
+     * 搜起，空的参数直接省略 —— 别拼出 `?q=` 这种会让服务端多走一跳 307 的形态）。
      * `trim` 和服务端 `parseQuery` 的口径对齐：全是空格 = 没搜。
      */
     const trimmed = value.trim();
     const params = new URLSearchParams();
     if (trimmed) params.set('q', trimmed);
-    if (consoleType) params.set('console', consoleType);
+    for (const [name, param] of keepParams) params.set(name, param);
     const query = params.toString();
 
     startTransition(() => {
@@ -102,6 +123,11 @@ export default function GamesSearchForm({
         —— 排在前面白多一跳 307。
       */}
       {consoleType && <input type="hidden" name="console" value={consoleType} />}
+      {/*
+        语种同理（机种专题页在用）：筛着「日本語」搜一下，提交后不能被踢回全部。
+        ⚠️ 排在 `console` 后面，与 `keepParams` 的顺序一致。
+      */}
+      {languageParam && <input type="hidden" name="lang" value={languageParam} />}
       <button
         type="submit"
         disabled={pending}
@@ -116,12 +142,15 @@ export default function GamesSearchForm({
 
         ⚠️ 落点用 `gamesHref(locale, 1, '', consoleType)` 而不是裸 `/games`：
         清掉的只是**关键词**，用户当前筛着的机种该留着（他在 NES 里搜了一轮，
-        点「清除搜索」想看的是全部 NES，不是全库）。
+        点「清除搜索」想看的是全部 NES，不是全库）。语种同理。
       */}
       {keyword && (
         <Link
-          /* 只剥关键词、机种保留；page=1 不写参数，与 gamesHref 的形态一致 */
-          href={localePath(locale, actionPath) + (consoleType ? `?console=${consoleType}` : '')}
+          /* 只剥关键词、其余筛选保留；page=1 不写参数，与 gamesHref / consoleHref 的形态一致 */
+          href={
+            localePath(locale, actionPath) +
+            (keepParams.length ? `?${new URLSearchParams(keepParams)}` : '')
+          }
           className="text-[12px] text-ink-400 transition-colors hover:text-accent"
         >
           {t('gamesPage.searchClear')}

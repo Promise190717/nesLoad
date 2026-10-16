@@ -9,13 +9,18 @@ import AdminLoading from './AdminLoading';
 interface AdminDeveloper {
   id: string;
   name: string;
-  /** 英文名（可空）。2026-10-13 加，英文站取它、空了回退 `name`。 */
   nameEn: string | null;
+  nameJa: string | null;
+  nameKo: string | null;
   imageUrl: string | null;
   summary: string | null;
   summaryEn: string | null;
+  summaryJa: string | null;
+  summaryKo: string | null;
   description: string | null;
   descriptionEn: string | null;
+  descriptionJa: string | null;
+  descriptionKo: string | null;
   foundedYear: number | null;
   website: string | null;
   createdAt: number;
@@ -107,12 +112,17 @@ export default function AdminDevelopers() {
 
   // 表单字段：新建与编辑共用一套
   const [name, setName] = useState('');
-  /* 英文字段（2026-10-13 加）：选填，英文站取 `_en`、空了回退中文 */
   const [nameEn, setNameEn] = useState('');
+  const [nameJa, setNameJa] = useState('');
+  const [nameKo, setNameKo] = useState('');
   const [summary, setSummary] = useState('');
   const [summaryEn, setSummaryEn] = useState('');
+  const [summaryJa, setSummaryJa] = useState('');
+  const [summaryKo, setSummaryKo] = useState('');
   const [description, setDescription] = useState('');
   const [descriptionEn, setDescriptionEn] = useState('');
+  const [descriptionJa, setDescriptionJa] = useState('');
+  const [descriptionKo, setDescriptionKo] = useState('');
   const [foundedYear, setFoundedYear] = useState('');
   const [website, setWebsite] = useState('');
   const [image, setImage] = useState<File | null>(null);
@@ -135,17 +145,9 @@ export default function AdminDevelopers() {
   /** 翻上一页：从栈里拿回上一页当时用的入口游标，重新请求。 */
   const goPrev = useCallback(() => setPage((p) => Math.max(1, p - 1)), []);
 
-  // 每次翻页 / 搜索 / 增删改都重拉当前页。setState 一律走 .then/.catch —— 直接在
-  // effect 体里同步 setState 会被 react-hooks/set-state-in-effect 拦下。
-  // effect 依赖里有 page：成功回调要往 cursorHistory[page] 写下一页的入口。
   useEffect(() => {
     const requestId = ++listRequestId.current;
 
-    /*
-     * 先点亮「载入中」。effect 体内同步 setState 会被 react-hooks/set-state-in-effect
-     * 拦下，所以放微任务里（执行序仍先于 fetch 响应，不会漏帧）；
-     * 同样受 requestId 把守：请求被换掉时，旧请求不许点亮新一轮。
-     */
     void Promise.resolve().then(() => {
       if (listRequestId.current !== requestId) return;
       setListPending(true);
@@ -156,7 +158,6 @@ export default function AdminDevelopers() {
         if (listRequestId.current !== requestId) return;
         setList(data.developers);
         setHasMore(data.hasMore);
-        // 把「下一页的入口」存进栈里（下标 = 当前页码）。已有同值就不动，省一次渲染
         setCursorHistory((prev) => {
           if (prev[page] === data.nextCursor) return prev;
           const copy = [...prev];
@@ -189,13 +190,8 @@ export default function AdminDevelopers() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen]);
 
-  /*
-   * 游标翻页没有 total，「共 Y 页」算不出来（2026-10-14 用户拍板选 A）——
-   * 分页条只显示「第 X 页」，下一页按钮的禁用态由 hasMore 决定，越界无从谈起。
-   */
   const applySearch = () => {
     setKeyword(searchDraft.trim());
-    // 关键词变了，旧关键词翻过的游标全部作废 —— 清栈，从第一页重来
     setCursorHistory([null]);
     setPage(1);
   };
@@ -203,10 +199,16 @@ export default function AdminDevelopers() {
   const resetForm = () => {
     setName('');
     setNameEn('');
+    setNameJa('');
+    setNameKo('');
     setSummary('');
     setSummaryEn('');
+    setSummaryJa('');
+    setSummaryKo('');
     setDescription('');
     setDescriptionEn('');
+    setDescriptionJa('');
+    setDescriptionKo('');
     setFoundedYear('');
     setWebsite('');
     setImage(null);
@@ -225,15 +227,19 @@ export default function AdminDevelopers() {
     setEditingId(developer.id);
     setName(developer.name);
     setNameEn(developer.nameEn ?? '');
+    setNameJa(developer.nameJa ?? '');
+    setNameKo(developer.nameKo ?? '');
     setSummary(developer.summary ?? '');
     setSummaryEn(developer.summaryEn ?? '');
+    setSummaryJa(developer.summaryJa ?? '');
+    setSummaryKo(developer.summaryKo ?? '');
     setDescription(developer.description ?? '');
     setDescriptionEn(developer.descriptionEn ?? '');
+    setDescriptionJa(developer.descriptionJa ?? '');
+    setDescriptionKo(developer.descriptionKo ?? '');
     setFoundedYear(developer.foundedYear === null ? '' : String(developer.foundedYear));
     setWebsite(developer.website ?? '');
     setImage(null);
-    // 编辑时输入框默认是空的（浏览器不许我们往里塞值）；把现有文件名写在旁边，
-    // 用户才知道「不选就是保持原图」而不是「图没了」
     setImageLabel(developer.imageUrl ? developer.imageUrl.split('/').pop() ?? '' : '');
     setModalNotice(null);
     setModalOpen(true);
@@ -270,14 +276,19 @@ export default function AdminDevelopers() {
     setBusy(true);
     setModalNotice(null);
 
-    // 改 / 增都是 multipart（换厂标要带文件），所以两边共用同一份 FormData 拼法
     const form = new FormData();
     form.set('name', trimmedName);
     form.set('name_en', nameEn.trim());
+    form.set('name_ja', nameJa.trim());
+    form.set('name_ko', nameKo.trim());
     form.set('summary', summary.trim());
     form.set('summary_en', summaryEn.trim());
+    form.set('summary_ja', summaryJa.trim());
+    form.set('summary_ko', summaryKo.trim());
     form.set('description', description.trim());
     form.set('description_en', descriptionEn.trim());
+    form.set('description_ja', descriptionJa.trim());
+    form.set('description_ko', descriptionKo.trim());
     form.set('founded_year', foundedText);
     form.set('website', website.trim());
     if (image) form.set('image', image);
@@ -290,8 +301,6 @@ export default function AdminDevelopers() {
       if (!res.ok) throw new Error(await readError(res, '请求失败。'));
 
       setPageNotice({ tone: 'ok', text: '已保存。' });
-      // 新建的排在最后一页（按创建时间倒序），但用户更可能立刻想给游戏选它 ——
-      // 不跳页，留在原地，只在顶部提示一句就够了。
       reloadList();
       resetForm();
       setModalOpen(false);
@@ -308,7 +317,6 @@ export default function AdminDevelopers() {
   };
 
   const remove = async (developer: AdminDeveloper) => {
-    // 名下有游戏时接口会回 409 和一整句说明 —— 先问一句是防手滑，真正的把关在服务端
     if (!window.confirm(`删除「${developer.name}」？此操作不可撤销。`)) return;
     try {
       const res = await fetch(`/api/admin/developers/${developer.id}`, { method: 'DELETE' });
@@ -368,7 +376,6 @@ export default function AdminDevelopers() {
           </p>
         )}
 
-        {/* 列表请求在飞（首屏 / 翻页 / 搜索 / 增删改后重拉）就亮加载行 —— 之前这几段是纯空白 */}
         {listPending && <AdminLoading label="载入中…" />}
 
         {listLoaded && list.length === 0 && !keyword && (
@@ -382,7 +389,6 @@ export default function AdminDevelopers() {
           <ul className="flex flex-col divide-y-2 divide-ink-900">
             {list.map((developer) => (
               <li key={developer.id} className="flex items-center gap-3 py-2">
-                {/* 没传厂标的不画破图，退成一个首字占位块 */}
                 {developer.imageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -396,7 +402,6 @@ export default function AdminDevelopers() {
                   </span>
                 )}
 
-                {/* 名字 + 简介两行，和游戏列表那条同一个版式（长简介 truncate，不撑破这一行） */}
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-[12px] text-ink-100">{developer.name}</span>
                   {developer.summary && (
@@ -463,7 +468,7 @@ export default function AdminDevelopers() {
           onMouseDown={onBackdrop}
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950/80 p-6"
         >
-          <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[620px] p-4">
+          <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[680px] p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
               {isEditing ? '编辑开发商' : '添加开发商'}
             </h2>
@@ -471,21 +476,20 @@ export default function AdminDevelopers() {
             <form onSubmit={(e) => void submit(e)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {'名字'}
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={name} onChange={(e) => setName(e.target.value)} className={FIELD_CLASS} />
               </label>
 
-              {/* 英文字段（2026-10-13 加），紧挨中文那栏 —— 见 AdminGames 里同一段注释 */}
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {'名字 (EN)'}
-                <input
-                  value={nameEn}
-                  onChange={(e) => setNameEn(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'名字 (JA)'}
+                <input value={nameJa} onChange={(e) => setNameJa(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'名字 (KO)'}
+                <input value={nameKo} onChange={(e) => setNameKo(e.target.value)} className={FIELD_CLASS} />
               </label>
 
               <label className={LABEL_CLASS}>
@@ -507,11 +511,6 @@ export default function AdminDevelopers() {
                 />
               </label>
 
-              {/*
-                厂标。**编辑时不强制重选**：输入框在浏览器里没法预填一个已存在的 File，
-                所以留空 = 保持原图（接口那边也是这么处理的），
-                旁边那行小字把「当前这张叫什么」写出来，用户才知道自己没把它删掉。
-              */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {'厂标 / 图片'}
                 <input
@@ -533,20 +532,20 @@ export default function AdminDevelopers() {
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {'简介'}
-                <input
-                  value={summary}
-                  onChange={(e) => setSummary(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={summary} onChange={(e) => setSummary(e.target.value)} className={FIELD_CLASS} />
               </label>
 
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {'简介 (EN)'}
-                <input
-                  value={summaryEn}
-                  onChange={(e) => setSummaryEn(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={summaryEn} onChange={(e) => setSummaryEn(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'简介 (JA)'}
+                <input value={summaryJa} onChange={(e) => setSummaryJa(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'简介 (KO)'}
+                <input value={summaryKo} onChange={(e) => setSummaryKo(e.target.value)} className={FIELD_CLASS} />
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
@@ -559,11 +558,29 @@ export default function AdminDevelopers() {
                 />
               </label>
 
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {'介绍 (EN)'}
                 <textarea
                   value={descriptionEn}
                   onChange={(e) => setDescriptionEn(e.target.value)}
+                  rows={4}
+                  className={`${FIELD_CLASS} resize-y`}
+                />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'介绍 (JA)'}
+                <textarea
+                  value={descriptionJa}
+                  onChange={(e) => setDescriptionJa(e.target.value)}
+                  rows={4}
+                  className={`${FIELD_CLASS} resize-y`}
+                />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'介绍 (KO)'}
+                <textarea
+                  value={descriptionKo}
+                  onChange={(e) => setDescriptionKo(e.target.value)}
                   rows={4}
                   className={`${FIELD_CLASS} resize-y`}
                 />

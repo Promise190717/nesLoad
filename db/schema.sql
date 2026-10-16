@@ -8,15 +8,38 @@
 --    所以 `_en` 全部可空 —— 后台可以只补英文、不必重填中文。
 --    老库要单独跑一次（只增不删）：
 --      node --env-file=.env.local scripts/add-i18n-fields.mjs
+--
+-- ⚠️⚠️ **2026-10-16：下面那 8 个文案列已经退化成「只写不读的投影」** ——
+--    真正被读取的是 `game_texts` 侧表（见本文件后面那张表的说明）。
+--    这里原样留着它们是为了：① `title` 是 NOT NULL，本来就必须写；
+--    ② 回滚退路（侧表那条路真要退回去时，旧列里是完整的中英两份）。
+--    **别在这里加新列了** —— 加语言要改的是数据，不是表结构。
+--
+-- ⚠️ **`source_url` 是 2026-10-16 加的**（后台爬取可以选「不保存 ROM」）：只留一个来源地址，
+--    前台按它回源取，本站一个字节都不存。形态是 `<host 角色>:<路径>`、**不含域名**：
+--      files:/games/roms/kirby-squeak-squad.nds
+--      site:/games/roms/Contra.nes
+--    域名整个抽到 lib/server/upstream.ts 的 UPSTREAM_ROOT —— 换域名只改那一处。
+--    ⚠️ **host 角色不能省**：上游两个 host 不可互换（实测 files 上的 NDS 是 206、主站同路径 404；
+--       主站的 Contra.nes 是 206、files 同路径 404），只留 path 会有一半文件取不到。
+--    ⚠️ 与 `rom_url` **互斥**：不存 ROM 时 `rom_url` 写空串（那列是 NOT NULL）。
+--       前台优先读 `source_url`，没有才读 R2（见 app/api/games/[id]/rom）。
+-- ⚠️ **`group_key` 是 2026-10-16 加的**（同款聚合键，见 game_texts 那段）。
+--    一行 = 一盘 ROM；**同一款游戏的不同语言版本是好几行**（`language` 各不同），
+--    这几行共用一个 `group_key` —— 文案（`game_texts`）挂在 group_key 上，一款一份。
+--    老库要单独跑一次（只增不删，可反复执行）：
+--      node --env-file=.env.local scripts/add-game-group-key.mjs
 CREATE TABLE IF NOT EXISTS games (
   id            TEXT PRIMARY KEY,
   title         TEXT NOT NULL,            -- 游戏名（必填，中文原文）
   title_en      TEXT,                     -- 游戏名英文（可空，2026-10-13 加）
   image_url     TEXT NOT NULL,            -- 封面图公网 URL（必填）
-  rom_url       TEXT NOT NULL,            -- ROM 在 R2 的对象 key（必填）
+  rom_url       TEXT NOT NULL,            -- ROM 在 R2 的对象 key；不存 ROM 时是空串（见 source_url）
+  source_url    TEXT,                     -- 源站 ROM 地址（`site:/…` / `files:/…`，不含域名，2026-10-16 加）
   rom_name      TEXT NOT NULL,            -- ROM 原始文件名（FBNeo 靠 zip 文件名认驱动）
   console_type  TEXT NOT NULL,            -- nes / snes / gba / arcade（必填）
-  language      TEXT,                     -- 语言（可选）
+  language      TEXT,                     -- 这盘 ROM 自己的语言（可选）
+  group_key     TEXT,                     -- 同款聚合键（2026-10-16 加）→ 决定读哪一份 game_texts
   series        TEXT,                     -- 系列（可选，中文原文）
   series_en     TEXT,                     -- 系列英文（可空，2026-10-13 加）
   year          INTEGER,                  -- 年份（可选）
@@ -31,14 +54,90 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE INDEX IF NOT EXISTS idx_games_created_at ON games (created_at DESC);
 -- 「点开发商 → 出他名下所有游戏」这条查询走它
 CREATE INDEX IF NOT EXISTS idx_games_developer_id ON games (developer_id);
+-- 每条列表读取都要拿它去 JOIN game_texts（`ON t.group_key = COALESCE(g.group_key, g.id)`），
+-- 是同款聚合（`DELETE … WHERE NOT EXISTS`）与后台按款找记录走的路
+CREATE INDEX IF NOT EXISTS idx_games_group_key ON games (group_key);
 
--- ⚠️ 上面那列 `description` 是 2026-10-12 补的。**这个文件只对「还没建过表」的库有效**：
+-- ⚠️ 上面那两列 `description`（2026-10-12）与 `source_url`（2026-10-16）都是后补的。
+--    **这个文件只对「还没建过表」的库有效**：
 --    `CREATE TABLE IF NOT EXISTS` 见表已存在就整句跳过，不会往老表里补列。
 --    已经上线的库要单独补一次（只增不删，全程没有 DELETE / UPDATE / DROP）：
 --      node --env-file=.env.local scripts/add-games-description.mjs
+--      node --env-file=.env.local scripts/add-games-source-url.mjs
 --    为什么不把 `ALTER TABLE ... ADD COLUMN` 直接写进本文件：这个文件里每条语句都是
 --    `IF NOT EXISTS`、可以反复执行；ALTER 跑第二遍会报 `duplicate column name`，
 --    掺进来就把「重复执行无害」这个性质破坏了。
+
+-- 游戏文案的**多语言侧表**（2026-10-16 加）
+--
+-- 为什么从 games 的宽表搬出来：文案字段原来成对出现（`title` + `title_en`），
+-- 加一个语言就要给每张表加 4 列，并且要改 8+ 处代码（schema / GameRow / Game /
+-- toGame / localizeGame / INSERT / UPDATE / SEARCH_CONDITION / 后台表单）。
+-- 搬到侧表后**加语言 = 插数据**，表结构不动。
+--
+-- 一行 = 「**一款游戏**在某个语言下的文案」。字段可空，空了**逐字段回退**到中文原文
+-- （见 lib/game-text.ts 的 localizeTexts）—— 所以「只翻了标题、说明还没翻」是合法状态。
+--
+-- ⚠️⚠️ **主键是 `group_key`、不是 `game_id`（2026-10-16 改）** —— 这是这张表唯一反直觉
+--    的地方，动它之前先读完这段。
+--
+--    背景：一行 `games` 是**一盘 ROM**，不是「一款游戏」。同一款游戏的中 / 英 / 日 / 韩
+--    四个语言版本就是四条 games 记录（判重是「标题 + 机种 + 语言」三维，语言不同放行）。
+--    而文案（标题怎么翻、系列叫什么）**四个版本是同一份** —— 上游抓一次就只返回一份，
+--    后台也是照一份填的。挂 `game_id` 就等于把同一份文案复制四遍：
+--
+--        games        Kirby·en   Kirby·zh   Kirby·ja   Kirby·ko          4 行
+--        game_texts      4 行       4 行       4 行       4 行     =    16 行
+--
+--    改挂 `group_key`（同款那几条记录共用一个值）之后只要 4 行，而且后台改一次标题
+--    就是改整款 —— 不会出现「改了英文版那条、中文版那条还挂着旧名字」。
+--
+--    ⚠️ `group_key` 的**唯一出口是 lib/server/games.ts 的 `resolveGroupKey()`**：
+--       新增记录时一律由数据层算（先按「中文标题 + 机种 + 开发商」反查同款，查到就复用、
+--       查不到才新开一个），**接口层和后台表单都不用传、也传不了**。
+--       刻意没拿上游 slug 当这个键：手动添加那条路根本没有 slug，而「同款」的判据
+--       本来就和判重同一套（改一处两边一起变才对）。
+--
+-- ⚠️ `locale` 的取值比**界面语言**（`Locale` = zh | en，见 lib/i18n.ts）**宽**：
+--    界面暂时只有中英，但日韩的内容可以先把数据录进来，等界面开了直接用。
+--    取值清单见 lib/game-text.ts 的 CONTENT_LOCALES（唯一出处）。
+--
+-- ⚠️ 老库要单独跑一次（给 games 补 `group_key` 列 → 归组回填 → 重建本表 →
+--    同款去重合并成一份；幂等、只增不删，旧表**改名成 `game_texts_old` 留底、不 DROP**）：
+--   node --env-file=.env.local scripts/add-game-group-key.mjs
+--   ⚠️ 那个脚本**取代**了旧的 scripts/add-game-texts.mjs（后者建的是 game_id 主键的旧表，
+--      在新库上跑会建出一张形状不对的表 —— 别跑它，文件头有警告）。
+--
+-- ⚠️ games 表里那 8 个旧文案列（title / series / developer / description 与各自的 `_en`）
+--    **保留、但只写不读**（用户 2026-10-16 决定）：写入路径照旧把中英两份投影过去
+--    （`title` 那列是 NOT NULL，本来也必须写），**读取一律走这张表**。
+--    留着的意义是回滚退路 —— 万一侧表这条路要退回去，旧列里是完整的中英两份。
+--    代价是同一份数据存了两处，所以**绝不要直接改旧列**：改了不会显示出来。
+--    等侧表稳定运行一段时间再单独清理（清理前先确认没有代码在读它们）。
+CREATE TABLE IF NOT EXISTS game_texts (
+  group_key   TEXT NOT NULL,             -- → games.group_key（同款共用一份文案）
+  locale      TEXT NOT NULL,             -- zh / en / ja / ko …（比界面语言宽）
+  title       TEXT,                      -- 游戏名；空 = 没翻，回退中文
+  series      TEXT,                      -- 系列
+  developer   TEXT,                      -- 开发商名（快照，随 developers.name / name_en 走）
+  description TEXT,                      -- 说明 / 简介
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (group_key, locale)
+);
+
+-- 读取那条 JOIN 走 `ON t.group_key = COALESCE(g.group_key, g.id)`（见 lib/server/games.ts
+-- 的 loadGameTexts）—— `WHERE g.id IN (…)` 先筛出 games 行、再用本表主键前缀取文案，
+-- 所以本表这边不需要额外索引。games 上那条 idx_games_group_key 服务的是反方向
+-- （按 group 找记录，如 deleteGame 里的 `NOT EXISTS`）。
+--
+-- ⚠️ **没有外键约束**（D1 底下 SQLite 默认不开，同下面那几张表）：
+--    所以后台删游戏时数据层要**自己顺手清一遍**，而且必须**晚一步**清 ——
+--    **只有这个 group 下最后一盘 ROM 也没了，文案行才跟着删**（见 deleteGame 里那条
+--    `NOT EXISTS`）。删早了会让还在库里的另外几个语言版本突然没文案。
+--    写入走 upsert（`ON CONFLICT(group_key, locale) DO UPDATE`），读取走批量 JOIN。
+--
+-- ⚠️ `COALESCE(g.group_key, g.id)` 只是**防御**：迁移脚本会把老行的 group_key 全部回填，
+--    之后不该再有 NULL。留着它是为了「万一漏了一条」时文案还读得出来（读不到比读错更糟）。
 
 -- 开发商库（2026-10-12 加，用户要的「游戏厂商库」，口径统一叫**开发商**）
 --
@@ -65,6 +164,7 @@ CREATE TABLE IF NOT EXISTS developers (
   description_en TEXT,                    -- 介绍英文（可空，2026-10-13 加）
   founded_year  INTEGER,                  -- 成立年份（可选）
   website       TEXT,                     -- 官网地址（可选）
+  source_slug   TEXT,                     -- 上游 slug（回填日韩用，见上方注释）
   created_at    INTEGER NOT NULL
 );
 
@@ -72,6 +172,10 @@ CREATE TABLE IF NOT EXISTS developers (
 --    （2026-10-13，见 games 表上方的总说明与 scripts/add-i18n-fields.mjs）。
 --    `name_en` 改了要**级联**到 `games.developer_en`（见 lib/server/developers.ts 的
 --    updateDeveloper），否则开发商页写着 Capcom、游戏卡片上还是老名字。
+--
+-- ⚠️⚠️ **2026-10-16：下面那 6 个文案列已经退化成「只写不读的投影」** ——
+--    真正被读取的是 `developer_texts` 侧表（见本文件后面那张表的说明）。
+--    这里原样留着它们是为了回滚退路。别在这里加新列了 —— 加语言要改的是数据。
 
 -- 列表默认按创建时间倒序（和 games 一致：新加的排在前面）
 CREATE INDEX IF NOT EXISTS idx_developers_created_at ON developers (created_at DESC);
@@ -83,7 +187,7 @@ CREATE INDEX IF NOT EXISTS idx_developers_created_at ON developers (created_at D
 
 -- 机种库（2026-10-14 加，用户要的「机种专题页」——和 developers 同一套做法）
 --
--- ⚠️ **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade' 等十二个），不是 UUID：
+-- ⚠️ **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade' 等十四个），不是 UUID：
 --   机种是代码里定死的枚举（`ConsoleType`，见 lib/emulator.ts），加机种要改核心 / 卡带
 --   好几处，不是后台能随手加的东西。拿类型当主键换来两样好处：
 --   · 地址好看且稳定 —— 专题页是 `/consoles/nes` 而不是一串 uuid；
@@ -94,13 +198,14 @@ CREATE INDEX IF NOT EXISTS idx_developers_created_at ON developers (created_at D
 --   会退回代码里的默认名字（NES / SFC / GBA / ARC）照常渲染。所以后台删除 =
 --   「清掉资料恢复默认」，不做「名下有游戏不许删」那套拦截。
 --
--- ⚠️ 2026-10-14 加了八个机种（gb / gbc / md / gg / sms / 32x / ws / ngp），
---   老库靠 `scripts/add-consoles.mjs` 补行（幂等、只增不删）。
+-- ⚠️ 2026-10-14 加了八个机种（gb / gbc / md / gg / sms / 32x / ws / ngp），2026-10-15 加
+--   nds，2026-10-16 加 ps1（第一台光盘机种）——老库都靠 `scripts/add-consoles.mjs`
+--   补行（幂等、只增不删），加机种后跑一遍即可。
 --
 -- name / name_en / summary / … 的双语规则与 developers 完全一致：
 -- 没有后缀 = 中文原文，`_en` = 英文（空了回退中文）。
 CREATE TABLE IF NOT EXISTS consoles (
-  console_type  TEXT PRIMARY KEY,       -- ConsoleType 十二个之一（nes / snes / gb / … / arcade）
+  console_type  TEXT PRIMARY KEY,       -- ConsoleType 十四个之一（nes / snes / gb / … / arcade）
   name          TEXT NOT NULL,          -- 展示名（必填，中文原文）
   name_en       TEXT,                   -- 展示名英文（可空）
   image_url     TEXT,                   -- 机图 / 图片公网 URL（可选）
@@ -192,7 +297,7 @@ CREATE INDEX IF NOT EXISTS idx_app_users_created_at ON app_users (created_at DES
 CREATE TABLE IF NOT EXISTS user_history (
   user_id       TEXT NOT NULL,           -- → app_users.id
   game_id       TEXT NOT NULL,           -- → games.id（只可能是在线库的游戏）
-  title         TEXT NOT NULL,           -- 快照：游戏名（⚠️ 读取时改用 games 的两份，见下方注释）
+  title         TEXT NOT NULL,           -- 快照：游戏名（⚠️ 读取时改用 game_texts，见下方注释）
   image_url     TEXT NOT NULL,           -- 快照：封面地址
   rom_name      TEXT NOT NULL,           -- 快照：ROM 原始文件名（FBNeo 认它）
   console_type  TEXT NOT NULL,           -- 快照：nes / snes / gba / arcade
@@ -204,10 +309,11 @@ CREATE TABLE IF NOT EXISTS user_history (
 -- 取某人的历史、按最近玩过倒序 —— 这条查询走它
 CREATE INDEX IF NOT EXISTS idx_user_history_recent ON user_history (user_id, played_at DESC);
 
--- ⚠️ 2026-10-13（双语）：这张表**不加 `title_en`** —— 列表读取时 `JOIN games` 现取
---    `g.title` / `g.title_en` 两份（见 lib/server/user-data.ts 的 listUserHistory）。
---    快照列 `title` 仍然写（写入路径不变，它也帮不上双语），只是读取不用它。
---    这样既不用加列、也不用回头补历史数据的英文名。
+-- ⚠️ 2026-10-13（双语）/ 2026-10-16（文案搬进侧表）：这张表**不加任何语言列** ——
+--    列表读取时 `JOIN games` 把下架的滤掉，再按 game_id 批量捞 `game_texts`
+--    （见 lib/server/user-data.ts 的 listUserHistory 与 lib/server/games.ts 的 loadGameTexts）。
+--    快照列 `title` 仍然写（写入路径不变），只是读取不用它。
+--    这样加语言既不用给这张表加列、也不用回头补历史数据。
 
 -- 云端存档槽
 --
@@ -362,3 +468,38 @@ CREATE TABLE IF NOT EXISTS game_comments (
 CREATE INDEX IF NOT EXISTS idx_game_comments_game ON game_comments (game_id, created_at DESC, id DESC);
 -- 「我发过哪些评论」/ 将来后台按人查，走它
 CREATE INDEX IF NOT EXISTS idx_game_comments_user ON game_comments (user_id, created_at DESC, id DESC);
+
+-- ===================================================================
+-- 机种文案的多语言侧表（2026-10-16 加）
+--
+-- 为什么从 consoles 的宽表搬出来：同 game_texts 的理由 —— 加语言 = 插数据，不动表结构。
+-- 一行 = 「某个机种在某个语言下的文案」。字段可空，空了逐字段回退中文原文。
+--
+-- ⚠️ `locale` 取值见 lib/entity-text.ts 的 CONTENT_LOCALES（与 game-text.ts 共用同一套）。
+-- ⚠️ 老库要单独跑一次（建表 + 从 consoles 旧列搬数据；幂等、只增不删）：
+--      node --env-file=.env.local scripts/add-entity-texts.mjs
+-- ⚠️ consoles 表里那 6 个旧文案列保留、但只写不读 —— 读取一律走这张表。
+CREATE TABLE IF NOT EXISTS console_texts (
+  console_type  TEXT NOT NULL,           -- → consoles.console_type
+  locale        TEXT NOT NULL,           -- zh / en / ja / ko …
+  name          TEXT,                    -- 机种展示名
+  summary       TEXT,                    -- 简介
+  description   TEXT,                    -- 介绍
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (console_type, locale)
+);
+
+-- 开发商文案的多语言侧表（2026-10-16 加）
+--
+-- 同 consoles，一行 = 「某个开发商在某个语言下的文案」。
+-- ⚠️ 老库靠同一个脚本补：scripts/add-entity-texts.mjs
+-- ⚠️ developers 表里那 6 个旧文案列保留、但只写不读。
+CREATE TABLE IF NOT EXISTS developer_texts (
+  developer_id  TEXT NOT NULL,           -- → developers.id
+  locale        TEXT NOT NULL,           -- zh / en / ja / ko …
+  name          TEXT,                    -- 开发商名
+  summary       TEXT,                    -- 简介
+  description   TEXT,                    -- 介绍
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (developer_id, locale)
+);

@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { LOCALES, localePath } from '@/lib/i18n';
+import { DEFAULT_LOCALE, LOCALES, htmlLang, localePath } from '@/lib/i18n';
 import { listConsoleStubsCached } from '@/lib/server/consoles';
 import { listDeveloperStubsCached } from '@/lib/server/developers';
 import { listGameStubsCached } from '@/lib/server/games';
@@ -24,8 +24,9 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 而且**必须**能被收录 —— 隐私政策与条款要能直接被搜到、被第三方按固定地址检查，
  * 只挂在房间那颗钮的弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
  *
- * 2026-10-13 语言分路径之后，**每条地址都出两份**（英文无前缀 / 中文 `/zh`），
- * 由下面的 `entries()` 统一生成 —— 它顺带把两条 `hreflang` 互相指好。
+ * 2026-10-13 语言分路径之后，**每条地址都出四份**（英文无前缀、中文 `/zh`、
+ * 日文 `/ja`、韩文 `/ko`，2026-10-16 从两份扩到四份），
+ * 由下面的 `entries()` 统一生成 —— 它顺带把四条 `hreflang` 互相指好。
  * 别手写其中一份：漏了 alternates 的那份在 Google 眼里就是「重复内容」，
  * 这正是分语言路径最容易被忽略的代价。
  *
@@ -58,10 +59,15 @@ export const dynamic = 'force-dynamic';
 type ChangeFrequency = NonNullable<MetadataRoute.Sitemap[number]['changeFrequency']>;
 
 /**
- * 一条路径 → sitemap 里的**两条**（英文、中文），两条互指同一组 hreflang。
+ * 一条路径 → sitemap 里的**四条**（英文、中文、日文、韩文），四条互指同一组 hreflang。
  *
  *   · `en` / `x-default` → 无前缀那份（英文是默认语言，没表态的访客看它）；
- *   · `zh-CN`            → `/zh` 那份。
+ *   · `zh-CN` / `ja-JP` / `ko-KR` → 各自带前缀那份。
+ *
+ * ⚠️ **语言那份遍历 `LOCALES` 现拼**（2026-10-16 改）：写死 `en` / `zh` 两条时，
+ *    加日韩只会在下面 `LOCALES.map` 那边多出两行 URL，而它们带的 `alternates`
+ *    仍然只有中英 —— 那两份在 Google 眼里就是「没有 hreflang 标注的重复内容」，
+ *    正是分语言路径最容易被忽略的代价。**别退回手写。**
  *
  * `x-default` 和 `en` 指向同一个地址是**对的**，不是笔误：`x-default` 说的是
  * 「不知道用户要哪种语言时给哪个」，而本站的答案就是英文那份。
@@ -71,12 +77,9 @@ function entries(
   path: string,
   extra: { lastModified?: Date; changeFrequency?: ChangeFrequency; priority?: number } = {}
 ): MetadataRoute.Sitemap {
-  const english = `${origin}${localePath('en', path)}`;
-  const languages = {
-    en: english,
-    'zh-CN': `${origin}${localePath('zh', path)}`,
-    'x-default': english,
-  };
+  const languages: Record<string, string> = {};
+  for (const locale of LOCALES) languages[htmlLang(locale)] = `${origin}${localePath(locale, path)}`;
+  languages['x-default'] = `${origin}${localePath(DEFAULT_LOCALE, path)}`;
 
   return LOCALES.map((locale) => ({
     url: `${origin}${localePath(locale, path)}`,

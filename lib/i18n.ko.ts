@@ -1,0 +1,688 @@
+/**
+ * 韩语界面文案（2026-10-16 加）。
+ *
+ * **为什么不写在 `lib/i18n.ts` 里**：那边已经有 `en` / `zh` 两张表、加起来两千多行；
+ * 再塞两张进来会把它冲到七千行，谁都翻不动。理由和 `lib/legal.ts` 当初分出去的一样。
+ * 代价是「加语言」从「改一处」变成「加一个文件 + 在 `messages` 里挂上」。
+ *
+ * ⚠️ **`MessageKey` 从 `lib/i18n.ts` 的 `en` 表推导**，这里是 `Record<MessageKey, string>`：
+ *    · 少一个键 → 编译报错（缺属性）；
+ *    · 多一个键 / 拼错键名 → 编译报错（多余属性）。
+ *    所以**这份文件的键必须与 `en` 表逐键一致**，`zh` / `ja` 同理。
+ *    改文案时先改 `en`，再回来对齐另外三份。
+ *
+ * ⚠️ **这是界面语言，不是内容语言**。游戏标题 / 简介的韩文在数据库里
+ *    （`game_texts` 的 `ko` 行，见 lib/game-text.ts），不在这张表里。
+ *
+ * ⚠️ **占位符 `{xxx}` 必须原样保留**（`{site}` / `{count}` / `{name}` / `{level}` …），
+ *    它们由 `translate()` 在运行时替换；漏掉一个不会报错，只会在页面上少一段字。
+ *
+ * 术语口径（全表统一，改的时候一起改）：
+ *   · console → 기종；developer → 개발사；series → 시리즈
+ *   · cartridge → 카트리지；room → 방；host → 호스트；guest → 게스트
+ *   · netplay → 온라인 대전；save → 세이브；key bindings → 키 설정
+ *   · game library → 게임 라이브러리；guestbook → 방명록
+ *
+ * ⚠️ 机种名保持站内写法（NES / SFC / GBA / 게임보이 / 메가드라이브 / 아케이드）——
+ *    和站内机种列表（`consoles` 表，目前只有中英两份，韩语界面回退英文名）对得上。
+ */
+
+import type { MessageKey } from './i18n';
+
+export const ko: Record<MessageKey, string> = {
+  'meta.title': '{site} — 브라우저에서 즐기는 레트로 게임: NES·SFC·GBA·아케이드',
+  'meta.description':
+    'NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 같은 레트로 게임을 브라우저에서 바로 즐길 수 있습니다. 온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 불러오세요.',
+  'meta.keywords':
+    '레트로 게임, 온라인 레트로 게임 라이브러리, NES 에뮬레이터, 패미컴 에뮬레이터, SFC 에뮬레이터, 슈퍼패미컴 에뮬레이터, GBA 에뮬레이터, 게임보이 어드밴스, 게임보이 에뮬레이터, 게임보이 컬러 에뮬레이터, NDS 에뮬레이터, 닌텐도 DS 에뮬레이터, 메가드라이브 에뮬레이터, 제네시스 에뮬레이터, 게임기어 에뮬레이터, 마스터 시스템 에뮬레이터, 32X 에뮬레이터, 원더스완 에뮬레이터, 네오지오 포켓 에뮬레이터, 플레이스테이션 에뮬레이터, PS1 에뮬레이터, PSX 에뮬레이터, 아케이드 에뮬레이터, 브라우저 게임, 브라우저 에뮬레이터, RetroArch WASM, {site}',
+  'seo.room.title': '픽셀 방 — 브라우저에서 즐기는 레트로 게임',
+  'seo.room.description':
+    '픽셀 방에 들어와 보세요. NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 게임이 브라운관에서 돌아갑니다. 온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 화면에 끌어다 놓으세요.',
+  'seo.login.title': '로그인',
+  'seo.login.description':
+    '로그인하면 세이브, 플레이 기록, 즐겨찾기가 여러 기기에서 동기화됩니다.',
+  'home.hero.title': '브라우저에서 즐기는 명작 레트로 게임',
+  'home.hero.lead':
+    '{site}에서는 NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종의 게임을 온라인으로 즐길 수 있습니다. 2인 온라인 대전도 지원합니다.',
+  'home.hero.play': '내 ROM 불러오기',
+  'home.hero.browse': '모든 게임 보기',
+  'home.join.title': '친구와 함께 즐기기',
+  'home.join.hint': '친구가 공유한 4자리 방 코드를 입력하면 온라인 대전에 참여할 수 있습니다.',
+  'home.join.submit': '방 참여',
+  'home.hero.or': '또는',
+  'home.search.label': '게임 라이브러리 검색',
+  'home.search.placeholder': '제목 / 개발사 / 시리즈로 검색',
+  'home.search.submit': '검색',
+  'home.consoles.title': '기종으로 찾기',
+  'home.consoles.lead':
+    'NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종 — 하나를 고르면 그 기종의 게임이 나옵니다.',
+  'home.consoles.count': '게임 {count}개',
+  'home.consoles.all': '모든 기종',
+  'home.latest.title': '최신 등록',
+  'home.latest.lead': '최근에 추가된 게임입니다.',
+  'home.latest.viewAll': '모든 게임',
+  'home.developers.title': '개발사로 찾기',
+  'home.developers.lead': '이곳에 등록된 게임이 가장 많은 개발사입니다.',
+  'home.developers.viewAll': '모든 개발사',
+  'home.empty':
+    '라이브러리가 아직 비어 있습니다 — 방을 열고 ROM을 브라운관에 끌어다 놓으면 바로 즐길 수 있습니다.',
+  'home.faq.title': '자주 묻는 질문',
+  'home.faq.q1': '무료인가요?',
+  'home.faq.a1':
+    '전부 무료로 즐길 수 있습니다. 로그인하면 플레이 기록과 세이브를 클라우드에 보관할 수 있습니다.',
+  'home.faq.q2': '뭔가 설치해야 하나요?',
+  'home.faq.a2': '아니요. 게임을 클릭하면 브라우저에서 바로 즐길 수 있습니다.',
+  'home.faq.q3': '휴대폰이나 태블릿에서도 되나요?',
+  'home.faq.a3': '네. 휴대폰과 태블릿 브라우저에서도 그대로 즐길 수 있습니다.',
+  'home.faq.q4': 'ROM 파일을 내려받을 수 있나요?',
+  'home.faq.a4':
+    '네. 각 게임 페이지에 다운로드 버튼이 있습니다. 사용할 권리가 있는 ROM만 내려받으세요.',
+  'home.faq.q5': '친구와 같이 즐길 수 있나요?',
+  'home.faq.a5': '물론입니다. 친구를 불러 방을 만들면 바로 대전할 수 있습니다.',
+  'home.faq.q6': '게임패드를 지원하나요?',
+  'home.faq.a6':
+    '지원합니다. USB나 블루투스 패드를 연결하면 브라우저를 통해 에뮬레이터가 그대로 인식합니다. 버튼 배치는 각 코어의 기본값을 따릅니다. 휴대폰에서는 화면 버튼을 사용합니다.',
+  'seo.heading': '브라우저에서 레트로 게임 즐기기',
+  'seo.intro':
+    '{site}는 온라인 레트로 게임방입니다. NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등의 게임이 브라우저에서 바로 돌아갑니다 — 실행은 여러분의 기기에서, 코어는 WebAssembly로 컴파일된 RetroArch입니다.',
+  'seo.howTo':
+    '온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 TV에 끌어다 놓으세요. 설치할 것은 없습니다.',
+  'seo.games.title': '모든 게임 — NES·SFC·GBA·아케이드를 온라인으로',
+  'seo.games.description':
+    '온라인 라이브러리에 레트로 게임 {count}개가 있으며 모두 브라우저에서 즐길 수 있습니다: NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등. 제목을 열면 상세 정보를 보고 바로 즐길 수 있으며, ROM 파일을 내려받을 수도 있습니다.',
+  'seo.games.search.title': '“{keyword}” 검색 결과',
+  'seo.games.search.description':
+    '온라인 라이브러리에서 “{keyword}”와 일치하는 게임은 {count}개입니다. 브라우저에서 즐기거나 ROM 파일을 내려받을 수 있습니다.',
+  'seo.games.console.title': '{console} 게임 — 브라우저에서 온라인 플레이',
+  'seo.games.console.description':
+    '온라인 라이브러리에 있는 {console} 게임 {count}개. 모두 브라우저에서 즐길 수 있고 ROM 파일로 내려받을 수도 있습니다.',
+  'seo.game.title': '{title} — {console} 온라인으로 즐기기',
+  'seo.game.description':
+    '브라우저에서 《{title}》({console})을 바로 즐길 수 있습니다 — 무료, 설치 불필요. ROM 파일도 내려받을 수 있습니다.',
+  'seo.gameDownload.title': '《{title}》 ROM 내려받기 ({console})',
+  'seo.gameDownload.description':
+    '《{title}》({console})의 ROM 파일을 클릭 한 번으로 내려받으세요. 가입은 필요 없습니다. 브라우저에서 바로 즐길 수도 있습니다.',
+  'seo.developers.title': '게임 개발사 — 그들의 NES·SFC·GBA·아케이드 게임 즐기기',
+  'seo.developers.description':
+    '온라인 라이브러리 게임을 만든 {count}곳의 개발사. 하나를 열면 그 회사의 모든 작품이 나옵니다.',
+  'seo.developer.title': '{name} — 이 개발사의 게임',
+  'seo.developer.description':
+    '온라인 라이브러리에 있는 {name}의 게임 전부({count}개). 브라우저에서 즐기거나 ROM 파일로 내려받을 수 있습니다.',
+  'seo.consoles.title': '기종으로 찾기 — NES·SFC·GBA·아케이드를 온라인으로',
+  'seo.consoles.description':
+    '온라인 라이브러리의 모든 기종(총 {count}개 게임). 기종을 고르면 그 게임이 모두 나오고, 브라우저에서 바로 즐길 수 있습니다.',
+  'seo.console.title': '{name} 게임 — 온라인으로 즐기기',
+  'seo.console.description':
+    '온라인 라이브러리에 있는 {name}의 게임 전부({count}개). 브라우저에서 즐기거나 ROM 파일로 내려받을 수 있습니다.',
+
+  'theme.toDark': '나이트 모드로 전환',
+  'theme.toLight': '데이 모드로 전환',
+  'lamp.turnOn': '불 켜기',
+  'lamp.turnOff': '불 끄기',
+  'simple.enter': '심플 모드: 벽, TV, 책상, 바닥만 남기기',
+  'simple.exit': '심플 모드 종료',
+  'tvSize.open': 'TV 크기',
+  'tvSize.opt.large': '크게',
+  'tvSize.opt.medium': '보통',
+  'tvSize.opt.small': '작게',
+  'tvSize.pick': 'TV 크기를 “{level}”로 설정',
+  /* 语言下拉的读屏名字。语言名本身**不翻译**（各语言用本语言写，见 LOCALE_OPTIONS） */
+  'locale.label': '언어',
+  /*
+   * 语言提示弹窗。三条都提到「当前页面是哪种语言」，所以每种语言各写一份 ——
+   * 弹窗正文跟**当前页面语言**，只有那颗钮跟**目标语言**（LOCALE_SWITCH_LABEL）。
+   */
+  'localePrompt.title': '이 페이지는 한국어입니다',
+  'localePrompt.body': '브라우저가 다른 언어를 선호합니다. 전환할까요?',
+  'localePrompt.keep': '한국어 유지',
+  'fullscreen.enter': '게임 화면 전체 화면으로 보기',
+  'fullscreen.exit': '전체 화면 종료',
+
+  /*
+   * 屏幕上的提示。走 `font-pixel`（Press Start 2P）—— 那套字模没有谚文，
+   * 所以韩语会落到系统字体上（globals.css 的 `.screen-hint-*` 补偿字号）。
+   */
+  'screen.pick': '클릭해서 ROM 파일을 고르거나 여기에 끌어다 놓으세요',
+  'screen.srLabel': '실행할 ROM 파일 고르기',
+  'screen.tapLoad': '내 ROM을 불러오려면 클릭',
+  'screen.orLibrary': '또는 온라인 라이브러리에서 실행',
+  'screen.release': '놓으면 불러옵니다',
+  'screen.mobileLibrary': '라이브러리에서 실행',
+  'screen.mobileTap': '화면을 탭해서 라이브러리 열기',
+  'screen.waitingHost': '호스트 화면을 기다리는 중',
+  'screen.paused': '일시 정지',
+  'screen.resumeOnPanel': '본체 패널의 재개 버튼을 누르세요',
+  'screen.waitHostResume': '호스트의 재개를 기다리는 중',
+
+  /* 机身面板那排钮 */
+  'panel.resume': '재개',
+  'panel.pause': '일시 정지',
+  'panel.save': '세이브',
+  'panel.load': '로드',
+  'panel.reset': '리셋',
+  'panel.eject': '꺼내기',
+  'volume.down': '볼륨 한 단계 내리기',
+  'volume.up': '볼륨 한 단계 올리기',
+  'volume.set': '볼륨을 {max}단계 중 {level}단계로 설정',
+
+  'saves.title': '세이브 불러오기',
+  'saves.load': '불러오기',
+  'saves.close': '닫기',
+  'saves.groupLocal': '이 기기',
+  'saves.groupCloud': '클라우드(계정)',
+  'saves.deleteCloud': '이 클라우드 세이브 삭제',
+  'saves.delete': '삭제',
+  'saves.loginHint': '로그인하면 클라우드 세이브를 쓸 수 있고, 다른 기기에서도 이어서 즐길 수 있습니다.',
+  'saves.login': '로그인',
+  'saves.loading': '불러오는 중…',
+  'saves.downloading': '클라우드 세이브를 내려받는 중…',
+  'saves.restoring': '게임을 복원하는 중…',
+  'saves.empty': '아직 세이브가 없습니다',
+
+  'library.removeLabel': '{name} 삭제',
+
+  'legend.moves': '이동',
+  'legend.open': '키 설명',
+  'legend.title': '키 설명',
+  'legend.close': '닫기',
+  'legend.needZip':
+    '형식  FBNeo는 .zip만 읽습니다 — 이 파일은 {ext}인 것 같습니다. 다시 압축하거나 .zip 버전을 준비하세요',
+  'play.needZip':
+    '형식  이 ROM은 {ext} 형식의 압축 파일이라 풀지 못했습니다 — .zip이나 압축하지 않은 ROM으로 시도하세요',
+  'legend.needDisc':
+    '형식  디스크 이미지가 여러 파일(.cue + .bin)로 되어 있습니다. 이 사이트는 단일 파일만 지원합니다 — .pbp 또는 .iso 버전을 준비하세요',
+  'play.needDisc':
+    '형식  여러 파일로 된 디스크 이미지(.cue + .bin)입니다. 이 사이트는 단일 파일만 지원합니다 — .pbp 또는 .iso로 시도하세요',
+  'legend.needBios':
+    'BIOS  Neo Geo 게임(KOF, 메탈슬러그…)으로 보입니다. neogeo.zip이 필요합니다 — 그 파일을 페이지에 끌어다 놓으면 설치됩니다. CPS1 / CPS2 게임에는 필요 없습니다.',
+  'legend.gamepad':
+    '게임패드  연결하면 바로 됩니다. 온라인 대전에서는 호스트와 게스트가 각각 하나씩 쓸 수 있습니다.',
+
+  'netplay.title': '온라인 대전',
+  'netplay.open': '온라인 대전 시작',
+  'netplay.close': '닫기',
+  'netplay.create': '방 만들기',
+  'netplay.or': '또는',
+  'netplay.join': '참여',
+  'netplay.codePlaceholder': '코드',
+  'netplay.hint':
+    '양쪽 모두 공용 중계 서버에 접속할 수 있으면 됩니다. 같은 LAN이 가장 안정적입니다. 4자리 코드를 상대에게 알려 주세요. 에뮬레이터를 돌려 화면을 보내는 쪽은 호스트이고, 게스트는 ROM이 없어도 즐길 수 있습니다.',
+  'netplay.roomCode': '방 코드',
+  'netplay.modeLan': 'LAN',
+  'netplay.modeWan': '인터넷',
+  'netplay.wanDev': '인터넷을 통한 온라인 대전은 개발 중입니다.',
+  'netplay.quality': '화면 품질',
+  'netplay.qualitySmooth': '부드럽게',
+  'netplay.qualityBalanced': '균형',
+  'netplay.qualitySharp': '선명하게',
+  'netplay.qualityHint':
+    '화면 품질은 호스트 쪽 부하와 직결됩니다. 균형을 권장합니다. 호스트 기기가 따라가지 못하면 게임 전체가 느려집니다. 그럴 때는 한 단계 낮추세요. 이 설정은 호스트에만 적용됩니다.',
+  'netplay.copy': '복사',
+  'netplay.copied': '복사했습니다',
+  'netplay.share': '공유',
+  'netplay.shareCopied': '링크를 복사했습니다',
+  'netplay.inviteTitle': '방 초대',
+  'netplay.inviteBody': '{code} 방에 참여할까요?',
+  'netplay.inviteJoin': '참여',
+  'netplay.inviteCancel': '취소',
+  'netplay.connected': '연결됨',
+  'netplay.waiting': '상대의 참여를 기다리는 중',
+  'netplay.joining': '방에 참여하는 중…',
+  'netplay.waitingGame': '연결됨 — 호스트가 카트리지를 넣기를 기다리는 중',
+  'netplay.hostPlaying': '호스트가 플레이 중',
+  'netplay.paused': '일시 정지',
+  'netplay.toastHost': '연결됨 · 상대가 들어왔습니다 · 당신은 1P',
+  'netplay.toastGuest': '호스트에 연결됨 · 당신은 2P',
+  'netplay.toastHostLeft': '호스트가 나갔습니다 · 방이 닫혔습니다',
+  'netplay.toastGuestLeft': '2P가 방을 나갔습니다',
+  'netplay.youAreHost':
+    '당신은 1P입니다. 카트리지를 넣으면 화면이 상대에게 자동으로 전송됩니다. 키는 본인의 설정을 그대로 씁니다 — 현재 배치는 “키 설명”에서 확인하세요.',
+  'netplay.youAreGuest':
+    '당신은 2P입니다. 카트리지는 필요 없습니다 — 호스트가 화면을 보내고, 당신의 입력은 호스트로 전달됩니다. 본인의 키 설정(플레이어 1 그룹)이나 게임패드로 즐기세요 — 현재 배치는 “키 설명”에서 확인하세요.',
+  'netplay.leave': '방 나가기',
+  'netplay.closeRoom': '방 닫기',
+  'netplay.badCode': '코드가 올바르지 않은 것 같습니다 — 4자리여야 합니다.',
+  'netplay.errInsecure':
+    '온라인 대전에는 HTTPS 또는 localhost가 필요합니다. 이 페이지는 http라서 브라우저가 의존하는 암호화 API를 제공하지 않습니다.',
+  'netplay.errNoDirect':
+    '양쪽 모두 중계 서버에는 닿았지만 직접 연결을 열지 못했습니다 — 보통 NAT나 방화벽이 원인입니다. 같은 LAN이 성공률이 가장 높습니다.',
+  'netplay.errPassword': '방 코드가 일치하지 않습니다.',
+  'netplay.errHandshake': '핸드셰이크가 시간 초과했습니다 — 상대가 나갔을 수 있습니다.',
+  'netplay.errHostLeft': '호스트가 방을 나갔습니다 — 방이 닫혔습니다.',
+  'netplay.errRoomFull': '방이 가득 찼습니다 — 이 게임은 1대1만 지원합니다.',
+  'netplay.errUnknown':
+    '상대에게 연결하지 못했습니다. 정확한 원인은 브라우저 콘솔에 나옵니다.',
+
+  'seo.play.title': '플레이룸 — 게임을 불러와 온라인으로 즐기기',
+  'seo.play.description':
+    '한 화면에서 게임을 시작합니다. 혼자 바로 즐기거나, 1대1 방을 열어 코드를 공유하세요. NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드를 지원합니다.',
+  'play.modeSolo': '혼자',
+  'play.start': '시작',
+  'play.confirmStart': '확인하고 시작',
+  'play.confirm': '확인',
+  'play.qualityIntro': '네트워크 상황에 맞춰 온라인 대전의 화면 품질을 고르세요.',
+  'play.qualityHint.smooth': '30 fps · 대역폭을 적게 씁니다. 네트워크가 느릴 때 적합합니다.',
+  'play.qualityHint.balanced': '최대 720p / 60 fps · 화질과 부드러운 움직임의 균형.',
+  'play.qualityHint.sharp':
+    '최대 60 fps · 원래 해상도와 픽셀 디테일을 우선합니다. 빠른 네트워크에 적합하며, 네트워크가 부족하면 프레임이 떨어질 수 있습니다.',
+  'play.qualityConfirmHint':
+    '확인하면 방에 연결됩니다. 호스트가 게임을 불러오고, 게스트에게는 호스트의 화면이 전달됩니다.',
+  'play.connecting': '연결 중…',
+  'play.confirmJoin': '확인하고 참여',
+  'play.cancel': '취소',
+  'play.screenSize': '화면 크기',
+  'play.controlsTitle': '게임 조작',
+  'play.netplayKeysHint': '온라인 대전에서는 각자 자신의 기기에 있는 플레이어 1 키를 사용합니다.',
+  'play.cancelled': '불러오기를 취소했습니다.',
+  'play.retry': '다시 불러오기',
+  'play.retryJoin': '다시 참여하기',
+  'play.saved': '저장했습니다.',
+  'play.localSaving': '저장 중…',
+  'play.uploading': '클라우드로 업로드 중…',
+  'play.cloudFailed': '클라우드 동기화에 실패했습니다.',
+  'play.tooLarge': '세이브가 너무 큽니다',
+  'play.theme': '모드',
+  'play.saveFailed': '저장하지 못했습니다. 다시 시도해 주세요.',
+  'play.loadFailed': '세이브를 불러오지 못했습니다. 다시 시도해 주세요.',
+  'play.leftRoom': '방에서 나갔습니다.',
+  'play.latency': '지연',
+  'play.measuringLatency': '측정 중…',
+  'play.downloading': 'ROM을 내려받는 중…',
+  'play.booting': '코어를 시작하는 중…',
+  'play.loadFail': '이 카트리지는 불러오지 못했습니다.',
+  'play.notFound': '그 게임을 찾을 수 없습니다.',
+  'play.fullscreen': '전체 화면',
+  'play.volume': '볼륨',
+  'play.edit': '편집',
+  'play.hint': 'Esc로 전체 화면을 나갑니다. 나머지 조작은 오른쪽에 있습니다.',
+  'play.leaveTitle': '게임 진행 중',
+  'play.leaveBody': '돌아가면 이번 플레이가 끝납니다 — 진행 상황은 자동 저장되지 않습니다.',
+  'play.leaveStay': '계속하기',
+  'play.leaveGo': '나가서 돌아가기',
+  'gamesPage.playOnline': '온라인 대전',
+
+  'keybind.title': '키 설정',
+  'keybind.open': '키 설정',
+  'keybind.close': '닫기',
+  'keybind.p1': '플레이어 1',
+  'keybind.p2': '플레이어 2',
+  'keybind.mine': '내 키',
+  'keybind.pressKey': '새 키를 누르세요…',
+  'keybind.btnStart': 'START',
+  'keybind.btnCoin': 'COIN',
+  'keybind.reset': '기본값으로 되돌리기',
+  'keybind.reload': '카트리지 다시 불러오기',
+  'keybind.reloading': '다시 불러오는 중…',
+  'keybind.unsupported': '이 키는 쓸 수 없습니다 — 다른 키를 시도하세요.',
+  'keybind.conflictSame':
+    '{pressed}은(는) 이미 {button} 버튼에 지정되어 있습니다 — 다른 키를 시도하세요.',
+  'keybind.conflictOther':
+    '{pressed}은(는) 이미 플레이어 {player}의 {button} 버튼에 지정되어 있습니다 — 다른 키를 시도하세요.',
+  'keybind.hint':
+    '키보드 배치는 카트리지를 넣을 때 한 번만 읽습니다 — 변경 사항을 적용하려면 카트리지를 다시 불러오세요. 두 플레이어가 같은 키를 함께 쓸 수는 없습니다.',
+  'keybind.soloHint':
+    '키보드 배치는 카트리지를 넣을 때 한 번만 읽습니다 — 변경 사항을 적용하려면 카트리지를 다시 불러오세요.',
+  'keybind.hostHint':
+    '당신은 호스트입니다. 플레이어 1은 본인의 키, 플레이어 2는 게스트 입력을 주입할 대상입니다. 같은 키로 두면 주입이 당신의 플레이어 1까지 움직입니다. 변경 후에는 카트리지를 다시 불러오세요.',
+  'keybind.guestHint':
+    '당신은 게스트이고 본인의 키 설정(플레이어 1 그룹)으로 즐깁니다 — 두 사람이 각자 자기 키보드 앞에 있으니 겹칠 일이 없습니다. 변경은 바로 적용되며 카트리지를 다시 불러올 필요가 없습니다.',
+  'keybind.guestLocalHint':
+    '당신은 게스트이고, 이 기기에서도 본인의 카트리지가 돌아가고 있습니다. 당신의 키는 플레이어 1 그룹입니다. 이 기기의 카트리지가 그 그룹을 읽으므로 변경 후에는 다시 불러와야 합니다. 호스트로 보내는 입력도 같은 그룹이며 그쪽은 즉시 적용됩니다.',
+
+  'games.open': '게임 라이브러리',
+  'games.title': '게임 라이브러리',
+  'games.close': '닫기',
+  'games.empty': '라이브러리가 비어 있습니다 — 아직 아무것도 올라오지 않았습니다',
+  'games.loading': '불러오는 중…',
+  'games.loadingRom': '{name} 불러오는 중…',
+  'games.cancel': '취소',
+  'games.failed': '게임 라이브러리를 불러오지 못했습니다',
+  'games.tabLibrary': '게임 라이브러리',
+  'games.tabHistory': '기록',
+  'games.historyEmpty': '아직 게임 라이브러리에서 불러온 적이 없습니다',
+  'games.historyLoad': '{name}\n클릭해서 다시 불러오기',
+  'games.tabFavorites': '즐겨찾기',
+  'games.favorite': '“{name}”을(를) 즐겨찾기에 추가',
+  'games.unfavorite': '“{name}”을(를) 즐겨찾기에서 빼기',
+  'games.favoritesEmpty': '즐겨찾기가 아직 없습니다 — 커버 왼쪽 위의 별을 누르면 추가됩니다.',
+  'games.favoritesSignInBefore': '로그인하면 즐겨찾기를 보관할 수 있습니다 — ',
+  'games.favoritesSignInLink': '로그인',
+  'games.favoritesSignInAfter': ' 하거나, 오른쪽 위 계정 버튼을 눌러 주세요.',
+
+  'user.title': '계정',
+  'user.close': '닫기',
+  'user.open': '계정 — 로그인 / 회원가입',
+  'user.openSignedIn': '계정: {name}',
+  'user.tabLogin': '로그인',
+  'user.tabRegister': '회원가입',
+  'user.username': '사용자 이름',
+  'user.password': '비밀번호',
+  'user.usernameHint': '3~20자: 영문자, 숫자, _ - . 를 쓸 수 있습니다',
+  'user.emailLabel': '이메일',
+  'user.emailHint': '이메일로 가입합니다. 별칭 주소나 일회용 메일은 쓸 수 없습니다.',
+  'user.passwordHint': '6자 이상, 공백은 쓸 수 없습니다.',
+  'user.signIn': '로그인',
+  'user.signUp': '회원가입',
+  'user.signingIn': '로그인 중…',
+  'user.signingUp': '가입 중…',
+  'user.signOut': '로그아웃',
+  'user.signedInAs': '로그인됨: {name}',
+  'user.cloudHint':
+    '플레이 기록, 세이브, 즐겨찾기는 계정에 보관됩니다 — 온라인 라이브러리에서 게임을 열면 자동으로 동기화됩니다.',
+  'user.formLead':
+    '로그인하면 세이브, 플레이 기록, 즐겨찾기가 클라우드에 보관되어 언제 어디서나 바로 즐길 수 있습니다!',
+  'user.consentLogin': '로그인하면 다음에 동의한 것으로 봅니다:',
+  'user.consentRegister': '계정을 만들면 다음에 동의한 것으로 봅니다:',
+  'user.consentMiddle': ' 및 ',
+  'user.consentAfter': '.',
+  'user.error.failed': '문제가 발생했습니다 — 다시 시도해 주세요.',
+  'user.error.missingCredentials': '사용자 이름과 비밀번호를 입력하세요.',
+  'user.error.usernameInvalid': '사용자 이름에는 영문자, 숫자, _ - . 만 쓸 수 있습니다',
+  'user.error.usernameTooShort': '사용자 이름이 너무 짧습니다(3자 이상).',
+  'user.error.usernameTooLong': '사용자 이름이 너무 깁니다(20자 이하).',
+  'user.error.usernameTaken': '이미 사용 중인 이름입니다 — 다른 이름을 골라 주세요.',
+  'user.error.emailInvalid': '올바른 이메일 주소를 입력하세요.',
+  'user.error.emailAlias': '별칭 이메일(name+tag@… 또는 Gmail의 점 표기 등)은 쓸 수 없습니다.',
+  'user.error.emailTemp': '일회용 메일은 쓸 수 없습니다 — 평소 쓰는 메일함을 이용하세요.',
+  'user.error.passwordInvalid': '비밀번호를 입력하세요.',
+  'user.error.passwordTooShort': '비밀번호가 너무 짧습니다(6자 이상).',
+  'user.error.passwordTooLong': '비밀번호가 너무 깁니다(72자 이하).',
+  'user.error.passwordHasSpace': '비밀번호에 공백은 쓸 수 없습니다.',
+  'user.error.invalidCredentials': '사용자 이름 또는 비밀번호가 틀렸습니다.',
+  'user.error.banned': '이 계정은 정지되었습니다.',
+  'user.error.captchaRequired': '먼저 사람 확인을 완료하세요.',
+  'user.error.captchaFailed': '사람 확인에 실패했습니다 — 다시 시도해 주세요.',
+  'login.lead':
+    '로그인하면 세이브, 플레이 기록, 즐겨찾기가 클라우드에 보관되어 언제 어디서나 바로 즐길 수 있습니다! 계정이 없으신가요? 가입하세요.',
+
+  'account.title': '내 계정',
+  'account.loading': '불러오는 중…',
+  'account.failed': '문제가 발생했습니다 — 다시 시도해 주세요.',
+  'account.since': '{time}부터 이용',
+  'account.vipBadge': 'VIP',
+  'account.nonVipBadge': '일반',
+  'account.vipUntil': 'VIP 만료 {time}',
+  'account.vipExpired': 'VIP가 {time}에 만료되었습니다',
+  'account.tabFavorites': '즐겨찾기',
+  'account.tabHistory': '기록',
+  'account.tabSaves': '세이브',
+  'account.tabProfile': '프로필',
+  'account.tabPassword': '비밀번호',
+  'account.favoritesLoading': '즐겨찾기를 가져오는 중…',
+  'account.historyLoading': '기록을 가져오는 중…',
+  'account.savesLoading': '세이브를 가져오는 중…',
+  'account.favoritesEmpty':
+    '즐겨찾기가 아직 없습니다 — 방의 게임 라이브러리에서 커버 왼쪽 위의 별을 누르면 추가됩니다.',
+  'account.unfavorite': '“{name}”을(를) 즐겨찾기에서 빼기',
+  'account.historyEmpty':
+    '플레이 기록이 아직 없습니다 — 온라인 라이브러리에서 연 게임이 여기에 나옵니다.',
+  'account.historyCount': '최근 플레이한 게임 {count}개',
+  'account.historyDeleted': '기록에서 삭제했습니다.',
+  'account.clearHistory': '모두 지우기',
+  'account.confirmClearHistory': '정말 지울까요?',
+  'account.historyCleared': '기록을 지웠습니다.',
+  'account.historyHint':
+    '기록은 최근 플레이한 {max}개를 보관합니다 — 오래된 것을 다시 하면 맨 앞으로 올라옵니다.',
+  'account.savesEmpty': '아직 클라우드 세이브가 없습니다.',
+  'account.savesCount': '총 세이브 {count}개',
+  'account.savesGroupCount': '세이브 {count}개',
+  'account.viewGame': '《{name}》 보기',
+  'account.savesHint':
+    '세이브는 게임당 하나입니다 — 다시 저장하면 덮어씁니다. 기기와 클라우드 모두 같습니다.',
+  'account.saveDeleted': '세이브를 삭제했습니다.',
+  'account.clearSaves': '모두 지우기',
+  'account.confirmClearSaves': '정말 지울까요?',
+  'account.savesCleared': '세이브 {count}개를 지웠습니다.',
+  'account.delete': '삭제',
+  'account.confirmDelete': '정말 삭제할까요?',
+  'account.avatar': '프로필 이미지',
+  'account.chooseImage': '이미지 고르기',
+  'account.clearAvatar': '프로필 이미지 빼기',
+  'account.uploading': '업로드 중…',
+  'account.avatarSaved': '프로필 이미지를 바꿨습니다.',
+  'account.avatarCleared': '프로필 이미지를 뺐습니다.',
+  'account.avatarHint': 'PNG / JPEG / WebP / GIF, 2 MB까지.',
+  'account.gender': '성별',
+  'account.genderNone': '선택 안 함',
+  'account.genderMale': '남성',
+  'account.genderFemale': '여성',
+  'account.genderSaved': '저장했습니다.',
+  'account.genderHint': '선택 사항 — 본인에게만 보입니다.',
+  'account.passwordTabHint': '변경 후에도 이 기기의 로그인은 유지됩니다 — 다시 로그인할 필요가 없습니다.',
+  'account.password': '비밀번호',
+  'account.oldPassword': '현재 비밀번호',
+  'account.newPassword': '새 비밀번호',
+  'account.confirmPassword': '새 비밀번호 확인',
+  'account.savePassword': '비밀번호 변경',
+  'account.saving': '저장 중…',
+  'account.passwordSaved': '비밀번호를 변경했습니다.',
+  'account.passwordHint':
+    '변경 후에도 이 기기의 로그인은 유지됩니다. 다른 기기는 각자의 로그인 상태가 만료될 때까지 유지됩니다.',
+  'account.error.missingOld': '현재 비밀번호를 입력하세요.',
+  'account.error.wrongPassword': '현재 비밀번호가 틀렸습니다.',
+  'account.error.passwordTooShort': '새 비밀번호가 너무 짧습니다(6자 이상).',
+  'account.error.passwordTooLong': '새 비밀번호가 너무 깁니다(72자 이하).',
+  'account.error.passwordHasSpace': '새 비밀번호에 공백은 쓸 수 없습니다.',
+  'account.error.mismatch': '두 새 비밀번호가 서로 다릅니다.',
+  'account.error.avatarMissing': '먼저 이미지를 고르세요.',
+  'account.error.avatarTooLarge': '이 이미지는 너무 큽니다(2 MB까지).',
+  'account.error.avatarType': '지원하지 않는 형식입니다 — PNG / JPEG / WebP / GIF를 쓰세요.',
+
+  'games.filterAll': '전체',
+  'games.searchPlaceholder': '제목 / 개발사 / 시리즈로 검색',
+  'games.search': '검색',
+  'games.noMatch': '일치하는 게임이 없습니다.',
+  'games.prev': '이전',
+  'games.next': '다음',
+  /*
+   * 在线库的加载速度提示。**韩语同样是空串** —— 那句话是说给「文件在境外」的读者听的，
+   * 韩语界面下的读者多半就在境外，这条既没用又显得莫名其妙（理由与英文那份相同）。
+   */
+  'games.remoteSlow': '',
+
+  'note.text': '어릴 적 그 즐거움을 다시 한번.. \n 더 많은 숨은 요소가 기다리고 있어요!',
+  'note.open': '바닥에 놓인 종이 읽기',
+  'note.title': '한 장의 종이',
+  'note.close': '닫기',
+  'window.cycle': '창밖의 계절 바꾸기',
+  'painting.open': '그림 가까이 보기',
+  'painting.close': '닫기',
+  'painting.title.sunflowers': '해바라기',
+  'painting.artist.sunflowers': '빈센트 반 고흐',
+  'painting.title.monaLisa': '모나리자',
+  'painting.artist.monaLisa': '레오나르도 다 빈치',
+  'painting.title.starryNight': '별이 빛나는 밤',
+  'painting.artist.starryNight': '빈센트 반 고흐',
+  'painting.title.scream': '절규',
+  'painting.artist.scream': '에드바르 뭉크',
+  'painting.title.pearl': '진주 귀걸이를 한 소녀',
+  'painting.artist.pearl': '요하네스 베르메르',
+  'painting.title.wave': '가나가와 앞바다의 큰 파도',
+  'painting.artist.wave': '가쓰시카 호쿠사이',
+  'painting.title.unknown': '어디서 왔는지 모를 이름 없는 그림',
+  'painting.artist.unknown': '작자 미상',
+  'mp4.play': 'MP4 플레이어로 노래 재생',
+  'mp4.pause': 'MP4 플레이어 멈추기',
+  'cat.wand': '바닥의 고양이 장난감 흔들기',
+  'cat.ragdoll': '책 뒤에서 랙돌이 내다본다',
+  'cat.siamese': '책 뒤에서 샴이 내다본다',
+  'cat.tabby': '책 뒤에서 줄무늬 고양이가 내다본다',
+  'cat.orange': '책 뒤에서 치즈태비가 내다본다',
+  'cat.american': '책 뒤에서 아메리칸 숏헤어가 내다본다',
+  'cat.tuxedo': '책 뒤에서 턱시도 고양이가 내다본다',
+  'cat.calico': '책 뒤에서 삼색이가 내다본다',
+
+  'feedback.open': '바닥의 방명록 펼쳐 보기',
+  'feedback.title': '방명록',
+  'feedback.close': '닫기',
+  'feedback.placeholder': '한마디 남겨 주세요 — 건의 사항이나 추가했으면 하는 게임 등…',
+  'feedback.submit': '등록',
+  'feedback.submitting': '등록 중…',
+  'feedback.ok': '등록했습니다. 감사합니다!',
+  'feedback.required': '먼저 내용을 적어 주세요.',
+  'feedback.failed': '등록하지 못했습니다 — 다시 시도해 주세요.',
+  'feedback.loading': '불러오는 중…',
+  'feedback.empty': '아직 글이 없습니다 — 첫 글을 남겨 보세요.',
+  'feedback.retry': '다시 시도',
+  'feedback.prev': '이전',
+  'feedback.next': '다음',
+  'feedback.page': '{n} 페이지',
+  'feedback.resolved': '처리 완료',
+  'feedback.unresolved': '미처리',
+
+  'legal.privacy': '개인정보 처리방침',
+  'legal.terms': '이용약관',
+  'legal.updated': '최종 수정 {date}',
+  'legal.contact': '문의:',
+
+  'tour.title': '사용 안내',
+  'tour.skip': '건너뛰기',
+  'tour.back': '이전',
+  'tour.next': '다음',
+  'tour.done': '시작하기',
+  'tour.replay': '사용 안내 다시 보기',
+  'tour.screen.title': '먼저 게임 한 편',
+  'tour.screen.body':
+    'ROM 파일(.nes / .sfc / .gba / .md / .gb 등)이나 아케이드 .zip을 TV에 끌어다 놓으면 즐길 수 있습니다. 화면을 클릭해 파일을 골라도 됩니다.',
+  'tour.rail.title': '오른쪽 스위치 줄',
+  'tour.rail.body':
+    '위에서부터 세 그룹입니다. 겉모습: 테마(나이트 / 데이), 언어(中文 / English / 日本語 / 한국어), 전체 화면(전체 화면이 되는 것은 화면 자체), 심플 모드(벽, TV, 책상, 바닥만 남김), TV 크기(크게 / 보통 / 작게 3단계, 책상도 함께 길어집니다). 게임: 온라인 대전, 키 설정. 도움말: 키 설명, 방명록.',
+
+  'topLinks.label': '사이트 페이지',
+  'topLinks.games': '게임 목록',
+  'menu.open': '메뉴 열기',
+  'menu.close': '메뉴 닫기',
+  'menu.theme': '테마',
+  'menu.simple': '심플 모드',
+
+  'leave.title': '이 페이지를 나갈까요?',
+  'leave.bodyGame': '실행 중인 게임이 중단됩니다 — 진행 상황은 저장되지 않습니다.',
+  'leave.bodyNetplay': '온라인 대전 방에서 나가게 되고, 상대는 연결이 끊깁니다.',
+  'leave.stay': '머무르기',
+  'leave.confirm': '나가기',
+
+  'gamesPage.heading': '모든 게임',
+  'gamesPage.intro':
+    '온라인 라이브러리에 게임 {count}개가 있습니다 — NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등. 커버를 클릭하면 상세 정보를 보고 바로 즐길 수도 있습니다.',
+  'gamesPage.empty': '라이브러리가 아직 비어 있습니다.',
+  'gamesPage.introConsole':
+    '라이브러리에 {console} 게임 {count}개가 있습니다. 커버를 클릭하면 상세 정보를 보고 바로 즐길 수도 있습니다.',
+  'gamesPage.filterLabel': '기종으로 거르기',
+  'gamesPage.filterAll': '전체',
+  'gamesPage.consoleEmpty': '라이브러리에 아직 {console} 게임이 없습니다.',
+  'gamesPage.searchLabel': '게임 라이브러리 검색',
+  'gamesPage.searchPlaceholder': '제목 / 개발사 / 시리즈로 검색',
+  'gamesPage.searchSubmit': '검색',
+  'gamesPage.searchLoading': '검색 중…',
+  'gamesPage.searchClear': '검색 지우기',
+  'gamesPage.searchResults': '“{keyword}”에 맞는 게임은 {count}개입니다.',
+  'gamesPage.searchEmpty':
+    '“{keyword}”에 맞는 게임이 없습니다. 더 짧은 단어나 게임 제목으로 검색해 보세요.',
+  'gamesPage.prev': '이전',
+  'gamesPage.next': '다음',
+  'gamesPage.backHome': '방으로 돌아가기',
+  'gamesPage.backToGames': '모든 게임',
+  'common.back': '뒤로',
+  'common.home': '홈',
+  'gamesPage.play': '바로 즐기기',
+  'gamesPage.download': 'ROM 내려받기',
+  'gamesPage.share': '이 게임 공유',
+  'gamesPage.shareCopied': '복사했습니다',
+  'gamesPage.shareFailed': '복사하지 못했습니다',
+  'gamesPage.favorite': '즐겨찾기에 추가',
+  'gamesPage.unfavorite': '즐겨찾기됨',
+  'gamesPage.favoriteSignIn':
+    '즐겨찾기를 저장하려면 로그인이 필요합니다 — 방 오른쪽 위의 계정 버튼을 눌러 주세요.',
+  'gamesPage.favoriteFailed': '즐겨찾기를 바꾸지 못했습니다 — 다시 시도해 주세요.',
+  'gamesPage.favoriteCount': '즐겨찾기 {n}명',
+  'gamesPage.report': '문제 알리기',
+  'gamesPage.reportTitle': '문제 알리기',
+  'gamesPage.reportSubject': '대상: {name}',
+  'gamesPage.reportPlaceholder': '어떤 문제인가요? 예: 실행되지 않음, 화면이 깨짐, 소리가 안 남…',
+  'gamesPage.reportSubmit': '알리기',
+  'gamesPage.reportSubmitting': '보내는 중…',
+  'gamesPage.reportOk': '접수했습니다. 감사합니다!',
+  'gamesPage.reportRequired': '먼저 어떤 문제인지 적어 주세요.',
+  'gamesPage.reportFailed': '보내지 못했습니다 — 다시 시도해 주세요.',
+  'gamesPage.reportClose': '취소',
+
+  'comments.heading': '댓글',
+  'comments.count': '댓글 {n}개',
+  'comments.empty': '아직 댓글이 없습니다 — 첫 번째가 되어 보세요.',
+  'comments.placeholder': '이 게임에 대한 생각을 남겨 주세요…',
+  'comments.ratingLabel': '평점',
+  'comments.ratingStar': '5점 중 {n}점 주기',
+  'comments.ratingValue': '5점 중 {n}점',
+  'comments.ratingAverage': '{avg} / 5',
+  'comments.ratingRequired': '먼저 별점을 골라 주세요.',
+  'comments.submit': '댓글 등록',
+  'comments.submitting': '등록 중…',
+  'comments.ok': '등록했습니다. 맨 위에 표시됩니다.',
+  'comments.required': '내용을 적고 등록해 주세요.',
+  'comments.failed': '등록하지 못했습니다 — 다시 시도해 주세요.',
+  'comments.signInLead': '댓글을 쓰려면 로그인이 필요합니다.',
+  'comments.signIn': '로그인',
+  'comments.signInRequired': '등록하려면 다시 로그인해 주세요.',
+  'comments.loading': '댓글을 불러오는 중…',
+  'comments.retry': '다시 시도',
+  'comments.loadFailed': '댓글을 불러오지 못했습니다.',
+  'comments.loadMore': '더 보기',
+  'comments.delete': '삭제',
+  'comments.deleteConfirm': '삭제하기',
+  'comments.cancel': '취소',
+  'comments.deleted': '댓글을 삭제했습니다.',
+  'comments.deleteFailed': '삭제하지 못했습니다 — 다시 시도해 주세요.',
+
+  'gamesPage.field.console': '기종',
+  'gamesPage.field.year': '연도',
+  'gamesPage.field.developer': '개발사',
+  'gamesPage.field.series': '시리즈',
+  'gamesPage.field.language': '언어',
+
+  'notFound.title': '페이지를 찾을 수 없습니다',
+  'notFound.description':
+    '그 주소는 {site}에 없습니다. 링크를 확인하거나 방으로 돌아가 보세요.',
+  'gamesPage.notFoundTitle': '게임을 찾을 수 없습니다',
+  'gamesPage.notFound': '이 게임은 라이브러리에 없습니다(삭제되었을 수 있습니다).',
+  'gamesPage.fallbackDescription': '《{title}》은(는) {console} 게임입니다.',
+
+  'developersPage.heading': '개발사',
+  'developersPage.intro':
+    '라이브러리 게임을 만든 {count}곳의 개발사. 하나를 열면 그 회사의 모든 작품이 나옵니다.',
+  'developersPage.empty': '아직 등록된 개발사가 없습니다.',
+  'developersPage.gameCount': '게임 {count}개',
+  'developersPage.gamesHeading': '{name}의 게임',
+  'developersPage.gamesEmpty': '라이브러리에 아직 이 개발사의 게임이 없습니다.',
+  'developersPage.field.founded': '설립 연도',
+  'developersPage.backToDevelopers': '모든 개발사',
+  'developersPage.notFoundTitle': '개발사를 찾을 수 없습니다',
+  'developersPage.notFound': '이 개발사는 라이브러리에 없습니다(삭제되었을 수 있습니다).',
+
+  'consolesPage.heading': '기종',
+  'consolesPage.intro':
+    '라이브러리에 있는 기종 — 총 {count}개 게임. 하나를 열면 그 기종의 게임이 모두 나옵니다.',
+  'consolesPage.gameCount': '게임 {count}개',
+  'consolesPage.gamesHeading': '{name}의 게임',
+  'consolesPage.gamesEmpty': '라이브러리에 아직 이 기종의 게임이 없습니다.',
+  /* 언어로 걸렀는데 한 개도 없을 때(`{lang}`은 lib/rom-lang.ts의 언어명, 예: 한국어) */
+  'consolesPage.gamesEmptyLang': '이 기종에는 아직 {lang} 게임이 없습니다.',
+  'consolesPage.filterLangLabel': '언어로 필터',
+  'consolesPage.field.released': '출시 연도',
+  'consolesPage.backToConsoles': '모든 기종',
+  'consolesPage.notFoundTitle': '기종을 찾을 수 없습니다',
+  'consolesPage.notFound': '이 기종은 이 사이트의 대상이 아닙니다(또는 삭제되었습니다).',
+
+  'download.heading': 'ROM 내려받기',
+  'download.hint': '아래 버튼을 누르면 6초 뒤에 다운로드가 시작됩니다.',
+  'download.button': '다운로드 시작',
+  'download.waiting': '{seconds}초 후 시작…',
+  'download.started': '다운로드를 시작했습니다 — 브라우저 다운로드를 확인하세요.',
+  'download.rights': '사용할 권리가 있는 ROM 파일만 내려받으세요.',
+  'download.disclaimer':
+    '면책 조항: 이 페이지의 모든 ROM 파일은 제3자로부터 수집한 것이며 개인의 학습 및 백업 연구 목적으로만 사용됩니다. 저작권은 모두 원 권리자에게 있습니다. 권리를 침해하는 내용이 있으면 문의해 주시면 삭제하겠습니다.',
+
+  'deepLink.notFound': '그 게임을 찾을 수 없습니다 — 삭제되었을 수 있습니다.',
+  'deepLink.title': '게임 불러오는 중',
+  'deepLink.loading': 'ROM을 내려받는 중…',
+  'deepLink.hint': '다운로드가 끝나면 자동으로 시작됩니다',
+};

@@ -9,7 +9,7 @@ import {
   alternatesFor,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type MessageKey,
 } from '@/lib/i18n';
@@ -70,7 +70,7 @@ export async function generateMetadata({
       description,
       images: [{ url: game.imageUrl, alt: text.title }],
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
   };
 }

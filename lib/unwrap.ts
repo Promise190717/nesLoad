@@ -53,6 +53,9 @@ import { baseName, inflateEntry, readZipEntries } from './zip';
  *
  * ⚠️ 和那张表一样**不收 `.bin`**：它太泛（光盘镜像、各种裸 dump），
  * 收进来会让「装着一堆无关 bin 的压缩包」被当成 ROM 包拆开。
+ * PS1 那一条（2026-10-16 加）同理**只收单文件镜像**，`.cue` / `.m3u` / `.toc` / `.ccd`
+ * 这些**描述文件**不收 —— 它们是纯文本、指向同目录的 `.bin`，拆出来也没法跑
+ * （见 `lib/emulator.ts` 的 `unsupportedArchive`）。
  */
 const ROM_EXTENSIONS = new Set([
   // NES / Famicom
@@ -85,6 +88,13 @@ const ROM_EXTENSIONS = new Set([
   'wsc',
   'ngp',
   'ngc',
+  // PS1（2026-10-16 加）—— **只有单文件镜像**，理由见上面那段 ⚠️。
+  // 这条特别要紧：上游那批 PS1 的 7z 里装的就是 `.pbp` / `.iso`（实测
+  // `files.retrogamesnexus.com/games/roms/*.7z`），不加这一组那些包会被判成
+  // 「机种认不出」而报 `UnsupportedRomError`。
+  'pbp',
+  'iso',
+  'img',
 ]);
 
 /**

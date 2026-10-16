@@ -1,5 +1,5 @@
 /*
- * 机种库（consoles 表）的读写。
+ * 机种库（consoles 表 + console_texts 侧表）的读写。
  *
  * 和 developers.ts 同一套做法，但有一个本质区别（见 db/schema.sql 那段说明）：
  * **主键是 `console_type` 本身**（'nes' / 'snes' / 'gba' / 'arcade' 等十二个，代码里的
@@ -11,27 +11,28 @@
  * ⚠️ **本文件不许 import `./games.ts`**（单向依赖：games → consoles，和 developers 同一条规矩）。
  * 「某个机种有几款游戏」用一条相关子查询现算。
  *
- * ## 双语
+ * ## 多语言侧表（2026-10-16 加）
  *
- * `name` / `summary` / `description` 各有一份 `_en`（后缀 = 英文，无后缀 = 中文原文），
- * 取值规则和 developers 一致：`localizeConsole` 在渲染时选，英文空值回退中文。
+ * 文案（name / summary / description）不再平铺在 consoles 表里，而是搬到
+ * `console_texts` 侧表 —— 加语言 = 插数据，不动表结构。
+ * `consoles` 表里那 6 个旧列（name / name_en / summary / summary_en /
+ * description / description_en）保留、但只写不读，作为回滚退路。
  */
 
 import { cached } from './cache';
 import { query } from './d1';
-import type { Locale } from '@/lib/i18n';
+import {
+  EMPTY_ENTITY_TEXT,
+  isBlankEntityText,
+  localizeEntityTexts,
+  type EntityTexts,
+  type LocalizedEntityText,
+} from '@/lib/entity-text';
 
-/** DB 行（snake_case）。 */
+/** DB 行（snake_case，只含 consoles 表本身的列）。 */
 export interface ConsoleRow {
   console_type: string;
-  name: string;
-  /** 名字英文（可空）。空 = 英文站回退 `name`。 */
-  name_en: string | null;
   image_url: string | null;
-  summary: string | null;
-  summary_en: string | null;
-  description: string | null;
-  description_en: string | null;
   release_year: number | null;
   created_at: number;
 }
@@ -40,15 +41,9 @@ export interface ConsoleRow {
 export interface Console {
   /** 机种标识 = `ConsoleType`（十二个之一），同时也是 URL 里那段 */
   type: string;
-  name: string;
-  nameEn: string | null;
+  /** 多语言文案（从 console_texts 侧表读取） */
+  texts: EntityTexts;
   imageUrl: string | null;
-  /** 简介：一句话，列表卡片上用 */
-  summary: string | null;
-  summaryEn: string | null;
-  /** 介绍：整段，机种专题页正文用 */
-  description: string | null;
-  descriptionEn: string | null;
   releaseYear: number | null;
   createdAt: number;
   /**
@@ -59,79 +54,110 @@ export interface Console {
   gameCount: number;
 }
 
-/** `localizeConsole` 的产物：三条文案字段各选定一份语言。 */
-export interface LocalizedConsoleText {
-  name: string;
-  summary: string | null;
-  description: string | null;
+/** 按语言取一个机种的文案。纯函数，不碰数据库。 */
+export function localizeConsole(consoleObj: Console, locale: string): LocalizedEntityText {
+  return localizeEntityTexts(consoleObj.texts, locale);
 }
 
-/**
- * 按语言取一个机种的文案。**英文站空值回退中文**（和 `localizeDeveloper` 同一规则）。
- * 纯函数，不碰数据库。
- */
-export function localizeConsole(console: Console, locale: Locale): LocalizedConsoleText {
-  if (locale !== 'zh') {
-    return {
-      name: console.nameEn || console.name,
-      summary: console.summaryEn || console.summary,
-      description: console.descriptionEn || console.description,
-    };
-  }
-  return {
-    name: console.name,
-    summary: console.summary,
-    description: console.description,
-  };
-}
+/** 兼容旧名 —— 前台页面仍在 import 它。 */
+export type LocalizedConsoleText = LocalizedEntityText;
 
 /** 「名下有几款游戏」那条相关子查询 —— 列表和单条都要它，别两处各写一份。 */
 const GAME_COUNT = '(SELECT COUNT(*) FROM games g WHERE g.console_type = consoles.console_type) AS game_count';
 
-function toConsole(row: ConsoleRow & { game_count?: number }): Console {
+function toConsole(row: ConsoleRow & { game_count?: number }, texts: EntityTexts = {}): Console {
   return {
     type: row.console_type,
-    name: row.name,
-    nameEn: row.name_en,
+    texts,
     imageUrl: row.image_url,
-    summary: row.summary,
-    summaryEn: row.summary_en,
-    description: row.description,
-    descriptionEn: row.description_en,
     releaseYear: row.release_year,
     createdAt: row.created_at,
     gameCount: Number(row.game_count ?? 0),
   };
 }
 
+/** 批量加载机种文案。 */
+async function loadConsoleTexts(types: string[]): Promise<Map<string, EntityTexts>> {
+  if (types.length === 0) return new Map();
+  const placeholders = types.map(() => '?').join(',');
+  const rows = await query<{
+    console_type: string;
+    locale: string;
+    name: string | null;
+    summary: string | null;
+    description: string | null;
+  }>(
+    `SELECT console_type, locale, name, summary, description
+       FROM console_texts WHERE console_type IN (${placeholders})`,
+    types
+  );
+
+  const map = new Map<string, EntityTexts>();
+  for (const r of rows) {
+    if (!map.has(r.console_type)) map.set(r.console_type, {});
+    map.get(r.console_type)![r.locale as import('@/lib/game-text').ContentLocale] = {
+      name: r.name,
+      summary: r.summary,
+      description: r.description,
+    };
+  }
+  return map;
+}
+
+/** 写机种文案侧表。 */
+async function writeConsoleTexts(type: string, texts: EntityTexts): Promise<void> {
+  const now = Date.now();
+  for (const locale of ['zh', 'en', 'ja', 'ko'] as const) {
+    const t = texts[locale] ?? EMPTY_ENTITY_TEXT;
+    if (isBlankEntityText(t) && locale !== 'zh') continue;
+    await query(
+      `INSERT INTO console_texts (console_type, locale, name, summary, description, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(console_type, locale) DO UPDATE SET
+         name = excluded.name,
+         summary = excluded.summary,
+         description = excluded.description,
+         updated_at = excluded.updated_at`,
+      [type, locale, t.name, t.summary, t.description, now]
+    );
+  }
+}
+
 /**
- * 全部机种资料行（带名下游戏数）。**只返回库里有的行** —— 某个机种还没在后台填过资料时
+ * 全部机种资料行（带名下游戏数 + 侧表文案）。**只返回库里有的行** —— 某个机种还没在后台填过资料时
  * 它就不在结果里，调用方（前台页面 / 后台列表）负责对照 `CONSOLE_TYPES` 补默认值，
  * 本函数不知道枚举的存在（数据层不该反过来依赖组件）。
  */
 export async function listConsoles(): Promise<Console[]> {
   const rows = await query<ConsoleRow & { game_count: number }>(
-    `SELECT consoles.*, ${GAME_COUNT} FROM consoles ORDER BY consoles.created_at ASC, consoles.console_type ASC`
+    `SELECT console_type, image_url, release_year, created_at, ${GAME_COUNT}
+     FROM consoles ORDER BY created_at ASC, console_type ASC`
   );
-  return rows.map(toConsole);
+  const textsMap = await loadConsoleTexts(rows.map((r) => r.console_type));
+  return rows.map((r) => toConsole(r, textsMap.get(r.console_type) ?? {}));
 }
 
 /**
- * 机种列表页（`/consoles`）那份缓存的时长（秒）= 12 小时。
+ * 机种列表页（`/consoles`）那份缓存的时长（秒）= 24 小时。
  *
- * 缓存键里没有语言（`Console` 两种语言都带），用哪份由页面调 `localizeConsole` 决定。
+ * ⚠️ 2026-10-16 从 12 小时提到 24 小时（用户要求「所有列表页统一 24 小时」）。
+ *    代价：后台改完机种资料，这一页最多晚 24 小时才更新（机种专题页上机种自己的资料
+ *    **不缓存**，那边改完是立刻的）。
+ *
+ * 缓存键里没有语言（`Console` 的 `texts` 带了所有语言），用哪份由页面调 `localizeConsole` 决定。
  */
-export const CONSOLES_PAGE_REVALIDATE_SECONDS = 43200;
+export const CONSOLES_PAGE_REVALIDATE_SECONDS = 86400;
 
 /**
  * `listConsoles` 的缓存版 —— **只给前台用**；后台必须走未缓存的那份。
  *
  * ⚠️ 改完机种资料要把键尾的版本号 +1：缓存条目不随部署失效，不换键前台要等一个 TTL
- *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2，2026-10-15 补 nds 图升到 v3）。
+ *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2，2026-10-15 补 nds 图升到 v3，
+ *    2026-10-16 加多语言侧表升到 v4，同日补日韩文案升到 v5，同日加 ps1 机种升到 v6）。
  */
 export const listConsolesCached = cached(
   async () => listConsoles(),
-  ['consoles:list', 'v3'],
+  ['consoles:list', 'v6'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
 
@@ -148,27 +174,34 @@ export const listConsolesCached = cached(
  *    返回值里的 `gameCount`（恒为 0）。`listConsoles` 那边带缓存，子查询照留。
  */
 export async function getConsole(type: string): Promise<Console | null> {
-  const rows = await query<ConsoleRow>(`SELECT * FROM consoles WHERE console_type = ?`, [type]);
-  return rows[0] ? toConsole(rows[0]) : null;
+  const rows = await query<ConsoleRow>(
+    `SELECT console_type, image_url, release_year, created_at FROM consoles WHERE console_type = ?`,
+    [type]
+  );
+  if (!rows[0]) return null;
+  const texts = (await loadConsoleTexts([type])).get(type) ?? {};
+  return toConsole(rows[0], texts);
 }
 
 export interface ConsoleInput {
-  name: string;
-  nameEn: string | null;
+  texts: EntityTexts;
   /** 已经解析好的最终图片地址（没换图就是原来那张），不是上传上来的 File */
   imageUrl: string | null;
-  summary: string | null;
-  summaryEn: string | null;
-  description: string | null;
-  descriptionEn: string | null;
   releaseYear: number | null;
 }
 
 /**
  * 写入一个机种的资料。**存在就整行更新，不存在就插入**（upsert）——
  * 预填过的四个机种走 UPDATE 分支，所以后台「第一次保存」不会撞主键报错。
+ *
+ * 同时写：
+ *   1. consoles 表（旧列投影，只写不读，回滚退路）；
+ *   2. console_texts 侧表（真正被读取的来源）。
  */
 export async function upsertConsole(type: string, input: ConsoleInput): Promise<void> {
+  const zh = input.texts.zh ?? EMPTY_ENTITY_TEXT;
+  const en = input.texts.en ?? EMPTY_ENTITY_TEXT;
+
   await query(
     `INSERT INTO consoles
        (console_type, name, name_en, image_url, summary, summary_en,
@@ -185,17 +218,19 @@ export async function upsertConsole(type: string, input: ConsoleInput): Promise<
        release_year = excluded.release_year`,
     [
       type,
-      input.name,
-      input.nameEn,
+      zh.name ?? '',
+      en.name,
       input.imageUrl,
-      input.summary,
-      input.summaryEn,
-      input.description,
-      input.descriptionEn,
+      zh.summary,
+      en.summary,
+      zh.description,
+      en.description,
       input.releaseYear,
       Date.now(),
     ]
   );
+
+  await writeConsoleTexts(type, input.texts);
 }
 
 /**
@@ -207,6 +242,7 @@ export async function upsertConsole(type: string, input: ConsoleInput): Promise<
  */
 export async function deleteConsole(type: string): Promise<void> {
   await query('DELETE FROM consoles WHERE console_type = ?', [type]);
+  await query('DELETE FROM console_texts WHERE console_type = ?', [type]);
 }
 
 /**

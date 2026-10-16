@@ -61,14 +61,23 @@ const TONE_CLASS: Record<LogTone, string> = {
  *    页码超出范围仍回 HTTP 200 + 0 条（NDS 分类 21 页 / 372 款，第 22 页起 0 条）。
  *    读列表**报错**也算终止 —— 不能把错误当末页一直往下撞。
  *
- * ⚠️ **规模警告**：一个机种整类就是几百款 × 最多 4 种语言 = 上千条记录、上千次 ROM 下载。
- *    所以给了「最多页数」（留空 = 全部）和「停止」，别一上来就整类跑。
+ * ⚠️ **规模警告**：一个机种整类就是几百款 × 最多 4 种语言 = 上千条记录。
+ *    所以「保存 ROM」**默认不勾**（只存源站地址、不下载字节），另外「停止」随时能按。
+ *    ⚠️ 2026-10-16：「最多页数」已按用户要求**去掉** —— 一律爬到最后一页。
+ *
+ * ⚠️ **2026-10-16 起每款要抓 4 个上游页面**（zh / en / ja / ko 各一次，服务端并行）——
+ *    四语言文案全靠它（原来只抓「主语言 + 另一种」两次，所以上游请求数翻了一倍）。
+ *    并发上限仍是 5 款，但每款打 4 个页面，撞上游限流的机会变大了；
+ *    真被限流（抓取报 502）就调小并发，别硬撞。
  */
 export default function AdminAutoCrawl({ onImported }: { onImported: () => void }) {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
-  /** 最多爬几页（留空 = 不限制，一直爬到最后一页）。 */
-  const [maxPages, setMaxPages] = useState('');
+  /**
+   * 要不要把 ROM 存进本站 R2。**默认否**（2026-10-16 用户要求）——
+   * 只把上游地址入库、前台回源取：省 R2 存储，也省掉每款几 MB 的下载。
+   */
+  const [saveRom, setSaveRom] = useState(false);
 
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
@@ -147,7 +156,7 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
 
   const reset = useCallback(() => {
     setUrl('');
-    setMaxPages('');
+    setSaveRom(false);
     setLogs([]);
     setLineCount(0);
     setPage(0);
@@ -199,9 +208,6 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
     setGamesSeen(0);
     setStat({ ok: 0, skip: 0, fail: 0 });
 
-    const parsedLimit = Number.parseInt(maxPages, 10);
-    const pageLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : Infinity;
-
     timerRef.current = window.setInterval(flushLogs, FLUSH_MS);
 
     const startedAt = Date.now();
@@ -212,15 +218,10 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
     const totals = { ok: 0, skip: 0, fail: 0 };
     let pages = 0;
     let games = 0;
-    let hitPageLimit = false;
 
     try {
       for (let current = 1; ; current += 1) {
         if (stopRef.current) break;
-        if (current > pageLimit) {
-          hitPageLimit = true;
-          break;
-        }
 
         let list: ListResult;
         try {
@@ -270,6 +271,7 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
             await importGame(fresh[index], {
               fallbackConsole: list.consoleType,
               developerIds,
+              saveRom,
               shouldStop: () => stopRef.current,
               // 每个语言版本开始 / 结束各一行 —— 「当前爬的是什么、结果如何」都在这儿
               onEvent: (event) => {
@@ -316,7 +318,6 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
         'head'
       );
       pushLog(`耗时 ${seconds} 秒。`, 'head');
-      if (hitPageLimit) pushLog(`到了页数上限（${pageLimit} 页），先停。`, 'info');
       flushLogs();
 
       setRunning(false);
@@ -345,7 +346,9 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
           <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 max-h-[85vh] w-full max-w-[720px] overflow-y-auto p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">{'自动爬取分类页'}</h2>
 
-            <p className="mb-2 text-[12px] text-ink-500">{'粘贴一个分类页地址。它会一页页爬到最后一页，每页 5 款并发；一款有几种语言版本就导几条（中 / 英 / 日 / 韩）。下面那个控制台每个语言版本打一行。'}</p>
+            <p className="mb-3 text-[12px] leading-[1.7] text-ink-500">
+              {'粘贴一个分类页地址 —— 它会一页页爬到最后一页（每页 5 款并发）。一款有几种语言版本就导几条（中 / 英 / 日 / 韩），下面的控制台每个语言版本打一行。'}
+            </p>
 
             {/* 输入框与按钮**不进 form** —— 在里头按回车不该顺手把别的提交了 */}
             <input
@@ -362,16 +365,21 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
               className={`${FIELD_CLASS} w-full`}
             />
 
-            <label className="mt-2 flex items-center gap-2 text-[12px] text-ink-400">
-              {'最多页数'}
+            {/* 默认**不勾**（2026-10-16 用户要求）：只存源站地址，前台回源取 */}
+            <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px] text-ink-200">
               <input
-                value={maxPages}
-                onChange={(e) => setMaxPages(e.target.value)}
-                inputMode="numeric"
+                type="checkbox"
+                checked={saveRom}
+                onChange={(e) => setSaveRom(e.target.checked)}
                 disabled={running}
-                className={`${FIELD_CLASS} w-[72px]`}
+                className="mt-[2px] h-[13px] w-[13px] shrink-0 accent-accent disabled:cursor-not-allowed"
               />
-              <span className="text-ink-500">{'留空 = 一直爬到最后一页。'}</span>
+              <span className="min-w-0">
+                <span className="block">{'保存 ROM 到本站'}</span>
+                <span className="mt-0.5 block text-[11px] leading-[1.5] text-ink-500">
+                  {'不勾 = 只存源站下载地址，前台回源取（不占本站存储，也不下载）'}
+                </span>
+              </span>
             </label>
 
             {(running || page > 0) && (
@@ -404,7 +412,9 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
                 className="h-[260px] overflow-y-auto border border-ink-700 bg-ink-900 p-2 font-mono text-[11px] leading-[1.6]"
               >
                 {logs.length === 0 ? (
-                  <p className="text-ink-600">—</p>
+                  <p className="flex h-full items-center justify-center text-ink-600">
+                    {'等待开始…'}
+                  </p>
                 ) : (
                   logs.map((line) => (
                     <p

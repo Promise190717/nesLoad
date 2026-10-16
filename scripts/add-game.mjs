@@ -21,6 +21,19 @@
  * ⚠️ 只增不删：全程只有 INSERT，没有任何 UPDATE / DELETE / DROP。
  * ⚠️ 需要 R2_* 与 CF_* 环境变量（同 .env.example）。没配就直接报错退出。
  *
+ * ⚠️ **2026-10-16：文案搬进了 `game_texts` 侧表**（`games` 上那几列变成只写不读的投影）。
+ *    所以下面写 D1 那一步是**两条 INSERT**：`games`（元数据 + 投影列）+ `game_texts`
+ *    （中英两份文案，**这才是前台读的**）。少写后者的话，前台会看到一条没有名字的游戏。
+ *    规则与后台那条路一致（见 lib/server/games.ts 的 withDeveloper）：厂名按
+ *    `developer_id` 反查后写进每一份文案。
+ *
+ * ⚠️ **同日（2026-10-16）文案又改挂 `group_key`**：一行 `games` 是**一盘 ROM**，
+ *    同一款游戏的中 / 英 / 日 / 韩四个版本是四行，而文案四行共享同一份 —— 所以 `games`
+ *    里多了一列 `group_key`（同款那几行共用一个值），`game_texts` 挂它而不是 `game_id`。
+ *    这个脚本会先按「中文标题 + 机种 + 开发商」反查同款（判据与 lib/server/games.ts 的
+ *    `findGameGroup()` 刻意一致，改一处要改两处）—— 于是「先录英文版、过两天再录中文版」
+ *    会归到同一款上、共用一份文案，而不是各存一份。
+ *
  * 当前内联的元数据是从 https://retrogamesnexus.com/zh/games/castlevania-aria-of-sorrow
  * 爬下来的（英文页 /en/games/... 用来补 *_en）。要录别的游戏，改下面 GAME 这个常量即可。
  */
@@ -237,7 +250,8 @@ if (dryRun) {
   if (developerIsNew) console.log(`  INSERT INTO developers (${developer.name})`);
   console.log(`  PUT ${R2_BUCKET}/${imageKey}`);
   console.log(`  PUT ${R2_BUCKET}/${romKey}`);
-  console.log('  INSERT INTO games (...) VALUES (...)');
+  console.log('  INSERT INTO games (…, group_key, …) VALUES (…)');
+  console.log('  INSERT INTO game_texts (group_key, locale, …) VALUES (…)（中英各一份）');
   process.exit(0);
 }
 
@@ -261,11 +275,43 @@ await uploadObject(romKey, romBuf, 'application/octet-stream');
 console.log('已上传封面与 ROM 到 R2。');
 
 // 4) 最后写 D1
+const now = Date.now();
+
+/*
+ * 同款聚合键（2026-10-16）—— **必须在写 games 之前算**：反查是按中文标题找的，
+ * 这一行自己插进去之后再查就会命中自己。
+ *
+ * 判据与 lib/server/games.ts 的 findGameGroup() 是同一套（改一处要改两处）：
+ * 中文标题（忽略 ASCII 大小写）+ 机种 + 开发商。开发商那一维：有外键就比外键、
+ * 没有就要求对方也「没有」（空串这种历史脏数据也算没有）。
+ * 查到就复用那一款的 group_key，查不到才新开一个 —— 于是「同一款录第二遍」会归到一款上。
+ */
+const groupKey =
+  (
+    await d1(
+      `SELECT COALESCE(g.group_key, g.id) AS group_key
+         FROM games g
+         JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id) AND t.locale = 'zh'
+        WHERE t.title COLLATE NOCASE = ?
+          AND g.console_type = ?
+          AND ${developer.id ? 'g.developer_id = ?' : "(g.developer_id IS NULL OR g.developer_id = '')"}
+        LIMIT 1`,
+      developer.id
+        ? [GAME.title.trim(), GAME.consoleType, developer.id]
+        : [GAME.title.trim(), GAME.consoleType]
+    )
+  )[0]?.group_key ?? randomUUID();
+
+/*
+ * ① games —— 元数据 + 中英两份的**投影列**（`title` 那列是 NOT NULL，本来也必须写；
+ *    其余 `_en` 列现在只写不读，留着是回滚退路，见 lib/server/games.ts 的文件头）。
+ */
 await d1(
   `INSERT INTO games
-     (id, title, title_en, image_url, rom_url, rom_name, console_type, language, series, series_en,
-      year, developer, developer_en, developer_id, description, description_en, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, title, title_en, image_url, rom_url, rom_name, console_type, language, group_key,
+      series, series_en, year, developer, developer_en, developer_id, description, description_en,
+      created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   [
     id,
     GAME.title,
@@ -275,6 +321,7 @@ await d1(
     romName,
     GAME.consoleType,
     GAME.language,
+    groupKey,
     GAME.series,
     GAME.seriesEn,
     GAME.year,
@@ -283,9 +330,36 @@ await d1(
     developer.id,
     GAME.description,
     GAME.descriptionEn,
-    Date.now(),
+    now,
   ]
 );
+
+/*
+ * ② game_texts —— **前台真正读的那一份**（2026-10-16 加；同日改挂 `group_key`）。
+ *    中文原文一定建；英文那份只在有内容时才建（全空的英文行没有意义）。
+ *    ⚠️ 第一个参数是 `groupKey` 而**不是 `id`** —— 同款的几行共用这一份，别写成 id。
+ */
+const zhText = [groupKey, 'zh', GAME.title, GAME.series ?? null, developer.name ?? null, GAME.description ?? null, now];
+await d1(
+  `INSERT INTO game_texts (group_key, locale, title, series, developer, description, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?)
+   ON CONFLICT(group_key, locale) DO UPDATE SET
+     title = excluded.title, series = excluded.series, developer = excluded.developer,
+     description = excluded.description, updated_at = excluded.updated_at`,
+  zhText
+);
+
+const enText = [groupKey, 'en', GAME.titleEn ?? null, GAME.seriesEn ?? null, developer.nameEn ?? null, GAME.descriptionEn ?? null, now];
+if (enText.slice(2, 6).some((value) => value !== null && String(value).trim() !== '')) {
+  await d1(
+    `INSERT INTO game_texts (group_key, locale, title, series, developer, description, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(group_key, locale) DO UPDATE SET
+       title = excluded.title, series = excluded.series, developer = excluded.developer,
+       description = excluded.description, updated_at = excluded.updated_at`,
+    enText
+  );
+}
 
 console.log(`✅ 已录入：${GAME.title}`);
 console.log(`   封面：${publicUrl(imageKey)}`);

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useState, type FormEvent } from 'react';
 import { validateEmail } from '@/lib/email';
+import type { Locale } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 import TurnstileWidget from './TurnstileWidget';
 
@@ -83,6 +84,24 @@ const CONSENT_LINK_CLASS =
  */
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
 const CAPTCHA_ENABLED = TURNSTILE_SITE_KEY !== '';
+
+/**
+ * 人机验证框的语言 —— **Cloudflare Turnstile 自己那套码**，不是我们的 `Locale`。
+ *
+ * 它只认这几个（小写、连字符写法），所以不能直接拿 `locale` 拼；也不能用
+ * `lib/i18n.ts` 的 `dateLocale()` / `htmlLang()` —— 那两个是给 `Intl` / `hreflang` 用的，
+ * 恰好这里三种都不同名（`zh-cn` vs `zh-CN`）。
+ *
+ * ⚠️ 2026-10-16 加日韩时补了后两项。**加语言时这里要跟着补** ——
+ *    漏掉的话验证框会退回 Turnstile 的默认语言（英文），
+ *    中文用户当年就是这么发现的（见下面那段注释）。
+ */
+const TURNSTILE_LANG: Record<Locale, string> = {
+  en: 'en',
+  zh: 'zh-cn',
+  ja: 'ja',
+  ko: 'ko',
+};
 
 type Mode = 'login' | 'register';
 type Notice = { tone: 'ok' | 'error'; text: string };
@@ -326,12 +345,13 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
         {/*
           人机验证。只在配了站点密钥时才画（`NEXT_PUBLIC_TURNSTILE_SITE_KEY`，
           见本文件顶部）—— 本地开发没配密钥时这一块完全不出现，表单和以前一样。
-          语言跟着当前界面走，别让中文用户看到一个英文的验证框。
+          语言跟着当前界面走（`TURNSTILE_LANG`，它那套码和我们的 `Locale` 不同名），
+          别让中文用户看到一个英文的验证框。
         */}
         {CAPTCHA_ENABLED && (
           <TurnstileWidget
             siteKey={TURNSTILE_SITE_KEY}
-            language={locale === 'zh' ? 'zh-cn' : 'en'}
+            language={TURNSTILE_LANG[locale]}
             onToken={setCaptchaToken}
             onExpire={() => setCaptchaToken('')}
             resetSignal={captchaReset}

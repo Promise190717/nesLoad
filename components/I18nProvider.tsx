@@ -8,7 +8,6 @@ import {
   SITE_NAME,
   htmlLang,
   localePath,
-  otherLocale,
   splitLocalePath,
   translate,
   type Locale,
@@ -20,10 +19,15 @@ interface I18nValue {
   t: Translate;
   /** 给站内路径加语言前缀（`/games` → `/zh/games`）。**站内 `<Link>` 一律走它。** */
   href: (path: string) => string;
-  /** 另一种语言 —— 语言切换那颗钮要显示的就是它。 */
-  altLocale: Locale;
-  /** 当前页面的另一种语言地址（含 query）。语言切换那颗钮的 `href`。 */
-  altHref: string;
+  /**
+   * **当前页面在指定语言下的地址**（含 query）—— 语言切换器每一行、提示弹窗的
+   * 切换钮都走它。
+   *
+   * ⚠️ 2026-10-16 之前这里暴露的是 `altLocale` + `altHref`（「另一种语言」和
+   *    「另一种语言的地址」），那只在两种语言时成立。四种语言下「另一种」不再唯一，
+   *    所以改成这个**按语言现算**的函数 —— 调用点全都得自己说是要哪一种。
+   */
+  hrefIn: (next: Locale) => string;
   /** 记住用户的选择（写 cookie）。**不导航** —— 导航由调用方的 `<Link>` 负责。 */
   rememberLocale: (next: Locale) => void;
 }
@@ -89,29 +93,28 @@ export function I18nProvider({
       translate(locale, key, { site: SITE_NAME[locale], ...vars });
 
     /*
-     * 另一种语言的当前页地址。
+     * 当前页面在**指定语言**下的地址（含 query）。
      *
-     * `splitLocalePath(pathname).path` 先把可能存在的 `/zh` 剥掉 —— 不剥的话
+     * `splitLocalePath(pathname).path` 先把可能存在的语言前缀剥掉 —— 不剥的话
      * 从 `/zh/games` 切英文会算出 `/en/zh/games`。
      *
-     * query 要带上：房间那页的深链是 `/?id=<游戏>`（见 app/[locale]/games/[id]/page.tsx），
-     * 丢掉它，用户在中文页切一下英文就会从「正在载入那款游戏」退回一间空屋子。
+     * query 要带上：房间那页的深链是 `/room?id=<游戏>`，丢掉它，用户在中文页
+     * 切一下语言就会从「正在载入那款游戏」退回一间空屋子。
      *
-     * 后台不参与（它没有第二种语言的地址），`altHref` 退回当前地址 ——
+     * 后台不参与（它没有别的语言的地址），退回当前地址 ——
      * 后台界面里也没有语言切换入口，这个值只是为了让类型完整。
      */
-    const altLocale: Locale = otherLocale(locale);
-    const query = searchParams.toString();
-    const altHref = admin
-      ? pathname
-      : localePath(altLocale, splitLocalePath(pathname).path) + (query ? `?${query}` : '');
+    const hrefIn = (next: Locale) => {
+      if (admin) return pathname;
+      const query = searchParams.toString();
+      return localePath(next, splitLocalePath(pathname).path) + (query ? `?${query}` : '');
+    };
 
     return {
       locale,
       t,
       href: (path) => localePath(locale, path),
-      altLocale,
-      altHref,
+      hrefIn,
       rememberLocale,
     };
   }, [locale, pathname, searchParams, rememberLocale]);

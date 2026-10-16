@@ -1,8 +1,8 @@
 # nesLoad
 
-在浏览器里运行的复古游戏机，目前有**十二个机种**：NES / SFC / GB / GBC / GBA / 世嘉 MD / Game Gear / Master System / 世嘉 32X / WonderSwan / Neo Geo Pocket / 街机。界面是一台极简像素风的电视机：把 ROM 文件拖到机身上（或点机身下沿的插卡口），卡带就会插进去开始运行。
+在浏览器里运行的复古游戏机，目前有**十四个机种**：NES / SFC / GB / GBC / GBA / NDS / 世嘉 MD / Game Gear / Master System / 世嘉 32X / WonderSwan / Neo Geo Pocket / 索尼 PlayStation（PS1）/ 街机。界面是一台极简像素风的电视机：把 ROM 文件拖到机身上（或点机身下沿的插卡口），卡带就会插进去开始运行。
 
-模拟内核基于 [Nostalgist](https://nostalgist.js.org/)（封装 RetroArch 的 WASM 构建）。**只有 NES / SFC 的核心在运行时从 CDN 加载**；其余十个机种（GBA / GB / GBC / MD / GG / SMS / 32X / WS / NGP / 街机）的核心都随仓库放在 `public/cores/`，从本站加载、不走 CDN（一条理由：jsdelivr 在国内经常连不上或被限速，拉不动就表现成「拖进去毫无反应」；**不是因为 CDN 上没有这些包**，它们都在）。**仓库内不包含任何 ROM**——`public/cores/` 里是开源的 WASM 核心构建，不是 ROM。
+模拟内核基于 [Nostalgist](https://nostalgist.js.org/)（封装 RetroArch 的 WASM 构建）。**只有 NES / SFC 的核心在运行时从 CDN 加载**；其余十二个机种（GBA / GB / GBC / NDS / MD / GG / SMS / 32X / WS / NGP / PS1 / 街机）的核心都随仓库放在 `public/cores/`，从本站加载、不走 CDN（一条理由：jsdelivr 在国内经常连不上或被限速，拉不动就表现成「拖进去毫无反应」；**不是因为 CDN 上没有这些包**，它们都在）。**仓库内不包含任何 ROM**——`public/cores/` 里是开源的 WASM 核心构建，不是 ROM。
 
 ## 技术栈
 
@@ -27,7 +27,7 @@ pnpm dev
 
 界面只有两个东西：**电视机**和机身下沿的**插卡口**。载入游戏有三种方式：
 
-1. 把 `.nes` / `.sfc` / `.gba` / 街机 `.zip` 文件直接拖到电视机上（街机的 `neogeo.zip` **站点已经自带一份**，不用你操心；想自己换一份也走这条路，见「支持的格式」）；
+1. 把 `.nes` / `.sfc` / `.gba` / 街机 `.zip` / PS1 的 `.pbp` `.iso` 文件直接拖到电视机上（街机的 `neogeo.zip` **站点已经自带一份**，不用你操心；PS1 的 BIOS 站点**不带**，但核心找不到会回落 HLE、游戏照跑，想要更好兼容性就自己拖一份 SCPH1001.BIN 进来；两份都走这条路，见「支持的格式」）；
 2. 点机身下沿的插卡口，在文件选择框里挑；
 3. 点右上角的**游戏库**图标，从弹窗里挑：在线库直接下载，「历史」里是从游戏库点开过的那批（点一下重新下一遍）。
 
@@ -104,15 +104,35 @@ pnpm dev
 
 **2P**：方向键移动，小键盘 `1` `2` `4` `5` `7` `8` = A B C X Y Z（三行各取左边两个，凑成一块 2×3），`Del` = 投币，小键盘 `0` = 开始
 
-> 两套按键刻意不重叠，避免双人同屏时互相抢键。
+**上面那套是「通用」默认。** 有两台机器各有自己的一套（`defaultBindingsFor`）：
+
+- **PS1**（2026-10-16 加）：`W`/`A`/`S`/`D` 移动，`I` = △，`J` = □，`K` = ×，`L` = ○，`U` = L1，`O` = R1，`Q` = L2，`E` = R2，`B` = SELECT，`Enter` = START。`IJKL` 在键盘上正好是个小十字（`I` 正在 `K` 正上方），和手柄的 △□×○ 菱形对得上 —— 语义上也是 △=上 / □=左 / ×=下 / ○=右，和十字键同构。⚠️ 通用那套套到 PS1 上是**歪的**（△ 会落在 `J` 正上方），所以单开了一套。
+- **NDS**（2026-10-15 加）：方向键移动，`Z`/`X` = A/B，`A`/`S` = X/Y，`Q`/`E` = L/R，`R`/`W` = L2/R2，`Shift` = SELECT，`Enter` = START（左手管四颗面键和两排肩键，右手整只交给方向键）。
+
+> 上面那两套按键刻意不重叠，避免双人同屏时互相抢键。机种专属那几套的 P2 也照这条规矩（PS1 直接沿用通用 P2）。
+>
+> ⚠️ **改键位是全局的**：本地那份（`nesload:keybindings`）**全机种共用一份**，所以在 PS1 上改过一个键之后，再去玩 NES 用的也是那份。只有「一个键都没动过」的人才会按机种拿到上面那套专属默认（判据是 `loadBindings()` 的 `LEGACY_DEFAULTS`）。
 >
 > 右侧那排开关里的**按键说明**（问号那个）点开是个弹窗，里面的键位是**从当前键位现算**的（`playerLegend()`），改完键位立刻跟着变 —— 它和按键面板读的是同一份数据，不会出现「说明说一套、面板显示另一套」。
 
 #### 自定义按键
 
-右上角的**键盘图标**打开按键面板：1P / 2P 两个标签页各列 12 个钮，点某一项进入捕获态（那一格会闪），按下新键即改绑，`Esc` 取消。单机双人和联机都吃这一套。底部两个按钮：**重载卡带**（见下）和**恢复默认**（两组一起回默认）。
+右上角的**键盘图标**打开按键面板：1P / 2P 两个标签页各列 12 个钮（**NDS / PS1 是 14 个** —— 它们多一排 `L2` / `R2`），点某一项进入捕获态（那一格会闪），按下新键即改绑，`Esc` 取消。单机双人和联机都吃这一套。底部两个按钮：**重载卡带**（见下）和**恢复默认**（两组一起回默认）。
 
-钮名走**街机叫法**：方向箭头 + `A B C`（下排）/ `X Y Z`（上排）+ `投币` / `开始`。内部仍对应 RetroArch retropad 的 `b/a/y/x/l/r/select/start`（`A→b`、`B→a`、`C→y`、`X→x`、`Y→l`、`Z→r`、`投币→select`、`开始→start`），这样一套面板同时盖住 NES / SFC / GBA / 街机四种机种。（⚠️ 面板标签是**街机视角**的固定命名：GBA 用的 `l` / `r` 两个肩键在面板上仍显示成 `Y` / `Z`，但掌机虚拟键和实际按键都按 GBA 的 L / R 走——见 `HandheldConsole` 的 `FACE_ROWS`。）
+钮名默认走**街机叫法**：方向箭头 + `A B C`（下排）/ `X Y Z`（上排）+ `投币` / `开始`。内部仍对应 RetroArch retropad 的 `b/a/y/x/l/r/select/start`（`A→b`、`B→a`、`C→y`、`X→x`、`Y→l`、`Z→r`、`投币→select`、`开始→start`）—— 一套面板就盖住 NES / SFC / GBA / 世嘉那几台 / 街机。
+
+**丝印和街机那套不一样的机种要单独登记**（`lib/keybindings.ts` 的 `CONSOLE_BUTTONS` + `CONSOLE_BUTTON_LABELS`，两张都是 `Partial`，漏了不报错、只是退回街机叫法）：
+
+| 机种 | 面键 | 肩键 | 开始 / 投币 |
+| --- | --- | --- | --- |
+| NDS | `A` / `B` / `X` / `Y` | `L` / `R` / `L2` / `R2` | `START` / `SELECT` |
+| PS1 | `△` / `○` / `×` / `□` | `L1` / `R1` / `L2` / `R2` | `START` / `SELECT` |
+
+⚠️ PS1 那四颗面键**不是按丝印顺序对齐的**，而是照 libretro 对 PS1 的标准映射：retropad `B→×`、`A→○`、`Y→□`、`X→△`（`pcsx_rearmed` 也是这一套）。所以面板上「×」落在 `b`、「○」落在 `a`、「□」落在 `y`、「△」落在 `x` —— 看着像打乱，其实是这套机器的标准。
+
+⚠️ **那四颗符号是「画」出来的，不是文字**（`components/PadGlyph.tsx`）：`×`(U+00D7) 是 Latin-1 的乘号、多数西文字体按 x-height 画得很小，而 `○`(U+25CB) / `□`(U+25A1) / `△`(U+25B3) 属几何图形区、只能掉到 CJK 兜底字体里当**全角**字画 —— 同一个 `font-size` 下必然一大三小（2026-10-16 用户报「圈叉三角正方形大小都不是统一的」）。所以这四个（含按键说明页脚那一行、机身面键、撞键提示）一律走 `PadGlyph` 换成**定尺矢量图形**，跟着 `font-size` 缩放；**别的钮名（`A` / `L1` / `SELECT` …）原样还是文字**。想调描边粗细只改 `PadGlyph.tsx` 里那一个 `strokeWidth`。
+
+> ⚠️ **PS1 还有 `L3` / `R3`（摇杆按下去）和类比摇杆，本站没有**：键位模型只有 14 个钮（`ButtonName`），画不出也绑不了这两颗；摇杆更是完全没建模（键盘 / 手柄的左摇杆推过阈值只当**方向键**用，见 `lib/gamepad.ts` 的 `STICK_THRESHOLD`）。绝大多数 PS1 游戏用十字键就能玩，但**必须用摇杆的那几款（《捉猴啦》这类）玩不了** —— 这是已知缺口，不是 bug。
 
 三条规矩：
 
@@ -153,7 +173,7 @@ pnpm dev
 
 它们是**独立路由**，不是房间里的浮层，理由和后台那几页一样：这两页要能被直接分享、被搜索引擎收录、被第三方（广告平台 / 应用商店审核之类）按一个固定地址检查。所以它们也进了 `sitemap.xml`（`app/sitemap.ts`）。
 
-文案在 `lib/legal.ts`（中英各一份，含**游戏 ROM 的版权声明**与侵权通知方式），版式在 `components/LegalPage.tsx`。那边**自成一套 i18n**（不经过 `lib/i18n.ts` 的 `MessageKey`，所以漏译不会报错）——改一节，两份都要动。
+文案在 `lib/legal.ts`（**中 / 英 / 日 / 韩各一份**，含**游戏 ROM 的版权声明**与侵权通知方式），版式在 `components/LegalPage.tsx`。那边**自成一套 i18n**（不经过 `lib/i18n.ts` 的 `MessageKey`，所以漏译不会报错）——改一节，四份都要动。
 
 版权 / 隐私的联系邮箱只在 `lib/legal.ts` 的 `SUPPORT_EMAIL` 定义一次，两份文档和页脚都读它。
 
@@ -174,7 +194,7 @@ pnpm dev
 - `/play` 的外壳是 `GamesShell`，为此给它加了两个可选 prop：`showHeader`（默认 `true`，`/play` 传 `false` —— 名字与资料在右列顶上，顶上再来个 `<h1>` 就重复了；h1 由 `PlayScene` 出一颗 sr-only 的）和 `fill`（默认 `false`，`/play` 传 `true` —— 内容 `flex-1` 吃满剩余高度，页脚因此压在视口最底）。**两个都只有 `/play` 在用**，别顺手给别的页打开。
 - ⚠️ **两页的 `?id=` 语义刻意不同**：`/room?id=` 进来自动下载并开玩；`/play?id=` **不自动载入** —— 用户要的是「先进房间设置，点开始才加载」，`?id=` 只把这一款摆在黑区里（游戏名 + 机种），等右侧按下「开始」才下 ROM。
 - **首页刻意不写 `generateMetadata`**：`/` 的标题 / 说明 / canonical 就是根布局那三样（`meta.title` / `meta.description` / `alternatesFor(locale, '/')`），首页的 `title.default` 本来就是给它准备的。子页面（`/room`、`/games`…）才各写各的。`/room` 有自己的一套（`seo.room.*` + `alternatesFor(locale, '/room')`），少了它就会被当成首页的重复内容。
-- 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 12 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 12 小时**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 已统一成 12 小时（列表页原来是 30 分钟）。⚠️ 此前这里写的「24 小时」是笔误 —— 代码里 `HOME_REVALIDATE_SECONDS = 43200` 一直是 12 小时。
+- 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 24 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 24 小时**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 就一直同步（列表页原来是 30 分钟），2026-10-16 又一起提到 24 小时。⚠️ `countGamesByConsoleCached`（各机种游戏数）**同时服务首页和 `/consoles` 列表页**（同一份缓存条目），所以「列表页 24 小时、首页仍 12 小时」这种拆法做不到 —— 首页跟着一起变是必然的，不是漏改。
 - ⚠️ **首页没有 `export const revalidate`，那不是漏写**：根布局（`app/layout.tsx`）要读 cookie / 请求头决定语言，整个应用因此走动态渲染 —— 页面级 `revalidate` 对路由缓存**不起作用**。首页真正在用的 Next 缓存是上面那三个 `unstable_cache`（数据层，「页-侧」缓存，不下沉到 `listGamesPage` / `countGamesByConsole`）。
 - 首页 Hero 里那个搜索框**宽度是 100%**（`w-full`，跟着外层 `max-w-5xl` 走）：它的左右边界和下面几个区块的网格对齐，不再是原来 `max-w-md` 居中窄条。
 - 首页 Hero 的入口（2026-10-15 定）：**「浏览全部游戏」**（`/games`，accent 实底的主按钮）＋**「加载本地 ROM」**（`/room`，描边次按钮）并排。右那颗是 2026-10-15 用户要求加的（键 `home.hero.play`，文案从「进入小屋」改过来），点进去就是屋里拖 / 选自己的 ROM —— 屋里那个**在线游戏库入口同日收掉了**（见 `components/ConsoleScene.tsx` 那颗钮的注释）。⚠️ 这颗钮的文案当天还改过一版：原先写的是「游玩本地 ROM」，动词换成「加载」是为了和屋里点进去第一眼看到的那句同一套说法（`screen.tapLoad` =「点击从本地加载」/ "CLICK TO LOAD A LOCAL ROM"）—— 按钮说什么，落点第一句就说什么。⚠️ 页脚里的「回到房间」全站已删（含首页这条），见下面页脚那一行。
@@ -232,12 +252,12 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`?page=N` 翻页（真 URL，爬虫顺得下去）。带搜索框（`?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **12 小时缓存**（见下）。 |
+| `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`?page=N` 翻页（真 URL，爬虫顺得下去）。带搜索框（`?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **24 小时缓存**（见下）。 |
 | `/games/[id]` | 单款游戏的资料页：封面、标题、机种 / 年份 / 开发者 / 系列 / 语言、说明，加**四颗**主按钮（2026-10-14 加的「联机游戏」见下）。带 `VideoGame` + `BreadcrumbList` 结构化数据。 |
 | `/games/[id]/download` | 下载页：点「开始下载」**等 6 秒**才真的开始下（用户要求）。**只有这一颗按钮**，没有别的下载入口。 |
 
 - 详情页动作区：第一层四颗实体钮 —— **开始游戏** → `/room?id=<id>`（回房间，唯一带强调色）、**联机游戏** → `/play?id=<id>`（2026-10-14 加，简洁开局页，见上）、**收藏**、**下载 ROM** → 下载页。第二层两枚无描边「图标 + 文字」链接：**分享游戏**（把这一页的地址复制进剪贴板，`components/ShareGameButton.tsx`）、**反馈问题**。除分享与反馈之外全是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走。
-- 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/games.ts` 的 `listGamesPageCached`），**TTL 12 小时**（2026-10-14 从 30 分钟拉长 —— 用户为压 D1 的 `rows_read` 额度拍板）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **房间的在线库弹窗（`/api/games`）2026-10-14 起也走同一套缓存**（在那之前它实时查库）；**后台列表（`/api/admin/games`）仍然走不缓存的 `listGamesPage`**，那边必须立刻看到刚上传的游戏。副作用：**后台上传的新游戏最多晚 12 小时才出现在列表页和在线库弹窗上**（后台自己那张列表不受影响）。
+- 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/games.ts` 的 `listGamesPageCached`），**TTL 24 小时**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压 D1 的 `rows_read` 额度拍板；2026-10-16 提到 24 小时）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **房间的在线库弹窗（`/api/games`）2026-10-14 起也走同一套缓存**（在那之前它实时查库）；**后台列表（`/api/admin/games`）仍然走不缓存的 `listGamesPage`**，那边必须立刻看到刚上传的游戏。副作用：**后台上传的新游戏最多晚 24 小时才出现在列表页和在线库弹窗上**（后台自己那张列表不受影响）。
 - 详情页 / 下载页的 meta description 会**把后台填的那句「说明」放在最前面**（截到 100 字），后面接一句通用的「能玩、能下载」。没填说明就只用通用那句 —— **不编造**剧情 / 发行商那类信息。
 - 游戏不存在时两页都 `notFound()`，落到 `app/[locale]/games/[id]/not-found.tsx`（一页盖住两条路由），带 `noindex`。
 - 版式在 `components/GamesShell.tsx`（页头 + 返回 + 页脚互链，三页共用）；下载那颗按钮在 `components/RomDownloadGate.tsx`、分享那颗在 `components/ShareGameButton.tsx`（**这两个是这套页面里仅有的客户端组件**，其余整页留在服务端渲染）。
@@ -277,30 +297,38 @@ pnpm dev
 - 详情页原来的 `developer` 文本列**保留**（老数据、以及列表页 meta 描述里那个「年份 · 开发商 · 机种」仍读它），迁移脚本 `scripts/add-developers.mjs` 把库里 20 个不同的 `developer` 取值写进 `developers` 表并回填 `games.developer_id`（幂等、只补空的、可重复跑）。⚠️ 有的老数据本身填反了（如「西游释厄传」「冒险岛」其实是游戏名），脚本原样照搬，没做清洗。
 - 后台 `app/admin/(panel)/developers` 新增一个 tab 管开发商（增删改、logo 上传走 R2、删除前检查是否被游戏占用）；游戏表单里「开发商」从文本输入改成了**下拉**（选项来自 `/api/admin/developers/options`）。
 - 开发商页面也进 `sitemap.xml`，详情页 `notFound()` 落到 `app/[locale]/developers/[id]/not-found.tsx`（带 noindex）。
-- 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 12 小时**（代码里 `DEVELOPERS_PAGE_REVALIDATE_SECONDS = 43200`；此前这里写的「24 小时」是笔误）。**「总数」另有一层独立缓存**（`countDevelopersCached`，键里没有 offset）：翻多少页都只数一次全表（2026-10-14 加，和 games 那边同一套做法）。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚 12 小时才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
+- 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 24 小时**（2026-10-16 从 12 小时提上来；代码里 `DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400`）。**「总数」另有一层独立缓存**（`countDevelopersCached`，键里没有 offset）：翻多少页都只数一次全表（2026-10-14 加，和 games 那边同一套做法）。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚 24 小时才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
 
 ### 机种（公开页面）
 
 2026-10-14 加的**机种库**，用户要的是「机种专题页 + 机种下面的所有游戏」。结构和开发商那套同构，但有一个本质区别：
 
-- ⚠️ **`consoles` 表的主键是 `console_type` 本身**（`nes` / `snes` / `gb` / … / `arcade`，共十二个，见 `lib/consoles.ts` 的 `CONSOLE_TYPES`），不是 uuid —— 机种是代码里的枚举，加机种是改代码的事（要同步核心 / 卡带 / 筛选条好几处）。所以地址是好看的 `/consoles/nes`，而且 `games.console_type` 天生就是关联，不需要回填外键。
+- ⚠️ **`consoles` 表的主键是 `console_type` 本身**（`nes` / `snes` / `gb` / … / `arcade`，共十四个，见 `lib/consoles.ts` 的 `CONSOLE_TYPES`），不是 uuid —— 机种是代码里的枚举，加机种是改代码的事（要同步核心 / 卡带 / 筛选条好几处）。所以地址是好看的 `/consoles/nes`，而且 `games.console_type` 天生就是关联，不需要回填外键。
 - ⚠️ **这张表是机种「资料的扩展」，不是机种的「清单」**：某一行被删了（后台的「重置资料」），那个机种的游戏一根毫毛都不少，前台页面对照 `CONSOLE_TYPES` 退回内置默认（`CONSOLE_LABEL` 的丝印词）照常渲染 —— **机种专题页永远不会 404**（404 页只接「不在枚举里」的地址）。这也是后台**没有「名下有游戏不许删」拦截**的原因。
 
 | 路由 | 是什么 |
 | --- | --- |
 | `/consoles` | 机种列表：**卡片是按代码里的机种清单画出来的**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认；**按游戏数从多到少排**（2026-10-15 加，和首页「按机种浏览」同一口径；数量并列时保持 `CONSOLE_TYPES` 的固定次序，空机种垫底但不过滤）。 |
-| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，12 小时）。 |
+| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，24 小时），带**语种筛选**（`?lang=`，见下）。 |
 
+- **语种筛选**（2026-10-16 加，`app/[locale]/consoles/[id]/page.tsx`）：`?lang=<zh|en|ja|ko|all>`，筛的是 `games.language`（**游戏自己的语种**，不是界面语言）。
+  - 位置在「{机种} 上的游戏」标题下面、搜索框下面那条筛选条 —— 一排链接（每个语种一颗 + 一颗「全部」），版式与行为照抄 `/games` 的机种筛选条（当前那颗 accent 高亮 + `aria-current`）；**每颗后面挂这个机种下该语种的条数**（`countConsoleGamesByLanguageCached`，一条 `GROUP BY`、24 小时缓存）。
+  - ⚠️ **不写 `?lang=` 时默认 = 全部**（2026-10-16 从「按界面语言挑一份」改成「先给全部」：`/zh/consoles/nes` 先列出这个机种下所有语种的游戏）；所以「默认那一份」的地址就是**裸路径**，点「全部」那颗不会在地址里留下 `?lang=`（`?lang=all` 会被 307 收敛回裸地址）。对应地，「全部」那颗链接的 href 由 `languageParamOf` 拼（「全部」就给空串）。
+  - 两态写法：**「全部」⇒ 不写**、其余 ⇒ 短码本身。规范顺序 `?q=…&lang=…&page=N`；认不出的 `?lang=xxx`、重复参数、`?lang=`（空）、`?lang=all` 一律 307 到规范地址 —— 和 `/games` 的 `?console=xxx` / `?page=01` 同一条规矩。
+  - ⚠️ **切换语种 / 搜索 / 翻页必须互相带上彼此**（都走 `consoleHref`，搜索表单靠 hidden `lang`）：少了任何一处，筛着「日本語」搜一下或翻一页就掉回全部。
+  - ⚠️ 收录策略与 `/games` 相反：**带 `?lang=` 的那几份 `noindex, follow`**（只是同一份列表的子集，四个语种全收就是四份重复内容）；**默认那一份（裸地址，现在就是「全部」）照常收录**，hreflang 也只指裸地址那一份。
+  - 资料表里的「N 款游戏」始终是**这个机种的总数**（不筛语种），和「全部」那颗一致 —— 别改成跟着语种走。
 - 首页「按机种浏览」的卡片指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
 - 预填数据：`scripts/add-consoles.mjs`（**结构迁移 + 占位资料**：建表 + 给缺资料的机种补默认行，幂等、可反复跑；**加了新机种就跑它一遍**）+ `scripts/seed-consoles.mjs`（**一次性内容快照**：最早那四个机种的完整双语资料 + R2 机图，会**覆盖后台的人工编辑**，跑过就别再跑）。
+- 机图：放 `scripts/console-images/<机种>-pixel.png`，跑 `scripts/fill-console-images.mjs` 上传到 R2 `images/consoles/` 并回填 `image_url`（默认**只补 `image_url` 为空的行**，要覆盖加 `--force`）。规格 **1024×1024、透明底、扁平 2D 像素画、3/4 视角、内容约占 0.95 画布宽**（对齐 `snes` / `gba` / `nds` 那一支）。⚠️ **必须透明底**：机种卡片画在深色底上，不透明的图会显出一个方块 —— 库里 2026-10-14 那八张（gb / gbc / md / gg / sms / 32x / ws / ngp）就是浅灰底没抠的，属**既有欠账**。
 - 后台 `app/admin/(panel)/consoles` 一个 tab 管资料（**没有添加 / 搜索 / 翻页** —— 条目跟随代码里的机种清单，只有编辑与重置；接口 `PATCH /api/admin/consoles/[type]` 是 upsert，资料行不存在时顺带创建）。
 - 机种页面也进 `sitemap.xml`（只列**有资料行**的机种）。
 
-#### 加机种要动的地方（2026-10-14 扩到十二个、2026-10-15 加 NDS 时踩过的坑）
+#### 加机种要动的地方（2026-10-14 扩到十二个、2026-10-15 加 NDS、2026-10-16 加 PS1 时踩过的坑）
 
 机种清单**只有一个来源**：`lib/consoles.ts`（`CONSOLE_LABEL` / `CONSOLE_TYPES` / `CONSOLE_TINT`）。`components/CartridgeSprite.tsx` 只是原样再导出，老 import 路径不用改；挪出组件的原因是 `lib/netplay.ts`、服务端页面、后台接口都要读它，而组件不该被 `lib/*` 依赖。
 
-⚠️ 现在是**十三个**机种（2026-10-15 加了 `nds`）。原来十二个正好铺满首页四列网格的三整行，加完末尾只剩一张卡独占第四行 —— 刻意的取舍。
+⚠️ 现在是**十四个**机种（2026-10-15 加了 `nds`，2026-10-16 加了 `ps1`）。原来十二个正好铺满首页四列网格的三整行，加完末尾只剩两张卡 —— 刻意的取舍，不为此再补机种凑数。
 
 ⚠️ **判重（`findGameDuplicate`）从 2026-10-15 起是三个维度：同名 + 同机种 + 同语言**。加机种时别只想着渲染 —— 「同一款游戏在不同机种上各有一版」正是加机种要支持的场景，判重少一维就会把新机种的同名游戏全拒掉。
 
@@ -312,7 +340,9 @@ pnpm dev
 | --- | --- |
 | `lib/emulator.ts` | `EXTENSION_MAP`（扩展名回退）、`detectConsole`（文件头判据）、`LOCAL_CORE_CONSOLES`（核心走本地还是 CDN） |
 | `lib/unwrap.ts` | `ROM_EXTENSIONS`（zip 里装着这种 ROM 时要能拆一层） |
-| `lib/server/upstream.ts` | `toConsoleType`（上游页面文字 → 站内机种，批量导入在用）；⚠️ 短标识（`md` / `gg` / `ws` / `ds`）必须按整词匹配，且跑不了的机种（`3ds` / `sega cd`…）要**挡在兜底之前** |
+| `lib/bios.ts` | `BIOS_SPECS`（**只有需要 BIOS 的机种**：目前是街机 + PS1）、`biosTypeFor`（机种 → 要哪份 BIOS） |
+| `lib/keybindings.ts` | `CONSOLE_BUTTONS`（这个机种有哪几个钮）、`CONSOLE_BUTTON_LABELS`（机身丝印，**和街机那套 A B C X Y Z 不一样的机种才登记**）。两张都是 `Partial`，漏了不会报错、只是退回街机那套叫法 |
+| `lib/server/upstream.ts` | `toConsoleType`（上游页面文字 → 站内机种，批量导入在用）；⚠️ 短标识（`md` / `gg` / `ws` / `ps1` / `psx`）必须按整词匹配，且跑不了的机种（`ps2` / `psp` / `vita` / `3ds` / `sega cd`…）要**挡在兜底之前**。`scripts/fill-game-texts-ja-ko.mjs` 里有一份**逐条一致的移植**，两边都要改 |
 | `scripts/add-consoles.mjs` | 默认资料行（跑一遍就把数据库补上） |
 | `lib/i18n.ts` | 那些列举机种的文案 —— **口径是「代表机型 + 等十余款机种 / and more」**，不是全列；`meta.keywords` 是唯一写全机型的地方 |
 
@@ -331,9 +361,10 @@ pnpm dev
 > `retroarch-emscripten-build` 来源的例外 —— 换它的文件时**别再当成「从 jsdelivr 拿现成 zip」**。
 >
 > **能加但还没加**的：PC Engine（`mednafen_pce_fast`）、ColecoVision、Atari Lynx、Vectrex、
-> C64（`vice_x64` 一整套）、PC-88 / X1 等。**光盘机种**（PS1 / Sega CD / PCE CD）核心在，
-> 但要多文件镜像 + 一份 BIOS，而 `lib/bios.ts` 目前**全站只存一份 BIOS**（id 写死 `neogeo`），
-> 得先改成按机种分 key（`ensureBios()` 那套「站点自带一份 + 拖入时自动装」可以照搬）。
+> C64（`vice_x64` 一整套）、PC-88 / X1 等。**还有光盘机种**：Sega CD / PCE CD 的核心也在，
+> 挡路的东西和 PS1 当初一样是「多文件镜像」—— 2026-10-16 加 PS1 时顺手把 `lib/bios.ts`
+> 改成了**按机种分 key**（`BiosType` + `BIOS_SPECS` + `biosTypeFor`，不再是「全站只存一份、
+> id 写死 `neogeo`」），所以 BIOS 那一关已经过了，剩下的仍是「一次只收一个文件」这个入口限制。
 
 
 ### 给 AI 的站点政策
@@ -363,6 +394,7 @@ pnpm dev
 - **世嘉 32X**：`.32x`
 - **WonderSwan**：`.ws` `.wsc`；**Neo Geo Pocket**：`.ngp` `.ngc`
 - **街机**：`.zip`（romset）。**`.7z` / `.rar` 不支持**——FBNeo 只吃 zip，这两种连机种都认不出来（按键说明弹窗里会明说是格式问题）。
+- **PS1**：`.pbp` `.iso` `.img`（**单文件**光盘镜像）。⚠️ **`.bin` + `.cue` 那种多文件镜像不支持**——这个项目的入口是「拖一个文件进来」，表达不了「一张盘两个文件」，所以 `.cue` / `.m3u` / `.toc` / `.ccd` 那几张**描述文件**也刻意不收（它们是纯文本、指向同目录的 `.bin`，收下也跑不起来）。拖进来时按键说明弹窗会给一句准话，让用户换 `.pbp` / `.iso` 的版本。`.pbp`（PSP 的 EBOOT 封装，整张盘一个文件）是最该走的那条路，参考站发的 PS1 游戏多半就是它；`.iso` / `.img` 靠 ISO9660 魔数认，来源更广但没压缩、更大。⚠️ **`.chd` 存疑、别承诺**：核心的扩展名表里有它，但那个 WASM 构建里 `libchdr` / `MComprHD` 计数都是 0，大概率没编进去。
 - **压缩包**：NES / SNES 的 ROM **可以装在 zip 里**——`.zip` 里放一盘 `.nes` / `.smc` 能直接跑（2026-10-14 起这批新机种的扩展名也一并支持）。更常见的是**扩展名被改过**的那种：文件名写 `.smc`、内容其实是 zip（下载站很爱这么打包），一样能认。判断依据是**压缩包内层条目的扩展名**，所以不会误伤街机 romset —— romset 里是 `p_1.3a` 这类名字，命中不了。规则见 `lib/unwrap.ts`。
 
 机种识别会优先读取文件头，只有识别不出来时才回退到扩展名。因此即使 ROM 被改过名，也能挂载到正确的核心。**压缩包会先拆一层再认**（见上），所以「zip 里装 NES ROM」不会再被误判成街机。
@@ -373,26 +405,29 @@ pnpm dev
 | --- | --- | --- |
 | 1 | NES / FDS | iNES / NES 2.0 的 magic、`FDS`+`0x1A`、`UNIF` |
 | 2 | 街机 | zip 的本地文件头 `PK\x03\x04` |
-| 3 | GB / GBC | `0x104` 起的任天堂 logo，黑白 / 彩色看 `0x143` 的标志位。**必须排在 GBA 前**（GBC 卡带够得着 GBA 的大小门槛，而 GBA 的判据只是 `0xB2` 一个字节） |
-| 4 | GBA | `0xB2` 处的固定值 `0x96`（外加 192 KiB 的大小下限） |
-| 5 | 世嘉 MD / 32X | `0x100` 起的主机名（`SEGA 32X` 先认，否则会被 `SEGA` 吞成 MD） |
-| 6 | Neo Geo Pocket | `0x00` 起的 `COPYRIGHT BY SNK CORPORATION` |
-| 7 | Game Gear / Master System | `0x7FF0` 起的 `TMR SEGA`。⚠️ 两台**文件头完全一样**，具体哪台只能看扩展名（`.gg` / 别的都算 `sms`） |
-| 8 | SNES | 校验和互为反码 + 大小的启发式判断。**刻意放最后** —— 它是唯一一条不是固定字符串的判据 |
-| 9 | — | 全认不出就回退扩展名（`EXTENSION_MAP`） |
+| 3 | PS1 | `.pbp` 的魔数 `\0PBP`、PS-EXE 的 `PS-X EXE`、ISO9660 的 `CD001`（三个扇区偏移 `0x8001` / `0x9311` / `0x9319`）。**必须排在 GB / GBA 之前**：GBA 的判据只是 `0xB2` 一个字节，而光盘镜像动辄几百 MB、必然过得了它的大小门槛，盘里的数据区正好是 `0x96` 就会被判成 GBA |
+| 4 | GB / GBC | `0x104` 起的任天堂 logo，黑白 / 彩色看 `0x143` 的标志位。**必须排在 GBA 前**（GBC 卡带够得着 GBA 的大小门槛，而 GBA 的判据只是 `0xB2` 一个字节） |
+| 5 | GBA | `0xB2` 处的固定值 `0x96`（外加 192 KiB 的大小下限） |
+| 6 | 世嘉 MD / 32X | `0x100` 起的主机名（`SEGA 32X` 先认，否则会被 `SEGA` 吞成 MD） |
+| 7 | Neo Geo Pocket | `0x00` 起的 `COPYRIGHT BY SNK CORPORATION` |
+| 8 | Game Gear / Master System | `0x7FF0` 起的 `TMR SEGA`。⚠️ 两台**文件头完全一样**，具体哪台只能看扩展名（`.gg` / 别的都算 `sms`） |
+| 9 | SNES | 校验和互为反码 + 大小的启发式判断。**刻意放最后** —— 它是唯一一条不是固定字符串的判据 |
+| 10 | — | 全认不出就回退扩展名（`EXTENSION_MAP`） |
 
-⚠️ 两个刻意的取舍：**`.bin` 不收进扩展名表**（太泛，PS1 光盘镜像也叫 bin，猜成 MD 只会把「不认识」变成「静默失败」；真·MD 的 `.bin` 靠 `0x100` 的 `SEGA` 头认）；**WonderSwan 没有文件头判据**（它的 ROM 头就是跳转指令 + 校验和，没有版权串可认），所以只能带对 `.ws` / `.wsc` 扩展名。
+⚠️ 三个刻意的取舍：**`.bin` 不收进扩展名表**（太泛，PS1 光盘镜像也叫 bin，猜成 MD 只会把「不认识」变成「静默失败」；真·MD 的 `.bin` 靠 `0x100` 的 `SEGA` 头认）；**PS1 的多文件形态（`.cue` / `.m3u` / `.toc` / `.ccd`）也不收**（一次只能拖一个文件，收下描述文件也找不到它指向的 `.bin`，失败还是静默的 —— 所以只认 `.pbp` / `.iso` / `.img` 三种单文件镜像）；**WonderSwan 没有文件头判据**（它的 ROM 头就是跳转指令 + 校验和，没有版权串可认），所以只能带对 `.ws` / `.wsc` 扩展名。
 
-核心：**除了 NES / SFC（fceumm / snes9x）在运行时从 CDN 拉，其余十个机种的核心都随仓库放在 `public/cores/`**，运行时从本站加载 —— 理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有这些包。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
+核心：**除了 NES / SFC（fceumm / snes9x）在运行时从 CDN 拉，其余十二个机种的核心都随仓库放在 `public/cores/`**，运行时从本站加载 —— 理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有这些包。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`（**NDS 的 melonds 是唯一例外**，它不在那个构建里，是从 EmulatorJS 的 `melonds-wasm.data` 里解出来的）。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
 
 | 机种 | 核心 | 说明 |
 | --- | --- | --- |
 | NES / SNES | `fceumm` / `snes9x` | 走 CDN（一直正常，没动） |
 | GBA / GB / GBC | `mgba` | **一个核心三台机**——mGBA 本身就兼容 GB / GBC，所以加 GB / GBC 没添任何新文件 |
+| NDS | `melonds` | 上游构建里没有，核心从 EmulatorJS 解出来（见上） |
 | MD / GG / SMS | `genesis_plus_gx` | 同样一个核心三台机（还能吃 SG-1000） |
 | 32X | `picodrive` | Genesis Plus GX 不管 32X，那个构建里只有 picodrive 支持 |
 | WonderSwan | `mednafen_wswan` | 彩色机型（WSC）共用这一档 |
 | Neo Geo Pocket | `mednafen_ngp` | 同上，NGPC 也走它 |
+| PS1 | `pcsx_rearmed` | 那个构建里**唯一**的 PS1 核心（没有 beetle_psx / swanstation），也是参考站跑 PS1 用的同一个；包 1.14 MB / wasm 2.9 MB，是这批里最轻的之一 |
 | 街机 | `fbneo` / `fbalpha2012_cps1` | 哪个由 `lib/arcade-core.ts` 按 romset 现挑 |
 
 ⚠️ **加新核心时记得真把 `.js` 和 `.wasm` 两个文件都放进去**——2026-10-13 就是因为 `public/cores/` 里漏了 mgba 那两个文件，GBA 一拖进去 `Nostalgist.launch` 直接抛错（`/cores/mgba_libretro.js` 是 404，404 页面被当成核心 js 喂给了加载器）。
@@ -402,6 +437,7 @@ pnpm dev
 - **romset 是版本锁死的**。zip 里的文件必须和 FBNeo 期望的版本对得上，对不上就直接不加载——表现和「格式不支持」一样是静默的（屏幕继续出雪花）。
 - **FBNeo 靠 zip 的「文件名」认驱动名**（去掉扩展名那一截，`kof98.zip` → `kof98`）。romset 被改过名——中文名、下载站加的 `(1)` 后缀——一样静默失败。启动时 `console` 会打出这次用的名字，名字里含非 ASCII 字符时还会额外提醒一句。
 - **Neo Geo 需要 BIOS**（`neogeo.zip`）：**站点已经自带一份**（`public/bios/neogeo.zip`），第一次启动街机游戏时自动装进浏览器并一直用本地那份——用户这边是零操作。想换一份（比如 UniBIOS）也可以把这个文件**直接拖进页面**覆盖掉，和拖卡带是同一个动作。识别**只看文件名**（`neogeo` 开头即可，`neogeo-bios.zip` 也算），所以别把它改成跟 neogeo 无关的名字。CPS1 / CPS2 那类（三国志、街霸、名将）**不需要** BIOS。⚠️ 站点自带那份是 SNK 的版权物，放在 `public/` 里就等于进了 git 仓库。
+- **PS1 的 BIOS 是「软依赖」，站点刻意不带**（2026-10-16 加）：`pcsx_rearmed` 的核心选项原文是「找不到真 BIOS 就回落 HLE（高层模拟）」，所以**没有 BIOS 游戏照跑**，只是兼容性差一点（个别游戏不行）。**站点不带这份文件**——SCPH1001.BIN 是索尼的版权物，`public/bios/` 里只留 `neogeo.zip`。想要更好兼容性就把自己那份 `SCPH1001.BIN`（或 `SCPH5501` / `SCPH7001` / `SCPH101`）拖进页面装上，识别**只看文件名前缀 `scph`**（大小写不敏感）。⚠️ 这一档**不钉死文件名**（核心认那四个名字，把 `scph5501.bin` 改成 `SCPH1001.BIN` 只会让日志和实际用的 BIOS 对不上）——和街机那档正好相反，命名规则写在 `lib/bios.ts` 的 `BiosSpec.nameFor` 上。
 - **载入失败在界面上是静默的**（屏幕里不放任何文案，见下文），所以排查要看浏览器 `console` —— 那里有文件名、机种、核心名和 romset 名。不过「按键说明」弹窗里还会兜两句最可能的原因：**压缩格式不对**、以及**缺 `neogeo.zip`**（后者 2026-10-14 加，判据是 `looksLikeNeoGeoRomset` 按 rom 名猜的）。注意缺 BIOS 那条只在**本地和站点自带两份都没有**时才出现——正常情况下 `ensureBios()` 已经自动装好了。**romset 版本对不上仍然没有任何提示**，只能看 `console`。
 
 ## 存档
@@ -537,18 +573,20 @@ services:
 
 ## 多语言
 
-界面支持中文 / 英文。**语言分在路径上**（2026-10-13 改的，之前是「所有语言共用一个 URL、靠 cookie 定」）：
+界面支持中文 / 英文 / 日文 / 韩文（日韩 **2026-10-16** 加）。**语言分在路径上**（2026-10-13 改的，之前是「所有语言共用一个 URL、靠 cookie 定」）：
 
 | | 地址 |
 | --- | --- |
 | 英文（默认，**不占前缀**） | `/`、`/room`、`/play`、`/games`、`/games/<id>`、`/login`、`/privacy`… |
 | 中文 | `/zh`、`/zh/room`、`/zh/play`、`/zh/games`、`/zh/games/<id>`、`/zh/login`、`/zh/privacy`… |
+| 日文 | `/ja`、`/ja/room`、`/ja/games`、`/ja/games/<id>`、`/ja/privacy`… |
+| 韩文 | `/ko`、`/ko/room`、`/ko/games`、`/ko/games/<id>`、`/ko/privacy`… |
 
 前台所有页面都住在 `app/[locale]/` 下，语言从路由参数 `params.locale` 拿（`readLocaleParam()`），不再靠 cookie 猜。**前缀的搬运全在 `middleware.ts`**：
 
-1. `/zh/...` —— 原样放行（`[locale]` 段直接接住），只往请求头塞一个 `x-nesload-locale`。带前缀的地址**不查 cookie**：它是显式选择，别人分享的 `/zh/games` 不该被弹走；
+1. `/zh/...` `/ja/...` `/ko/...` —— 原样放行（`[locale]` 段直接接住），只往请求头塞一个 `x-nesload-locale`。带前缀的地址**不查 cookie**：它是显式选择，别人分享的 `/zh/games` 不该被弹走；
 2. `/en/...` —— 301 回无前缀。显式英文前缀和默认地址是同一页，两套地址并存就是重复内容；
-3. 无前缀 —— **只看 cookie**：设置过中文就 307 到 `/zh/...`；没设置过（或设置的就是英文）则**内部 rewrite** 成 `/en/...`（地址栏不变）。
+3. 无前缀 —— **只看 cookie**：设置过非默认语言就 307 到对应的 `/xx/...`；没设置过（或设置的就是英文）则**内部 rewrite** 成 `/en/...`（地址栏不变）。
 
 > **「没主动设置过语言，访问哪个就是哪个」**（2026-10-13 用户要求）：无前缀地址**不看 `Accept-Language`**，浏览器是中文也照样渲染英文页，改由**客户端**弹一句问（见下面的语言提示）。把服务端 307 换成客户端询问，是因为 307 会改地址、破坏分享出去的链接。
 
@@ -560,7 +598,7 @@ services:
 
 **首次访问的语言提示**（`components/LocalePrompt.tsx`）：挂在根布局里，所以每个前台页面都有（后台除外）。只在「**没设置过语言 且 浏览器想要的语言 ≠ 当前页面语言**」时，于页面底部弹一条**非模态**提示 —— 两个选择：「切过去」（写 cookie 并导航到另一种语言的同一页）或「保持当前」（**同样写 cookie**，视为已主动设置，之后不再问）。它和首次访问的操作指引**排队**：指引那层是 z-[60] 的全屏暗幕，两者同时在场会把提示压暗、还点不动，靠 `TOUR_OPEN_EVENT` / `TOUR_DONE_EVENT` 让路。
 
-**SEO**：每个页面两条 `hreflang` 互指（`en` / `zh-CN`）+ `x-default` 指英文，收口在 `lib/i18n.ts` 的 `alternatesFor()`；sitemap 每条地址出两份，见 `app/sitemap.ts` 的 `entries()`。⚠️ Next 的 `alternates` 是**整体覆盖**不是深合并 —— 漏写一页，那页的 canonical 就会顶着首页的地址。
+**SEO**：每个页面四条 `hreflang` 互指（`en` / `zh-CN` / `ja-JP` / `ko-KR`）+ `x-default` 指英文，收口在 `lib/i18n.ts` 的 `alternatesFor()`（它**遍历 `LOCALES` 现拼**，所以加语言时这里自动多一条）；sitemap 每条地址出四份，见 `app/sitemap.ts` 的 `entries()`。⚠️ Next 的 `alternates` 是**整体覆盖**不是深合并 —— 漏写一页，那页的 canonical 就会顶着首页的地址。
 
 > 语言由 middleware 的请求头 + `[locale]` 段决定，所以整棵树都是动态渲染 —— 换来的是首屏文案直接就是对的，不会先渲染英文再翻成中文。代价是不能再用 `output: 'export'` 做纯静态托管。
 
@@ -568,7 +606,7 @@ services:
 
 **屏幕里那几句提示 2026-10-12 起跟着语言走了**（`DRAG & DROP A ROM` / `RELEASE TO LOAD` / `WAITING FOR HOST` / `PAUSED` 这一组，文案键是 `screen.*`）。它们原先只有英文，理由是 `font-pixel`（Press Start 2P）没有中日韩字形；现在中文靠**字体回退**落到系统字体上（Windows 上通常是新宋体——小字号自带点阵，反而更像老电视），和机身前面板那排「暂停 / 存档 / 读档 / 重载 / 弹出」同一个路子。代价是汉字比像素字胖，10px 以下笔画会黏，所以**中文比英文各抬 1px、英文维持原设计尺寸**（`globals.css` 的 `.screen-hint-xs / .screen-hint-sm`，按 `<html data-locale>` 命中）。三行提示的字号是 11 / 10 / 10，颜色统一 `crt-ink-200`——**这是屏幕上文案的亮度下限**：屏幕底不是纯黑就是雪花，而雪花（灰度噪点铺纯黑）合成出来约 `#5c5c5c`，比它暗的灰压上去基本看不见（副提示原来用的 `crt-ink-400` 就是这么踩的坑）。
 
-**按键说明**弹窗里那两行键位（`playerLegend()` 现算）是这条规矩的例外：它是给人读懂的说明，所以走系统字体、做了中英两版。原先那版是 `font-pixel` 的英文，只列键名不说对应关系（`1P ARROWS / Z X / A S / Q E / SHIFT / ENTER`），等于没说明白。压缩格式那条提示也挂在同一个弹窗里（见「支持的格式」）。
+**按键说明**弹窗里那两行键位（`playerLegend()` 现算）是这条规矩的例外：它是给人读懂的说明，所以走系统字体、**每个界面语言各一版**（文案走 `Translate`，也就是 `lib/i18n.ts` 那四张表里的键）。原先那版是 `font-pixel` 的英文，只列键名不说对应关系（`1P ARROWS / Z X / A S / Q E / SHIFT / ENTER`），等于没说明白。压缩格式那条提示也挂在同一个弹窗里（见「支持的格式」）。
 
 屏幕里**不放任何说明文案**，能上屏幕的只有状态提示（怎么开始玩 / `RELEASE TO LOAD` / `WAITING FOR HOST` / `PAUSED` / 载入进度条）。**没插卡带时屏幕是纯黑的**，上面只有那三行提示和一个闪烁的方块光标；插上卡带就直接出画面。（2026-10-12 之前这里铺的是**一整屏雪花**，用户嫌「扎眼」——雪花语义上没错，但整屏 720×540、高频、还在动，必然是全屋最亮最吵的东西。四个方案比过之后换成纯黑待机，雪花那份样式留在 `globals.css` 里给「刚弹出卡带」的闪现过渡备用。）状态一律优先由机身上的东西表达——`PWR` 灯的颜色（暂停时会变成 accent 色）、面板按钮的可用状态。因此载入失败、存档结果这类一次性反馈没有对应的界面元素，也没有 OSD。进度条那个百分数是**读数**、不是文案，和 `EXIT FULLSCREEN` 同性质。
 
@@ -615,7 +653,7 @@ app/
                     （公开页面，见「机种」一节）
   admin/          后台（**不在 [locale] 下**：不做语言前缀，语言由 cookie 定）
   api/            接口（**刻意不挂 middleware**，见 middleware.ts 顶部注释）
-  sitemap.ts      sitemap.xml（每条地址出中英两份并互指 hreflang）
+  sitemap.ts      sitemap.xml（每条地址出四份并互指 hreflang）
   robots.ts       robots.txt
   llms.txt/       给 AI 的站点政策（自然语言版，正文在 lib/ai-policy.ts）
   ai.txt/         同上，机器可读版（Spawning 的 ai.txt 约定）
@@ -651,19 +689,25 @@ lib/
   netplay.ts      NetplayController，Trystero 房间层 + 画面推流 + 按键转发
   keybindings.ts  键位模型：默认值、DOM code ↔ RetroArch 键名换算、localStorage 读写
   audio-tap.ts    从 WebAudio 上旁路一路音频，联机时推给加入者
-  i18n.ts         文案表与语言解析
+  i18n.ts         文案表（en 基准 + zh）与语言解析：Locale / LOCALES / 前缀 / hreflang / SITE_NAME
+  i18n.ja.ts      日语文案表（Record<MessageKey, string>，键与 en 表逐键一致）
+  i18n.ko.ts      韩语文案表（同上）
   db.ts           共用的 IndexedDB 连接与事务包装
   library.ts      载入历史（只存字符串：名字 / 封面 / 下载地址，上限 10 条）
   saves.ts        存档槽（每游戏 5 份，超出顶掉最早的）
-  bios.ts         街机 BIOS（Neo Geo 的 neogeo.zip，站点自带一份 + 可手动拖入覆盖）
-  legal.ts        法务文案（隐私政策 / 服务条款，中英各一份，自成一套 i18n）
+  bios.ts         机种 BIOS（**按机种分 key**：街机那份 `neogeo.zip` 站点自带 + 可拖入覆盖，
+                  PS1 那份 SCPH BIOS 站点不带、只认用户自己拖的）
+  legal.ts        法务文案（隐私政策 / 服务条款，中 / 英 / 日 / 韩各一份，自成一套 i18n）
+  game-text.ts    游戏文案的多语言结构 + localizeTexts()（客户端组件也要用，所以独立成文件）
   ai-policy.ts    AI 面向的站点政策正文（/llms.txt 与 /ai.txt 共用这一份）
   chiptune.ts     现场合成的 8-bit 小段，MP4 放不出来时的兜底音源
 public/
-  cores/          十个机种的核心（fbneo / fbalpha2012_cps1 / mgba / genesis_plus_gx / picodrive /
-                  mednafen_wswan / mednafen_ngp 的 .js + .wasm，约 56 MB）—— 从本站加载，不走 CDN
+  cores/          十二个机种的核心（fbneo / fbalpha2012_cps1 / mgba / genesis_plus_gx / picodrive /
+                  mednafen_wswan / mednafen_ngp / melonds / pcsx_rearmed 的 .js + .wasm，
+                  约 64 MB）—— 从本站加载，不走 CDN
   bios/           街机 BIOS（Neo Geo 的 neogeo.zip，约 1.3 MB）—— 同 cores 一起钉了长缓存；
-                  第一次跑街机游戏时自动装进浏览器，之后走本地那份（见 lib/bios.ts）
+                  第一次跑街机游戏时自动装进浏览器，之后走本地那份（见 lib/bios.ts）。
+                  ⚠️ PS1 的 BIOS **刻意不在这里**（索尼版权物），要用户自己拖进来
   audio/          地板那台 MP4 的音源（仓库不带 mp3，见该目录下的 README）
   icons/          PWA 图标（192 / 512 / maskable 512，由 scripts/generate-icons.mjs 生成）
   sw.js           Service Worker（缓存策略见该文件顶部那段注释）
@@ -671,10 +715,12 @@ public/
 
 ## 已知限制
 
-- **NES / SFC 首次运行需要联网**：核心由 Nostalgist 从 CDN 拉，首次启动要等十几秒（实测约 18 秒）。**其余十个机种的核心是本站文件**（`public/cores/`，见「支持的格式」那张对照表），不依赖网络。插卡带的这段时间**屏幕里**会显示进度条：拿得到核心的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条（核心进过 CacheStorage 之后基本就是后者）。
+- **NES / SFC 首次运行需要联网**：核心由 Nostalgist 从 CDN 拉，首次启动要等十几秒（实测约 18 秒）。**其余十二个机种的核心是本站文件**（`public/cores/`，见「支持的格式」那张对照表），不依赖网络。插卡带的这段时间**屏幕里**会显示进度条：拿得到核心的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条（核心进过 CacheStorage 之后基本就是后者）。
 - 字体 Press Start 2P 通过 `<link>` 在运行时加载。这里刻意没用 `next/font`（它会在构建时下载字体，无网络环境下会让构建直接失败）；加载失败时优雅退化为等宽字体，不影响功能。
 - 存档和「历史」都放在 IndexedDB 里；拿不到 IndexedDB 时（隐私模式等）「历史」会空着、载入过的游戏也不留痕，此时点「存档」会自动降级为下载 `.state` 文件。历史只占几百字节一条（纯字符串），存档仍是 Blob。
 - ~~只支持桌面端~~：2026-10-13 起**取消了那个「请用桌面端」的提示**，窄窗口照画屋子 —— 尺寸链会自动收（屏幕取 `min(档位上限, 100vw − 360px)`，桌面 / 底座 / 吊灯线都跟着推出来），所以任何宽度下机身都不会再被 `main` 的 overflow 从两边切掉。窗口小于 900px 时那两处入口收进菜单抽屉，见上面「隐私政策与服务条款」。
 - 联机要求双方都能访问公共 MQTT broker（默认 `broker.emqx.io`），**完全断网的内网用不了**。没有房间列表——房间码只能口头或手动传递。玩什么由房主决定，加入者只收画面、不能自己换游戏。详见上面的「联机」一节。
-- **压缩包**：内层拆得出单机 ROM（`.nes` / `.smc` 等）的 zip 会按 ROM 走，其余 zip 一律当街机 romset。`.7z` / `.rar` 仍然不支持——要解压得引 wasm 解压器（EmulatorJS 那边是自托管的 7z 280 KB + unrar 241 KB）。
+- **压缩包**：内层拆得出单机 ROM（`.nes` / `.smc` / `.pbp` 等）的 **zip 和 7z** 会按 ROM 走（7z 走 `public/compression/extract7z.js`，EmulatorJS 那份 asm.js，解大包要十几秒、接在下载进度条上），其余 zip 一律当街机 romset。**`.rar` 仍然不支持**——要解压得再引一套 wasm（EmulatorJS 那边是自托管的 unrar 241 KB），认出来时按键说明弹窗会给一句准话。
+- **PS1 只认单文件光盘镜像**（`.pbp` / `.iso` / `.img`）：`.cue` + `.bin` 那种多文件形态表达不了（一次只能拖一个文件），`.chd` 也不保证（核心的扩展名表里有，但那个构建大概率没编 `libchdr`）。另外 PS1 是**软件渲染 + 单线程 WASM**，3D 游戏（铁拳 3 这种）的实际流畅度得看机器 —— **这一项没实测过**。
+- **PS1 的 `L3` / `R3` 和类比摇杆用不了**：键位模型只有 14 个钮（`ButtonName`），没有「摇杆按下去」这两颗；**类比摇杆本身也根本没建模**（键盘没有轴，手柄左摇杆推过阈值只当方向键用）。绝大多数 PS1 游戏十字键就能玩，但**必须用摇杆的那几款（《捉猴啦》这类）玩不了** —— 已知缺口，不是 bug。取舍理由见上面「键位」一节。
 - **地板那台 MP4 的曲子不由仓库提供**：`public/audio/i-miss-you.mp3` 是一首有版权的录音制品，要自己放进去。文件不在时**自动退到现场摇的 8-bit 小段**（`lib/chiptune.ts`，运行时手搓一段 1.3–3.8 秒的 WAV；只在五声音阶里随机游走，旋律原创、和原曲无关）—— **每点一次都摇一段新的**，那一段**放一遍就停**，console 里留一行说明。兜底只退一次，刷新页面才会重新先试那个文件。

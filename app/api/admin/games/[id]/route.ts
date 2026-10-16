@@ -56,20 +56,56 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return fail('bad-year', '年份必须是整数');
   }
 
+  /*
+   * 文案进 `game_texts` 侧表（2026-10-16 起）。
+   *
+   * ⚠️ **请求体仍然用扁平字段**（`title` / `titleEn` / `titleJa` / `titleKo`，
+   *    系列与说明同理），没有改成一个嵌套的 `texts` 对象 —— 改之前这段注释写的是
+   *    「将来界面开日韩时，这里应该改成直接收一个 `texts` 对象」；2026-10-16 真开日韩时
+   *    **没照那样改**，理由是：POST 那条路里 `texts`（爬取）与扁平字段（手动添加）
+   *    本来就并存，PATCH 的调用方只有 AdminGames 一个，把它的字段名从 `titleEn` 换成
+   *    嵌套对象只会让「新增 / 编辑」两个表单的提交体形状不一致，换不来任何收益。
+   *    真要收 `texts`，应该 POST / PATCH 一起改。
+   *
+   * ⚠️ 四个语言**全都带上**（哪怕日韩那几栏是空的）：`updateGame` 的语义是
+   *    「只动传进来的语言」，漏掉 `ja` 就等于「日文那几行原样不动」——
+   *    那样用户把日文清空之后旧文案还在。（英文那几栏是同一个道理，见下。）
+   *
+   * ⚠️ `developer` 那一栏不填：厂名由数据层按 `developerId` 反查（见 withDeveloper）。
+   */
   const patch: GamePatch = {
-    title,
-    // 英文字段（可空），见 lib/server/games.ts
-    titleEn: optionalText(body.titleEn),
+    texts: {
+      zh: {
+        title,
+        series: optionalText(body.series),
+        developer: null,
+        description: optionalText(body.description),
+      },
+      en: {
+        title: optionalText(body.titleEn),
+        series: optionalText(body.seriesEn),
+        developer: null,
+        description: optionalText(body.descriptionEn),
+      },
+      ja: {
+        title: optionalText(body.titleJa),
+        series: optionalText(body.seriesJa),
+        developer: null,
+        description: optionalText(body.descriptionJa),
+      },
+      ko: {
+        title: optionalText(body.titleKo),
+        series: optionalText(body.seriesKo),
+        developer: null,
+        description: optionalText(body.descriptionKo),
+      },
+    },
     consoleType,
     // 上面已经取好（判重也用它），别再解析一遍
     language,
-    series: optionalText(body.series),
-    seriesEn: optionalText(body.seriesEn),
     year,
     // 开发商下拉框给的是 developers.id，名字由数据层反查（见 lib/server/games.ts）
     developerId: optionalText(body.developerId),
-    description: optionalText(body.description),
-    descriptionEn: optionalText(body.descriptionEn),
   };
 
   try {

@@ -17,7 +17,10 @@
  * 无论哪种，一律去取 `/<locale>/games/<slug>` —— 那一页同时带完整 JSON-LD 与 RSC 数据
  * （ROM 地址只在 RSC 里；两页都带 `fileName`，2026-10-14 核过下载页也有）。
  *
- * 双语：抓完主语言那一份，再**尽力**抓一次另一语言（失败就留空，前台会自动回退中文）。
+ * 多语言（2026-10-16 起四份）：**四个语言各抓一次**（zh / en / ja / ko，实测上游
+ * `/ja/…` `/ko/…` 是真日韩文），抓回来的四份进响应体的 `texts`，由调用方写进
+ * `game_texts` 侧表。中文那份是「站内主名字」（判重与 `games.title` 用它）；
+ * 某个语言抓不到就留空 —— 前台读取时逐字段回退中文。
  *
  * ⚠️ **2026-10-15：`fileName` 是「一份语言一个地址」，不是只给一个。**
  *    所以除了一直有的 `romUrl` / `romName` / `romLang`（挑出来的那一份，手动添加那条路在用），
@@ -101,17 +104,26 @@ function stripTags(html: string): string {
 }
 
 /**
- * 简介：取「关于 <标题>」（英文站是「About ...」）那个小标题下面的**第一段**。
+ * 简介：取「关于 <标题>」那个小标题下面的**第一段**。
  *
  * 为什么只取一段：这个字段在前台是**游戏库卡片上的悬停提示**（见 lib/i18n.ts 的
  * `admin.description.placeholder`），整段铺开太长；首段一般是自包含的引言，够用。
- * 取不到就返回 null，由调用方回退到 JSON-LD 那句短描述。
+ * 取不到就返回 null，由调用方回退到 JSON-LD 那句短描述（见 bestDescription）。
+ *
+ * ⚠️ **小标题是四语言的**（2026-10-16 实测，四个都要认，少一个那份简介就抓不到）：
+ *    · 中文 —— `关于 星之卡比 参上！多洛奇团`
+ *    · 英文 —— `About …`
+ *    · 日文 —— `星のカービィ 参上！ ドロッチェ団について`
+ *    · 韩文 —— `별의 커비 도트 투어 소개`
+ *    ⚠️ `소개` 比另外三个泛（韩文里「介绍」用得很广），但现在只有**第一个**匹配
+ *    才会被取走，而实测那一页里只有「关于」那块含它。真出现误命中，把判据收成
+ *    「标题以 `소개` 结尾」即可。
  *
  * ⚠️ 要改回「整段」的话，把下面换成收集 `body` 里所有 `<p>` 再 `join('\n\n')` 即可
  *    （2026-10-13 之前就是那么写的）。
  */
 function aboutText(html: string): string | null {
-  const heading = html.match(/<h[1-6][^>]*>[^<]*(?:关于|About)[^<]*<\/h[1-6]>/i);
+  const heading = html.match(/<h[1-6][^>]*>[^<]*(?:关于|About|について|소개)[^<]*<\/h[1-6]>/i);
   if (!heading || heading.index === undefined) return null;
 
   const rest = html.slice(heading.index + heading[0].length);
@@ -289,39 +301,82 @@ export async function POST(request: Request) {
     const primary = await scrapeGamePage(target.locale, target.slug);
 
     /*
-     * 另一语言那份**尽力而为**：抓不到就让那几个 `_en` 字段留空 ——
-     * 前台对空的 `_en` 会自动回退中文（见 lib/server/games.ts 的 localizeGame），
-     * 所以这里失败不该让整个请求失败。
+     * **四个语言各抓一份**（2026-10-16）：上游 `/ja/…` `/ko/…` 的文案是真日韩文，
+     * 抓回来写进 `game_texts` 的 ja / ko 行 —— 这就是「自动爬取补齐日韩」。
+     *
+     * ⚠️ primary（用户给的那个 locale）**失败就整体失败**（封面 / ROM / 机种以它为主份）；
+     *    其余三份**尽力而为** —— 抓不到就把那个语言的文案留空，写入时不会建空行
+     *    （见 lib/server/games.ts 的 writeTexts），前台读取时逐字段回退中文。
+     *    一份失败不该让整个请求失败，也不该带走别的语言。
+     *
+     * ⚠️ **并行发**：四个页面各几十 KB，串行就是四倍延迟。
      */
-    const other = UPSTREAM_LOCALES.find((l) => l !== target.locale) ?? UPSTREAM_LOCALES[0];
-    let secondary: ScrapedPage | null = null;
-    try {
-      secondary = await scrapeGamePage(other, target.slug);
-    } catch (error) {
-      console.warn('[admin] 另一语言抓取失败，_en 字段留空', error);
-    }
+    const pages = new Map<string, ScrapedPage | null>([[target.locale, primary]]);
+    await Promise.all(
+      UPSTREAM_LOCALES.filter((locale) => locale !== target.locale).map(async (locale) => {
+        try {
+          pages.set(locale, await scrapeGamePage(locale, target.slug));
+        } catch (error) {
+          console.warn(`[admin] ${locale} 那份抓取失败，该语言文案留空`, error);
+          pages.set(locale, null);
+        }
+      })
+    );
 
-    // 中文那份进无后缀字段，英文那份进 `_en`
-    const primaryIsEn = target.locale === 'en';
-    const zh = primaryIsEn ? secondary : primary;
-    const en = primaryIsEn ? primary : secondary;
+    const pageOf = (locale: string): ScrapedPage | null => pages.get(locale) ?? null;
 
-    const title = zh?.title ?? primary.title;
+    /*
+     * 四份文案（每份只带「要翻译的三个字段」）—— 调用方原样传给
+     * POST /api/admin/games 的 `texts` 字段，那边写进 `game_texts`。
+     *
+     * ⚠️ **`developer` 不在里面**：厂名由数据层按 `developerId` 反查后写
+     *    （见 lib/server/games.ts 的 withDeveloper）。上游的厂名是**按页面语言翻译的**
+     *    （实测韩文页给「HAL 연구소」，与库里存的名字对不上），照搬会污染快照、
+     *    还会让「名字 → developers.id」那张映射表失配。
+     */
+    const texts = Object.fromEntries(
+      UPSTREAM_LOCALES.map((locale) => {
+        const page = pageOf(locale);
+        return [
+          locale,
+          {
+            title: page?.title ?? null,
+            series: page?.series ?? null,
+            description: page ? bestDescription(page) : null,
+          },
+        ];
+      })
+    );
+
+    /*
+     * primary 之外的兜底页 —— 封面 / 机种 / ROM 表在 primary 上取不到时用它。
+     * 按 `UPSTREAM_LOCALES` 的顺序取**第一个抓到的**（顺序固定，别依赖 Map 的插入序）。
+     */
+    const fallbackPage =
+      UPSTREAM_LOCALES.filter((locale) => locale !== target.locale)
+        .map((locale) => pageOf(locale))
+        .find((page): page is ScrapedPage => page !== null) ?? null;
+
+    /*
+     * 中文那份是「站内主名字」（判重与 `games.title` 都用它），缺了才退到 primary。
+     * ⚠️ 别改成 primary 优先：primary 是**用户贴的那个链接的语言**，可能正好是日文页。
+     */
+    const title = pageOf('zh')?.title ?? primary.title;
     // 语言 key 跟着选中的那份 ROM 走（它决定表单「语言」下拉填什么，也是判重的一半）
-    const romLang = primary.romLang ?? secondary?.romLang ?? null;
+    const romLang = primary.romLang ?? fallbackPage?.romLang ?? null;
 
     /*
      * 顺手查一次重：判据与 POST /api/admin/games 里那次**完全一致**（都走 findGameDuplicate，
      * 同名 + 同机种 + 同语言），否则会出现「这里说不重复、下载完上传却被判重复」。
      *
-     * ⚠️ 机种这一维取**先定的那个值**（primary 优先，再看 secondary）—— 和下面响应体里
+     * ⚠️ 机种这一维取**先定的那个值**（primary 优先，再看 fallbackPage）—— 和下面响应体里
      *    `consoleType` 用的是同一个表达式，别再算一遍，否则两条路径会漂。
      *
      * 调用方（批量导入）靠它**先决定要不要去下载封面和 ROM** —— 那一步是几 MB，
      * 是整条链路里最慢的一段；库里已有的（同名 + 同机种 + 同语言）直接跳过，不白下载一遍。
      * ⚠️ 查重失败（D1 抖一下）**不该拦住抓取本身** —— 上传那一步还会再判一次，那才是兜底。
      */
-    const consoleType = primary.consoleType ?? secondary?.consoleType ?? null;
+    const consoleType = primary.consoleType ?? fallbackPage?.consoleType ?? null;
     let duplicateOf: { id: string; title: string; language: string | null } | null = null;
     try {
       duplicateOf = title
@@ -344,7 +399,7 @@ export async function POST(request: Request) {
      *    那几份一律 `duplicate: false`，由上传那一步兜底判。
      * ⚠️ 查重失败（D1 抖一下）同样不该拦住抓取 —— 置 false，交给上传那一步。
      */
-    const variants = primary.roms.length ? primary.roms : secondary?.roms ?? [];
+    const variants = primary.roms.length ? primary.roms : fallbackPage?.roms ?? [];
     const roms = await Promise.all(
       variants.map(async (variant) => {
         let duplicate = false;
@@ -360,18 +415,34 @@ export async function POST(request: Request) {
     );
 
     return NextResponse.json({
+      /**
+       * **四个语言的文案**（2026-10-16 加）—— 爬取那条路原样传给
+       * POST /api/admin/games 的 `texts` 字段，写进 `game_texts` 的 zh / en / ja / ko 行。
+       * 某个语言那页没抓到就是那份全 `null`（写入时不建空行，见 writeTexts）。
+       * ⚠️ 只有 title / series / description，**没有 developer**（见上面 texts 那段）。
+       */
+      texts,
+      /*
+       * 下面这六个扁平字段是 `texts` 里**中英两份的投影**，只为**手动添加**
+       * （AdminGames 的「从链接自动填充」）留着 —— 那个表单目前只有中英两栏。
+       * ⚠️ 爬取那条路别再用它们：那样会把日韩丢掉。
+       */
       title,
-      titleEn: en?.title ?? null,
+      titleEn: texts.en?.title ?? null,
       consoleType,
-      year: primary.year ?? secondary?.year ?? null,
-      developer: zh?.developer ?? primary.developer,
-      series: zh?.series ?? primary.series,
-      seriesEn: en?.series ?? null,
-      description: bestDescription(zh ?? primary),
-      descriptionEn: bestDescription(en),
+      year: primary.year ?? fallbackPage?.year ?? null,
+      /*
+       * 开发商取**中文页**那份（缺了退 primary）—— 它是「名字 → developers.id」
+       * 那张映射表的键，必须与库里存的名字是同一种语言（见上面 texts 那段）。
+       */
+      developer: pageOf('zh')?.developer ?? primary.developer,
+      series: texts.zh?.series ?? primary.series,
+      seriesEn: texts.en?.series ?? null,
+      description: texts.zh?.description ?? bestDescription(primary),
+      descriptionEn: texts.en?.description ?? null,
       // 封面 / ROM 的**地址**（字节不在这里取）：主语言那份优先 ——
       // 不同语言页面挂的 ROM 版本可能不同（中文页给日版、英文页给美版）
-      imageUrl: primary.imageUrl ?? secondary?.imageUrl ?? null,
+      imageUrl: primary.imageUrl ?? fallbackPage?.imageUrl ?? null,
       /**
        * `fileName` 里**每一个**语言版本（2026-10-15 加）—— 「从列表导入」照它逐份入库：
        * `language` 是站内短码（zh / en / ja / ko），认不出的语言是 null；
@@ -379,8 +450,8 @@ export async function POST(request: Request) {
        */
       roms,
       // 下面三个是「挑出来的那一份」，手动添加（AdminGames 自动填充）在用，别删
-      romUrl: primary.romUrl ?? secondary?.romUrl ?? null,
-      romName: primary.romName ?? secondary?.romName ?? null,
+      romUrl: primary.romUrl ?? fallbackPage?.romUrl ?? null,
+      romName: primary.romName ?? fallbackPage?.romName ?? null,
       romLang,
       /** 库里已经有同名同语言的一条 —— 调用方据此**跳过下载**（那一步最慢） */
       duplicate: duplicateOf !== null,

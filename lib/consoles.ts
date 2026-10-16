@@ -15,12 +15,23 @@
  *
  * ⚠️ **加机种要动的地方**（`Record<ConsoleType, …>` 那几处会编译报错提醒，数组不会）：
  *   ① 这里（`CONSOLE_LABEL` / `CONSOLE_TYPES` / `CONSOLE_TINT`）；
- *   ② `lib/emulator.ts`（`ConsoleType` / `CORE_MAP` / `EXTENSION_MAP` / `detectConsole`）；
+ *   ② `lib/emulator.ts`（`ConsoleType` / `CORE_MAP` / `EXTENSION_MAP` / `detectConsole` /
+ *      `LOCAL_CORE_CONSOLES`）+ 把核心两个文件放进 `public/cores/`；
  *   ③ `lib/server/games.ts` 的 `countGamesByConsole` 初始化对象；
- *   ④ `lib/unwrap.ts` 的内层扩展名表（zip 里装着这种 ROM 时要能拆）；
+ *   ④ `lib/unwrap.ts` 的内层扩展名表（zip / 7z 里装着这种 ROM 时要能拆）；
  *   ⑤ `components/HandheldConsole.tsx` 的 `FACE_ROWS`（掌机面键按机种长）；
  *   ⑥ `lib/server/upstream.ts` 的 `toConsoleType`（上游页面文字 → 站内机种）；
- *   ⑦ `scripts/add-consoles.mjs` 的默认资料（数据库那边补行）。
+ *      ⚠️ `scripts/fill-game-texts-ja-ko.mjs` 里有一份**逐条一致的移植**，两边都要改；
+ *   ⑦ `scripts/add-consoles.mjs` 的默认资料（数据库那边补行）；
+ *   ⑧ `lib/keybindings.ts` 的 `CONSOLE_BUTTONS` / `CONSOLE_BUTTON_LABELS`
+ *      （机身丝印和街机那套 A B C X Y Z 不一样的机种才要登记）+ `defaultBindingsFor`
+ *      （**通用那套默认键位摆不下这台机器时**才另开一套 —— NDS / PS1 各有一套）；
+ *   ⑨ `lib/bios.ts` 的 `BIOS_SPECS`（**只有需要 BIOS 的机种** —— 目前是街机和 PS1）。
+ *
+ * ⚠️ 上面九处是**代码**；还有两件**数据**（不写代码也不会报错，但机种页会缺东西）：
+ *   · `scripts/add-consoles.mjs` 的默认资料行（或后台手填）；
+ *   · **机图** `scripts/console-images/<机种>-pixel.png` + `scripts/fill-console-images.mjs`
+ *     （1024² 透明底扁平像素画；规格与生成做法见 `.workbuddy-ai/memory/REFERENCE.md` 的 PS1 一节）。
  */
 import type { ConsoleType } from './emulator';
 
@@ -44,6 +55,8 @@ export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   '32x': '32X',
   ws: 'WS',
   ngp: 'NGP',
+  // PS1 的丝印词。**用 `PS` 而不是 `PS1`**：三个字符是上限，而机身丝印本来就是 PS
+  ps1: 'PS',
   arcade: 'ARC',
 };
 
@@ -51,11 +64,16 @@ export const CONSOLE_LABEL: Record<ConsoleType, string> = {
  * 全部机种，**按界面上的展示顺序**。
  *
  * 顺序刻意按「阵营 + 年代」排：任天堂家用机 → 任天堂掌机（GB 一系 + NDS）→ 世嘉 →
- * 其它掌机（万代 / SNK）→ 街机。首页那个「按机种浏览」区块和 `/games` 的机种筛选条
+ * 其它掌机（万代 / SNK）→ 索尼 → 街机。首页那个「按机种浏览」区块和 `/games` 的机种筛选条
  * 共用这一份，两处各写一份迟早会漂。
  *
  * ⚠️ 2026-10-15 加到十三个（NDS）。原来十二个正好是首页四列网格的三整行，现在末尾
  *    会**只剩一张卡**在第四行 —— 这是刻意的取舍，不为此再补一个机种凑数。
+ *
+ * ⚠️ 2026-10-16 加到十四个（PS1，**第一台光盘机种**）。位置刻意放在 `ngp` 之后、
+ *    `arcade` 之前：上面那几档是「任天堂 / 世嘉 / 其它掌机」，PS1 是**索尼家用机**，
+ *    自成一档；而街机一直是垫底那一档（README 的机种表也是这个次序）。
+ *    十四张卡在首页四列网格上是三整行 + 两张 —— 同样不为凑数再补机种。
  */
 export const CONSOLE_TYPES: readonly ConsoleType[] = [
   'nes',
@@ -70,6 +88,7 @@ export const CONSOLE_TYPES: readonly ConsoleType[] = [
   '32x',
   'ws',
   'ngp',
+  'ps1',
   'arcade',
 ];
 
@@ -78,7 +97,7 @@ export const CONSOLE_TYPES: readonly ConsoleType[] = [
  *
  * 只用在卡带 sprite 那条 5px 的竖条上（见 `CartridgeSprite`），所以取的都是
  * 低饱和的中间调 —— 饱和度高一点就会从那块灰阶界面里跳出来。
- * 十三个色相彼此拉开，但刻意不要求「认色识机种」，那件事由旁边的丝印词负责。
+ * 十四个色相彼此拉开，但刻意不要求「认色识机种」，那件事由旁边的丝印词负责。
  */
 export const CONSOLE_TINT: Record<ConsoleType, string> = {
   nes: '#d16c70',
@@ -94,6 +113,9 @@ export const CONSOLE_TINT: Record<ConsoleType, string> = {
   '32x': '#a8455f',
   ws: '#d08a5f',
   ngp: '#7a7f9c',
+  // PS1：那台著名的灰色主机，取一个**中性偏暖的浅灰** —— 和 NDS 的冷灰蓝（#9aa3b8）
+  // 差在蓝通道、和 GG 的橄榄（#8a8f6f）差在绿通道，两条都拉得开
+  ps1: '#a8a49b',
   arcade: '#c96f6f',
 };
 

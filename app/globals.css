@@ -1149,14 +1149,22 @@ body {
  *   `.screen-hint-sm`  text-[12px] → 12px   「DRAG & DROP A ROM」那行主提示
  *   `.screen-hint-xs`  text-[12px] → 12px   副提示（怎么选文件 / 等房主 / 暂停副标题）
  *
+ * ⚠️ 2026-10-16 起选择器**不止中文**：日文（假名）和韩文（谚文）同样不在
+ *    Press Start 2P 的字模里、同样落系统字体，补偿的理由一模一样。
+ *    以后加语言时，只要那门语言用非拉丁字母，就把它的短码加进来。
+ *
  * 这几条是**未分层**的，优先级高于 Tailwind 的 utilities 层，所以能压过元素上那两个
  * `text-[12px]` 工具类（和 `.screen:fullscreen` 压过尺寸类同一个道理）。
  * 工具类只设了 font-size、没设 line-height，所以这里改字号不会带出行高问题。
  * ------------------------------------------------------------------ */
-:root[data-locale='zh'] .screen-hint-xs {
+:root[data-locale='zh'] .screen-hint-xs,
+:root[data-locale='ja'] .screen-hint-xs,
+:root[data-locale='ko'] .screen-hint-xs {
   font-size: 12px;
 }
-:root[data-locale='zh'] .screen-hint-sm {
+:root[data-locale='zh'] .screen-hint-sm,
+:root[data-locale='ja'] .screen-hint-sm,
+:root[data-locale='ko'] .screen-hint-sm {
   font-size: 12px;
 }
 

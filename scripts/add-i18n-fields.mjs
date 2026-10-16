@@ -21,6 +21,15 @@
  *
  * ⚠️ 本脚本**只加列、不填内容**。英文内容由另一个脚本（fill-i18n-content.mjs）灌 ——
  *    建表和填内容是两件事：表结构一次就位，文案会随认知修正，生命周期不同。
+ *
+ * ⚠️⚠️ **2026-10-16 起：给「游戏文案」加语言不要再走这条路。**
+ *    游戏文案已经搬进 `game_texts` 侧表（加语言 = 插数据，**不动表结构**），
+ *    `games` 上那 8 个列退化成「只写不读的投影」（见 db/schema.sql 顶部那段）。
+ *    在这儿加出来的列**读了也不会显示**。
+ *    · 要给游戏文案加语言 → 改 `lib/game-text.ts` 的 `CONTENT_LOCALES`（不用建表），
+ *      再用 `scripts/add-game-group-key.mjs` 把内容搬进侧表；
+ *    · 这个脚本现在只对 **`developers`** 还有意义 —— 那两张表仍是宽表
+ *      （见 REFERENCE.md「内容双语字段」那节顶上的作废说明）。
  */
 
 const { CF_ACCOUNT_ID, CF_D1_API_TOKEN, D1_DATABASE_ID } = process.env;

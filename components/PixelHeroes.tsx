@@ -41,7 +41,12 @@ const ORANGE = '#f07a22';
 
 const SPRITES: PixelSprite[] = [
   {
-    name: { en: 'Mario (Super Mario Bros.)', zh: '马里奥（超级马力欧兄弟）' },
+    name: {
+      en: 'Mario (Super Mario Bros.)',
+      zh: '马里奥（超级马力欧兄弟）',
+      ja: 'マリオ（スーパーマリオブラザーズ）',
+      ko: '마리오(슈퍼 마리오 브라더스)',
+    },
     palette: { R: RED, H: '#7c3f00', S: SKIN, K: BLACK, B: BLUE, Y: YELLOW, D: '#7a4b12' },
     rows: [
       '....RRRRR.......',
@@ -63,7 +68,12 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Link (The Legend of Zelda)', zh: '林克（塞尔达传说）' },
+    name: {
+      en: 'Link (The Legend of Zelda)',
+      zh: '林克（塞尔达传说）',
+      ja: 'リンク（ゼルダの伝説）',
+      ko: '링크(젤다의 전설)',
+    },
     palette: { G: '#3ea23e', S: SKIN, K: BLACK, D: '#8a5a2b', Y: YELLOW },
     rows: [
       '................',
@@ -85,7 +95,12 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Samus (Metroid)', zh: '萨姆斯（银河战士）' },
+    name: {
+      en: 'Samus (Metroid)',
+      zh: '萨姆斯（银河战士）',
+      ja: 'サムス（メトロイド）',
+      ko: '사무스(메트로이드)',
+    },
     palette: { O: ORANGE, G: '#8cf05f', R: RED, Y: YELLOW },
     rows: [
       '................',
@@ -107,7 +122,7 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Mega Man', zh: '洛克人' },
+    name: { en: 'Mega Man', zh: '洛克人', ja: 'ロックマン', ko: '록맨' },
     palette: { B: '#3096f0', D: '#1850c8', S: SKIN, K: BLACK },
     rows: [
       '................',
@@ -129,7 +144,12 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Ryu (Street Fighter)', zh: '隆（街头霸王）' },
+    name: {
+      en: 'Ryu (Street Fighter)',
+      zh: '隆（街头霸王）',
+      ja: 'リュウ（ストリートファイター）',
+      ko: '류(스트리트 파이터)',
+    },
     palette: { W: WHITE, S: SKIN, K: BLACK, R: RED },
     rows: [
       '................',
@@ -151,7 +171,7 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Contra commando', zh: '魂斗罗突击兵' },
+    name: { en: 'Contra commando', zh: '魂斗罗突击兵', ja: '魂斗羅の兵士', ko: '콘트라 병사' },
     palette: { S: '#e8a06a', R: RED, B: BLUE, K: BLACK },
     rows: [
       '................',
@@ -173,7 +193,7 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Pac-Man', zh: '吃豆人' },
+    name: { en: 'Pac-Man', zh: '吃豆人', ja: 'パックマン', ko: '팩맨' },
     palette: { Y: YELLOW },
     rows: [
       '................',
@@ -195,7 +215,7 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Ghost (Pac-Man)', zh: '幽灵（吃豆人）' },
+    name: { en: 'Ghost (Pac-Man)', zh: '幽灵（吃豆人）', ja: 'ゴースト（パックマン）', ko: '고스트(팩맨)' },
     palette: { R: '#e02020', W: '#ffffff', B: '#2121ff' },
     rows: [
       '................',
@@ -217,7 +237,7 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Bomberman', zh: '炸弹人' },
+    name: { en: 'Bomberman', zh: '炸弹人', ja: 'ボンバーマン', ko: '봄버맨' },
     palette: { W: WHITE, P: '#f080c0', K: BLACK, B: '#2870e0' },
     rows: [
       '................',
@@ -239,7 +259,7 @@ const SPRITES: PixelSprite[] = [
     ],
   },
   {
-    name: { en: 'Kirby', zh: '星之卡比' },
+    name: { en: 'Kirby', zh: '星之卡比', ja: 'カービィ', ko: '커비' },
     palette: { P: '#ffb0d8', K: BLACK, C: '#f87c9c', M: '#a02040', R: '#e03050' },
     rows: [
       '................',

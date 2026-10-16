@@ -27,16 +27,18 @@ import { useI18n } from './I18nProvider';
  *    要它们就得退回 `<Link>`（房间那边改之前权衡过一次，结论写在那段注释里）。
  *
  * ⚠️ **点选项时两步的顺序不能反**：`rememberLocale` **先**写 cookie、**再**导航。
- *    middleware 正是靠这个 cookie 决定「无前缀地址要不要把你送去 `/zh`」——
+ *    middleware 正是靠这个 cookie 决定「无前缀地址要不要把你送去带前缀那份」——
  *    反过来的话，从 `/zh` 切到英文、落到 `/games`，下一个请求又会被 cookie 里那个
  *    「中文」送回 `/zh`，表现为**切了没反应**。
  *
- * 目标地址直接用 `useI18n()` 的 `altHref`（**当前页面的另一种语言地址，含 query**）：
- * 全站只有两种语言，于是「选中的不是当前语言」⇔「选中的就是另一种语言」。
- * 将来真加了第三种语言，这里要改成按 `next` 现算地址。
+ * 目标地址用 `useI18n()` 的 **`hrefIn(option.value)`** —— 每个选项各自现算，
+ * 因为「当前页面在日文下的地址」和「在韩文下的地址」是两个不同的地址。
+ * ⚠️ 2026-10-16 之前这里用的是 `altHref`（「另一种语言」的地址），那**只在两种语言时
+ *    成立**（选中的不是当前 ⇔ 就是那另一种）；四种语言下它会变成「不管点哪个都去
+ *    同一个地方」。加语言时这里是必须改的一处。
  */
 export default function LocaleSwitcher() {
-  const { t, locale, altHref, rememberLocale } = useI18n();
+  const { t, locale, hrefIn, rememberLocale } = useI18n();
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
@@ -105,7 +107,7 @@ export default function LocaleSwitcher() {
                   // 点的是当前语言：只是收起来，不必白跑一趟导航
                   if (option.value === locale) return;
                   rememberLocale(option.value);
-                  router.push(altHref);
+                  router.push(hrefIn(option.value));
                 }}
               >
                 {option.label}

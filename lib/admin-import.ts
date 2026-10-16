@@ -7,9 +7,13 @@
  *   POST /api/admin/fetch-image / fetch-rom → 经服务端代理取字节（跨域 + CORS）
  *   POST /api/admin/games                  → 上传入库（判重在那里兜底）
  *
- * ⚠️ **两个入口必须共用这一份**：表单字段名（`title` / `title_en` / `console_type` /
- *    `language` / `series` / `developer_id` / `description` / `image` / `rom`）漏一个
- *    就是静默丢数据 —— 抄出第二份迟早会漂。
+ * ⚠️ **两个入口必须共用这一份**：表单字段名（`texts` / `title` / `title_en` /
+ *    `console_type` / `language` / `series` / `developer_id` / `description` /
+ *    `image` / `rom`）漏一个就是静默丢数据 —— 抄出第二份迟早会漂。
+ *
+ * ⚠️ 文案走 **`texts`**（一个 JSON 字符串，**四个语言**，2026-10-16 加）：上游 `/ja/…`
+ *    `/ko/…` 是真日韩文，爬取时四个语言各抓一份、原样带下去（见 scrape-game 的 `texts`）。
+ *    后面那几栏扁平字段是中英投影，留着当退路（服务端收不到 `texts` 时用）。
  *
  * ⚠️ 一款游戏可能回**好几条**（2026-10-15 起「多语言各导一条」）：上游 `fileName`
  *    是「一份语言一个地址」，最多四份（中 / 英 / 日 / 韩）。
@@ -36,6 +40,26 @@ export interface ListResult {
   total: number;
   games: ListGame[];
 }
+
+/**
+ * `/api/admin/scrape-game` 回的**一份语言文案**（2026-10-16 加）。
+ *
+ * ⚠️ 只有三个字段 —— **`developer` 不在里面**：厂名由数据层按 `developerId` 反查后写
+ * （见 lib/server/games.ts 的 withDeveloper）。上游的厂名是**按页面语言翻译的**
+ * （实测韩文页给「HAL 연구소」，与库里存的名字对不上），照搬会让快照失真、
+ * 也会让「名字 → developers.id」那张映射表失配。
+ */
+export interface ScrapedText {
+  title: string | null;
+  series: string | null;
+  description: string | null;
+}
+
+/**
+ * 四语言文案，按**上游语言前缀**索引（zh / en / ja / ko）。
+ * 某个语言那页没抓到，就是那份全 `null`（写入时不建空行）。
+ */
+export type ScrapedTexts = Record<string, ScrapedText>;
 
 /** 一条的结局：成功 / 跳过（库里已有同名同语言）/ 失败。 */
 export type ImportStatus = 'ok' | 'duplicate' | 'failed';
@@ -87,6 +111,14 @@ export interface ImportOptions {
   fallbackConsole: ConsoleType | null;
   /** 开发商「名字 → id」映射，整批只拉一次（见 fetchDeveloperOptions） */
   developerIds: Map<string, string>;
+  /**
+   * 要不要把 ROM 存进本站 R2（2026-10-16）。
+   *
+   * `false` 时**不下载 ROM**，只把上游地址入库（服务端收敛成 `site:/…` / `files:/…`），
+   * 前台按它回源取 —— 省 R2 存储，也省掉整条链路里最慢的那一段。
+   * ⚠️ **不传 = `true`**（保持「从列表导入」那条路的老行为，别改它的默认）。
+   */
+  saveRom?: boolean;
   /** 每一条语言版本的开始 / 结束都会回调一次 */
   onEvent?: (event: ImportEvent) => void;
   /** 「停止」标志：每次真要下载前看一眼，返回 true 就不再往下做 */
@@ -181,7 +213,7 @@ export async function importGame(
   game: ListGame,
   options: ImportOptions
 ): Promise<ImportOutcome[]> {
-  const { fallbackConsole, developerIds, onEvent, shouldStop } = options;
+  const { fallbackConsole, developerIds, saveRom = true, onEvent, shouldStop } = options;
   const label = game.title ?? game.slug;
 
   try {
@@ -195,6 +227,12 @@ export async function importGame(
     }
 
     const meta = (await metaRes.json()) as {
+      /**
+       * **四个语言的文案**（2026-10-16 加）—— 下面原样转给 POST /api/admin/games
+       * 的 `texts` 字段，那边写进 `game_texts`。这就是「爬取补齐日韩」落地的那一步。
+       */
+      texts?: ScrapedTexts;
+      /* 下面是中英投影，只为手动添加那条路留着（见 scrape-game 返回体的注释） */
       title?: string | null;
       titleEn?: string | null;
       consoleType?: ConsoleType | null;
@@ -288,9 +326,17 @@ export async function importGame(
        * 不该带走这款的其它语言（外面那个 catch 管的是「整款连详情都没抓到」）。
        */
       try {
-        // 这一份的封面（一款共用，第一次真要用到时才取）+ 这一份自己的 ROM
+        // 这一份的封面（一款共用，第一次真要用到时才取）
         if (!cover) cover = await fetchAsset('/api/admin/fetch-image', meta.imageUrl, '');
-        const rom = await fetchAsset('/api/admin/fetch-rom', variant.url, variant.name);
+        /*
+         * ROM：勾了「保存 ROM」就下载字节走老路；没勾就**只带上游地址**（2026-10-16），
+         * 字节一个都不取 —— 这是整条链路里最慢的一段（几 MB × 语言数）。
+         * 地址**原样**交给服务端收敛（`site:/…` / `files:/…`），客户端不 import 服务端模块
+         * （收敛在 app/api/admin/games 里用 toStoredSource 做，转换即校验）。
+         */
+        const rom = saveRom
+          ? await fetchAsset('/api/admin/fetch-rom', variant.url, variant.name)
+          : null;
 
         /*
          * 字段名与手动添加那条**必须一致**（见 app/api/admin/games 的 POST）。
@@ -298,6 +344,15 @@ export async function importGame(
          * 语言：用**这一份**的短码（认不出的语言那一支兜底时可能为空）。
          */
         const form = new FormData();
+        /*
+         * 文案走 `texts`（**四个语言**，2026-10-16 加）—— 服务端优先认它，写进 `game_texts`。
+         *
+         * 下面那几栏扁平字段**照旧带着**，两个理由：
+         *   ① 服务端万一收不到 `texts`（老版本 / 手工构造的请求），还有退路；
+         *   ② `title` 那一栏服务端还要拿去判重（`findGameDuplicate` 比的是中文标题）——
+         *      与 `texts.zh.title` 同源，重复带上不冲突。
+         */
+        if (meta.texts) form.set('texts', JSON.stringify(meta.texts));
         form.set('title', title);
         form.set('title_en', meta.titleEn ?? '');
         form.set('console_type', meta.consoleType ?? fallbackConsole ?? 'nes');
@@ -310,7 +365,13 @@ export async function importGame(
         form.set('description', meta.description ?? '');
         form.set('description_en', meta.descriptionEn ?? '');
         form.set('image', cover);
-        form.set('rom', rom);
+        if (rom) {
+          form.set('rom', rom);
+        } else {
+          // 不存 ROM：把上游地址与原始文件名带上（后者 FBNeo 认它当驱动名，改不得）
+          form.set('source_url', variant.url);
+          form.set('rom_name', variant.name);
+        }
 
         const res = await fetch('/api/admin/games', { method: 'POST', body: form });
         if (!res.ok) {

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import LegalPage from '@/components/LegalPage';
-import { SITE_NAME, alternatesFor, localePath, ogLocale, otherLocale } from '@/lib/i18n';
+import { SITE_NAME, alternatesFor, localePath, ogLocale, otherLocales } from '@/lib/i18n';
 import { legalDoc } from '@/lib/legal';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -28,7 +28,7 @@ export async function generateMetadata({
       title: doc.title,
       description: doc.summary,
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
   };
 }

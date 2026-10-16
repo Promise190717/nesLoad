@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
 import type { AccountTab } from '@/lib/account-tabs';
 import type { ConsoleType } from '@/lib/emulator';
+import { localizeTexts, type GameTexts } from '@/lib/game-text';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { MAX_CARTRIDGES } from '@/lib/library';
 import BackLink from './BackLink';
@@ -60,47 +61,45 @@ interface AccountUser {
 /** `/api/user/favorites` 的条目（对齐 lib/server/user-data.ts 的 UserFavoriteItem）。 */
 interface FavoriteItem {
   id: string;
-  title: string;
-  /** 英文名（可空）。中英两份都带出来，由 `localizeFavoriteItem` 现挑一份。 */
-  titleEn: string | null;
+  /** 文案按语言索引（和 `/api/games` 的 `Game.texts` 同一形状），由 `localizeTexts` 现挑一份。 */
+  texts: GameTexts;
   imageUrl: string;
   romName: string;
   consoleType: ConsoleType;
   language: string | null;
   year: number | null;
-  developer: string | null;
-  developerEn: string | null;
+  developerId: string | null;
   favoritedAt: number;
 }
 
 /**
  * 按当前界面语言取收藏那一条要显示的文字。
  *
- * 和 `GameLibraryPanel` 的 `localizeLibraryGame` 同一个套路（那边收的是游戏库卡片那份
- * 形状）：这里只用到标题和开发商，就只取这两样 —— 不必为两条字段把四个都搬一遍。
- * 英文站空值回退中文，和服务端 `localizeGame` 是同一条规则。
+ * 直接转发 `lib/game-text.ts` 的 `localizeTexts`（纯函数，服务端与客户端共用同一份）——
+ * 这里只用到标题和开发商，就把其余两样丢掉。原来是手抄的「英文站空值回退中文」，
+ * 2026-10-16 撤掉（抄一份的代价是加语言时只改一处）。
  */
-function localizeFavoriteItem(item: FavoriteItem, locale: Locale): { title: string; developer: string | null } {
-  if (locale !== 'zh') {
-    return { title: item.titleEn || item.title, developer: item.developerEn || item.developer };
-  }
-  return { title: item.title, developer: item.developer };
+function localizeFavoriteItem(
+  item: FavoriteItem,
+  locale: Locale
+): { title: string; developer: string | null } {
+  const text = localizeTexts(item.texts, locale);
+  return { title: text.title, developer: text.developer };
 }
 
 /**
  * `/api/user/history` 的条目（对齐 lib/server/user-data.ts 的 `UserHistoryItem`）。
  *
  * 注意字段名和 `FavoriteItem` / `SaveOverviewItem` **不一样** —— 这份是照
- * `lib/library.ts` 的 `Cartridge` 形状来的（`id` = gameId、`name` 是标题、
+ * `lib/library.ts` 的 `Cartridge` 形状来的（`id` = gameId、`texts` 是标题、
  * `playedAt` 是时间），因为它本来就要能直接喂给屋里那套 `loadRemote`。
- * 这里只做展示和删除，所以只用得上 `id` / `name` / `imageUrl` / `console` / `playedAt`。
+ * 这里只做展示和删除，所以只用得上 `id` / `texts` / `imageUrl` / `console` / `playedAt`。
  */
 interface HistoryItem {
   /** = game_id。删单条时拿它拼 `/api/user/history/<id>`。 */
   id: string;
-  name: string;
-  /** 英文名（可空）。按语言挑一份，空了回退 `name`。 */
-  nameEn: string | null;
+  /** 文案按语言索引，由 `localizeTexts` 现挑一份（原来平铺的 `name` + `nameEn` 已撤）。 */
+  texts: GameTexts;
   imageUrl: string;
   romName: string;
   console: ConsoleType;
@@ -117,9 +116,8 @@ interface SaveOverviewItem {
   size: number;
   createdAt: number;
   imageUrl: string;
-  gameTitle: string;
-  /** 游戏英文标题（可空）。按语言挑一份，空了回退 `gameTitle`。 */
-  gameTitleEn: string | null;
+  /** 游戏文案（JOIN 现取，比槽位上那个 `title` 快照新），由 `localizeTexts` 现挑一份。 */
+  texts: GameTexts;
   consoleType: ConsoleType;
 }
 
@@ -836,7 +834,7 @@ function HistoryTab() {
                   href={localeHref(`/games/${item.id}`)}
                   className="block truncate text-[12px] text-ink-100 transition-colors hover:text-accent"
                 >
-                  {locale === 'zh' ? item.name : item.nameEn || item.name}
+                  {localizeTexts(item.texts, locale).title}
                 </Link>
                 <span className="block truncate text-[12px] text-ink-500">
                   {formatTime(item.playedAt, locale)}
@@ -1003,7 +1001,7 @@ function SavesTab() {
 
       <ul className="flex flex-col divide-y-2 divide-ink-800">
         {items.map((item) => {
-          const title = locale === 'zh' ? item.gameTitle : item.gameTitleEn || item.gameTitle;
+          const title = localizeTexts(item.texts, locale).title;
           const confirming = confirmingId === item.id;
           return (
             <li key={item.id} className="-mx-2 flex items-center gap-3 px-2 py-2.5 transition-colors hover:bg-ink-850">

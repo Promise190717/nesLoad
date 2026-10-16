@@ -13,9 +13,13 @@
  *   · https://retrogamesnexus.com/zh/sega-game-gear-games   （多段拼的机种也认）
  *   · https://retrogamesnexus.com/zh/games           （全部游戏）
  *   · 干脆只给 /zh/snes-games
- * 认得出机种段、但那台站内跑不了的（`n64-games` / `playstation-games`…）回
+ * 认得出机种段、但那台站内跑不了的（`n64-games` / `sega-saturn-games`…）回
  * `unsupported-console` —— 见 POST 里那段注释。
  * ⚠️ NDS 2026-10-15 起**能跑了**（本站自带 melonds 核心），`nds-games` 现在会被放行。
+ * ⚠️ PS1 2026-10-16 起**也能跑了**（`pcsx_rearmed`，见 `lib/emulator.ts` 的 `CORE_MAP`），
+ *    `playstation-games` 同样放行 —— 但注意上游那批 PS1 游戏里
+ *    **多文件镜像（`.cue` + `.bin`）本站吃不下**，只有 `.pbp` / `.iso` 能跑，
+ *    逐条爬之前先看一眼 ROM 地址的扩展名。
  *
  * ⚠️ **页码可以由调用方递进来**（body 里带 `page`，盖掉地址里那个 `page=`）——
  *    「自动爬取」靠它一页页往下翻（见 components/AdminAutoCrawl）。
@@ -57,7 +61,7 @@ interface ListTarget {
   path: string;
   /** 路径里那个机种段（`snes` / `sega-game-gear`）；`/games`（全部游戏）没有就是 null */
   consoleSegment: string | null;
-  /** 这一页的机种；认不出、或认得出但我们跑不了（`n64` / `playstation`…）就是 null */
+  /** 这一页的机种；认不出、或认得出但我们跑不了（`n64` / `sega-saturn`…）就是 null */
   consoleType: ConsoleType | null;
   page: number;
 }
@@ -171,10 +175,11 @@ export async function POST(request: Request) {
    * 机种段认得出来、但我们没有对应核心的，**直接拒**，别放进来。
    *
    * 放进来会怎样：列表页这一趟拿不到机种（consoleType = null），逐条抓详情也拿不到，
-   * 最后落到 `form.set('console_type', … ?? 'nes')` —— 一整页 N64 / PS1 / 土星的游戏
+   * 最后落到 `form.set('console_type', … ?? 'nes')` —— 一整页 N64 / 土星的游戏
    * 会被静默记成红白机。宁可在这儿报错，也不要往库里灌错机种。
    * `/games`（全部游戏）没有机种段，仍按原样放行（那种页面本来就是混着的）。
    * ⚠️ NDS 2026-10-15 起在 `toConsoleType` 里认得出，所以不会再落到这道闸门。
+   * ⚠️ PS1 2026-10-16 起同样认得出（放行），理由和限制见文件头那条。
    */
   if (target.consoleSegment && !target.consoleType) {
     return failJson(

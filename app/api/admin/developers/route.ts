@@ -18,7 +18,9 @@ import {
   listAdminDevelopersPage,
   MAX_PAGE_SIZE,
   normalizeWebsite,
+  type Developer,
 } from '@/lib/server/developers';
+import { flatEntityTexts, type FlatEntityText } from '@/lib/entity-text';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
 
 export const runtime = 'nodejs';
@@ -60,6 +62,36 @@ function friendly(error: unknown): string {
   return /UNIQUE constraint failed/i.test(message) ? '已经有一个同名开发商了' : message;
 }
 
+/**
+ * GET 返回的条目：`Developer` 把侧表那层字典摊成**四语言的扁平字段**。
+ *
+ * ⚠️ **后台表单一栏一个字段，所以接口必须摊平**（同 `/api/admin/consoles` 那条）——
+ *    2026-10-16 侧表化时这里一度直接回了 `{ texts }`，后台列表当场变成一片空白
+ *    （组件读的是 `developer.name`，拿到的是 `undefined`）。别再直接回 `Developer`。
+ */
+export interface AdminDeveloper extends FlatEntityText {
+  id: string;
+  imageUrl: string | null;
+  foundedYear: number | null;
+  website: string | null;
+  createdAt: number;
+  /** 名下游戏数。名下有游戏时**不许删**（[id] 那条接口会回 409）。 */
+  gameCount: number;
+}
+
+/** `Developer` → `AdminDeveloper`。`sourceSlug` **刻意不带出来**（回填日韩用的内部字段）。 */
+function flatten(developer: Developer): AdminDeveloper {
+  return {
+    id: developer.id,
+    ...flatEntityTexts(developer.texts),
+    imageUrl: developer.imageUrl,
+    foundedYear: developer.foundedYear,
+    website: developer.website,
+    createdAt: developer.createdAt,
+    gameCount: developer.gameCount,
+  };
+}
+
 export async function GET(request: Request) {
   const denied = await assertAdmin();
   if (denied) return denied;
@@ -71,7 +103,12 @@ export async function GET(request: Request) {
 
   try {
     // 游标翻页、没有 total —— 理由与形状见 /api/admin/games 那边的 GET 注释。
-    return NextResponse.json(await listAdminDevelopersPage(cursor, limit, { keyword }));
+    const page = await listAdminDevelopersPage(cursor, limit, { keyword });
+    return NextResponse.json({
+      developers: page.developers.map(flatten),
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+    });
   } catch (error) {
     console.error('[admin] 开发商列表读取失败', error);
     return fail('list-failed', (error as Error).message, 500);
@@ -116,21 +153,19 @@ export async function POST(request: Request) {
       imageUrl = publicUrl(key);
     }
 
-    const developer = await insertDeveloper({
-      id,
-      name,
-      // 英文字段（可空）：英文站取它、空了回退中文（见 lib/server/developers.ts）
-      nameEn: optionalText(form.get('name_en')),
+    const developer = await insertDeveloper(id, {
+      texts: {
+        zh: { name, summary: optionalText(form.get('summary')), description: optionalText(form.get('description')) },
+        en: { name: optionalText(form.get('name_en')), summary: optionalText(form.get('summary_en')), description: optionalText(form.get('description_en')) },
+        ja: { name: optionalText(form.get('name_ja')), summary: optionalText(form.get('summary_ja')), description: optionalText(form.get('description_ja')) },
+        ko: { name: optionalText(form.get('name_ko')), summary: optionalText(form.get('summary_ko')), description: optionalText(form.get('description_ko')) },
+      },
       imageUrl,
-      summary: optionalText(form.get('summary')),
-      summaryEn: optionalText(form.get('summary_en')),
-      description: optionalText(form.get('description')),
-      descriptionEn: optionalText(form.get('description_en')),
       foundedYear,
       website: normalizeWebsite(form.get('website')),
     });
 
-    return NextResponse.json({ ok: true, developer });
+    return NextResponse.json({ ok: true, developer: flatten(developer) });
   } catch (error) {
     console.error('[admin] 新建开发商失败', error);
     return fail('create-failed', friendly(error), 500);

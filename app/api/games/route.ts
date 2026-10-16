@@ -12,8 +12,8 @@
  * 筛当页那几条 —— 翻页会换一批结果，等于没搜；分页也一样，本地 slice 的前提是
  * 手里有全量数据。所以关键词和机种都随查询一起下发。
  *
- * ⚠️ **2026-10-14 起走 `listGamesPageCached`（12 小时缓存）** —— 用户拍板「前台的列表
- *    都加缓存」。代价是「后台刚传的游戏最多晚 12 小时才出现在这里」。在那之前这里是
+ * ⚠️ **2026-10-14 起走 `listGamesPageCached`（2026-10-16 起 24 小时缓存）** —— 用户拍板
+ *    「前台的列表都加缓存」。代价是「后台刚传的游戏最多晚 24 小时才出现在这里」。在那之前这里是
  *    实时查库（每次翻页 / 改筛选 = 2 次 D1：COUNT + SELECT，见 lib/server/games.ts）。
  *    现在 COUNT 走独立缓存（键里没有 offset，翻多少页都只数一次），SELECT 按页缓存。
  *    **后台列表（`/api/admin/games`）不受影响，仍然实时 —— 2026-10-14 起还改成了
@@ -55,7 +55,14 @@ export async function GET(request: Request) {
   const consoleType = CONSOLE_TYPES.find((value) => value === consoleParam) ?? null;
 
   try {
-    return NextResponse.json(await listGamesPageCached(offset, limit, keyword, consoleType));
+    /*
+     * 末尾那个 `null` 是**语种**那一维（2026-10-16 加的，机种专题页的 `?lang=` 在用）——
+     * 在线库弹窗没有语种筛选，永远传 null = 不限。签名里留着它是为了让两处共用同一份
+     * 缓存实现（键形状统一），见 lib/server/games.ts 的 listGamesPageCached。
+     */
+    return NextResponse.json(
+      await listGamesPageCached(offset, limit, keyword, consoleType, null)
+    );
   } catch (error) {
     console.error('[games] 列表读取失败', error);
     return NextResponse.json({ error: 'list-failed' }, { status: 500 });

@@ -20,6 +20,18 @@
  *
  * ⚠️ `games.developer_en` 是 `developers.name_en` 的**快照**（与 `developer` 列对称）：
  *    先在 developers 里把 name_en 写好，再由最后一段 SQL 按 developer_id 反查补齐。
+ *
+ * ⚠️ **2026-10-16：游戏文案搬进了 `game_texts` 侧表**。`games` 上那几列
+ *    （`title_en` / `series_en` / `description_en`）现在是**只写不读的投影** ——
+ *    只更新它们，前台一个字都看不到。所以下面 games 那段循环**同时写两处**：
+ *    `games` 的投影列 + `game_texts` 的 en 行（判空看侧表自己的现状，不看投影列）。
+ *
+ *    这个脚本是迁移之前写的，那份硬编码英文数据仍然有参考价值（要重建库时能派上用场），
+ *    但**新加游戏走后台**（/admin/games）就行，不必再回来跑它。
+ *
+ * ⚠️ **同日（2026-10-16）文案又改挂 `group_key`**：一行 games 是「一盘 ROM」，同一款游戏的
+ *    中英日韩四个版本是四行，而文案只有一份 —— 侧表挂 `group_key`（同款共用一个值）。
+ *    所以下面读写侧表用的都是 `group_key`（从 `games.group_key` 取，老行退回自己的 id）。
  */
 
 const { CF_ACCOUNT_ID, CF_D1_API_TOKEN, D1_DATABASE_ID } = process.env;
@@ -850,8 +862,25 @@ for (const entry of DEVELOPERS) {
 
 /* ---------- 2) games ---------- */
 
-const gameRows = (await run('SELECT id, title, title_en, series_en, developer_en, description_en FROM games')).results;
+const gameRows = (
+  await run(
+    'SELECT id, title, title_en, series_en, developer_en, description_en, COALESCE(group_key, id) AS group_key FROM games'
+  )
+).results;
 const gameById = new Map(gameRows.map((row) => [row.id, row]));
+
+/*
+ * 侧表里现存的英文行（2026-10-16 加；同日改挂 `group_key`）。
+ * ⚠️ 判「要不要写」用的是**侧表自己的现状**，不是 `games` 上那几列 ——
+ *    那几列现在只是投影，拿它当「已经写过了」的依据会让侧表永远补不上。
+ * ⚠️ 侧表一行 = **一款**（挂 `group_key`，同款的几个语言版本共用一份）——
+ *    所以这里的键是 `group_key` 而不是 `game_id`。下面写完会顺手更新这张表，
+ *    免得 GAMES 里同款的两条记录都以为「侧表还没有 en 行」而撞主键。
+ */
+const enTextRows = (
+  await run('SELECT group_key, title, series, description FROM game_texts WHERE locale = ?', ['en'])
+).results;
+const enTextByGroup = new Map(enTextRows.map((row) => [row.group_key, row]));
 
 let gameUpdated = 0;
 let gameSkipped = 0;
@@ -865,6 +894,7 @@ for (const entry of GAMES) {
     continue;
   }
 
+  /* ---- ① games 上那几个投影列（只写不读，见文件头）---- */
   const setClauses = [];
   const params = [];
   /* 每一列单独判断 —— 后台可能已手填其中一列，只补空的那几列。 */
@@ -881,7 +911,21 @@ for (const entry of GAMES) {
     params.push(entry.descriptionEn);
   }
 
-  if (setClauses.length === 0) {
+  /* ---- ② game_texts 的 en 行（**前台读的就是它**，见文件头）---- */
+  const enText = enTextByGroup.get(row.group_key) ?? { title: null, series: null, description: null };
+  const textPatch = {};
+  if (entry.titleEn && (!enText.title || String(enText.title).trim() === '')) {
+    textPatch.title = entry.titleEn;
+  }
+  if (entry.seriesEn && (!enText.series || String(enText.series).trim() === '')) {
+    textPatch.series = entry.seriesEn;
+  }
+  if (entry.descriptionEn && (!enText.description || String(enText.description).trim() === '')) {
+    textPatch.description = entry.descriptionEn;
+  }
+  const textKeys = Object.keys(textPatch);
+
+  if (setClauses.length === 0 && textKeys.length === 0) {
     gameSkipped += 1;
     console.log(`· 跳过（英文已齐）：${entry.title}`);
     continue;
@@ -889,19 +933,64 @@ for (const entry of GAMES) {
 
   if (DRY_RUN) {
     gameUpdated += 1;
-    console.log(`· [dry-run] 会写入：${entry.title} -> ${entry.titleEn}（补 ${setClauses.length} 列）`);
+    console.log(
+      `· [dry-run] 会写入：${entry.title} -> ${entry.titleEn}` +
+        `（games 补 ${setClauses.length} 列 / game_texts 补 ${textKeys.length} 列）`
+    );
     continue;
   }
 
-  const sql = `UPDATE games SET ${setClauses.join(', ')} WHERE id = ?`;
-  const result = await run(sql, [...params, row.id]);
-  if (result.meta?.changes) {
-    gameUpdated += 1;
-    console.log(`✅ ${entry.title} -> ${entry.titleEn}`);
-  } else {
-    gameSkipped += 1;
-    console.log(`· 跳过（写入时条件已不成立）：${entry.title}`);
+  if (setClauses.length > 0) {
+    await run(`UPDATE games SET ${setClauses.join(', ')} WHERE id = ?`, [...params, row.id]);
   }
+
+  if (textKeys.length > 0) {
+    /*
+     * upsert 侧表的 en 行。已存在就只覆盖这次要补的那几列（别的列原样留着）；
+     * 不存在就整行插进去。
+     *
+     * ⚠️ 第一个参数是 **`row.group_key`**（不是游戏 id）：同款的几个语言版本共用一份文案
+     *    （2026-10-16）。写完之后顺手把本地那张表也更新掉 —— 否则 GAMES 里同款的下一条
+     *    记录还会以为「侧表没有 en 行」而走 INSERT，撞主键。
+     *
+     * ⚠️ `developer` **不在这个脚本的射程内** —— 厂名由 `developers` 反查后写进每一份文案
+     *    （见 lib/server/games.ts 的 withDeveloper），所以插新行时留空，读取时回退中文厂名。
+     *    真要补侧表里的英文厂名，跑下面第 3 段那条 SQL 的配套脚本或走后台。
+     */
+    if (enTextByGroup.has(row.group_key)) {
+      const sets = textKeys.map((key) => `${key} = ?`);
+      await run(
+        `UPDATE game_texts SET ${sets.join(', ')}, updated_at = ? WHERE group_key = ? AND locale = ?`,
+        [...textKeys.map((key) => textPatch[key]), Date.now(), row.group_key, 'en']
+      );
+      Object.assign(enTextByGroup.get(row.group_key), textPatch);
+    } else {
+      await run(
+        `INSERT INTO game_texts (group_key, locale, title, series, developer, description, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          row.group_key,
+          'en',
+          textPatch.title ?? null,
+          textPatch.series ?? null,
+          null,
+          textPatch.description ?? null,
+          Date.now(),
+        ]
+      );
+      enTextByGroup.set(row.group_key, {
+        title: textPatch.title ?? null,
+        series: textPatch.series ?? null,
+        description: textPatch.description ?? null,
+      });
+    }
+  }
+
+  gameUpdated += 1;
+  console.log(
+    `✅ ${entry.title} -> ${entry.titleEn}` +
+      `（games ${setClauses.length} 列 / game_texts ${textKeys.length} 列）`
+  );
 }
 
 /* ---------- 3) games.developer_en 快照（按 developer_id 从 developers.name_en 反查）----------
@@ -920,6 +1009,35 @@ if (!DRY_RUN) {
   );
   console.log(`\n--- developer_en 快照 ---`);
   console.log(`按 developer_id 反查补齐 ${syncResult.meta?.changes ?? 0} 条 games.developer_en。`);
+
+  /*
+   * 侧表那份厂名（2026-10-16 加）—— **读取来源**。规则与 lib/server/games.ts 的
+   * `withDeveloper` 一致：英文行写 `developers.name_en`，只补空的、不覆盖已有的
+   * （后台手填过的留着）。中文行不在这儿管：它的厂名是 `games.developer` 那一份，
+   * 由 add-game-group-key.mjs 的迁移 / 后台写入负责。
+   *
+   * ⚠️ 关联条件走 **`COALESCE(g.group_key, g.id) = game_texts.group_key`**（同日改挂
+   *    group_key）—— 同款可能有好几条 games 行（中英日韩各一盘 ROM），
+   *    它们指向同一个 group；子查询命中多行时 SQLite 取第一行，不影响结果。
+   */
+  const textSync = await run(
+    `UPDATE game_texts
+        SET developer = (
+              SELECT d.name_en
+                FROM games g
+                JOIN developers d ON d.id = g.developer_id
+               WHERE COALESCE(g.group_key, g.id) = game_texts.group_key
+            )
+      WHERE locale = 'en'
+        AND (developer IS NULL OR TRIM(developer) = '')
+        AND (
+              SELECT d.name_en
+                FROM games g
+                JOIN developers d ON d.id = g.developer_id
+               WHERE COALESCE(g.group_key, g.id) = game_texts.group_key
+            ) IS NOT NULL`,
+  );
+  console.log(`按 developer_id 反查补齐 ${textSync.meta?.changes ?? 0} 条 game_texts（en）的厂名。`);
 }
 
 /* ---------- 收尾核对 ---------- */

@@ -12,9 +12,11 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/lib/consoles';
+import { CONTENT_LOCALES, isBlankGameText, type GameText, type GameTexts } from '@/lib/game-text';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { findGameDuplicate, insertGame, listAdminGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
 import { publicUrl, uploadObject } from '@/lib/server/r2';
+import { sourceFileName, toStoredSource } from '@/lib/server/upstream';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +44,88 @@ function optionalText(value: FormDataEntryValue | null): string | null {
 /** 表单里真正的文件。空 input 会塞一个 size 为 0 的 File，那等同于没选。 */
 function asFile(value: FormDataEntryValue | null): File | null {
   return value instanceof File && value.size > 0 ? value : null;
+}
+
+/**
+ * 解析表单里的 `texts` 字段（**一个 JSON 字符串**，2026-10-16 加）。
+ *
+ * 爬取那条路（lib/admin-import.ts）带的是**四个语言**的文案：
+ * `{ "zh": { title, series, description }, "en": {…}, "ja": {…}, "ko": {…} }`。
+ * 这里收敛成数据层要的 `GameTexts`：
+ *   · 只认 `CONTENT_LOCALES` 里那几个 key，别的语言丢掉（上游可能加我们没登记的）；
+ *   · **每份补 `developer: null`** —— 厂名不由调用方传，由 `insertGame` 按 `developerId`
+ *     反查后写进每一份（见 lib/server/games.ts 的 withDeveloper）；
+ *   · 一份里三个字段**全是空**就整份不要（写入时本来也不会建行，见 writeTexts）；
+ *   · 空串 / 纯空白一律收敛成 `null`，别把 `" "` 当成「有内容」写进库。
+ *
+ * ⚠️ 返回 `null` 表示**「这个字段没法用」**，调用方据此退回表单上那几栏扁平字段
+ *    （手动添加那条路，见下面的 `flatTexts`）。**别把「解析出一个空的 `GameTexts`」
+ *    当成成功** —— 那会写出一款没有文案的游戏。
+ */
+function parseTextsField(raw: FormDataEntryValue | null): GameTexts | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+  const source = parsed as Record<string, unknown>;
+  const texts: GameTexts = {};
+
+  for (const locale of CONTENT_LOCALES) {
+    const entry = source[locale];
+    if (!entry || typeof entry !== 'object') continue;
+
+    const row = entry as Record<string, unknown>;
+    const pick = (key: string): string | null => {
+      const value = row[key];
+      return typeof value === 'string' && value.trim() ? value.trim() : null;
+    };
+
+    const text: GameText = {
+      title: pick('title'),
+      series: pick('series'),
+      developer: null,
+      description: pick('description'),
+    };
+    if (isBlankGameText(text)) continue;
+    texts[locale] = text;
+  }
+
+  return texts;
+}
+
+/**
+ * 手动添加那条路的文案来源：把表单上那几栏**扁平字段**拼成 `GameTexts`。
+ *
+ * 字段名规则：无后缀 = 中文，`_en` / `_ja` / `_ko` = 英 / 日 / 韩
+ * —— 三个字段（`title` / `series` / `description`）× 四个语言 = 12 栏。
+ * （日韩那 6 栏是 2026-10-16 跟着界面语言一起开的；在那之前这里只有中英。）
+ *
+ * ⚠️ **三栏全空的那一份整份丢掉**（不建 key）：`writeTexts` 对「传进来的空的一份」
+ *    是**删行**（见 lib/server/games.ts），传个空壳过去等于发一条没意义的 DELETE。
+ *    中文那份不可能空 —— 调用方前面已经卡过 `title` 必填。
+ *
+ * ⚠️ `developer` 一律 `null`：厂名由数据层按 `developerId` 反查后写（见 `withDeveloper`）。
+ */
+function flatTexts(form: FormData): GameTexts {
+  const texts: GameTexts = {};
+  for (const locale of CONTENT_LOCALES) {
+    const suffix = locale === 'zh' ? '' : `_${locale}`;
+    const text: GameText = {
+      title: optionalText(form.get(`title${suffix}`)),
+      series: optionalText(form.get(`series${suffix}`)),
+      developer: null,
+      description: optionalText(form.get(`description${suffix}`)),
+    };
+    if (isBlankGameText(text)) continue;
+    texts[locale] = text;
+  }
+  return texts;
 }
 
 /** 从查询串里取一个非负整数，去掉小数与负号（别让 -1 / NaN 传到 SQL 里）。 */
@@ -94,13 +178,26 @@ export async function POST(request: Request) {
   const title = optionalText(form.get('title'));
   const image = asFile(form.get('image'));
   const rom = asFile(form.get('rom'));
+  /**
+   * 源站 ROM 地址（2026-10-16 加）。调用方给的是**上游原样的地址**
+   * （`https://files.retrogamesnexus.com/…` 或 `/games/roms/…`），这里收敛成站内形态
+   * `site:/…` / `files:/…`（**不含域名**，见 lib/server/upstream.ts）——
+   * **转换即校验**：认不出的域名返回 null，下面直接拒。
+   * 有值时**不需要**上传 ROM，前台按它回源取（见 app/api/games/[id]/rom）。
+   */
+  const rawSource = optionalText(form.get('source_url'));
+  const sourceUrl = toStoredSource(rawSource);
   const consoleType = optionalText(form.get('console_type')) as ConsoleType | null;
   // 语言要在判重（同名 + 同语言才算重复）与写库两处用，先取出来，别取两遍
   const language = optionalText(form.get('language'));
 
   if (!title) return fail('title-required', '请填写游戏名');
   if (!image) return fail('image-required', '请选择封面图片');
-  if (!rom) return fail('rom-required', '请选择游戏文件');
+  // 两条来源二选一：给了地址就不必传文件，反过来也一样
+  if (!rom && !sourceUrl) return fail('rom-required', '请选择游戏文件，或提供源站地址');
+  if (rawSource && !sourceUrl) {
+    return fail('bad-source-url', '源站地址不合法（只认上游域名的地址）');
+  }
   if (!consoleType || !CONSOLE_TYPES.includes(consoleType)) {
     return fail('bad-console-type', '类型不合法');
   }
@@ -111,9 +208,37 @@ export async function POST(request: Request) {
     return fail('bad-year', '年份必须是整数');
   }
 
+  /*
+   * 文案（2026-10-16 起进 `game_texts` 侧表）。两条来源，优先级从高到低：
+   *   ① 表单里的 `texts`（**JSON，四个语言**）—— 爬取那条路（lib/admin-import.ts）带的；
+   *   ② 上面那几栏扁平字段（`title` / `title_en` / `title_ja` / `title_ko`，
+   *      系列与说明同理）—— **手动添加**那条路带的，2026-10-16 起也是四个语言（见 flatTexts）。
+   *
+   * ⚠️ 走 ② 时**空的那几份整份不要**（`flatTexts` 里 `isBlankGameText` 那一步）：
+   *    `insertGame` → `writeTexts` 只处理传进来的语言，所以「只填了中文」不会在库里
+   *    留下三行空文案。这条路径只用于**新建**（id 是现场生成的），库里不可能已有文案，
+   *    所以「跳过空的那份」与旧写法（带上空的一份 → writeTexts 顺手删掉那行）效果一致。
+   *
+   * ⚠️ `developer` 那一栏**不在这儿填**：厂名由数据层按 `developerId` 反查后写进每一份
+   *    （见 lib/server/games.ts 的 withDeveloper）—— 让调用方自己传迟早会和各语言不一致。
+   */
+  const parsedTexts = parseTextsField(form.get('texts'));
+  const texts: GameTexts = parsedTexts?.zh?.title ? parsedTexts : flatTexts(form);
+
   const id = randomUUID();
   const imageKey = `images/${id}-${safeName(image.name || 'cover')}`;
-  const romKey = `roms/${id}-${safeName(rom.name || 'rom')}`;
+  /*
+   * 不存 ROM 时 `rom_url` 写**空串** —— 那列是 NOT NULL，而这一行的 ROM 走 `source_url`。
+   * 两条来源**互斥**：给了源站地址就不再往 R2 传 ROM（见下面 uploadObject 那一段）。
+   */
+  const romKey = sourceUrl ? '' : `roms/${id}-${safeName(rom?.name || 'rom')}`;
+  /*
+   * 原始文件名（FBNeo 认它当驱动名，改不得）：不下载 ROM 时表单里那份是上游地址的尾部，
+   * 优先用表单给的 `rom_name`，没有就从地址尾部推。
+   */
+  const romName = sourceUrl
+    ? optionalText(form.get('rom_name')) || sourceFileName(sourceUrl)
+    : (rom?.name ?? 'rom');
 
   try {
     /*
@@ -137,35 +262,42 @@ export async function POST(request: Request) {
     }
 
     await uploadObject(imageKey, new Uint8Array(await image.arrayBuffer()), image.type || 'application/octet-stream');
-    // ROM 一律按二进制流上传，别让 R2 自作主张改 Content-Type
-    await uploadObject(romKey, new Uint8Array(await rom.arrayBuffer()), 'application/octet-stream');
+    /*
+     * 有源站地址就**一个字节都不往 R2 存**（2026-10-16）—— 这正是「不保存 ROM」的意义所在。
+     * 没有时照旧上传；ROM 一律按二进制流上传，别让 R2 自作主张改 Content-Type。
+     */
+    if (!sourceUrl) {
+      await uploadObject(romKey, new Uint8Array(await rom!.arrayBuffer()), 'application/octet-stream');
+    }
 
-    const game = await insertGame({
+    const { group, ...game } = await insertGame({
       id,
-      title,
-      // 英文字段（可空）：英文站取它、空了回退中文（见 lib/server/games.ts）
-      titleEn: optionalText(form.get('title_en')),
+      // 上面那段算好的（`texts` 字段优先，退回中英扁平字段）—— 写入见 lib/server/games.ts
+      texts,
       imageUrl: publicUrl(imageKey),
       romKey,
+      // 源站地址（不存 ROM 时才有值）；null = 本站自持，前台读 R2
+      sourceUrl,
       // 存**原始文件名**：FBNeo 是拿 zip 文件名认驱动的，改名会让街机起不来
-      romName: rom.name,
+      romName,
       consoleType,
       // 上面已经取好（判重也用它），别再解析一遍
       language,
-      series: optionalText(form.get('series')),
-      seriesEn: optionalText(form.get('series_en')),
       year,
       /*
        * 开发商：表单里是一个下拉框，传上来的是 **developers.id**（不是名字）。
-       * 名字由 `insertGame` 反查后一起写进 `games.developer`（快照列），
+       * 名字由 `insertGame` 反查后一起写进 `games.developer`（快照列）与 `game_texts`，
        * 免得让「id 与名字」两处由调用方各自维护（见 lib/server/games.ts 的 resolveDeveloper）。
        */
       developerId: optionalText(form.get('developer_id')),
-      description: optionalText(form.get('description')),
-      descriptionEn: optionalText(form.get('description_en')),
     });
 
-    return NextResponse.json({ ok: true, game });
+    /*
+     * `group` 单独拿出去（不从 `game` 里读）：它是**这一次归组的结果**，不是游戏本身的
+     * 字段 —— `insertGame` 的返回值把它多带了一层。后台拿它提示「已归入《XXX》」，
+     * 归错款（比如中文名写错一个字，另开了一款）时当场就能看见。
+     */
+    return NextResponse.json({ ok: true, game, group });
   } catch (error) {
     console.error('[admin] 上传失败', error);
     // 把底层原因（如「R2 未配置：缺少 R2_ACCESS_KEY_ID」）透给后台，别吞掉

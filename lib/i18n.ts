@@ -3,17 +3,18 @@
  *
  * 语言是**路径说了算**：
  *   · 英文 —— 默认语言，**不占前缀**（`/`、`/games`、`/games/<id>`）；
- *   · 中文 —— 占 `/zh`（`/zh`、`/zh/games`、`/zh/games/<id>`）。
- * 所以同一个页面有两个地址，各自是一种语言，`hreflang` 互指。
+ *   · 中文 —— 占 `/zh`（`/zh`、`/zh/games`、`/zh/games/<id>`）；
+ *   · 日文 —— 占 `/ja`；韩文 —— 占 `/ko`（2026-10-16 加，规则与中文完全一样）。
+ * 所以同一个页面有四个地址，各自一种语言，`hreflang` 互指。
  *
  * 前台页面都住在 `app/[locale]/` 下（语言是路由参数 `params.locale`），
  * 而**前缀的搬运全在 middleware**（见 middleware.ts）：无前缀会被内部 rewrite 成
- * `/en/...`，`/zh/...` 原样放行，两边都往请求头塞一个语言戳（根布局在 `[locale]`
+ * `/en/...`，带前缀的原样放行，两边都往请求头塞一个语言戳（根布局在 `[locale]`
  * 段外面，只能靠那个头拿语言）。
  *
  * 语言只有两个来源：
  *   · **路径** —— 带前缀就是那个语言，对谁都一样（`/zh/games` 一定是中文）；
- *   · **cookie** —— 用户主动设置过。它只在「访问无前缀地址」时决定要不要送去 `/zh`。
+ *   · **cookie** —— 用户主动设置过。它只在「访问无前缀地址」时决定要不要送去带前缀那份。
  *
  * ⚠️ **浏览器语言（Accept-Language / navigator.language）不再是任何语言的来源**
  * （2026-10-13 用户要求：「没主动设置过，访问哪个就是哪个，不要跳转」）。
@@ -21,15 +22,32 @@
  * 唯一例外是**后台**：它没有语言前缀，路径里读不出语言，所以 middleware 的守卫分支
  * 仍按 cookie → Accept-Language 兜底（只写请求头，不引起跳转）。
  *
+ * ⚠️ **界面语言（这里）≠ 内容语言**（`lib/game-text.ts` 的 `CONTENT_LOCALES`）。
+ * 两者 2026-10-16 起取值恰好都是 zh / en / ja / ko，但是**两套东西**：
+ * 这里管的是「按钮上写什么」，那边管的是「库里这款游戏叫什么」。
+ * 内容语言的日韩可以**先录数据、界面后开**（界面没开时也能往库里插日韩行）。
+ *
+ * ⚠️ **四张文案表**：`en` / `zh` 在下面（`en` 是基准表，`MessageKey` 由它推导），
+ * `ja` / `ko` 在**同目录的独立文件**里（`i18n.ja.ts` / `i18n.ko.ts`）——
+ * 理由和 `lib/legal.ts` 当初分出去的一样：四份表全塞进这个文件会把它冲到七千行，
+ * 谁都翻不动。代价是「加语言」变成「加一个文件 + 改 `messages`」两步，不再是纯改一处。
+ *
  * 这里只放「常驻在界面上的文案」。屏幕里没有任何提示语，所以载入失败、存档结果
  * 这类一次性反馈没有对应条目 —— 它们的表现是画面本身（雪花 / 游戏画面）和
  * 面板按钮的可用状态。
  */
 
-export type Locale = 'zh' | 'en';
+import { ja } from './i18n.ja';
+import { ko } from './i18n.ko';
 
-/** 全部受支持的语言。遍历前缀 / 生成 hreflang 都从这儿走，加语言只改这一处。 */
-export const LOCALES: readonly Locale[] = ['en', 'zh'];
+export type Locale = 'zh' | 'en' | 'ja' | 'ko';
+
+/**
+ * 全部受支持的语言。遍历前缀 / 生成 hreflang / sitemap 每条路径出几份都从这儿走。
+ * **默认语言放第一个**（`x-default` 与无前缀那份都是它）。
+ */
+export const LOCALES: readonly Locale[] = ['en', 'zh', 'ja', 'ko'];
+
 
 /** 兜底语言：任何语言标签都匹配不上时用它。也是**唯一不占前缀**的那个。 */
 export const DEFAULT_LOCALE: Locale = 'en';
@@ -37,21 +55,46 @@ export const DEFAULT_LOCALE: Locale = 'en';
 /**
  * 语言选择器的选项。
  *
- * **文字各用本语言写**（中文 / English）—— 语言选择器的惯例：万一用户看不懂
- * 当前界面语言，也得能认出自己要选哪个。
+ * **文字各用本语言写**（中文 / English / 日本語 / 한국어）—— 语言选择器的惯例：
+ * 万一用户看不懂当前界面语言，也得能认出自己要选哪个。
  *
- * ⚠️ 和房间那颗旧钮的短标签（`中` / `EN`）**刻意不同**：那颗钮显示的是**要切去的**
- *    那种语言、只占一颗钮的宽度，越短越好；下拉显示的是**当前**语言、且是一份列表，
- *    说全名比省地方重要。
+ * ⚠️ 和「切换钮」上那句话（`LOCALE_SWITCH_LABEL`）**刻意不同**：那颗钮是一个动词短语
+ *    （「切换到中文」），下拉里的选项只是一个名字（「中文」）。
  *
- * 放在 `lib/i18n.ts` 而不是某个组件里：2026-10-13 起**两处**在用 ——
- * 房间右上角那行（`ConsoleScene`）和内容页顶栏（`components/LocaleSwitcher.tsx`）。
- * 各写一份的话，加第三种语言时只会改到其中一处。
+ * ⚠️ **顺序刻意不是 `LOCALES` 的顺序**：`LOCALES` 把默认语言（英文）放第一个是为了
+ *    hreflang / sitemap 的稳定顺序；这里排的是「中文 → 英文 → 日文 → 韩文」，
+ *    2026-10-13 定下前两项之后 2026-10-16 往后接，别顺手改成 `LOCALES.map(…)`。
+ *
+ * 放在 `lib/i18n.ts` 而不是某个组件里：**三处**在用 —— 房间右上角那行
+ * （`ConsoleScene`）、内容页顶栏（`components/LocaleSwitcher.tsx`）、
+ * 首次访问的语言提示（`components/LocalePrompt.tsx`，取目标语言的名字）。
+ * 各写一份的话，加语言时只会改到其中一处。
  */
 export const LOCALE_OPTIONS: readonly { value: Locale; label: string }[] = [
   { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
 ];
+
+/**
+ * 「切换到 <某语言>」那颗钮上的字 —— **用目标语言写**，一份语言一条。
+ *
+ * 为什么不放进文案表（`locale.toZh` / `locale.toEn` 那两个键 2026-10-16 删了）：
+ * 那颗钮的读者是**想要另一种语言的人**，所以字必须是他看得懂的那种语言，
+ * 而**不是当前页面语言**。放进文案表就得按「目标语言 × 页面语言」开 16 个键，
+ * 其中 12 个的取值还都一样 —— 那是把一张 4 行的表摊成矩阵。
+ *
+ * 于是规矩一句话：**页面语言决定弹窗正文（`localePrompt.*`），目标语言决定这颗钮。**
+ * 前两种语言的写法沿用 2026-10-13 的老文案（中文那份本来就是中文写的，
+ * 英文那份本来就是英文写的 —— 只是当年放在 `en` 表里看着像巧合）。
+ */
+export const LOCALE_SWITCH_LABEL: Record<Locale, string> = {
+  zh: '切换到中文',
+  en: 'Switch to English',
+  ja: '日本語に切り替える',
+  ko: '한국어로 전환',
+};
 
 /**
  * 各语言的 URL 前缀。**默认语言刻意是空串** —— 英文页不该多一层 `/en`，
@@ -60,6 +103,8 @@ export const LOCALE_OPTIONS: readonly { value: Locale; label: string }[] = [
 export const LOCALE_PREFIX: Record<Locale, string> = {
   en: '',
   zh: '/zh',
+  ja: '/ja',
+  ko: '/ko',
 };
 
 /**
@@ -107,10 +152,18 @@ export const LOCALE_COOKIE = 'nesload_locale';
  * ⚠️ 这是**对外的展示名**。仓库名 / npm 包名（package.json 的 `nesload`）、
  * localStorage 与 IndexedDB 的键前缀（`nesload:*`、`nesload_locale`）、
  * 联机的 APP_ID（lib/netplay.ts）都**不是**它，改这些会让老用户的数据和联机房间全部失联。
+ *
+ * ⚠️ 2026-10-16 加日韩时，用户定的是「**起一个本地友好的名字**」而不是沿用
+ *    `Game Hut` —— 所以四份都是本地写法。日文取「ゲーム小屋」（和中文同构，
+ *    `ゲーム` 是日语里通用的外来语写法）；韩文取「게임 하우스」（韩文里
+ *    `하우스` 作店名 / 品牌后缀比直译「오두막」自然得多）。
+ *    改名仍然只动这一处。
  */
 export const SITE_NAME: Record<Locale, string> = {
   zh: '游戏小屋',
   en: 'Game Hut',
+  ja: 'ゲーム小屋',
+  ko: '게임 하우스',
 };
 
 /** 英文是基准表，中文必须逐键对齐（漏键会在编译期报错）。 */
@@ -146,8 +199,8 @@ const en = {
    * 前半句必须能独立成立 —— 后半句被截掉也不能读不通。
    *
    * ⚠️ 机种那串**刻意只列代表机型、末尾加 and more**（2026-10-14 从四个扩到十二个时定的口径，
-   *    2026-10-15 加 NDS 后仍照这套走 —— 不用回来改）：
-   *    十三个全列进来既读不通也超长，而每加一个机种就得回来改一遍。机种全名放下面
+   *    2026-10-15 加 NDS、2026-10-16 加 PS1 后仍照这套走 —— 不用回来改）：
+   *    十四个全列进来既读不通也超长，而每加一个机种就得回来改一遍。机种全名放下面
    *    `meta.keywords` 那条（逗号列表，越长越没关系）。
    */
   'meta.description':
@@ -158,7 +211,7 @@ const en = {
    * 机种多了之后这里是**唯一把所有机型写全**的地方，加机种顺手补一组词。
    */
   'meta.keywords':
-    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, Game Boy emulator, Game Boy Color emulator, NDS emulator, Nintendo DS emulator, Sega Mega Drive emulator, Sega Genesis emulator, Game Gear emulator, Master System emulator, Sega 32X emulator, WonderSwan emulator, Neo Geo Pocket emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
+    'retro games, online retro game library, NES emulator, SNES emulator, SFC emulator, GBA emulator, Game Boy Advance emulator, Game Boy emulator, Game Boy Color emulator, NDS emulator, Nintendo DS emulator, Sega Mega Drive emulator, Sega Genesis emulator, Game Gear emulator, Master System emulator, Sega 32X emulator, WonderSwan emulator, Neo Geo Pocket emulator, PlayStation emulator, PS1 emulator, PSX emulator, arcade emulator, play NES in browser, browser emulator, RetroArch WASM, {site}',
   /*
    * 这里**没有** og:image 的 alt —— 不是漏了。
    * alt 由 app/opengraph-image.tsx 按文件约定导出，而那个导出必须是**静态值**，
@@ -388,12 +441,15 @@ const en = {
   'tvSize.opt.medium': 'Medium',
   'tvSize.opt.small': 'Small',
   'tvSize.pick': 'Set the TV size to {level}',
-  'locale.toZh': '切换到中文',
-  'locale.toEn': 'Switch to English',
   /*
-   * 语言下拉（`ConsoleScene` 右上角那一行第一位那颗 `<select>`）的**读屏名字**。
+   * 语言下拉（`ConsoleScene` 右上角那一行第一位那颗自绘下拉）的**读屏名字**。
    * 下拉和旁边那几条文字链接不同 —— 光有当前值（「中文」/「English」）不算标签，
    * 读屏念出来得先知道这是个什么控件。
+   *
+   * ⚠️ 这里**没有**「切换到 X 语言」的键：那颗钮上的字是 `LOCALE_SWITCH_LABEL`
+   *    （在文件上半部分，**按目标语言**写、一份语言一条），不进这张表。
+   *    2026-10-13 曾经有 `locale.toZh` / `locale.toEn` 两个键，2026-10-16 加日韩时删了 ——
+   *    四种语言再放这儿就是 16 个键、其中 12 个取值重复。
    */
   'locale.label': 'Language',
   /*
@@ -401,8 +457,11 @@ const en = {
    * 且用户从没主动设置过语言时，在客户端问一句「要不要切」。
    *
    * 文案用**当前页面的语言**写：弹窗是页面的一部分，夹一段外语会更突兀。
-   * 只有那颗切换钮写的是**目标语言自己的说法**（沿用上面 `locale.to*` 的规矩，
+   * 只有那颗切换钮写的是**目标语言自己的说法**（`LOCALE_SWITCH_LABEL`，
    * 让目标语言的读者能直接认出来）。
+   *
+   * ⚠️ 三条都提到了「英文 / 中文」这种语言名，所以**每条语言都要自己一份**
+   *    （不像 `locale.label` 那样可以照抄）。
    */
   'localePrompt.title': 'This page is in English',
   'localePrompt.body': 'Your browser prefers another language. Switch?',
@@ -534,6 +593,20 @@ const en = {
    */
   'play.needZip':
     'Format  This ROM is a {ext} archive that could not be unpacked — try a .zip or a bare ROM',
+  /*
+   * 多文件光盘镜像（2026-10-16 加，随 PS1）。
+   *
+   * 为什么单独一条：PS1 的光盘镜像有一大半是 `.cue` + `.bin` 两个文件，而 `.cue` 只是
+   * 一张**纯文本的目录**，真正的数据在同目录的 `.bin` 里。这个入口一次只收一个文件，
+   * 收下那张目录也没用（核心找不到它指向的 `.bin`，而且失败是静默的）。
+   * 所以这条不说「哪种格式不吃」，而是说「**要单文件**」—— 用户该换的是 `.pbp` / `.iso`。
+   *
+   * ⚠️ 它**不带 `{ext}` 参数**（和上面两条不同）：要说的不是「你给的是哪种格式」。
+   */
+  'legend.needDisc':
+    'Format  Disc images are usually multi-file (.cue + .bin). This site only takes single-file images — grab a .pbp or .iso build',
+  'play.needDisc':
+    'Format  This is a multi-file disc image (.cue + .bin). Only single-file images work here — try a .pbp or .iso build',
   /*
    * 这盘街机卡带**看着像** Neo Geo 游戏，而 BIOS 本地和站点两份都没拿到。
    * （正常情况下 `ensureBios()` 会自动装站点自带的那份，这条根本不出现 ——
@@ -721,8 +794,10 @@ const en = {
 
   /*
    * 自定义按键面板。同样浮在房间上、不进屏幕。
-   * 钮名走街机叫法（A B C X Y Z），由 `KeyBindingsPanel` 的 BUTTON_LABELS 直接给出
-   * —— 它们是手柄上的丝印、不进文案表。只有「开始 / 投币」是词，跟着语言走。
+   * 钮名**默认**走街机叫法（A B C X Y Z），由 `lib/keybindings.ts` 的 `BUTTON_LABELS`
+   * 直接给出 —— 它们是手柄上的丝印、不进文案表。机种丝印不一样的（NDS 的 A/B/X/Y + L/R、
+   * PS1 的 △○×□ + L1/L2/R1/R2）走 `CONSOLE_BUTTON_LABELS` 覆盖，取值一律经
+   * `buttonLabel(button, t, consoleType)`。只有「开始 / 投币」是词，跟着语言走。
    * ⚠️ 按钮 tooltip（`keybind.open`）=「按键设置」，和面板标题（`keybind.title`）**故意不同名**：
    * 按钮是「入口」，面板标题说的是里面干的活。别顺手统一成一个词。
    */
@@ -1224,293 +1299,14 @@ const en = {
   /*
    * ⚠️ 2026-10-15：这一句里**去掉了「游戏库」那一项** —— 房间里的游戏库入口收了
    * （用户要求，见 components/ConsoleScene.tsx 那颗钮的注释）。指引是逐项念那一列开关的，
-   * 念到一个不存在的钮就是错的。恢复入口时把这一项放回来（中英两份一起改）。
+   * 念到一个不存在的钮就是错的。恢复入口时把这一项放回来（四份一起改）。
+   *
+   * ⚠️ 2026-10-16：语言那一项括号里原来写「中 / EN」（那颗钮当年的短标签），
+   * 现在下拉显示的是**全名**、而且有四种 —— 写成四种语言的全名，
+   * 和 theme（night / day）、TV size（大 / 中 / 小）那两处「把选项念出来」的写法一致。
    */
   'tour.rail.body':
-    'Three groups, top to bottom. Look: theme (night / day), language (中 / EN), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Netplay, Key bindings. Help: Controls help, and the Guestbook.',
-
-  /* 后台（登录 + 录入），独立于房间界面。 */
-  'admin.title': 'Admin',
-  'admin.login.title': 'Admin sign-in',
-  'admin.login.username': 'Username',
-  'admin.login.password': 'Password',
-  'admin.login.submit': 'Sign in',
-  'admin.login.submitting': 'Signing in…',
-  'admin.login.error': 'Wrong username or password',
-  'admin.login.failed': 'Sign-in failed — try again',
-  'admin.logout': 'Sign out',
-  /* 后台左侧那几个 tab —— 游戏列表 / 开发商库 / 机种库 / 留言本 / 用户，2026-10-14 起是五条 */
-  'admin.nav.games': 'Games',
-  'admin.nav.developers': 'Developers',
-  'admin.nav.consoles': 'Consoles',
-  'admin.nav.feedback': 'Guestbook',
-  'admin.nav.reports': 'Game reports',
-  'admin.nav.users': 'Users',
-  'admin.upload.title': 'Add a game',
-  'admin.field.title': 'Title',
-  'admin.field.image': 'Cover image',
-  'admin.field.rom': 'ROM file',
-  'admin.field.console': 'Console',
-  'admin.field.language': 'Language',
-  'admin.field.series': 'Series',
-  'admin.field.year': 'Year',
-  'admin.field.developer': 'Developer',
-  /* 说明 / 简介（2026-10-12 加的字段）。多行，可留空；前台只在游戏库卡片的悬停提示里露 */
-  'admin.field.description': 'Description',
-  /*
-   * 英文字段（2026-10-13 加）。库里文案字段成对出现：无后缀 = 中文，`_en` = 英文
-   * （见 db/schema.sql 顶部那段）。这几栏**只在后台出现**，前台没有文案键 ——
-   * 表单标签统一在中文名后面缀 `(EN)`，两种语言下都这么显示：
-   * 中文管理员一眼知道往哪填英文，英文管理员看到的中文名旁边也是同一个后缀。
-   */
-  'admin.field.titleEn': 'Title (EN)',
-  'admin.field.seriesEn': 'Series (EN)',
-  'admin.field.descriptionEn': 'Description (EN)',
-  'admin.i18n.hint': 'Optional. Shown on the English site; left empty, the Chinese text is used.',
-  'admin.description.placeholder': 'Optional. Shows up as a hover hint on the library card.',
-  'admin.upload.submit': 'Upload',
-  'admin.upload.submitting': 'Uploading…',
-  'admin.upload.ok': 'Uploaded.',
-  'admin.upload.required': 'Title, cover image and ROM file are required.',
-  /*
-   * 「从链接自动填充」（2026-10-13 加；2026-10-14 起连封面和 ROM 一起抓）：
-   * 给个游戏页链接，抓回元数据预填表单，并把页面挂的封面 / 游戏文件一并取回。
-   * 实现见 app/api/admin/scrape-game/route.ts（只回地址）与
-   * app/api/admin/fetch-image / fetch-rom（取字节）。
-   */
-  'admin.scrape.placeholder': 'Paste a game page link to auto-fill',
-  'admin.scrape.button': 'Auto-fill',
-  'admin.scrape.loading': 'Reading…',
-  'admin.scrape.ok': 'Filled from the page.',
-  'admin.scrape.failed': 'Could not read that page.',
-  'admin.scrape.developerMissing': 'Developer “{name}” is not in the library yet.',
-  /* `assets` 是取字节期间那条提示（ROM 有几 MB，不会瞬回），其余几条是收尾结论。 */
-  'admin.scrape.assets': 'Fetching cover and ROM…',
-  'admin.scrape.assetsOk': 'Cover and ROM fetched.',
-  'admin.scrape.coverFailed': 'Cover could not be fetched.',
-  'admin.scrape.romFailed': 'ROM could not be fetched.',
-  'admin.scrape.noRom': 'No ROM file found on that page.',
-  /*
-   * 「从列表导入」（2026-10-14 加）：把一个机种列表页上的游戏**整页**导进来，
-   * 逐条走和手动添加同一条链路。实现见 components/AdminBulkImport.tsx +
-   * app/api/admin/scrape-list/route.ts。
-   * `total` / `stat` / `now` 里的 `{count}` `{ok}` 等由 translate() 插值。
-   */
-  'admin.bulk.button': 'Import from list',
-  'admin.bulk.title': 'Import from a list page',
-  'admin.bulk.hint':
-    'Paste a console list page — every game on it gets imported one by one. A game with several language versions (Chinese / English / Japanese / Korean) is imported once per language.',
-  'admin.bulk.placeholder': 'e.g. https://retrogamesnexus.com/zh/snes-games?page=1',
-  'admin.bulk.read': 'Read list',
-  'admin.bulk.reading': 'Reading…',
-  'admin.bulk.readFailed': 'Could not read that list page.',
-  'admin.bulk.empty': 'No games found on that page.',
-  'admin.bulk.total': 'Games on this page: {count}',
-  'admin.bulk.start': 'Start import',
-  'admin.bulk.stop': 'Stop',
-  'admin.bulk.now': 'Importing: {title}',
-  'admin.bulk.stat': 'Imported {ok} · Skipped {skipped} · Failed {failed}',
-  'admin.bulk.failures': 'Not imported',
-  'admin.bulk.done': 'Finished.',
-  'admin.bulk.stopped': 'Stopped early.',
-  'admin.bulk.close': 'Close',
-  'admin.bulk.noTitle': 'That page has no title',
-  'admin.bulk.noCover': 'That page has no cover image',
-  'admin.bulk.noRom': 'That page has no ROM file',
-  'admin.bulk.duplicate': 'Already in the library (same console, title and language).',
-  /*
-   * 「自动爬取」（2026-10-15 加）：给一个分类页地址，一页页爬到最后一页、每页 5 款并发，
-   * 画面上那个控制台把「游戏名 · 语言 → 结果」一行行吐出来。见 components/AdminAutoCrawl。
-   */
-  'admin.crawl.button': 'Auto crawl',
-  'admin.crawl.title': 'Auto crawl a category',
-  'admin.crawl.hint':
-    'Paste a category page. It walks page by page to the last one, 5 games at a time, and imports every language version (Chinese / English / Japanese / Korean). The console below prints one line per version.',
-  'admin.crawl.placeholder': 'e.g. https://retrogamesnexus.com/zh/nds-games',
-  'admin.crawl.pagesLabel': 'Max pages',
-  'admin.crawl.pagesHint': 'Empty = crawl until the last page.',
-  'admin.crawl.start': 'Start crawling',
-  'admin.crawl.stop': 'Stop',
-  'admin.crawl.close': 'Close',
-  'admin.crawl.console': 'Console',
-  'admin.crawl.consoleNote':
-    'Only the last {count} lines are shown — the full log is in the browser console.',
-  'admin.crawl.progress': 'Page {page} · {done}/{total} on this page · {games} games total',
-  'admin.crawl.stat': 'Imported {ok} · Skipped {skip} · Failed {fail}',
-  'admin.crawl.logPage': '── Page {page} ── {count} games',
-  'admin.crawl.logDupes': '   ({count} already seen, skipped)',
-  'admin.crawl.logPageEmpty': 'Page {page} has no games — reached the end.',
-  'admin.crawl.logPageFailed': 'Could not read page {page}: {detail}',
-  'admin.crawl.statusOk': 'imported',
-  'admin.crawl.statusSkip': 'skipped',
-  'admin.crawl.statusFail': 'failed',
-  'admin.crawl.done': 'Crawl finished.',
-  'admin.crawl.stopped': 'Stopped early.',
-  'admin.crawl.summary':
-    '{pages} pages · {games} games → {ok} imported · {skip} skipped · {fail} failed',
-  'admin.crawl.summaryTime': 'Took {seconds}s.',
-  'admin.crawl.pageLimitHit': 'Stopped at the page limit ({pages}).',
-  'admin.crawl.needUrl': 'Enter a category page URL first.',
-  /*
-   * 拖拽提示（2026-10-13 加）：封面 / 游戏文件两个选择框都接受从资源管理器拖文件；
-   * 封面**额外**接受从网页里拖一张图过来（那条路走 /api/admin/fetch-image 取字节）。
-   */
-  'admin.drop.image': 'Drag an image here, or pick a file — you can also drag one in from a web page.',
-  'admin.drop.rom': 'Drag a ROM file here, or pick one.',
-  'admin.drop.imageFailed': 'Could not get that image.',
-  'admin.upload.failed': 'Upload failed.',
-  'admin.list.title': 'Uploaded games',
-  'admin.list.empty': 'Nothing uploaded yet.',
-  'admin.add': 'Add',
-  'admin.searchPlaceholder': 'Search title / developer / series',
-  'admin.noMatch': 'No matching games.',
-  'admin.edit': 'Edit',
-  'admin.delete': 'Delete',
-  'admin.deleteConfirm': 'Delete “{name}”? This cannot be undone.',
-  'admin.edit.title': 'Edit game',
-  'admin.save': 'Save',
-  'admin.saving': 'Saving…',
-  'admin.cancel': 'Cancel',
-  'admin.files.locked': 'Cover and ROM are set only when adding — delete and re-add to replace them.',
-  'admin.language.none': 'Unspecified',
-  'admin.request.failed': 'Request failed.',
-  'admin.title.required': 'Title is required.',
-  'admin.badYear': 'Year must be a whole number.',
-  'admin.search': 'Search',
-  'admin.prev': 'Prev',
-  'admin.next': 'Next',
-  // 游标翻页后没有总数可算（2026-10-14），分页条只显示当前页码。
-  'admin.currentPage': 'Page {page}',
-
-  /*
-   * 开发商库（2026-10-12 用户要的「游戏厂商库」）。口径统一叫**开发商** ——
-   * 它接的就是游戏表单里原来那个手填的 `developer` 字段（见 db/schema.sql 的注释）。
-   * 游戏表单里的下拉框、公开的开发商页，读的都是这一张表。
-   */
-  'admin.developers.title': 'Developers',
-  'admin.developers.empty': 'No developers yet.',
-  'admin.developers.searchPlaceholder': 'Search developer name / summary',
-  'admin.developers.addTitle': 'Add a developer',
-  'admin.developers.editTitle': 'Edit developer',
-  'admin.developers.view': 'View',
-  'admin.developers.gameCount': '{count} games',
-  /* 游戏表单那个下拉框里的空选项 */
-  'admin.developers.none': 'Unspecified',
-  /* 后半句会接一个指向开发商 tab 的链接（见 AdminGames 那个 select 下面） */
-  'admin.developers.addHint': 'Not in the list? Add it under',
-  'admin.developers.unlinked':
-    'This game says “{name}”, which is not linked to a developer. Pick one below, otherwise that text is cleared when you save.',
-  'admin.developers.nameRequired': 'Name is required.',
-  'admin.developers.badFounded': 'Founded year must be a whole number.',
-  'admin.developers.saved': 'Saved.',
-  'admin.developers.failed': 'Request failed.',
-  'admin.developers.deleteConfirm': 'Delete “{name}”? This cannot be undone.',
-  'admin.developers.field.name': 'Name',
-  'admin.developers.field.image': 'Logo / image',
-  'admin.developers.imageHint':
-    'Optional. Without one the page falls back to the first character of the name.',
-  'admin.developers.imageCurrent': 'Current: {name}. Leave empty to keep it.',
-  'admin.developers.field.founded': 'Founded',
-  'admin.developers.field.website': 'Website',
-  'admin.developers.field.summary': 'Summary',
-  'admin.developers.field.description': 'About',
-  /* 英文字段（2026-10-13 加），见上面 admin.field.titleEn 那段说明 */
-  'admin.developers.field.nameEn': 'Name (EN)',
-  'admin.developers.field.summaryEn': 'Summary (EN)',
-  'admin.developers.field.descriptionEn': 'About (EN)',
-
-  /*
-   * 机种库（2026-10-14 加）。和开发商库的关键区别：**条目是代码里的固定四个**
-   * （nes / snes / gba / arcade），所以没有「添加 / 搜索 / 翻页」，只有编辑与重置。
-   * 「重置」= 删掉那一行资料，前台对该机种退回代码里的默认名字（不是删除机种本身）。
-   */
-  'admin.consoles.title': 'Consoles',
-  'admin.consoles.editTitle': 'Edit console',
-  'admin.consoles.view': 'View',
-  'admin.consoles.gameCount': '{count} games',
-  /* 还没在后台填过资料的机种（consoles 表里没有那一行） */
-  'admin.consoles.unfilled': 'Profile not filled in yet — the public page uses built-in defaults.',
-  'admin.consoles.reset': 'Reset profile',
-  'admin.consoles.badReleased': 'Release year must be a whole number.',
-  'admin.consoles.nameRequired': 'Name is required.',
-  'admin.consoles.saved': 'Saved.',
-  'admin.consoles.failed': 'Request failed.',
-  'admin.consoles.deleteConfirm':
-    'Reset “{name}”? Its profile (name, image, description) is removed and the public page falls back to the built-in defaults. The games themselves are not touched.',
-  'admin.consoles.field.name': 'Name',
-  'admin.consoles.field.image': 'Console image',
-  'admin.consoles.imageHint':
-    'Optional. Without one the public page falls back to the cartridge label (NES / SFC / GBA / ARC and the rest).',
-  'admin.consoles.imageCurrent': 'Current: {name}. Leave empty to keep it.',
-  'admin.consoles.field.released': 'Release year',
-  'admin.consoles.field.summary': 'Summary',
-  'admin.consoles.field.description': 'About',
-  'admin.consoles.field.nameEn': 'Name (EN)',
-  'admin.consoles.field.summaryEn': 'Summary (EN)',
-  'admin.consoles.field.descriptionEn': 'About (EN)',
-
-  /* 留言本（房间地板上那本）。后台只管「解决没有」——正文不给改，理由见那条接口的注释。 */
-  'admin.feedback.title': 'Guestbook',
-  'admin.feedback.empty': 'No messages yet.',
-  'admin.feedback.loadMore': 'Load more',
-  'admin.feedback.resolved': 'Resolved',
-  'admin.feedback.unresolved': 'Open',
-  'admin.feedback.markResolved': 'Mark resolved',
-  'admin.feedback.markUnresolved': 'Mark open',
-  'admin.feedback.failed': 'Request failed.',
-  /*
-   * 后台 · 游戏反馈 tab（2026-10-13 加）。和上面留言本那个 tab 是两块，
-   * 文案也刻意分开：这边每条都挨着**某一款游戏**（见 components/AdminReports.tsx）。
-   */
-  'admin.reports.title': 'Game reports',
-  'admin.reports.empty': 'No reports yet.',
-  'admin.reports.loadMore': 'Load more',
-  'admin.reports.resolved': 'Resolved',
-  'admin.reports.unresolved': 'Open',
-  'admin.reports.markResolved': 'Mark resolved',
-  'admin.reports.markUnresolved': 'Mark open',
-  'admin.reports.failed': 'Request failed.',
-
-  /*
-   * 用户管理（2026-10-13 加）。
-   *
-   * ⚠️ 这里说的是**前台注册用户**，不是后台管理员 —— `admin.users.hint` 那一句
-   * 就是为了别让人在这里找自己的管理员账号。
-   *
-   * `stats` 用三个占位符挤成一串（`H 3 · S 5 · F 2`）：那一行本来就窄，
-   * 三个数各配一段文字会把每行撑到两行高。缩写放在文案里而不是拼在组件里，
-   * 这样换语言时能整句重写（中文那份就是「历史 3 · 存档 5 · 收藏 2」）。
-   */
-  'admin.users.title': 'Users',
-  'admin.users.hint':
-    'Registered site users — these are not the admin accounts (admins are created with scripts/create-user.mjs and have no UI here).',
-  'admin.users.empty': 'No registered users yet.',
-  'admin.users.failed': 'Request failed.',
-  'admin.users.ban': 'Ban',
-  'admin.users.unban': 'Unban',
-  'admin.users.delete': 'Delete',
-  'admin.users.confirmDelete': 'Confirm delete',
-  'admin.users.banned': 'Banned {name}.',
-  'admin.users.unbanned': 'Unbanned {name}.',
-  'admin.users.deleted': 'Deleted {name} and all their data.',
-  'admin.users.statusBanned': 'Banned',
-  'admin.users.stats': 'H {history} · S {saves} · F {favorites}',
-  'admin.users.registered': 'Joined {time}',
-  'admin.users.lastLogin': 'Last seen {time}',
-  'admin.users.neverLoggedIn': 'Never signed in',
-  /*
-   * VIP（2026-10-13 加）。到期时间是毫秒时间戳，界面上只给到分钟（datetime-local）。
-   * 「vipUntil」里的 {time} 由 formatTime 现格式化 —— 别在这里写死格式。
-   */
-  'admin.users.vipBadge': 'VIP',
-  'admin.users.vipUntil': 'VIP until {time}',
-  'admin.users.vipSetup': 'Set VIP',
-  'admin.users.vipExpiresLabel': 'VIP expires at',
-  'admin.users.vipSave': 'Save',
-  'admin.users.vipClear': 'Revoke VIP',
-  'admin.users.vipClose': 'Close',
-  'admin.users.vipSaved': 'VIP updated for {name}.',
-  'admin.users.vipCleared': 'VIP revoked for {name}.',
+    'Three groups, top to bottom. Look: theme (night / day), language (中文 / English / 日本語 / 한국어), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Netplay, Key bindings. Help: Controls help, and the Guestbook.',
 
   /*
    * 游戏列表 / 详情 / 下载三页的**界面文案**（2026-10-12）。
@@ -1767,6 +1563,14 @@ const en = {
   'consolesPage.gameCount': '{count} games',
   'consolesPage.gamesHeading': 'Games on {name}',
   'consolesPage.gamesEmpty': 'There is no game for this console in the library yet.',
+  /* 筛了语种却一款都没有（`{lang}` 来自 lib/rom-lang.ts 的语言全称，如 English） */
+  'consolesPage.gamesEmptyLang': 'There is no {lang} game for this console yet.',
+  /*
+   * 语种筛选条的 `aria-label`（2026-10-16 加）。可见的标签本身就是语言名
+   * （简体中文 / English / 日本語 / 한국어，来自 lib/rom-lang.ts，不进文案表 ——
+   * 语言名要用**它自己的语言**写，翻译它不是本地化），所以这里只需要一个朗读用的说明。
+   */
+  'consolesPage.filterLangLabel': 'Filter by language',
   'consolesPage.field.released': 'Released',
   /* 页脚与面包屑里那条「全部机种」（真链接），与 developersPage.backToDevelopers 同一角色 */
   'consolesPage.backToConsoles': 'All consoles',
@@ -1806,7 +1610,7 @@ const zh: Record<MessageKey, string> = {
   'meta.description':
     '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
   'meta.keywords':
-    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, NDS 模拟器, NDS 游戏, 任天堂 DS, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, NDS 模拟器, NDS 游戏, 任天堂 DS, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, PlayStation 模拟器, PS1 模拟器, PSX 模拟器, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
   /* 房间页（`/room`）自己的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
   'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
   'seo.room.description':
@@ -1927,8 +1731,6 @@ const zh: Record<MessageKey, string> = {
   'tvSize.opt.medium': '中',
   'tvSize.opt.small': '小',
   'tvSize.pick': '把电视机大小设为「{level}」',
-  'locale.toZh': '切换到中文',
-  'locale.toEn': '切换到英文',
   /* 语言下拉的读屏名字，见上面英文那份的注释 */
   'locale.label': '语言',
   /* 语言提示弹窗，见上面英文那份的注释（文案跟当前页面语言，钮跟目标语言） */
@@ -1992,6 +1794,11 @@ const zh: Record<MessageKey, string> = {
   'legend.needZip': '格式  FBNeo 只吃 .zip —— 这个是 {ext}，重新打包一下（或换一个 .zip 版）',
   /* `/play` 那条通道专用，来由和措辞的取舍见上面英文那份的注释。 */
   'play.needZip': '格式  这个 ROM 是 {ext} 压缩包，没能解开 —— 换成 .zip 或裸 ROM 再试',
+  /* 多文件光盘镜像那条，来由和措辞的取舍见上面英文那份的注释（不带 {ext} 参数）。 */
+  'legend.needDisc':
+    '格式  光盘镜像是多文件的（.cue + .bin），本站只吃单文件 —— 换 .pbp 或 .iso 的版本',
+  'play.needDisc':
+    '格式  这是一张多文件光盘镜像（.cue + .bin），本站只吃单文件 —— 换成 .pbp 或 .iso 再试',
   /* Neo Geo 缺 BIOS 的提示，判据和措辞的来由见上面英文那份的注释。 */
   'legend.needBios':
     'BIOS  这盘看着像 Neo Geo 游戏（拳皇 / 合金弹头 / 侍魂…），需要 neogeo.zip —— 把它拖进页面就装上了。CPS1 / CPS2 那类不需要。',
@@ -2387,245 +2194,10 @@ const zh: Record<MessageKey, string> = {
   'tour.screen.body':
     '把 ROM 文件（.nes / .sfc / .gba / .md / .gb 等）或街机 .zip 拖到电视机上就能玩，也可以直接点屏幕挑文件。',
   'tour.rail.title': '右边这一列开关',
-  /* ⚠️ 2026-10-15：去掉了「游戏库」那一项，理由见 en 那份同一处的注释 */
+  /* ⚠️ 2026-10-15：去掉了「游戏库」那一项；2026-10-16：语言那一项写成四种语言的全名。
+     两处的理由见 en 那份同一处的注释 */
   'tour.rail.body':
-    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中 / EN）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：联机、自定义按键。帮助：按键说明、留言本。',
-
-  'admin.title': '后台',
-  'admin.login.title': '后台登录',
-  'admin.login.username': '用户名',
-  'admin.login.password': '口令',
-  'admin.login.submit': '登录',
-  'admin.login.submitting': '登录中…',
-  'admin.login.error': '用户名或口令不对',
-  'admin.login.failed': '登录失败，请重试',
-  'admin.logout': '退出登录',
-  'admin.nav.games': '游戏列表',
-  'admin.nav.developers': '开发商',
-  'admin.nav.consoles': '机种库',
-  'admin.nav.feedback': '留言本',
-  'admin.nav.reports': '游戏反馈',
-  'admin.nav.users': '用户',
-  'admin.upload.title': '添加游戏',
-  'admin.field.title': '游戏名',
-  'admin.field.image': '封面图片',
-  'admin.field.rom': '游戏文件',
-  'admin.field.console': '类型',
-  'admin.field.language': '语言',
-  'admin.field.series': '系列',
-  'admin.field.year': '年份',
-  'admin.field.developer': '开发商',
-  /* 说明 / 简介，见上面英文那份的注释 */
-  'admin.field.description': '说明',
-  /* 英文字段，见上面英文那份的注释 */
-  'admin.field.titleEn': '游戏名 (EN)',
-  'admin.field.seriesEn': '系列 (EN)',
-  'admin.field.descriptionEn': '说明 (EN)',
-  'admin.i18n.hint': '选填。英文站显示这一份；留空则回退到中文。',
-  'admin.description.placeholder': '选填。鼠标停在游戏库那张卡片上时会显示这行字。',
-  'admin.upload.submit': '上传',
-  'admin.upload.submitting': '上传中…',
-  'admin.upload.ok': '已上传。',
-  'admin.upload.required': '游戏名、封面图片、游戏文件为必传项。',
-  /* 「从链接自动填充」，见上面英文那份的注释 */
-  'admin.scrape.placeholder': '粘贴游戏页链接，自动填充',
-  'admin.scrape.button': '自动填充',
-  'admin.scrape.loading': '读取中…',
-  'admin.scrape.ok': '已从页面填充。',
-  'admin.scrape.failed': '读取该页面失败。',
-  'admin.scrape.developerMissing': '开发商「{name}」还不在库里 —— 先去建一个再选上。',
-  'admin.scrape.assets': '正在获取封面与游戏文件…',
-  'admin.scrape.assetsOk': '封面与游戏文件已获取。',
-  'admin.scrape.coverFailed': '封面获取失败。',
-  'admin.scrape.romFailed': '游戏文件获取失败。',
-  'admin.scrape.noRom': '该页面没有找到可下载的游戏文件。',
-  /* 「从列表导入」，见上面英文那份的注释 */
-  'admin.bulk.button': '从列表导入',
-  'admin.bulk.title': '从列表导入',
-  'admin.bulk.hint':
-    '粘贴一个机种列表页 —— 那一页上的游戏会逐个导入。一款有中 / 英 / 日 / 韩 多个语言版本的，每种语言各导一条。',
-  'admin.bulk.placeholder': '例如 https://retrogamesnexus.com/zh/snes-games?page=1',
-  'admin.bulk.read': '读取列表',
-  'admin.bulk.reading': '读取中…',
-  'admin.bulk.readFailed': '读取该列表页失败。',
-  'admin.bulk.empty': '那一页没有找到游戏。',
-  'admin.bulk.total': '本页共 {count} 款游戏',
-  'admin.bulk.start': '开始导入',
-  'admin.bulk.stop': '停止',
-  'admin.bulk.now': '正在导入：{title}',
-  'admin.bulk.stat': '成功 {ok} · 跳过 {skipped} · 失败 {failed}',
-  'admin.bulk.failures': '未导入',
-  'admin.bulk.done': '导入完成。',
-  'admin.bulk.stopped': '已提前停止。',
-  'admin.bulk.close': '关闭',
-  'admin.bulk.noTitle': '该页面没有标题',
-  'admin.bulk.noCover': '该页面没有封面图',
-  'admin.bulk.noRom': '该页面没有游戏文件',
-  'admin.bulk.duplicate': '库里已有同机种、同名、同语言的游戏。',
-  /* 「自动爬取」，见上面英文那份的注释 */
-  'admin.crawl.button': '自动爬取',
-  'admin.crawl.title': '自动爬取分类页',
-  'admin.crawl.hint':
-    '粘贴一个分类页地址。它会一页页爬到最后一页，每页 5 款并发；一款有几种语言版本就导几条（中 / 英 / 日 / 韩）。下面那个控制台每个语言版本打一行。',
-  'admin.crawl.placeholder': '例如 https://retrogamesnexus.com/zh/nds-games',
-  'admin.crawl.pagesLabel': '最多页数',
-  'admin.crawl.pagesHint': '留空 = 一直爬到最后一页。',
-  'admin.crawl.start': '开始爬取',
-  'admin.crawl.stop': '停止',
-  'admin.crawl.close': '关闭',
-  'admin.crawl.console': '控制台',
-  'admin.crawl.consoleNote': '只显示最近 {count} 行 —— 完整记录在浏览器控制台。',
-  'admin.crawl.progress': '第 {page} 页 · 本页 {done}/{total} · 累计 {games} 款',
-  'admin.crawl.stat': '成功 {ok} · 跳过 {skip} · 失败 {fail}',
-  'admin.crawl.logPage': '── 第 {page} 页 ── {count} 款',
-  'admin.crawl.logDupes': '   （其中 {count} 款前面见过，跳过）',
-  'admin.crawl.logPageEmpty': '第 {page} 页没有游戏 —— 到底了。',
-  'admin.crawl.logPageFailed': '第 {page} 页读取失败：{detail}',
-  'admin.crawl.statusOk': '成功',
-  'admin.crawl.statusSkip': '跳过',
-  'admin.crawl.statusFail': '失败',
-  'admin.crawl.done': '爬取结束。',
-  'admin.crawl.stopped': '已手动停止。',
-  'admin.crawl.summary': '共 {pages} 页 · {games} 款 → 成功 {ok} · 跳过 {skip} · 失败 {fail}',
-  'admin.crawl.summaryTime': '耗时 {seconds} 秒。',
-  'admin.crawl.pageLimitHit': '到了页数上限（{pages} 页），先停。',
-  'admin.crawl.needUrl': '请先填一个分类页地址。',
-  /* 拖拽提示，见上面英文那份的注释 */
-  'admin.drop.image': '把图片拖到这里，或点选文件 —— 也可以从网页里直接拖一张过来。',
-  'admin.drop.rom': '把游戏文件拖到这里，或点选文件。',
-  'admin.drop.imageFailed': '取不到那张图片。',
-  'admin.upload.failed': '上传失败。',
-  'admin.list.title': '已上传的游戏',
-  'admin.list.empty': '还没有上传任何游戏。',
-  'admin.add': '添加',
-  'admin.searchPlaceholder': '搜索游戏名 / 开发者 / 系列',
-  'admin.noMatch': '没有匹配的游戏。',
-  'admin.edit': '编辑',
-  'admin.delete': '删除',
-  'admin.deleteConfirm': '删除「{name}」？此操作不可撤销。',
-  'admin.edit.title': '编辑游戏',
-  'admin.save': '保存',
-  'admin.saving': '保存中…',
-  'admin.cancel': '取消',
-  'admin.files.locked': '封面与游戏文件仅在添加时设置 —— 如需更换请删除后重新添加。',
-  'admin.language.none': '未指定',
-  'admin.request.failed': '请求失败。',
-  'admin.title.required': '请填写游戏名。',
-  'admin.badYear': '年份必须是整数。',
-  'admin.search': '搜索',
-  'admin.prev': '上一页',
-  'admin.next': '下一页',
-  // 游标翻页后没有总数可算（2026-10-14），分页条只显示当前页码。
-  'admin.currentPage': '第 {page} 页',
-
-  /* 开发商库，见上面英文那份的注释 */
-  'admin.developers.title': '开发商',
-  'admin.developers.empty': '还没有开发商。',
-  'admin.developers.searchPlaceholder': '搜索开发商名字 / 简介',
-  'admin.developers.addTitle': '添加开发商',
-  'admin.developers.editTitle': '编辑开发商',
-  'admin.developers.view': '查看',
-  'admin.developers.gameCount': '{count} 款游戏',
-  'admin.developers.none': '未指定',
-  'admin.developers.addHint': '列表里没有？先去',
-  'admin.developers.unlinked':
-    '这条游戏现在写着「{name}」，但它没接上开发商。请在下面选一个，否则保存后这行字会被清掉。',
-  'admin.developers.nameRequired': '请填写开发商名字。',
-  'admin.developers.badFounded': '成立年份必须是整数。',
-  'admin.developers.saved': '已保存。',
-  'admin.developers.failed': '请求失败。',
-  'admin.developers.deleteConfirm': '删除「{name}」？此操作不可撤销。',
-  'admin.developers.field.name': '名字',
-  'admin.developers.field.image': '厂标 / 图片',
-  'admin.developers.imageHint': '选填。没有图时页面上用名字的第一个字占位。',
-  'admin.developers.imageCurrent': '当前：{name}。留空表示不换。',
-  'admin.developers.field.founded': '成立年份',
-  'admin.developers.field.website': '官网',
-  'admin.developers.field.summary': '简介',
-  'admin.developers.field.description': '介绍',
-  /* 英文字段，见上面英文那份的注释 */
-  'admin.developers.field.nameEn': '名字 (EN)',
-  'admin.developers.field.summaryEn': '简介 (EN)',
-  'admin.developers.field.descriptionEn': '介绍 (EN)',
-
-  /*
-   * 机种库（2026-10-14 加）。和开发商库的关键区别：**条目是代码里的固定四个**
-   * （nes / snes / gba / arcade），所以没有「添加 / 搜索 / 翻页」，只有编辑与重置。
-   * 「重置」= 删掉那一行资料，前台对该机种退回代码里的默认名字（不是删除机种本身）。
-   */
-  'admin.consoles.title': '机种库',
-  'admin.consoles.editTitle': '编辑机种',
-  'admin.consoles.view': '查看',
-  'admin.consoles.gameCount': '{count} 款游戏',
-  /* 还没在后台填过资料的机种（consoles 表里没有那一行） */
-  'admin.consoles.unfilled': '还没填资料 —— 前台先用内置默认信息。',
-  'admin.consoles.reset': '重置资料',
-  'admin.consoles.badReleased': '发售年份必须是整数。',
-  'admin.consoles.nameRequired': '请填写机种名字。',
-  'admin.consoles.saved': '已保存。',
-  'admin.consoles.failed': '请求失败。',
-  'admin.consoles.deleteConfirm':
-    '重置「{name}」？它的资料（名字 / 图片 / 介绍）会被清掉，前台退回内置默认信息。游戏本身不受影响。',
-  'admin.consoles.field.name': '名字',
-  'admin.consoles.field.image': '机图 / 图片',
-  'admin.consoles.imageHint': '选填。没有图时前台用卡带丝印词（NES / SFC / GBA / ARC 等）占位。',
-  'admin.consoles.imageCurrent': '当前：{name}。留空表示不换。',
-  'admin.consoles.field.released': '发售年份',
-  'admin.consoles.field.summary': '简介',
-  'admin.consoles.field.description': '介绍',
-  'admin.consoles.field.nameEn': '名字 (EN)',
-  'admin.consoles.field.summaryEn': '简介 (EN)',
-  'admin.consoles.field.descriptionEn': '介绍 (EN)',
-
-  'admin.feedback.title': '留言本',
-  'admin.feedback.empty': '还没有留言。',
-  'admin.feedback.loadMore': '加载更多',
-  'admin.feedback.resolved': '已解决',
-  'admin.feedback.unresolved': '未解决',
-  'admin.feedback.markResolved': '标记已解决',
-  'admin.feedback.markUnresolved': '标记未解决',
-  'admin.feedback.failed': '请求失败。',
-  /*
-   * 后台 · 游戏反馈 tab（2026-10-13 加）。和上面留言本那个 tab 是两块，
-   * 文案也刻意分开：这边每条都挨着**某一款游戏**（见 components/AdminReports.tsx）。
-   */
-  'admin.reports.title': '游戏反馈',
-  'admin.reports.empty': '还没有反馈。',
-  'admin.reports.loadMore': '加载更多',
-  'admin.reports.resolved': '已解决',
-  'admin.reports.unresolved': '未解决',
-  'admin.reports.markResolved': '标记已解决',
-  'admin.reports.markUnresolved': '标记未解决',
-  'admin.reports.failed': '请求失败。',
-
-  /* 用户管理，见上面英文那份的注释（⚠️ 这是前台注册用户，不是后台管理员） */
-  'admin.users.title': '用户',
-  'admin.users.hint':
-    '这里是前台注册用户，不是后台管理员账号（管理员用 scripts/create-user.mjs 手工建，没有界面）。',
-  'admin.users.empty': '还没有注册用户。',
-  'admin.users.failed': '请求失败。',
-  'admin.users.ban': '封禁',
-  'admin.users.unban': '解封',
-  'admin.users.delete': '删除',
-  'admin.users.confirmDelete': '确认删除',
-  'admin.users.banned': '已封禁 {name}。',
-  'admin.users.unbanned': '已解封 {name}。',
-  'admin.users.deleted': '已删除 {name} 及其全部数据。',
-  'admin.users.statusBanned': '已封禁',
-  'admin.users.stats': '历史 {history} · 存档 {saves} · 收藏 {favorites}',
-  'admin.users.registered': '注册于 {time}',
-  'admin.users.lastLogin': '最近登录 {time}',
-  'admin.users.neverLoggedIn': '从未登录',
-  /* VIP，见英文表里那一段的说明 */
-  'admin.users.vipBadge': 'VIP',
-  'admin.users.vipUntil': 'VIP · 有效期至 {time}',
-  'admin.users.vipSetup': '设置 VIP',
-  'admin.users.vipExpiresLabel': '会员有效期至',
-  'admin.users.vipSave': '保存',
-  'admin.users.vipClear': '取消会员',
-  'admin.users.vipClose': '收起',
-  'admin.users.vipSaved': '已更新 {name} 的会员。',
-  'admin.users.vipCleared': '已取消 {name} 的会员。',
+    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中文 / English / 日本語 / 한국어）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：联机、自定义按键。帮助：按键说明、留言本。',
 
   /* 游戏列表 / 详情 / 下载三页的界面文案，见上面英文那份的注释 */
   'topLinks.label': '站点页面',
@@ -2762,6 +2334,9 @@ const zh: Record<MessageKey, string> = {
   'consolesPage.gameCount': '{count} 款游戏',
   'consolesPage.gamesHeading': '{name} 上的游戏',
   'consolesPage.gamesEmpty': '库里还没有这个机种的游戏。',
+  /* 筛了语种却一款都没有（`{lang}` 来自 lib/rom-lang.ts 的语言全称，如 简体中文） */
+  'consolesPage.gamesEmptyLang': '这个机种下还没有 {lang} 的游戏。',
+  'consolesPage.filterLangLabel': '按语种筛选',
   'consolesPage.field.released': '发售年份',
   /* 页脚与面包屑里那条「全部机种」（真链接），与 developersPage.backToDevelopers 同一角色 */
   'consolesPage.backToConsoles': '全部机种',
@@ -2786,12 +2361,12 @@ const zh: Record<MessageKey, string> = {
   'deepLink.hint': '下载完成后自动开始',
 };
 
-const messages: Record<Locale, Record<MessageKey, string>> = { en, zh };
+const messages: Record<Locale, Record<MessageKey, string>> = { en, zh, ja, ko };
 
 export type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
 export function isLocale(value: unknown): value is Locale {
-  return value === 'zh' || value === 'en';
+  return (LOCALES as readonly string[]).includes(value as string);
 }
 
 /**
@@ -2840,8 +2415,11 @@ export function localePath(locale: Locale, path: string): string {
  * ⚠️ **显式英文前缀 `/en/...` 也要剥**。正常流量里地址栏看不到它（middleware 会
  * 301 掉），但 middleware 的**内部 rewrite** 会让 `usePathname()` 报出
  * `/en/games` 这种路由内部路径。不剥的话语言判断仍然对（`/en` 也是英文），
- * 但 `I18nProvider` 算「当前页面的另一种语言地址」会得到 `/zh/en/games` ——
+ * 但 `I18nProvider` 算「当前页面的某个语言版本地址」会得到 `/zh/en/games` ——
  * 一个只在切换钮上出现、平时看不出来的坏链接。
+ *
+ * ⚠️ 中文 / 日文 / 韩文**不用单独列**（它们的前缀都不是空串，下面那个循环会挨个试）。
+ *    2026-10-16 加日韩时这一处**没有改动** —— 前缀表加两行就够了，别在这里加分支。
  *
  * 无前缀一律判成 `DEFAULT_LOCALE`：这是「英文占空」的另一面。
  * 后台（`/admin/...`）也落在这条分支上 —— 它本来就不过语言前缀那套，
@@ -2869,9 +2447,20 @@ export function splitLocalePath(pathname: string): { locale: Locale; path: strin
  * 集中在一处是因为它散得到处都是：根布局的 `<html>`、JSON-LD 两个节点、
  * 每个页面的 `alternates.languages`。各写各的迟早漂成 `zh` / `zh-CN` / `zh-Hans`
  * 三种，而 `hreflang` 的值**必须逐字一致**才算同一组标注。
+ *
+ * ⚠️ 英文是**光秃秃的 `en`**（不是 `en-US`）：它同时是 `x-default` 指的那份，
+ *    而且当年就是这么定的 —— 改成 `en-US` 会把已有的 hreflang 标注全部换一遍，
+ *    收益只有「更精确」，不值得。日韩没有这个包袱，按惯例写全 `ja-JP` / `ko-KR`。
  */
-export function htmlLang(locale: Locale): 'zh-CN' | 'en' {
-  return locale === 'zh' ? 'zh-CN' : 'en';
+const HTML_LANG: Record<Locale, 'en' | 'zh-CN' | 'ja-JP' | 'ko-KR'> = {
+  en: 'en',
+  zh: 'zh-CN',
+  ja: 'ja-JP',
+  ko: 'ko-KR',
+};
+
+export function htmlLang(locale: Locale): 'en' | 'zh-CN' | 'ja-JP' | 'ko-KR' {
+  return HTML_LANG[locale];
 }
 
 /**
@@ -2879,49 +2468,69 @@ export function htmlLang(locale: Locale): 'zh-CN' | 'en' {
  * `zh_CN` 这种下划线写法，hreflang / `<html lang>` 用的是 `zh-CN` 连字符写法。
  * 看着像同一个东西，写混了爬虫不报错、只是那半边标注失效 —— 所以各留一个函数。
  */
-export function ogLocale(locale: Locale): 'zh_CN' | 'en_US' {
-  return locale === 'zh' ? 'zh_CN' : 'en_US';
-}
+const OG_LOCALE: Record<Locale, 'en_US' | 'zh_CN' | 'ja_JP' | 'ko_KR'> = {
+  en: 'en_US',
+  zh: 'zh_CN',
+  ja: 'ja_JP',
+  ko: 'ko_KR',
+};
 
-/** 另一种语言。语言切换、`og:locale:alternate` 都要用。 */
-export function otherLocale(locale: Locale): Locale {
-  return locale === 'zh' ? 'en' : 'zh';
+export function ogLocale(locale: Locale): 'en_US' | 'zh_CN' | 'ja_JP' | 'ko_KR' {
+  return OG_LOCALE[locale];
 }
 
 /**
- * 一个页面的 `alternates` 三件套：canonical + 两条 hreflang + `x-default`。
+ * **其他所有**语言。`og:locale:alternate` 用它 —— 那份是**一个列表**
+ * （Next 的 `alternateLocale` 收 `string[]`），不是「另一种」。
+ *
+ * ⚠️ 2026-10-16 之前叫 `otherLocale`、返回单个 `Locale`，只在两种语言时成立
+ * （「另一种」= 唯一的那一种）。加到四种之后那个函数本身就是错的 ——
+ * 它只会返回四种里的一种，另外两种语言在 OG 标注里直接消失。
+ * 所以改名 + 改返回值，**让所有调用点在编译期报错**，逐个改成列表。
+ */
+export function otherLocales(locale: Locale): Locale[] {
+  return LOCALES.filter((item) => item !== locale);
+}
+
+/**
+ * 一个页面的 `alternates` 三件套：canonical + 每条 hreflang + `x-default`。
  *
  * 入参是**不带前缀的路径**（`/games`、`/games/<id>`），前缀在这里加。
  * 这样调用点不必自己拼，也就不会出现「canonical 加了前缀、hreflang 忘了加」
  * 这种一半对一半的标注 —— 那种错 Google 会直接判成 hreflang 无效。
  *
- * `x-default` 指英文：它是无前缀的那个地址，也是**没表态的访客**该看到的版本
- * （middleware 只在检测到中文偏好时才把人送去 `/zh`）。
+ * 语言那份**遍历 `LOCALES` 现拼**，所以 2026-10-16 加日韩时这一处没改逻辑、
+ * 只是自动多出两条。别退回手写 —— 手写就是漏日韩那条的来源。
+ *
+ * `x-default` 指默认语言（英文）：它是无前缀的那个地址，也是**没表态的访客**
+ * 该看到的版本。
  *
  * ⚠️ Next 的 `alternates` 是**整体覆盖**而不是深合并：子页面写了自己的 `alternates`，
  * 父级那份就整个作废。所以每个 `generateMetadata` 都要写全 —— 少写一页，
  * 那页的 canonical 就会指向父级的（首页）。
  */
 export function alternatesFor(locale: Locale, path: string) {
-  return {
-    canonical: localePath(locale, path),
-    languages: {
-      [htmlLang('en')]: localePath('en', path),
-      [htmlLang('zh')]: localePath('zh', path),
-      'x-default': localePath('en', path),
-    },
-  };
+  const languages: Record<string, string> = {};
+  for (const item of LOCALES) languages[htmlLang(item)] = localePath(item, path);
+  languages['x-default'] = localePath(DEFAULT_LOCALE, path);
+
+  return { canonical: localePath(locale, path), languages };
 }
 
 /**
  * 把一串语言标签收敛成受支持的 locale。
- * 顺序即优先级：zh-CN → zh，en-GB → en，fr → 跳过继续看下一个。
+ * 顺序即优先级：zh-CN → zh，en-GB → en，ja-JP → ja，fr → 跳过继续看下一个。
  * 全部匹配不上时返回 DEFAULT_LOCALE（英文）。
+ *
+ * ⚠️ 只按**主语言子标签**判（`startsWith`），不区分 `zh-Hans` / `zh-Hant` ——
+ *    两种都归中文，因为界面只有一份中文。日韩同理（`ko-KR` / `ko-KP` 都是 ko）。
  */
 export function resolveLocale(tags: readonly string[]): Locale {
   for (const tag of tags) {
     const lower = tag.trim().toLowerCase();
     if (lower.startsWith('zh')) return 'zh';
+    if (lower.startsWith('ja')) return 'ja';
+    if (lower.startsWith('ko')) return 'ko';
     if (lower.startsWith('en')) return 'en';
   }
   return DEFAULT_LOCALE;
@@ -2946,9 +2555,31 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
  * 带上年份是为了跨年之后还能分清 —— 存档只有 5 份、历史最多 10 条，最旧的那条可能放很久。
  * 放在这里是因为它**跟着语言走**（zh-CN 与 en-US 的日期写法不同），而存档面板和游戏库
  * 历史都要用；两处各写一份迟早会漂成两种格式。
+ *
+ * ⚠️ 这份**不是 `htmlLang()`**：那边英文是光秃秃的 `en`（hreflang 的历史包袱），
+ *    而 `Intl` 这里要 `en-US` 才明确。看着像重复，其实是两件事，别合并。
  */
+const DATE_LOCALE: Record<Locale, string> = {
+  en: 'en-US',
+  zh: 'zh-CN',
+  ja: 'ja-JP',
+  ko: 'ko-KR',
+};
+
+/**
+ * `Intl.DateTimeFormat` / `toLocaleString` 用的语言标签。
+ *
+ * 从 `formatTime` 里单独提出来，是因为**页面上还有两处各写了一份**
+ * （`LegalPage` 的「最后更新」、`PlaySaveControls` 的存档时间）——
+ * 它们当年各写一个三元表达式，2026-10-16 加日韩时那种写法只会漏掉新语言。
+ * 一律走这里。
+ */
+export function dateLocale(locale: Locale): string {
+  return DATE_LOCALE[locale];
+}
+
 export function formatTime(timestamp: number, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+  return new Intl.DateTimeFormat(DATE_LOCALE[locale], {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

@@ -11,7 +11,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { canReturnWithinSite } from '@/lib/site-history';
 import { getAudioTrack } from '@/lib/audio-tap';
-import { ensureBios } from '@/lib/bios';
+import { biosTypeFor, ensureBios } from '@/lib/bios';
 import {
   EmulatorController,
   unsupportedArchive,
@@ -22,7 +22,7 @@ import {
 import { readGamepads } from '@/lib/gamepad';
 import { isAbortError, readBodyWithProgress } from '@/lib/http';
 import { setPlayActive } from '@/lib/play-leave-guard';
-import type { MessageKey } from '@/lib/i18n';
+import { localePath, type MessageKey } from '@/lib/i18n';
 import {
   buttonLabel,
   buttonsFor,
@@ -50,6 +50,7 @@ import ConsoleScreen from './ConsoleScreen';
 import { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
+import PadGlyph from './PadGlyph';
 import PlaySaveControls from './PlaySaveControls';
 import { unpackSave } from '@/lib/state-file';
 import { MobileGamepad } from './HandheldConsole';
@@ -242,15 +243,16 @@ export default function PlayScene({
     serverGame === null ? 'play.notFound' : null
   );
   /**
-   * 这盘 ROM 是站点解不开的压缩格式（`7z` / `rar`）时挂上 —— 和 `notice` **并排**显示。
+   * 这盘 ROM 是站点吃不下的格式时挂上 —— 和 `notice` **并排**显示。
+   * 三种：`7z` / `rar`（压缩包），以及 `disc`（**多文件光盘镜像的描述文件**）。
    *
    * 和 `/room` 的 `archiveHint` 是同一件事、同一份判据（`unsupportedArchive()`），
    * 只是这一页没有那个弹窗，只能直接摊在屏幕上。
    *
    * ⚠️ 单独一个 state 而不是塞进 `notice`：`notice` 存的是 `MessageKey`（不带参数），
-   *    而这条要带 `{ ext }`。两者的生命周期倒是一样的（每次 `load` 开头一起清）。
+   *    而 `7z` / `rar` 那条要带 `{ ext }`。两者的生命周期倒是一样的（每次 `load` 开头一起清）。
    */
-  const [archive, setArchive] = useState<'7z' | 'rar' | null>(null);
+  const [archive, setArchive] = useState<'7z' | 'rar' | 'disc' | null>(null);
   /** 这一笔 ROM 下载的取消把手；没有下载在飞时是 null */
   const abortRef = useRef<AbortController | null>(null);
   /**
@@ -611,12 +613,16 @@ export default function PlayScene({
         lastRomRef.current = romFile;
 
         /*
-         * 街机要带上 BIOS（Neo Geo 的 neogeo.zip）—— `ensureBios()` 会先把站点自带那份
-         * 备上（`public/bios/`），用户拖进来的那份能覆盖它。非街机一律 null，
-         * `loadRom` 也只认街机那条分支。
+         * 需要 BIOS 的机种（街机 / PS1，见 `lib/bios.ts` 的 `biosTypeFor`）要带上那一份 ——
+         * `ensureBios()` 会先把**站点自带**的那份备上（`public/bios/`），用户拖进来的能覆盖它。
+         *
+         * ⚠️ 只有街机有站点副本：PS1 那份（SCPH1001.BIN）是版权物，`public/bios/` 里不放，
+         *    所以 `ensureBios('ps1')` 正常恒为 null —— 那是预期行为（核心回落 HLE，游戏照跑）。
+         * 其余机种一律 null，`loadRom` 内部按机种自己判断要不要用。
          */
         const targetConsole = game?.consoleType ?? null;
-        const bios = targetConsole === 'arcade' ? await ensureBios() : null;
+        const wantedBios = biosTypeFor(targetConsole);
+        const bios = wantedBios ? await ensureBios(wantedBios) : null;
         if (ac.signal.aborted || !activeRef.current) return;
 
         /*
@@ -667,9 +673,9 @@ export default function PlayScene({
         if (!activeRef.current) return;
         // 用户自己掐的：不是故障，回到「设置好了，点开始」那一屏
         if (isAbortError(error))
-          console.info('[play] 已取消载入：', game?.title);
+          console.info('[play] 已取消载入：', title);
         else {
-          console.error('[play] 载入失败：', game?.title, error);
+          console.error('[play] 载入失败：', title, error);
           /*
            * 机种认不出时单独认一次压缩格式 —— 和 `/room` 对齐（`ConsoleScene` 的
            * `archiveHint`）。这一类是「有准话可给」的失败：7z / rar 用不着用户瞎猜。
@@ -698,7 +704,12 @@ export default function PlayScene({
         }
       }
     },
-    [controller, game]
+    /*
+     * `title` 只在两处日志里用（`game?.title` 那种写法随 `LibraryGame` 侧表化一起没了）。
+     * 它是派生的字符串，跟着 `game` / `locale` 走 —— 列在这里是为了让 lint 的
+     * `exhaustive-deps` 过，不会因为一次渲染而改变 `load` 的身份。
+     */
+    [controller, game, title]
   );
 
   /** 取消正在飞的那一笔 ROM 下载。没有下载在飞时是空操作。 */
@@ -1103,8 +1114,10 @@ export default function PlayScene({
           onConfirm={() => void start()}
           onBack={() => {
             if (window.history.length > 1) window.history.back();
-            else
-              window.location.assign(locale === 'zh' ? '/zh/games' : '/games');
+            // 用 localePath 而不是三元表达式：2026-10-16 之前这里写的是
+            // `locale === 'zh' ? '/zh/games' : '/games'`，加日韩时那种写法
+            // 会把日韩用户直接扔回英文页（而且不报错，只是送错语言）。
+            else window.location.assign(localePath(locale, '/games'));
           }}
         />
       )}
@@ -1208,13 +1221,16 @@ export default function PlayScene({
                         </span>
                       )}
                       {/*
-                        格式那条（7z / rar）跟在报错下面：它不是「出事了」而是
+                        格式那条（7z / rar / 多文件光盘镜像）跟在报错下面：它不是「出事了」而是
                         「换个包就行」—— 所以用 `crt-ink-300` 而不是 `danger`，
                         和 `/room` 那边同一个口径（那边是弹窗里的一行）。
+                        `disc` 那条不带参数（它说的不是「哪种格式」而是「要单文件」）。
                       */}
                       {archive && (
                         <span className="text-[12px] text-crt-ink-300">
-                          {t('play.needZip', { ext: archive })}
+                          {archive === 'disc'
+                            ? t('play.needDisc')
+                            : t('play.needZip', { ext: archive })}
                         </span>
                       )}
 
@@ -1551,7 +1567,8 @@ export default function PlayScene({
                   className="flex min-w-0 items-center justify-between gap-1 border-b border-ink-800 pb-2"
                 >
                   <dt className="shrink-0 text-[12px] text-ink-300">
-                    {buttonLabel(button, t, consoleType)}
+                    {/* PS1 那四颗符号走图形（根因见 components/PadGlyph.tsx） */}
+                    <PadGlyph name={buttonLabel(button, t, consoleType)} />
                   </dt>
                   <dd className="min-w-0 text-right">
                     <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">

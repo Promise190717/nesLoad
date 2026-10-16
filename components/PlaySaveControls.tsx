@@ -6,7 +6,7 @@ import { deleteSave, readSave, writeSave, type SaveInfo } from '@/lib/saves';
 import { MAX_SAVE_BYTES } from '@/lib/save-limit';
 import { packState } from '@/lib/state-file';
 import { readBodyWithProgress } from '@/lib/http';
-import { localePath } from '@/lib/i18n';
+import { dateLocale, localePath, type Locale } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
 
 /** 每个游戏只保留最新一份即时存档。 */
@@ -337,7 +337,8 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
 /** 列表里的一行：时间 + 加载 + 删除。本机 / 云端只差那朵小云和删除中的小圈圈。 */
 function SaveRow({ createdAt, locale, onLoad, onDelete, deleting, remote }: {
   createdAt: number;
-  locale: string;
+  /* 窄成 `Locale`（不是 `string`）：下面要喂 `dateLocale()`，而它只认登记表里那四个 */
+  locale: Locale;
   onLoad: () => void;
   onDelete: () => void;
   deleting: boolean;
@@ -352,7 +353,8 @@ function SaveRow({ createdAt, locale, onLoad, onDelete, deleting, remote }: {
         onClick={onLoad}
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate">{new Date(createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</span>
+          {/* 语言标签走 dateLocale()（lib/i18n.ts 唯一那份映射），别在这儿写三元表达式 */}
+          <span className="truncate">{new Date(createdAt).toLocaleString(dateLocale(locale))}</span>
           {remote && <CloudIcon />}
         </span>
         <span className="shrink-0">{t('saves.load')}</span>

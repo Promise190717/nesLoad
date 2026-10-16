@@ -9,7 +9,7 @@ import {
   htmlLang,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type Locale,
   type MessageKey,
@@ -100,13 +100,17 @@ export async function generateMetadata(): Promise<Metadata> {
        * `url` 也按语言分路径 —— 中文首页的 og:url 该是 `/zh`，跟 canonical 一致。
        * `locale` / `alternateLocale` 用 `ogLocale()`（下划线那套，`zh_CN`），
        * 跟 `htmlLang()`（连字符 `zh-CN`）不是一个体系，别混。
+       *
+       * ⚠️ `alternateLocale` 是**另外所有语言**（`otherLocales` 返回数组，
+       *    2026-10-16 从「另一种」改成列表）—— 两种语言时它俩等价，
+       *    四种语言下只报一种会让另外两种在 OG 标注里凭空消失。
        */
       url: localePath(locale, '/'),
       siteName: site,
       title: t('meta.title'),
       description: t('meta.description'),
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
     /*
      * `summary_large_image` 才会横着铺开那张 1200×630 的图。

@@ -2,6 +2,18 @@
 
 > 只放「改这块之前必须知道」的细节；总纲与硬约束见 `MEMORY.md`。
 
+## 机种专题页的语种筛选（`/consoles/[type]` 的 `?lang=`，2026-10-16）
+
+- 只挂在这**一页**上（`/games` 没有语种筛选，那一路永远传 `null`）。筛的是 `games.language` = **游戏自己的语种**，不是界面语言。
+- **两态写法（2026-10-16 用户要求改：默认从「按界面语言挑一份」变成「先给全部」）**：「全部」⇒ 地址里**不写** `lang`（默认那份就是裸路径）、其余 ⇒ 短码本身。归一化只有一处 = 页面里的 `languageParamOf()`（改成只收一个参数了），**判「地址规不规范」和「拼链接」共用它**，别在两处各写一份。⚠️ 原来那个「不写 = 跟着界面语言走」的 `defaultLanguage()` **已删**，别再往回加。
+- ⚠️ `?lang=all`、`?lang=`（空）、认不出的 `?lang=xxx`、重复参数 ⇒ 一律 307 回**裸地址**。判据是「**参数在不在**」而不是「是不是空串」（`lib/pager.ts` 的 `parsePageParam` 同款，重复参数会被 `typeof raw === 'string'` 筛掉）。
+- ⚠️ 数据层加了第四/第五维：`GamePageQuery.language` → `buildGamesWhere` 里 `language = ?N`（**精确匹配、排在最后**）；`listGamesByConsoleCached(...)` 第 4 参数、`listGamesPageCached(...)` 第 5 参数、`countGamesCached(...)` 第 4 参数。**加维会让线上旧缓存整体失效一轮**（键形状变了），属预期。
+- ⚠️ 条数：`countConsoleGamesByLanguageCached(consoleType)`，键 `games:lang-counts` + `v1`，一条 `GROUP BY language`。**不跟关键词走**（和资料表里「共 N 款」同口径）；返回值**只有 `GAME_LANGUAGE_VALUES` 四个键**（`jp` / `ZH` 这类脏数据丢掉 —— 它们既不参与筛选、也不该出现在标签上）。
+- ⚠️ 资料表里「N 款游戏」= 这个机种的**总数**（`loadGames(id, 1, '', null)`），和「全部」那颗同一个数。**别改成跟着语种走**，否则「全部」那颗会显示成当前语种的条数。
+- ⚠️ **三处都要带上 `lang`**：筛选条链接、翻页链接（`consoleHref` 一次拼全）、搜索表单。搜索表单靠 `GamesSearchForm` 的**可选** `languageParam`（收的是「写进地址那一串」，不是语种短码；`/games` 不传 = 行为与以前一字不差）。少了任何一处，筛着「日本語」搜一下 / 翻一页就掉回全部。
+- 收录：**带 `?lang=` 的那几份 `noindex, follow`**（子集，四个语种全收就是四份重复内容）；**hreflang 与 canonical 一律指裸地址那一份**，不看 `lang`（和 `/games?console=` 那条「带自己的筛选参数」刻意相反）。
+- 文案键：`consolesPage.filterLangLabel`（筛选条 aria-label）、`consolesPage.gamesEmptyLang`（`{lang}` 填的是 `lib/rom-lang.ts` 的语言全称）。语言名本身**不进文案表**（用各自的语言写）。
+
 ## NDS / EJS 核（melonds）
 
 - 来源：`melonds_libretro.{js,wasm}` 从 EmulatorJS 的 `melonds-wasm.data`（7z 壳）解出，不是 `retroarch-emscripten-build` 那个 tag（它没有 NDS）。
@@ -100,3 +112,56 @@
 - `ReportGameButton` **匿名提交**（`MAX_LENGTH=500`）；收藏数挂 `FavoriteButton`（`countGameFavorites` 刻意不缓存）。表 `game_reports`（**和留言本 `feedback` 别合并**：那个公开可读，这个只给后台）。
 - **DDL 双份逐字一致**（`db/schema.sql` + 对应 `scripts/add-*.mjs`）已对真库跑过：consoles / game_reports / game_comments / comments-rating。
 - **开发商库**：统一叫「开发商」；`developers` 表 + `games.developer_id` 外键；`lib/server/developers.ts`；后台 `/api/admin/developers`；前台 `/developers`；网格共用 `GameCardGrid`、分页共用 `lib/pager.ts`。
+
+### 实体多语言（2026-10-16 侧表化）—— 两头各是什么形状
+
+- 侧表三张：`game_texts` / `console_texts` / `developer_texts`（**`group_key`**|`console_type`|`developer_id` + `locale` 复合主键）。建表 + 搬数据 + `developers.source_slug` 补列 = `scripts/add-entity-texts.mjs`（games 的 `source_url` 同理走 `scripts/add-games-source-url.mjs`）。
+  - ⚠️⚠️⚠️ **`game_texts` 的主键是 `group_key`、不是 `game_id`**（2026-10-16 同日再改；三张侧表里唯一不一样的那张）。一行 `games` 是**一盘 ROM**，同一款游戏的中英日韩四个版本就是四行、而文案只有一份 ⇒ 挂 `game_id` 等于把同一份文案存 4 遍（4 行游戏 × 4 语言 = 16 行），后台改一次标题要进四条记录各改一遍；挂 `group_key` 一款一份，改一次 = 改整款。
+    - `group_key` 的**唯一出口 = `lib/server/games.ts` 的 `resolveGroupKey()`**（`insertGame` 内部调，接口层与后台表单**都不传**）：按「中文标题 `COLLATE NOCASE` + 机种 + 开发商」反查同款（`findGameGroup`），查到就复用、查不到才 `randomUUID()`。于是「批量导入四个语言版本」和「过两天手动补一个」自动归到同一款。**判重（`findGameDuplicate`）与归组刻意用同一套维度，改一处必须改两处。**
+    - 读取**永远** `JOIN games g ON t.group_key = COALESCE(g.group_key, g.id)`（`COALESCE` 只是给迁移前老行兜底）；`loadGameTexts(ids)` 签名不变、返回字典仍**按游戏 id** 索引（同款几条拿到同一个引用）。搜索的 `EXISTS` 子查询同理 ⇒ 同款几条一起命中。
+    - ⚠️ **改文案 = 改整款**（同款几条读同一份，是想要的效果）；⚠️ `deleteGame` 清文案**必须晚一步** —— 先删 games 行、再 `DELETE … WHERE group_key = ? AND NOT EXISTS (SELECT 1 FROM games WHERE group_key = ?)`，删早了会让还在库里的另外几个语言版本突然没名字。
+    - ⚠️ **PATCH 不改 `group_key`**（改机种 / 换开发商会让签名变，但不重算 —— 重算的后果是「改一次机种，这一款散成两个组」）。
+    - 迁移 = `scripts/add-game-group-key.mjs`（加列 + 归组回填 + 重建表 + 同款去重 + **旧表改名成 `game_texts_old` 留底、不 DROP**）；**旧脚本 `add-game-texts.mjs` 已作废**（文件头有警告，它建的是 `game_id` 主键的旧表 → 在新库上跑会让所有游戏都没名字）。
+    - ⚠️ **动这块记得升缓存键版本**：`games:count` / `games:list` / `games:latest` / `games:by-developer` / `games:by-console` 全部已升到 **`v2`**（查询形态变了）。
+    - 连带改过的脚本（都按 `group_key` 读写 + 同款去重）：`add-game.mjs`、`fill-games-description.mjs`、`fill-game-texts-ja-ko.mjs`、`fill-i18n-content.mjs`。
+  - ⚠️⚠️ **这些迁移脚本一律「自带 `run()` 直连 D1 REST + `node --env-file=.env.local` 读 env」，绝不 import `lib/server/*.ts`**。`add-entity-texts.mjs` 第一版就是 `import { createRemoteDatabase } from '../lib/server/d1.js'` —— 那个导出**不存在**，脚本一跑就 `ERR_MODULE_NOT_FOUND`，**表从来没建出来过**，直到线上报 `no such table: console_texts` 才发现。照 `add-game-group-key.mjs` / `add-games-source-url.mjs` 抄。
+  - ✅ **三张侧表 2026-10-16 已对线上 D1 建好并跑过迁移**：`game_texts` / `console_texts` / `developer_texts`。幂等靠 `INSERT OR IGNORE`（保护后台人工编辑），只 CREATE/ADD COLUMN/INSERT，不 DELETE/UPDATE/DROP。
+    - ✅ **`add-game-group-key.mjs` 2026-10-16 已在线上跑完**：`games` 1258 行 → **1138 款**（`group_key` 零 NULL）；`game_texts` **5021 → 4541 行**（zh 1138 / en 1138 / ja 1134 / ko 1131），旧表在 **`game_texts_old`（5021 行）** 留底，确认后可清。核对结论：无一行丢失、每款都有中文文案。
+    - ⚠️ 这个迁移**跑一次约 12 分钟**（上千次 D1 REST 往返），**必须后台跑**；中途 SIGTERM 无害（②只补 `group_key IS NULL`）。跑的时候**别并发跑改 `game_texts` 的脚本**（`fill-game-texts-ja-ko.mjs` 等）。
+- **机种 / 厂商的日韩文案 = 写死的官方译名**（`scripts/fill-entity-texts-ja-ko.mjs`）。⚠️ 与爬上游的 `fill-game-texts-ja-ko.mjs` **不是一回事**，别混名字：
+  · 机种名与厂商名是**专有名词、有官方译名**（ファミリーコンピュータ / 패밀리 컴퓨터、カプコン / 캡콤），**不该爬第三方站的机翻**；上游 `retrogamesnexus.com` 也**没有** `/ja/consoles`、`/ja/developers` 这类页面（实测全 404）。
+  · 数据写死在脚本顶部两张表（`CONSOLES` / `DEVELOPERS`）；厂商键是 **`developers.id`（UUID）**。
+  · 默认 `DO NOTHING`（只补缺、不冲后台人工编辑），`--force` 才 `DO UPDATE`；支持 `--dry-run` / `--only ja|ko`。
+  · 已跑：`console_texts` 13×4 语言 · `developer_texts` 47×4 语言（四语言齐全，无缺行）。
+- ⚠️⚠️ **补完侧表数据记得把缓存键版本 +1**（缓存条目不随部署失效）：`consoles:list` **v5** · `developers:list` **v4** · `developers:top` **v4**（2026-10-16 补日韩时升的）。`consoles:stubs` / `developers:stubs` / `developers:count` 不带文案，不用动。
+- ⚠️ **数据层一律 `texts: EntityTexts`**（`Developer` / `Console` / `Game` 都是），**不按语言裁剪**（缓存键里没有语言）。前台取值走 `localizeDeveloper` / `localizeConsole` / `localizeGame`（= `lib/entity-text.ts` / `lib/game-text.ts` 的纯函数，**逐字段回退中文**）。
+- ⚠️⚠️ **后台接口必须把 `texts` 摊成四语言扁平字段**（`name` / `nameEn` / `nameJa` / `nameKo` / `summary`… / `description`…）：后台表单一栏一个输入框。唯一出处 = `lib/entity-text.ts` 的 **`flatEntityTexts()` + `FlatEntityText`**，两个路由（`/api/admin/consoles`、`/api/admin/developers`）都 extends 它。**别再直接回 `Developer` / `Console`**（2026-10-16 开发商那条漏了摊平 ⇒ 后台列表整片空白：组件读 `developer.name` 拿到 `undefined`）。
+  - 例外：**`/api/admin/games` 回的是 `texts`**（`AdminGames.tsx` 的表单自己拆四语言，另有 `zhText()` 取列表显示用的中文）—— 改 games 那条别照抄 consoles/developers。
+  - ⭐ **后台「单独添加 / 编辑」表单 = 按语言分块**（2026-10-16 重构，`components/AdminGames.tsx`）：**公共区**（类型 / 年份 / 语言 / 开发商 / 封面图片）在上，下面 **`CONTENT_LOCALES.map` 出四个语言块**（每块 **名字 / 系列 / 说明**），ROM 在最底。文案 state 从原来的 12 个 `useState` 收成 **`texts: Record<ContentLocale, FormText>`**（用工厂 `emptyFormTexts()`，**不是共享常量**——`patchText` 是浅拷贝改写），`patchText(locale, key, value)` 改一格 ⇒ **加语言只改 `lib/game-text.ts` 一处**（以前是四个语言各手抄一遍、要动十几处）。中文那份**必填**（主名字 + 反查/判重的判据）。
+    - ⚠️ 提交时两条路的键名不一样，唯一出处 = 同文件的 **`FORM_SUFFIX`**（POST 蛇形 `''`/`_en`/`_ja`/`_ko`）/ **`PATCH_SUFFIX`**（JSON 驼峰 `''`/`En`/`Ja`/`Ko`），都是 `satisfies Record<ContentLocale, string>`（加语言漏了会编译报错）。**改名要连着接口一起改**：`/api/admin/games` 的 `flatTexts()` 与 `[id]/route.ts` 里的 `patch`。**参数本身没变过**——`group_key` 是服务端算的，前端加什么字段都传不进去。
+    - ⚠️ 「语言」下拉（= **这盘 ROM 是哪个语言版本**，进 `games.language`，判重的一维）与四个语言文案块（= 名字/说明**用哪种语言写**）**是两回事**，别合并成一栏。
+    - ⭐ **保存后提示「已归入《XXX》」**：`insertGame` 的返回值多带 **`group: GameGroupInfo`**（`{ key, reusedTitle }`；`reusedTitle === null` = 这次新开了一款，不是出错），POST 回 `{ ok, game, group }`，后台拿它提示。配套改的还有 `findGameGroup` —— 现在回 **`{ key, title } | null`**（多带库里那个中文名，用于提示里的**已有写法**）。这是「中文名打错一个字（繁简 / 错别字）就另开一款、同一款文案从此存两份」**唯一能在当时看出来**的地方。
+    - ⚠️ 客户端读 POST 响应体时 `res.json()` 要 `.catch(() => ({}))` 兜住：上传**已经成功**了，不能因为读不出 body 就让用户看到「上传失败」（会诱使他重传、撞上判重更困惑）。
+    - ⭐ **同款盘数可见**（2026-10-16 加）：`listAdminGamesPage` 返回的 `AdminGamePage.games` 是 **`AdminGame`**（= `Game` + `groupSize`）—— 列表 SQL 里多带一列
+      ```sql
+      (SELECT COUNT(*) FROM games g2
+        WHERE COALESCE(g2.group_key, g2.id) = COALESCE(games.group_key, games.id)) AS group_size
+      ```
+      相关子查询（**不是** GROUP BY / 窗口函数：那会把「多取一条判 hasMore」的分页形状搅乱；一页最多 100 行、子查询吃 `group_key` 索引，代价可忽略）。`attachTexts` 保序 ⇒ 按下标贴回每一行。后台拿它做两件事：编辑弹窗顶部提示「下面写的文案是这一款共用的 —— 库里还有同款 N 盘 ROM，保存后它们的显示一起变」（`N = groupSize - 1`，`N === 0` 时退化成「之后补其他语言版本时读的也是这一份」）；编辑保存成功后 `setPageNotice` 说「已保存 —— 这一款共 N 盘 ROM，文案已一起更新」。⚠️ 客户端**没有再发请求**：`editingGroupSize` 从当前页的 `games` 里 `find` 出来（每次保存后都 `reloadList()`，所以一直是最新的）。
+    - ⚠️ `groupSize` **只在后台这条列表路径上算**（前台那几条列表不需要，别顺手加进 `Game`）。
+- ⚠️ **写入时不做语言回退**：`game_texts.developer` 由 `games.ts` 的 `withDeveloper` 写、`developers.ts` 改名时级联，两边**同用 `rawEntityName(texts, locale)`**（只取该语言自己那份名）。回退是**读取**的事，写进去就看不出「这份到底翻没翻」。
+- ⭐⭐ **游戏文案补日韩 = `scripts/fill-game-texts-ja-ko.mjs`（第二版）**：**先抓上游 `sitemap.xml` 拿 slug 全集**（2107 条）→ 候选**离线比对**，只对存在的 slug 发请求。候选三路 = `title_en` 规范化（**街机唯一的路**，`rom_name` 是 MAME 短名推不出来）+ `rom_name` 推导 + 词元模糊召回（前缀 / 差一字母，兜上游自己的拼写出入）。另外三个必备变形：**罗马↔阿拉伯双向**、`Alpha`→`Alpha Zero`、尾部 `-v5.7` 版本号。⚠️ 候选要**跨同款的多盘 ROM 合并**（哈希文件名那盘推不出 slug）。⚠️⚠️ 该脚本**运行时探测 `game_texts` 的主键列**（`game_id` / `group_key` 双形状）—— 迁移落地前后都能跑。结尾打印**没补上的清单**，那才是结论。
+  - 2026-10-16 实测：`ja` 1012 → **1254**、`ko` 1011 → **1251**。残留 **7 款 = 上游确实没有**：4 款上游压根没收（`dynwar` 吞食天地 / `kof97pls` 拳皇97风云再起 / NES 松鼠大作战2 / 三国志街机中文改版）+ 3 款上游 **ko 页自己 500**（`touhou-puppet-play-enhanced`、`pokemon-amethyst`、`pokemon-evolved`，ja 已补）。
+  - ⚠️ 已知遗留：`game_texts` 里 **HTML 实体残留**（`&#x27;`，`aboutText()` 的实体表不收数字实体），en 464 / ko 93 / ja 21 / zh 15 行 —— 首轮就存在，没动。
+- ⚠️⚠️ **改开发商名要级联两处**：`game_texts.developer`（**前台真读的那份**，漏了 = 改名后卡片一张都不变）+ `games.developer/developer_en`（只写不读的旧快照）。⚠️ 2026-10-16 起侧表那条 SQL 要按 **`group_key`** 命中：`WHERE locale = ? AND group_key IN (SELECT COALESCE(g.group_key, g.id) FROM games g WHERE g.developer_id = ?)` —— 原来写的 `game_id IN (SELECT id FROM games …)` 已经不成立（那列没了）。⚠️ `writeDeveloperTexts` 必须「传进来的语言全空 ⇒ 删行（中文除外）」，`undefined` = 这次不管这个语言 —— 这两条原来混在一起，导致后台**清不掉**英文名。
+
+## ROM 来源地址（`source_url`）与那批存量迁移（2026-10-16）
+
+- **两列互斥**：`rom_url` = R2 对象 key（本站存字节）；`source_url` = 上游地址（`site:/…` / `files:/…`，**不含域名**，域名在 `lib/server/upstream.ts` 的 `UPSTREAM_ROOT`）。不存 ROM 时 `rom_url` 写**空串**（那列 NOT NULL），字节也**不在**本站。前台判据唯一一处：`app/api/games/[id]/rom` 的 `sourceFileUrl(row.source_url) ?? (row.rom_url ? publicUrl(row.rom_url) : null)` —— **来源优先**，所以两列同时有值也安全（这正是迁移可以分两步做的原因）。
+- ⚠️⚠️ **`files` / `site` 两个 host 不可互换**（上游给相对路径的挂主站、给绝对路径的挂 files 子域，实测同路径一个 206 一个 404）⇒ 存 source_url **必须带 host 角色前缀**，只留 path 会有一半文件取不到。
+- **迁移脚本 `scripts/fill-source-url.mjs`**（2026-10-16 跑过，一次性）：`--dry-run` 只读预览 / 默认只填 `source_url` / `--purge-r2` 删 R2 包 + 清 `rom_url` / `--all` 一把梭。台账 `source-url-migration-log.json`。
+  - ⭐ **匹配判据是「文件名」不是「语言」**：`rom_name` 与上游 `fileName` 里的文件名一一对应；同款不同机种是**两个 slug**（`chrono-trigger` = SFC、`chrono-trigger-nds` = NDS），按语言挑会把 SFC 那份填给 NDS 那条。
+  - 两条路：① `rom_name` 去扩展名 + 去尾部语言后缀推 slug → 抓 `/zh/games/<slug>` → 在 `fileName` 表里找同名（判据/锚点抄 `scrape-game` 的 `romsFromHtml`，改一处要改两处）；② 直探 `/games/roms/<rom_name>`（files → site）。
+  - ⚠️ **删包前逐条复探已写入的 source_url**，探不通就跳过保留 R2；顺序**先删对象、后清列**。⚠️ R2 无版本控制，删了无法恢复 —— 以后写这类脚本照这个来。
+  - 首次跑完：填 1238 · 删 1238（0 跳过）· 20 条找不到（文件名被改过的老上传 / 上游确实没收录）原样保留。
+- ⚠️ **重跑时不用再动缓存**：`games:row-by-id` 已经在这次升到 **`v2`**（理由见 `lib/server/games.ts` 那段注释 —— 缓存不随部署失效，不换键旧条目会回源已删对象）。以后再改这两列的语义，**继续升尾号**。

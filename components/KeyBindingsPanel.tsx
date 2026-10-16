@@ -18,6 +18,7 @@ import type { ConsoleType } from '@/lib/emulator';
 import type { NetplayRole } from '@/lib/netplay';
 import type { MessageKey } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
+import PadGlyph, { renderPadGlyphs } from './PadGlyph';
 
 /**
  * 面板底部的提示条。
@@ -367,8 +368,13 @@ export default function KeyBindingsPanel({
               const label = codeLabel(table[button]);
               return (
                 <div key={button} className="flex items-center gap-2">
+                  {/*
+                    钮名走 `PadGlyph`：PS1 那四颗（△ ○ × □）在 Unicode 里跨两个区、
+                    落到两种字体上，同字号下一颗小、三颗大 —— 画成图形才齐
+                    （根因与画法见 components/PadGlyph.tsx）。其余钮名原样是文字。
+                  */}
                   <span className="w-[54px] shrink-0 text-[12px] text-ink-400">
-                    {name}
+                    <PadGlyph name={name} />
                   </span>
                   <button
                     type="button"
@@ -392,11 +398,18 @@ export default function KeyBindingsPanel({
 
           {notice && (
             <p className="text-[12px] text-danger">
-              {t(notice.key, {
-                button: notice.button ? buttonLabel(notice.button, t, consoleType) : '',
-                player: notice.player ?? '',
-                pressed: notice.pressed ?? '',
-              })}
+              {/*
+                `{button}` 里塞的可能是 PS1 那四颗之一，套一层 `renderPadGlyphs`
+                把它换成图形 —— 撞键提示里的符号和左边钮表一样大才不突兀。
+                文案本身没有这四颗字符，所以套上去对别的机种 / 别的提示无副作用。
+              */}
+              {renderPadGlyphs(
+                t(notice.key, {
+                  button: notice.button ? buttonLabel(notice.button, t, consoleType) : '',
+                  player: notice.player ?? '',
+                  pressed: notice.pressed ?? '',
+                })
+              )}
             </p>
           )}
 

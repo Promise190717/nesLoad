@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { LOCALE_COOKIE, resolveLocale, type Locale } from '@/lib/i18n';
+import { LOCALE_COOKIE, LOCALE_OPTIONS, LOCALE_SWITCH_LABEL, resolveLocale, type Locale } from '@/lib/i18n';
 import { TOUR_DONE_EVENT, TOUR_OPEN_EVENT } from './OnboardingTour';
 import { useI18n } from './I18nProvider';
 
@@ -26,6 +26,11 @@ import { useI18n } from './I18nProvider';
  * ⚠️ 和操作指引（OnboardingTour）**排队**：指引是 z-[60] 的全屏暗幕，两者同时在场
  * 会把这条压暗、还点不动。靠 `TOUR_OPEN_EVENT` / `TOUR_DONE_EVENT` 让路，
  * 详见 OnboardingTour 里那两个常量的注释。
+ *
+ * ⚠️ **目标语言是「浏览器想要的那一种」，不是「另一种」**（2026-10-16 改）。
+ *    两种语言时那两个说法等价（另一种就是唯一剩下的那种）；四种语言下不等价了 ——
+ *    一个日语浏览器访问英文页，该问的是「要不要切到日文」，而不是随便挑一种。
+ *    所以这里自己算 `browserLocale()`（下面那个函数），不再从 context 里取。
  */
 
 /**
@@ -43,7 +48,7 @@ function hasSavedLocale(): boolean {
 
 /**
  * 浏览器想要哪种语言。**复用服务端那份收敛规则**（`resolveLocale`：
- * `zh-CN` → zh、认不出的当英文），免得两边各写一套判断、迟早分叉。
+ * `zh-CN` → zh、`ja-JP` → ja、认不出的当英文），免得两边各写一套判断、迟早分叉。
  */
 function browserLocale(): Locale {
   const tags = navigator.languages?.length ? navigator.languages : [navigator.language];
@@ -51,7 +56,7 @@ function browserLocale(): Locale {
 }
 
 export default function LocalePrompt() {
-  const { locale, altLocale, altHref, rememberLocale, t } = useI18n();
+  const { locale, hrefIn, rememberLocale, t } = useI18n();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   /** 计时器句柄。**不放在 effect 的清理里** —— 见下面那个单独的卸载 effect。 */
@@ -110,7 +115,19 @@ export default function LocalePrompt() {
     []
   );
 
-  if (!open) return null;
+  /*
+   * 目标语言 = **浏览器想要的那一种**。
+   *
+   * 在渲染时现取、不放进 state：它只跟浏览器设置有关，不会变。
+   * `open` 一旦为真说明它和当前语言不同（见 `schedule` 的判据）—— 但**切换之后**
+   * 两者可能变得相同（用户在下拉里自己切过去了，而这条还挂着），
+   * 所以下面用 `target === locale` 一并收掉：那时候问「要不要切到你现在这种语言」
+   * 是废话，直接不显示。
+   */
+  const target = browserLocale();
+  if (!open || target === locale) return null;
+
+  const targetLabel = LOCALE_OPTIONS.find((option) => option.value === target)?.label ?? target;
 
   return (
     <div className="fixed inset-x-0 bottom-6 z-[55] flex justify-center px-6">
@@ -134,20 +151,24 @@ export default function LocalePrompt() {
           <div className="flex gap-2">
             {/*
               切换那颗是 `<Link>` 而不是「onClick 里 router.push」：它去的是一个**真地址**
-              （当前页面的另一种语言版本），该能被中键 / 新标签打开。
+              （当前页面的目标语言版本），该能被中键 / 新标签打开。
               `rememberLocale` 必须在导航前跑 —— 先写 cookie 再走，否则服务端下次
               还会按老 cookie 把人送回去（见 I18nProvider 的注释）。
             */}
             <Link
-              href={altHref}
+              href={hrefIn(target)}
               onClick={() => {
-                rememberLocale(altLocale);
+                rememberLocale(target);
                 setOpen(false);
               }}
               className="pixel-edge pxw-3 pxc-600 block flex-1 bg-accent py-2 text-center text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
             >
-              {/* 钮上写的是**目标语言自己的说法**，沿用右上角那颗切换钮的规矩 */}
-              {t(altLocale === 'zh' ? 'locale.toZh' : 'locale.toEn')}
+              {/*
+                钮上写的是**目标语言自己的说法**（`LOCALE_SWITCH_LABEL`）：
+                这颗钮的读者是想要那种语言的人，字必须是他看得懂的语言。
+                `targetLabel` 只是给 `title` 用 —— 语言名本身各语言写法一样。
+              */}
+              <span title={targetLabel}>{LOCALE_SWITCH_LABEL[target]}</span>
             </Link>
             <button
               type="button"

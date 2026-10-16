@@ -13,13 +13,20 @@
  *    后台删了游戏就会留下孤儿行 —— JOIN 是最省事的兜底（也顺带保证返回给前端的
  *    封面 / 名字永远是**最新**的，而不是收藏那一刻的快照）。
  *
+ * ⚠️ 2026-10-16 起**文案走 `game_texts` 侧表**（原来是 JOIN games 上那几列中英文案）：
+ *    这里统一用 `lib/server/games.ts` 导出的 `loadGameTexts()` 批量捞，
+ *    拼成「按语言索引的字典」交给前端 —— 形状与 `/api/games` 那条完全一致
+ *    （`Game.texts`），前端用同一个 `localizeTexts` 挑语言，不必为这几条接口再写一套。
+ *
  * 存档则相反：**故意不 JOIN**。存档是「当时那份状态」，游戏下架了那份存档仍然属于用户，
  * 只是他短期内点不开；把行删掉才是真的毁数据。所以存档列表读快照字段，
  * 即使游戏没了也列得出来（前端据此把条目置灰）。这一条和「收藏用 JOIN」是**有意的分歧**。
  */
 
 import { randomUUID } from 'node:crypto';
+import type { GameTexts } from '@/lib/game-text';
 import { query } from './d1';
+import { loadGameTexts } from './games';
 import { deleteObject, uploadObject, publicUrl } from './r2';
 
 /**
@@ -40,36 +47,31 @@ const SAVES_PER_GAME = 1;
 /** 一个用户最多留多少条云端历史。和本地 lib/library.ts 的 MAX_CARTRIDGES 对齐。 */
 export const MAX_HISTORY = 10;
 
-/** DB 行。 */
+/** DB 行（文案不在这张表上，由 `game_texts` 现取，见 `listUserHistory`）。 */
 interface HistoryRow {
-  user_id: string;
   game_id: string;
-  title: string;
-  /** 英文标题（JOIN games 现取，不是本地快照） */
-  title_en: string | null;
   image_url: string;
   rom_name: string;
   console_type: string;
   played_at: number;
-  created_at: number;
 }
 
 /**
  * 对外结构 —— 前端直接拿去画「历史」那一列。
  *
- * 字段刻意和 `lib/library.ts` 的 `Cartridge` **对得上**（id / name / romUrl / imageUrl /
+ * 字段刻意和 `lib/library.ts` 的 `Cartridge` **对得上**（id / texts / romUrl / imageUrl /
  * romName / console + 一个时间戳）：`ConsoleScene` 的 `loadRemote` 收的是 `RemoteRom`，
  * 有了这份形状，从云端历史点一盘就能直接复用那条路径，不必再写一套载入逻辑。
+ *
+ * ⚠️ 文案是**按语言索引的字典**（`GameTexts`），和 `/api/games` 那条一致 ——
+ *    前端拿 `localizeTexts(texts, locale)` 现挑一份。原来是 `name` + `nameEn` 两个平铺字段，
+ *    2026-10-16 换掉：那样加语言又要加字段（正是侧表要解决的问题）。
  */
 export interface UserHistoryItem {
   /** = game_id。沿用 Cartridge.id 的含义（在线库那个 id）。 */
   id: string;
-  name: string;
-  /**
-   * 英文名（可空）。**JOIN games 现取**（不是 `user_history.title` 那个快照）——
-   * 快照在写入时定死，英文站会看到中文名。前端按语言挑一份，空了回退 `name`。
-   */
-  nameEn: string | null;
+  /** 游戏文案（JOIN game_texts 现取，不是 `user_history.title` 那个快照）。 */
+  texts: GameTexts;
   /** 重新下载地址。和本地那份一样在这儿拼出来，历史里不存整串地址。 */
   romUrl: string;
   imageUrl: string;
@@ -79,34 +81,20 @@ export interface UserHistoryItem {
   playedAt: number;
 }
 
-function toHistoryItem(
-  row: Pick<HistoryRow, 'game_id' | 'title' | 'title_en' | 'image_url' | 'rom_name' | 'console_type' | 'played_at'>
-): UserHistoryItem {
-  return {
-    id: row.game_id,
-    name: row.title,
-    nameEn: row.title_en,
-    romUrl: `/api/games/${row.game_id}/rom`,
-    imageUrl: row.image_url,
-    romName: row.rom_name,
-    console: row.console_type,
-    playedAt: row.played_at,
-  };
-}
-
 /**
  * 某人的云端历史，最近玩的在前。
  *
  * JOIN games 把下架的过滤掉（见文件头注释）；`romUrl` 由 game_id 现拼。
  * 上限 MAX_HISTORY 条 —— 和本地那份一样，是「最近玩过的 N 款」而不是全量流水。
  *
- * ⚠️ 标题**取 games 的两份**（`g.title` / `g.title_en`）而不是 `user_history.title`
- *    那个快照 —— 快照是写入时定的，英文站会看到中文名。
+ * ⚠️ 标题**取 game_texts 现取**（不是 `user_history.title` 那个快照）——
+ *    快照是写入时定的，英文站会看到中文名。
+ * ⚠️ JOIN games 不能省：`game_texts` 的行会随游戏一起删（见 games.ts 的 deleteGame），
+ *    没有这个 JOIN 的话，下架游戏的孤儿历史会变成一行**空标题**而不是被过滤掉。
  */
 export async function listUserHistory(userId: string): Promise<UserHistoryItem[]> {
   const rows = await query<HistoryRow>(
-    `SELECT h.game_id, g.title AS title, g.title_en AS title_en,
-            h.image_url, h.rom_name, h.console_type, h.played_at
+    `SELECT h.game_id, h.image_url, h.rom_name, h.console_type, h.played_at
        FROM user_history h
        JOIN games g ON g.id = h.game_id
       WHERE h.user_id = ?
@@ -114,7 +102,17 @@ export async function listUserHistory(userId: string): Promise<UserHistoryItem[]
       LIMIT ?`,
     [userId, MAX_HISTORY]
   );
-  return rows.map(toHistoryItem);
+
+  const texts = await loadGameTexts(rows.map((row) => row.game_id));
+  return rows.map((row) => ({
+    id: row.game_id,
+    texts: texts.get(row.game_id) ?? {},
+    romUrl: `/api/games/${row.game_id}/rom`,
+    imageUrl: row.image_url,
+    romName: row.rom_name,
+    console: row.console_type,
+    playedAt: row.played_at,
+  }));
 }
 
 export interface HistoryInput {
@@ -425,65 +423,35 @@ export async function clearUserSaves(userId: string): Promise<number> {
 /**
  * 对外结构：收藏的就是**游戏本身**，所以字段和游戏列表那条一样。
  *
- * ⚠️ 中英两份文案**都在**（`title` + `titleEn` 那种）：房间与个人中心里的语言是
- *    运行时切的，接口吐两份、由前端 `localizeGame` 现挑（同 `/api/games`，见
- *    lib/server/games.ts 文件头那段）。少带一份，英文站的收藏列表就会退成中文。
+ * ⚠️ 文案是**按语言索引的字典**（`GameTexts`，和 `Game.texts` 同一个形状）：
+ *    房间与个人中心里的语言是**运行时切的**，接口把库里有的语言全吐出来、
+ *    由前端 `localizeTexts` 现挑（同 `/api/games`，见 lib/server/games.ts 文件头那段）。
+ *    少带一份，英文站的收藏列表就会退成中文。
  */
 export interface UserFavoriteItem {
   id: string;
-  title: string;
-  titleEn: string | null;
+  texts: GameTexts;
   imageUrl: string;
   romName: string;
   consoleType: string;
   language: string | null;
-  series: string | null;
-  seriesEn: string | null;
   year: number | null;
-  developer: string | null;
-  developerEn: string | null;
-  description: string | null;
-  descriptionEn: string | null;
+  /** 开发商外键 —— 卡片/详情要接上开发商页时用它（`texts` 里是厂名快照）。 */
+  developerId: string | null;
   /** 收藏时间 —— 列表按它倒序 */
   favoritedAt: number;
 }
 
+/** DB 行（文案不在这张表上，由 `game_texts` 现取）。 */
 interface FavoriteRow {
   id: string;
-  title: string;
-  title_en: string | null;
   image_url: string;
   rom_name: string;
   console_type: string;
   language: string | null;
-  series: string | null;
-  series_en: string | null;
   year: number | null;
-  developer: string | null;
-  developer_en: string | null;
-  description: string | null;
-  description_en: string | null;
+  developer_id: string | null;
   created_at: number;
-}
-
-function toFavoriteItem(row: FavoriteRow): UserFavoriteItem {
-  return {
-    id: row.id,
-    title: row.title,
-    titleEn: row.title_en,
-    imageUrl: row.image_url,
-    romName: row.rom_name,
-    consoleType: row.console_type,
-    language: row.language,
-    series: row.series,
-    seriesEn: row.series_en,
-    year: row.year,
-    developer: row.developer,
-    developerEn: row.developer_en,
-    description: row.description,
-    descriptionEn: row.description_en,
-    favoritedAt: row.created_at,
-  };
 }
 
 /**
@@ -491,12 +459,14 @@ function toFavoriteItem(row: FavoriteRow): UserFavoriteItem {
  *
  * **JOIN games**：收藏列表要显示的就是游戏本身，快照没有意义（改了名字、换了封面
  * 都该跟着变）。顺带把下架的过滤掉 —— 收藏了一款、后来下架，列表里就不该再占一行。
+ *
+ * 文案与游戏列表走**同一条批量读取**（`loadGameTexts`）—— 收藏数是个位到几十的量级，
+ * 一次 `WHERE game_id IN (…)` 就够，不必为它单独拼 JOIN。
  */
 export async function listUserFavorites(userId: string): Promise<UserFavoriteItem[]> {
   const rows = await query<FavoriteRow>(
-    `SELECT g.id, g.title, g.title_en, g.image_url, g.rom_name, g.console_type,
-            g.language, g.series, g.series_en, g.year, g.developer, g.developer_en,
-            g.description, g.description_en,
+    `SELECT g.id, g.image_url, g.rom_name, g.console_type,
+            g.language, g.year, g.developer_id,
             f.created_at
        FROM user_favorites f
        JOIN games g ON g.id = f.game_id
@@ -504,7 +474,19 @@ export async function listUserFavorites(userId: string): Promise<UserFavoriteIte
       ORDER BY f.created_at DESC`,
     [userId]
   );
-  return rows.map(toFavoriteItem);
+
+  const texts = await loadGameTexts(rows.map((row) => row.id));
+  return rows.map((row) => ({
+    id: row.id,
+    texts: texts.get(row.id) ?? {},
+    imageUrl: row.image_url,
+    romName: row.rom_name,
+    consoleType: row.console_type,
+    language: row.language,
+    year: row.year,
+    developerId: row.developer_id,
+    favoritedAt: row.created_at,
+  }));
 }
 
 /**
@@ -673,10 +655,11 @@ export async function purgeUserData(
 export interface UserSaveOverviewRow extends UserSaveSlot {
   /** 游戏封面（JOIN 现取，下架的不返回） */
   imageUrl: string;
-  /** 游戏标题（JOIN 现取，比槽位上那个快照新） */
-  gameTitle: string;
-  /** 游戏英文标题（可空）。个人中心按语言挑一份，空了回退 `gameTitle`。 */
-  gameTitleEn: string | null;
+  /**
+   * 游戏文案（JOIN game_texts 现取，比槽位上那个 `title` 快照新）。
+   * 个人中心按当前语言 `localizeTexts(texts, locale)` 挑一份。
+   */
+  texts: GameTexts;
   /** 机种，给封面角标用 */
   consoleType: string;
 }
@@ -690,18 +673,18 @@ export async function listUserSaveOverview(userId: string): Promise<UserSaveOver
     size: number;
     created_at: number;
     image_url: string;
-    game_title: string;
-    game_title_en: string | null;
     console_type: string;
   }>(
     `SELECT s.id, s.game_id, s.rom_name, s.title, s.size, s.created_at,
-            g.image_url, g.title AS game_title, g.title_en AS game_title_en, g.console_type
+            g.image_url, g.console_type
        FROM user_saves s
        JOIN games g ON g.id = s.game_id
       WHERE s.user_id = ?
       ORDER BY s.created_at DESC`,
     [userId]
   );
+
+  const texts = await loadGameTexts(rows.map((row) => row.game_id));
   return rows.map((row) => ({
     id: row.id,
     gameId: row.game_id,
@@ -710,8 +693,7 @@ export async function listUserSaveOverview(userId: string): Promise<UserSaveOver
     size: row.size,
     createdAt: row.created_at,
     imageUrl: row.image_url,
-    gameTitle: row.game_title,
-    gameTitleEn: row.game_title_en,
+    texts: texts.get(row.game_id) ?? {},
     consoleType: row.console_type,
   }));
 }

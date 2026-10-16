@@ -12,11 +12,46 @@
 
 import type { ConsoleType } from '@/lib/emulator';
 
-/** 上游站点根。两个接口都只认这个域名，别让它退化成「任意 URL 抓取器」。 */
-export const UPSTREAM_SITE = 'https://retrogamesnexus.com';
+/**
+ * 上游**域名根** —— 换域名只改这一处。
+ *
+ * ⚠️ 上游把 ROM 挂在**两个 host** 上，而且**不可互换**（2026-10-16 实测）：
+ *   · 主站 `retrogamesnexus.com` —— 上游给**相对路径**的那批（NES 等）；
+ *   · 文件子域 `files.retrogamesnexus.com` —— 上游给**绝对地址**的那批（NDS 等）。
+ *   实测：`files.…/games/roms/kirby-squeak-squad.nds` → 206，主站同路径 → 404；
+ *   反过来 `/games/roms/Contra.nes` 主站 → 206，files 同路径 → 404。
+ *   所以库里存来源地址时必须**连 host 角色一起存**（见 toStoredSource）——
+ *   只留 path 的话，换域名一拼就有一半文件 404。
+ */
+export const UPSTREAM_ROOT = 'retrogamesnexus.com';
 
-/** 上游认得的语言前缀；第一个是缺省。 */
-export const UPSTREAM_LOCALES = ['zh', 'en'] as const;
+/** 上游站点根（主站）。两个抓取接口都只认这个域名，别让它退化成「任意 URL 抓取器」。 */
+export const UPSTREAM_SITE = `https://${UPSTREAM_ROOT}`;
+
+/** ROM 文件子域 —— 上游给绝对地址时挂这里（见 UPSTREAM_ROOT 那段）。 */
+export const UPSTREAM_FILES = `https://files.${UPSTREAM_ROOT}`;
+
+/**
+ * 上游认得的**页面语言前缀**；第一个是站内抓取时的缺省（见 scrape-game 的 parseTarget）。
+ *
+ * ⚠️ **2026-10-16 从 `['zh','en']` 扩到四个**：实测 `/ja/…` `/ko/…` 都是 200，
+ *    而且页面里的**文案是真日韩文**，不是只把界面翻了：
+ *      /zh/games/kirby-squeak-squad → 星之卡比 参上！多洛奇团
+ *      /ja/games/kirby-squeak-squad → 星のカービィ 参上！ ドロッチェ団
+ *      /ko/games/kirby-squeak-squad → 별의 커비 도트 투어
+ *    （列表页 `/ja/nds-games` `/ko/nds-games` 同样 200。）
+ *    所以爬取时**四个语言各抓一份**，把日韩也写进 `game_texts`（见 scrape-game）。
+ *
+ * ⚠️ **「第一个是缺省」说的是站内的选择，不是上游的规则**：上游真正无前缀的那个
+ *    是**英文**（`/en/…` 会 307 到 `/…`，实测）。站内把 `zh` 排在首位是因为
+ *    中文原文是必填的那一份（见 lib/server/games.ts 的 insertGame），
+ *    只给一个 slug 时去抓中文页最省事。
+ *
+ * ⚠️ 这是**上游页面**的语言，与站内的 `ContentLocale`（lib/game-text.ts）是两回事 ——
+ *    现在取值一样纯属巧合，别互相 import：上游哪天加个我们不认识的 `fr`，
+ *    该动的是这里，不该把 `CONTENT_LOCALES` 也带上。
+ */
+export const UPSTREAM_LOCALES = ['zh', 'en', 'ja', 'ko'] as const;
 
 /**
  * 抓页面时用的 UA。
@@ -54,6 +89,15 @@ function hasToken(text: string, token: string): boolean {
  *
  * 两处在用：JSON-LD 的 `gamePlatform`、以及列表页路径里的 `snes-games` 那一段。
  * 认不出返回 null —— 由调用方决定是留空还是兜底。
+ *
+ * ⚠️ **`scripts/fill-game-texts-ja-ko.mjs` 里有一份逐条一致的移植**（连同下面的
+ *    `hasToken`）。那个脚本是 `.mjs`，import 不了这里的 TS + `@/` 别名，只能抄一份。
+ *    **改这个函数就必须同步过去**，否则「后台爬取判定的机种」与「回填脚本判定的机种」
+ *    会漂开。这件事**真发生过**：脚本那边一开始图省事写成
+ *    `page.platform === games.console_type`（假定上游 `gamePlatform` 就是我们的短码），
+ *    结果 `gameboy` / `sega-master-system` / `sega-game-gear` / `sega-32x` /
+ *    `wonderswan` / `neogeo-pocket` 这六台**整段被误拒**（实测 250 款里 82 条）。
+ *    短码恰好一致的只有 `nes` / `snes` / `gbc` / `gba` / `nds` / `arcade`。
  *
  * ⚠️ **这两处给的是同一套带连字符的 slug，不是可读名**（2026-10-14 实测）：
  *   `gameboy` / `sega` / `sega-game-gear` / `sega-master-system` / `sega-32x` /
@@ -122,6 +166,29 @@ export function toConsoleType(value: unknown): ConsoleType | null {
    */
   if (hasToken(text, 'nes') || text.includes('famicom')) return 'nes';
 
+  /*
+   * 索尼（2026-10-16 起 PS1 能跑了）。
+   *
+   * ⚠️ **先把跑不了的那几台挡掉**，否则 `playstation 2` / `playstation portable` 会被
+   *    下面那条 `includes('playstation')` 吞成 PS1 —— 和 `sega cd` 必须挡在 `sega` 之前
+   *    是同一条规矩。上游目前只有 `/zh/playstation-games` 一个机种页（2026-10-16 核过
+   *    sitemap），但这类站点随时会多开几页，而**猜错机种比认不出更难查**。
+   */
+  if (
+    /playstation\s*(2|3|4|5|portable|vita)/.test(text) ||
+    ['ps2', 'ps3', 'ps4', 'ps5', 'psp', 'vita'].some((token) => hasToken(text, token))
+  ) {
+    return null;
+  }
+  /*
+   * PS1。上游写法：`playstation`（机种页 slug）/ `ps1` / `psx`。
+   * ⚠️ 只能 `includes('playstation')` —— 它是一个整词，没有会撞车的子串；
+   *    而 `ps1` / `psx` 短，必须按整词匹配（`hasToken`）。
+   */
+  if (text.includes('playstation') || hasToken(text, 'ps1') || hasToken(text, 'psx')) {
+    return 'ps1';
+  }
+
   // 世嘉：32X 在 MD 之前；光秃秃的 `sega` 排最后（Game Gear / Master System 也带 sega）
   if (hasToken(text, '32x')) return '32x';
   if (text.includes('genesis') || text.includes('mega drive') || hasToken(text, 'md')) return 'md';
@@ -155,4 +222,79 @@ export function toConsoleType(value: unknown): ConsoleType | null {
   }
 
   return null;
+}
+
+/* ── 来源地址（2026-10-16）───────────────────────────────────────────────
+ *
+ * 后台爬取可以选「不保存 ROM」，这时库里只留一个**来源地址**，前台按它回源取。
+ *
+ * 存的是 `<host 角色>:<路径>`，**不含域名**：
+ *   files:/games/roms/kirby-squeak-squad.nds
+ *   site:/games/roms/Contra.nes
+ * 域名整个抽到 UPSTREAM_ROOT（上面），换域名只改那一个常量 —— 但 host 角色必须留着，
+ * 原因见 UPSTREAM_ROOT 那段（两个 host 不可互换）。
+ */
+
+/**
+ * 把上游给的 ROM 地址收敛成站内存储形态。
+ *
+ * · 绝对地址 → 按 host 判角色（主站 = `site`，files 子域 = `files`）；
+ * · 相对路径 → `site`（上游那批挂主站，见 scrape-game 里 romsFromHtml 的注释）。
+ *
+ * 认不出的域名 / 非法地址返回 null —— 调用方据此报错，别把任意 URL 塞进库。
+ */
+export function toStoredSource(raw: string | null | undefined): string | null {
+  const text = (raw ?? '').trim();
+  if (!text) return null;
+
+  // 相对路径（上游 NES 那批的形态）
+  if (text.startsWith('/')) return `site:${text}`;
+
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+
+  const host = url.hostname.toLowerCase();
+  // query 一起留着 —— 上游要是哪天挂签名地址，丢了它文件就取不到
+  const path = `${url.pathname}${url.search}`;
+  if (host === UPSTREAM_ROOT) return `site:${path}`;
+  if (host === `files.${UPSTREAM_ROOT}`) return `files:${path}`;
+  return null;
+}
+
+/**
+ * `toStoredSource` 的逆运算：站内形态 → 可直取的绝对地址。认不出返回 null。
+ * 前台 ROM 代理回源时用它（见 app/api/games/[id]/rom）。
+ */
+export function sourceFileUrl(stored: string | null | undefined): string | null {
+  const text = (stored ?? '').trim();
+  if (!text) return null;
+
+  const at = text.indexOf(':');
+  if (at === -1) return null;
+  const host = text.slice(0, at);
+  const path = text.slice(at + 1);
+  if (!path.startsWith('/')) return null;
+
+  if (host === 'site') return `${UPSTREAM_SITE}${path}`;
+  if (host === 'files') return `${UPSTREAM_FILES}${path}`;
+  return null;
+}
+
+/** 从站内形态的来源地址里取**原始文件名**（FBNeo 认它当驱动名）。取不到回退 `'rom'`。 */
+export function sourceFileName(stored: string | null | undefined): string {
+  const text = (stored ?? '').trim();
+  if (!text) return 'rom';
+  // query 不算文件名的一部分
+  const path = text.slice(text.indexOf(':') + 1).split('?')[0];
+  const tail = path.split('/').filter(Boolean).pop() ?? '';
+  try {
+    return decodeURIComponent(tail) || 'rom';
+  } catch {
+    return tail || 'rom';
+  }
 }

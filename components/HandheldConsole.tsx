@@ -5,6 +5,7 @@ import { type ConsoleType, type LoadedRom } from '@/lib/emulator';
 import type { ButtonName } from '@/lib/keybindings';
 import ConsoleScreen, { deriveScreenState } from './ConsoleScreen';
 import { useI18n } from './I18nProvider';
+import PadGlyph from './PadGlyph';
 
 /*
  * 掌机（移动端那一套 UI）。
@@ -111,6 +112,28 @@ const FACE_ROWS: Record<ConsoleType, ([string, ButtonName] | null)[][]> = {
   // 万代 WonderSwan / SNK Neo Geo Pocket：各两颗面键（A / B）
   ws: [[['A', 'b'], ['B', 'a']]],
   ngp: [[['A', 'b'], ['B', 'a']]],
+  /*
+   * PS1（2026-10-16 加）：△ ○ × □ 四颗面键摆菱形 + 两排肩键 —— 和 NDS 同一套结构。
+   *
+   * 丝印按**机身实际位置**摆：△ 在上、□ 在左、○ 在右、× 在下。
+   * 钮名不是照丝印顺序对齐的，而是 libretro 对 PS1 的标准映射
+   * （△→`x`、□→`y`、○→`a`、×→`b`），依据写在 `lib/keybindings.ts` 的
+   * `CONSOLE_BUTTON_LABELS` 上。
+   *
+   * ⚠️ 肩键两排（L1 / R1 一排、L2 / R2 一排）和 NDS 摆法一致 —— 机身顶部就是
+   *    两对前后叠着的肩键。**代价是这一档比别的机种高一行**（5 行 vs NDS 的 4 行），
+   *    小屏上靠控制区那块滚动兜底。
+   * ⚠️ L3 / R3（摇杆按下去）**画不出来**：`ButtonName` 只有 14 个钮，没有摇杆。
+   * ⚠️ 这四颗的**字形是画出来的、不是文字**（`PadGlyph`）：它们在 Unicode 里跨两个区，
+   *    同字号下会一大三小 —— 别把它们改回纯字符（根因见 components/PadGlyph.tsx）。
+   */
+  ps1: [
+    [null, ['△', 'x'], null],
+    [['□', 'y'], null, ['○', 'a']],
+    [null, ['×', 'b'], null],
+    [['L1', 'l'], ['R1', 'r']],
+    [['L2', 'l2'], ['R2', 'r2']],
+  ],
 };
 
 /** 认不出机种时用哪一套 —— 就是 NES 那两颗，也是「默认只有 b / a」那条要求 */
@@ -561,10 +584,15 @@ function PadBtn({
       /*
        * `text-[length:var(--pad-font)]` 那个 `length:` 前缀不能省：`text-[…]` 既能吃字号
        * 也能吃颜色，塞一个 `var()` 进去 Tailwind 判不出类型 —— 带上类型提示才是字号。
+       *
+       * 字走 `PadGlyph`：字母 / 数字（B / A / 1 / 2 / L1）原样是文字，
+       * PS1 那四颗（△ ○ × □）换成**图形** —— 它们在 Unicode 里跨两个区、同字号下
+       * 大小对不齐（根因与画法见 components/PadGlyph.tsx）。
+       * ⚠️ 图形是 `1em` 见方，字号仍由下面这个类给（`--pad-font`），别在这颗钮上另设字号。
        */
       className="pixel-edge pxw-2 flex h-[var(--pad-btn)] w-[var(--pad-btn)] touch-none select-none items-center justify-center bg-ink-600 font-pixel text-[length:var(--pad-font)] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
     >
-      {label}
+      <PadGlyph name={label} />
     </button>
   );
 }

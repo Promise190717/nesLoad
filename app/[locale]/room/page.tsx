@@ -7,7 +7,7 @@ import {
   alternatesFor,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type Locale,
 } from '@/lib/i18n';
@@ -119,7 +119,7 @@ export async function generateMetadata({
       /* 带游戏时直接用 R2 上那张封面当分享图（绝对地址，本来就公网可读） */
       ...(text && game ? { images: [{ url: game.imageUrl, alt: text.title }] } : {}),
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
   };
 }

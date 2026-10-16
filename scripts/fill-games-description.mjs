@@ -8,11 +8,25 @@
  * 和 add-games-description.mjs 的分工：
  *   那个脚本负责**加列**（结构），这个负责**填内容**（数据）。
  *
- * ⚠️ 两条安全约定：
- *   ① 只会写 `description IS NULL / 全空白` 的行 —— 后台手填过的说明**不会被覆盖**，
- *      所以这个脚本可以反复执行，加新游戏之后再跑一次只补新的那几条。
- *   ② 全程只有 `UPDATE games SET description = ? WHERE id = ?`，
- *      没有 DELETE / DROP / 改别的列；改前改后各打一次总条数。
+ * ⚠️ **2026-10-16：文案搬进 `game_texts` 侧表之后，这个脚本改成「两处都写」** ——
+ *    侧表那份才是**读取来源**，`games.description` 退化成只写不读的投影（回滚退路，
+ *    见 db/schema.sql 顶部那段）。只写后者的话，跑完页面上什么都看不到。
+ *
+ * ⚠️ 三条安全约定：
+ *   ① 只会写**侧表里** `description IS NULL / 全空白` 的行（判空也改看侧表了）——
+ *      后台手填过的说明**不会被覆盖**，所以这个脚本可以反复执行，
+ *      加新游戏之后再跑一次只补新的那几条。
+ *   ② 侧表那条是 upsert，但 `DO UPDATE` **只改 `description` / `updated_at`**，
+ *      不碰 `title` / `series` / `developer`（那几栏由后台 / 爬取维护，别覆盖）。
+ *   ③ 没有 DELETE / DROP / 改别的列；改前改后各打一次总条数。
+ *
+ * ⚠️ 跑之前先确认 `game_texts` 是**新形状**（`group_key` 主键，见 scripts/add-game-group-key.mjs），
+ *    否则下面那句前置检查会直接退出（不然写侧表那一步会报 no such column）。
+ *
+ * ⚠️ **2026-10-16 同日：文案改挂 `group_key`**（同款的几条语言版本记录共用一个值 ——
+ *    一行 games 是「一盘 ROM」，同一款的中英日韩四个版本是四行、文案却只有一份）。
+ *    这个脚本仍然**以游戏 id 为键**维护 DESCRIPTIONS（人手维护的清单，按 id 更好定位），
+ *    只是落到库里时换成那一行的 `group_key`，并且同款只写一次。
  *
  * 文案维护在下面 `DESCRIPTIONS` 里，**以 id 为键**（标题有重名的：
  * 「塞尔达传说：众神的三角力量」中英两版就是两条记录）。
@@ -425,8 +439,30 @@ const countRows = async () => Number((await run('SELECT COUNT(*) AS n FROM games
 const before = await countRows();
 console.log(`games 现有 ${before} 条记录，文案共 ${DESCRIPTIONS.length} 条。`);
 
-/* 先把库里的 id / 现有说明捞出来，好判断「有哪些对不上」 */
-const rows = (await run('SELECT id, title, description FROM games')).results;
+/*
+ * 先把库里的 id / 现有说明捞出来，好判断「有哪些对不上」。
+ *
+ * ⚠️ **判空看的是 `game_texts` 侧表，不是 `games.description`**（2026-10-16）——
+ *    后者是只写不读的投影，看它会出现「侧表里已经有说明、旧列还空着」这种误判
+ *    （于是重复写一遍）。
+ *    `LEFT JOIN` 而不是 `JOIN`：侧表那行万一缺了（迁移没跑全），也要能列出来报错，
+ *    而不是**静默少几条** —— 那正是这个脚本最容易骗过自己的地方。
+ */
+let rows;
+try {
+  rows = (
+    await run(
+      `SELECT g.id, g.title, COALESCE(g.group_key, g.id) AS group_key, t.description
+         FROM games g
+         LEFT JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id) AND t.locale = 'zh'`,
+    )
+  ).results;
+} catch (error) {
+  console.error('❌ 读不到 game_texts 侧表 —— 先跑一次建表 + 数据迁移：');
+  console.error('   node --env-file=.env.local scripts/add-game-group-key.mjs');
+  console.error(`   （底层报错：${error.message}）`);
+  process.exit(1);
+}
 const byId = new Map(rows.map((row) => [row.id, row]));
 
 const missing = DESCRIPTIONS.filter((entry) => !byId.has(entry.id));
@@ -437,13 +473,21 @@ if (missing.length) {
 
 let updated = 0;
 let skipped = 0;
+/**
+ * 同一个 `group_key` 只处理一次（2026-10-16 起文案挂 group_key）。
+ * 一行的文案 = 一**款**的文案，同款的几条语言版本记录读到的是同一份 ——
+ * 放着不管会把同一段说明往同一个 group 上写好几遍（结果一样，纯浪费）。
+ */
+const doneGroups = new Set();
 
 for (const entry of DESCRIPTIONS) {
   const row = byId.get(entry.id);
   if (!row) continue;
+  if (doneGroups.has(row.group_key)) continue;
 
   if (row.description != null && String(row.description).trim() !== '') {
     skipped += 1;
+    doneGroups.add(row.group_key);
     console.log(`· 跳过（已有说明）：${entry.title}`);
     continue;
   }
@@ -456,21 +500,41 @@ for (const entry of DESCRIPTIONS) {
   if (DRY_RUN) {
     console.log(`· [dry-run] 会写入：${entry.title}（${entry.text.length} 字）`);
     updated += 1;
+    doneGroups.add(row.group_key);
     continue;
   }
 
   try {
-    const result = await run(
+    /*
+     * ① **侧表**（读取来源）：无条件 upsert —— 能走到这儿就说明侧表那份说明本来是空的
+     *    （判空在上面，读的也是侧表）。
+     *    ⚠️ 第一个参数是 **`row.group_key`**（不是游戏 id）：同款共用一份文案（2026-10-16）。
+     *    ⚠️ `DO UPDATE` **只改 `description` / `updated_at`**：`title` / `series` /
+     *    `developer` 那几栏是后台与爬取维护的，别在这儿覆盖掉。
+     *    新插入那一支才用 `row.title` 填 title（它是 `games.title` 的投影，两边同源）。
+     */
+    await run(
+      `INSERT INTO game_texts (group_key, locale, title, series, developer, description, updated_at)
+       VALUES (?, 'zh', ?, NULL, NULL, ?, ?)
+       ON CONFLICT(group_key, locale) DO UPDATE SET
+         description = excluded.description,
+         updated_at  = excluded.updated_at`,
+      [row.group_key, row.title, entry.text, Date.now()],
+    );
+
+    /*
+     * ② **games.description**（只写不读的投影，回滚退路）—— 这条仍带「空才写」的条件，
+     *    为的是不覆盖历史上手填进旧列的值。
+     *    ⚠️ 它**不参与**成功与否的判定（计数以侧表那次为准）：侧表写成功就是补上了。
+     */
+    await run(
       "UPDATE games SET description = ? WHERE id = ? AND (description IS NULL OR TRIM(description) = '')",
       [entry.text, entry.id],
     );
-    if (result.meta?.changes) {
-      updated += 1;
-      console.log(`✅ ${entry.title}（${entry.text.length} 字）`);
-    } else {
-      skipped += 1;
-      console.log(`· 跳过（写入时条件已不成立）：${entry.title}`);
-    }
+
+    updated += 1;
+    doneGroups.add(row.group_key);
+    console.log(`✅ ${entry.title}（${entry.text.length} 字）`);
   } catch (error) {
     console.error(`❌ ${entry.title} 写入失败：${error.message}`);
   }

@@ -11,7 +11,7 @@ import {
   alternatesFor,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type Locale,
   type MessageKey,
@@ -48,9 +48,9 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * 这一页取数要打 D1（COUNT + SELECT），而它的内容变得很慢
  * （只有后台上传 / 编辑游戏时才变）。所以取数那一步套了 `unstable_cache`：
- * **12 小时内同一批数据只查一次数据库**（2026-10-14 从 30 分钟拉长 —— 用户为压 D1 的
- * `rows_read` 额度拍板），之后由 Next 的缓存直接返回，页面照旧按请求动态渲染
- * （语言还是跟着 cookie 走，不受缓存影响）。
+ * **24 小时内同一批数据只查一次数据库**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压
+ * D1 的 `rows_read` 额度拍板；2026-10-16 又提到 24 小时），之后由 Next 的缓存直接返回，
+ * 页面照旧按请求动态渲染（语言还是跟着 cookie 走，不受缓存影响）。
  *
  * ⚠️ **「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）——
  *    翻多少页都只数一次全表，这是这次改动的重点。
@@ -60,7 +60,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * （房间的在线库弹窗 `/api/games` 2026-10-14 起也走同一套缓存了。）
  * 细节与 TTL 常量见 lib/server/games.ts。
  *
- * ⚠️ 副作用：**后台新传 / 改过的游戏，最多要等 12 小时才出现在这一页**（后台自己那张
+ * ⚠️ 副作用：**后台新传 / 改过的游戏，最多要等 24 小时才出现在这一页**（后台自己那张
  * 列表不受影响，它走 force-dynamic 的接口）。这是「不每次打数据库」必然的代价，
  * 想立刻生效就重启服务，或者把 TTL 调小（常量就一个）。
  *
@@ -221,7 +221,7 @@ function parseQuery(raw: SearchParams): {
  * 本页要的数据。
  *
  * **两层缓存，各管一件事**：
- *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 12 小时）——
+ *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 24 小时）——
  *      请求根本没打到 D1。它内部那个 `total` 还另有 `countGamesCached` 一层
  *      （键里没有 offset，所以翻多少页都只数一次全表）。TTL 与理由见
  *      lib/server/games.ts 那边。
@@ -230,19 +230,24 @@ function parseQuery(raw: SearchParams): {
  *      一个算总页数），少了它同一份数据要取两遍（即使内层命中缓存，也得各走一次
  *      键查找 + 反序列化）。
  *
- * ⚠️ 缓存键 = `['games:list', offset, limit, keyword, consoleType]`（`unstable_cache`
+ * ⚠️ 缓存键 = `['games:list', offset, limit, keyword, consoleType, language]`（`unstable_cache`
  * 自动把入参拼进键里）。所以**翻页 / 换关键词 / 换机种各是一份缓存**，不会串味；
  * 命中不了的键照常回源。关键词也进键意味着 `?q=xxx` 会被缓存 —— 那一份本来就被
- * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 12 小时 TTL、
+ * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 24 小时 TTL、
  * 超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀。机种只有十二个取值 + null，
  * 基数更是定死的。
+ *
+ * ⚠️ 键末尾那维 `language` **这一页永远传 `null`**：语种筛选是机种专题页
+ *    （`/consoles/[id]` 的 `?lang=`）的事，这一页没有那个筛选项。位置留着是为了
+ *    两页共用同一个函数（键形状统一，见 lib/server/games.ts 那个函数的注释）。
  */
 const loadPage = cache(async (page: number, keyword: string, consoleType: ConsoleType | null) => {
   const data = await listGamesPageCached(
     (page - 1) * PAGE_SIZE,
     PAGE_SIZE,
     keyword,
-    consoleType
+    consoleType,
+    null
   );
   return { ...data, page, keyword, consoleType };
 });
@@ -305,7 +310,7 @@ export async function generateMetadata({
       title: `${title}${pageSuffix}`,
       description,
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale))
+      alternateLocale: otherLocales(locale).map(ogLocale)
     },
     /*
      * 只有搜索页 noindex，不带关键词的列表页照常收录（理由见文件顶部那段）。

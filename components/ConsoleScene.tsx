@@ -12,12 +12,14 @@ import {
 } from 'react';
 import { getAudioTrack } from '@/lib/audio-tap';
 import {
+  biosTypeFor,
   ensureBios,
   getBiosInfo,
-  isNeoGeoBios,
   looksLikeNeoGeoRomset,
+  matchBiosFile,
   putBios,
   type BiosInfo,
+  type BiosType,
 } from '@/lib/bios';
 import { chiptuneUrl } from '@/lib/chiptune';
 import { readMobileFlag } from '@/lib/device';
@@ -78,6 +80,7 @@ import JoinRoomPrompt from './JoinRoomPrompt';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import NetplayPanel from './NetplayPanel';
 import OnboardingTour, { TOUR_DONE_EVENT, TOUR_OPEN_EVENT } from './OnboardingTour';
+import { renderPadGlyphs } from './PadGlyph';
 import PaintingPanel from './PaintingPanel';
 import RetroTv from './RetroTv';
 import UserPanel from './UserPanel';
@@ -442,13 +445,13 @@ export default function ConsoleScene({
     t,
     locale,
     href: localeHref,
-    altHref,
+    hrefIn,
     rememberLocale,
   } = useI18n();
 
   /**
-   * 语言下拉用得上它 —— 那是个 `<select>`，不是 `<Link>`，切语言只能程序化导航
-   * （见 `.top-links` 里那颗 `<select>` 的注释）。全文件唯一一处 `useRouter`。
+   * 语言下拉用得上它 —— 那是个自绘下拉，不是 `<Link>`，切语言只能程序化导航
+   * （见 `.top-links` 里那颗下拉的注释）。全文件唯一一处 `useRouter`。
    */
   const router = useRouter();
 
@@ -565,23 +568,26 @@ export default function ConsoleScene({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   /**
-   * 已装上的街机 BIOS（Neo Geo 的 neogeo.zip），null 表示没有。
+   * 已装上的 BIOS，**按机种分槽**（`arcade` / `ps1` 各一份），空槽表示那一档没有。
    *
-   * **只当状态用** —— 页脚那行拿它显示「BIOS 已装」；真正递给模拟器的那份由 loadFile
-   * 现取（`ensureBios()`），免得把一个几 MB 的 File 长期挂在 React state 上。
+   * **只当状态用** —— 页脚那行本该拿它显示「BIOS 已装」（⚠️ 那行渲染今天**没有**，
+   * 所以这个 state 目前只有「那一档装过没有」这一个读法，见 loadFile 里那句
+   * `if (!bios[wanted])`）；真正递给模拟器的那份由 loadFile 现取（`ensureBios()`），
+   * 免得把一个几 MB 的 File 长期挂在 React state 上。
    *
    * ⚠️ 它**不再**决定「要不要去翻一次 IndexedDB」：那份兜底已经挪进 `ensureBios()`
-   * （本地没有就自动装站点自带的那份）。所以这里的 null 只代表「本地和站点两份都没有」。
+   * （本地没有就自动装站点自带的那份）。所以空槽只代表「本地和站点两份都没有」。
    */
-  const [bios, setBios] = useState<BiosInfo | null>(null);
+  const [bios, setBios] = useState<Partial<Record<BiosType, BiosInfo>>>({});
 
   /**
-   * 刚拖进来的文件是 `.7z` / `.rar` 这类 FBNeo 吃不下的压缩格式。
+   * 刚拖进来的文件是 `.7z` / `.rar` 这类吃不下的压缩格式，或者是一张**多文件光盘镜像**
+   * 的描述文件（`.cue` / `.m3u` / `.toc` / `.ccd`）。
    *
    * 载入失败在屏幕上是完全静默的（刻意的），所以这一条是**唯一**还能告诉用户
    * 「为什么拖进去没反应」的通道 —— 它挂在「按键说明」那个弹窗里。存 null 表示没这回事。
    */
-  const [archiveHint, setArchiveHint] = useState<'7z' | 'rar' | null>(null);
+  const [archiveHint, setArchiveHint] = useState<'7z' | 'rar' | 'disc' | null>(null);
 
   /**
    * 刚拖进来的这盘街机卡带**看着像 Neo Geo 游戏**，而 BIOS 本地和站点两份都没拿到。
@@ -596,6 +602,10 @@ export default function ConsoleScene({
    *
    * 和 `archiveHint` 共用同一个展示通道（「按键说明」弹窗），但两者可以同时成立
    * （拖进来一个 `.7z` 的 Neo Geo 包），所以是**两个独立的 state**，不是联合类型。
+   *
+   * ⚠️ **只有街机这一档有这条提示**，PS1 刻意没有：pcsx_rearmed 找不到真 BIOS 会
+   * **回落 HLE**，游戏照跑 —— 弹一句「要 BIOS」反而是误导。PS1 那份 BIOS 的来路
+   * 见 `lib/bios.ts` 的文件头。
    */
   const [biosHint, setBiosHint] = useState(false);
 
@@ -1243,9 +1253,14 @@ export default function ConsoleScene({
    */
   const romAbortRef = useRef<AbortController | null>(null);
 
-  // 刷新页面后，已经装过的 BIOS 还得在页脚那行状态里体现出来
+  // 刷新页面后，已经装过的 BIOS 还得在页脚那行状态里体现出来 —— 两台机各查一次
   useEffect(() => {
-    void getBiosInfo().then(setBios);
+    void Promise.all([getBiosInfo('arcade'), getBiosInfo('ps1')]).then(([arcade, ps1]) => {
+      const next: Partial<Record<BiosType, BiosInfo>> = {};
+      if (arcade) next.arcade = arcade;
+      if (ps1) next.ps1 = ps1;
+      setBios(next);
+    });
   }, []);
 
   /**
@@ -1365,18 +1380,25 @@ export default function ConsoleScene({
       if (loadingRef.current) return;
 
       /*
-       * 拖进来的可能不是游戏，而是街机 BIOS（Neo Geo 的 neogeo.zip）。
+       * 拖进来的可能不是游戏，而是 BIOS。
        *
-       * 它和 romset 一样是个 zip、文件头一模一样，只能靠文件名分（见 lib/bios.ts）。
+       * 两台机各有一份（见 `lib/bios.ts` 的 `BIOS_SPECS`）：
+       *   · 街机的 neogeo.zip —— 它和 romset 一样是个 zip、文件头一模一样，只能靠文件名分；
+       *   · PS1 的 SCPH1001.BIN（或 5501 / 7001 / 101）—— 靠 `scph` 前缀认。
+       *
        * 认出来就存成系统文件 —— 不进历史、不启动模拟器。
        * 这条路刻意做得和拖卡带一样：用户不需要知道「BIOS」这个概念，拖进来就算装上了。
        */
-      if (isNeoGeoBios(file)) {
-        const info = await putBios(file);
-        setBios(info);
+      const droppedBios = matchBiosFile(file);
+      if (droppedBios) {
+        const info = await putBios(droppedBios, file);
+        if (info) setBios((prev) => ({ ...prev, [droppedBios]: info }));
         console.info(
-          `[nesload] 街机 BIOS 已装上：${file.name}。` +
-            'Neo Geo 游戏（合金弹头、拳皇、侍魂…）现在能跑了 —— 重新拖一次那盘卡带即可。'
+          droppedBios === 'arcade'
+            ? `[nesload] 街机 BIOS 已装上：${file.name}。` +
+                'Neo Geo 游戏（合金弹头、拳皇、侍魂…）现在能跑了 —— 重新拖一次那盘卡带即可。'
+            : `[nesload] PS1 BIOS 已装上：${file.name}。` +
+                '核心下次启动会用它（之前是回落 HLE）—— 重新拖一次那张盘即可。'
         );
         return;
       }
@@ -1390,32 +1412,42 @@ export default function ConsoleScene({
       // 载入失败时要靠它决定页脚给不给 BIOS 提示，所以在 try 里先认一次机种。
       // （loadRom 内部还会再认一次 —— 只读文件头，不值得为省这一次把签名搅乱。）
       let consoleType: ConsoleType | null = null;
-      // 街机要递给核心的那份 BIOS。在上面那个 try 里备齐，loadRom 那一步只负责用。
+      // 需要 BIOS 的机种要递给核心的那份。在上面那个 try 里备齐，loadRom 那一步只负责用。
       let biosFile: File | null = null;
       try {
         consoleType = await detectConsole(file);
 
         /*
-         * 街机：先把 BIOS 备齐 —— 本地存过就用本地那份，没存过就自动把站点自带的那份
+         * 需要 BIOS 的机种（街机 / PS1，见 `lib/bios.ts` 的 `biosTypeFor`）：
+         * 先把 BIOS 备齐 —— 本地存过就用本地那份，没存过就自动把**站点自带**的那份
          * （`public/bios/neogeo.zip`）装进 IndexedDB。用户这边是零操作。
          *
-         * 这一步同时承担「装上」和「取出来」，所以从站点那份装成功时，页脚那个 `bios`
-         * state 也得跟着同步 —— 它是页脚那行状态的唯一来源。
+         * ⚠️ **只有街机有站点副本**：PS1 那份（SCPH1001.BIN）是索尼的版权物，
+         *    `public/bios/` 里只留 neogeo.zip 是用户拍板的边界 —— 所以 PS1 那一档
+         *    `ensureBios('ps1')` 正常情况恒为 null，而那是**预期行为**，不是故障：
+         *    核心找不到真 BIOS 会回落 HLE，游戏照跑。
          *
-         * 两条都拿不到（自建部署没放文件、或者用户手动删过），才退回去认这盘是不是
-         * Neo Geo 游戏：认出来就把提示挂进「按键说明」弹窗，让「拖进去没反应」有个解释。
+         * 这一步同时承担「装上」和「取出来」，所以从站点那份装成功时，`bios` 那个
+         * state 也得跟着同步。
+         *
+         * 两条都拿不到时，**只有街机**再退一步去认这盘是不是 Neo Geo 游戏：认出来就把
+         * 提示挂进「按键说明」弹窗，让「拖进去没反应」有个解释。PS1 不挂 —— 理由同上。
          *
          * **只能在这一刻认**：Neo Geo 缺 BIOS 的失败在运行时没有任何信号 ——
          * 核心不抛异常，下面的 catch 分支永远走不到（见 `biosHint` 的注释）。
          *
-         * 非街机机种整个跳过：NES / SFC / GBA 不需要 BIOS，也就不必白读一次存储。
+         * 其余机种整个跳过：NES / SFC / GBA 不需要 BIOS，也就不必白读一次存储。
          */
-        if (consoleType === 'arcade') {
-          biosFile = await ensureBios();
+        const wantedBios = biosTypeFor(consoleType);
+        if (wantedBios) {
+          biosFile = await ensureBios(wantedBios);
           if (biosFile) {
-            // 可能刚从站点那份装上 —— 本地那份不必重设（`bios` 已经是它了）
-            if (!bios) setBios(await getBiosInfo());
-          } else {
+            // 可能刚从站点那份装上 —— 本地已经有的那一档不必重设
+            if (!bios[wantedBios]) {
+              const info = await getBiosInfo(wantedBios);
+              if (info) setBios((prev) => ({ ...prev, [wantedBios]: info }));
+            }
+          } else if (wantedBios === 'arcade') {
             setBiosHint(await looksLikeNeoGeoRomset(file));
           }
         }
@@ -1456,11 +1488,13 @@ export default function ConsoleScene({
             setLoading({ ratio: pct >= 100 ? null : loaded / total });
           },
           /*
-           * 街机要带上 BIOS（Neo Geo 的 neogeo.zip）—— 上面 `ensureBios()` 已经备好了。
-           * 没拿到就是 null，照常启动：CPS1 / CPS2 那类本来就不需要，
-           * 缺了只是 Neo Geo 游戏会静默失败（那种情况上面已经把 `biosHint` 挂上了）。
+           * 需要 BIOS 的机种要带上那一份 —— 上面 `ensureBios()` 已经备好了。
+           * 没拿到就是 null，照常启动：
+           *   · 街机：CPS1 / CPS2 那类本来就不需要，缺了只是 Neo Geo 游戏会静默失败
+           *     （那种情况上面已经把 `biosHint` 挂上了）；
+           *   · PS1：核心回落 HLE，多数游戏照跑（见 `lib/bios.ts` 的文件头）。
            *
-           * 非街机机种恒为 null —— `loadRom` 内部也只认街机那条分支，传了会被忽略。
+           * 其余机种恒为 null —— `loadRom` 内部按机种自己判断要不要用，传了也会被忽略。
            */
           biosFile
         );
@@ -3263,10 +3297,10 @@ export default function ConsoleScene({
           而且它没法像别的行那样带图标、进抽屉后也没法跟右侧那列开关排成同一种
           「左边图标、右边文案」的样子。
 
-          **为什么仍然不是 `<Link>`**：语言是路径维度（英文无前缀、中文 `/zh`），
-          切换的实质仍是「导航到另一个地址」；但用户要的是下拉，而下拉不是链接 ——
-          它没有 `href`，只能在点了选项之后程序化导航（`router.push(altHref)`，
-          本文件唯一一处 `useRouter`）。
+          **为什么仍然不是 `<Link>`**：语言是路径维度（英文无前缀、中文 `/zh`、日文 `/ja`、
+          韩文 `/ko`），切换的实质仍是「导航到另一个地址」；但用户要的是下拉，而下拉不是
+          链接 —— 它没有 `href`，只能在点了选项之后程序化导航
+          （`router.push(hrefIn(option.value))`，本文件唯一一处 `useRouter`）。
 
           ⚠️ **代价（用下拉就必然如此，自绘不比原生更差）**：原来那条 `<Link>` 能中键 /
           右键新标签打开、能复制地址、爬虫也能顺着 `href` 发现另一种语言那一版；
@@ -3277,10 +3311,12 @@ export default function ConsoleScene({
           反过来的话，从 `/zh` 切到英文、落到 `/games`，下一个请求又会被 cookie 里那个
           「中文」送回 `/zh`，表现为**切了没反应**。
 
-          目标地址直接用 `altHref`：全站只有两种语言，于是「选中的不是当前语言」
-          ⇔「选中的就是另一种语言」，而 `altHref` 正好是**当前页面的另一种语言地址**
-          （含 query —— 房间那页的深链是 `/room?id=<游戏>`，切语言不该把它弄丢）。
-          将来真加了第三种语言，这里要改成按 `next` 现算地址。
+          目标地址用 `hrefIn(option.value)`：**每个选项各自现算** —— 「当前页面在日文下的
+          地址」和「在韩文下的地址」是两个不同的地址（含 query —— 房间那页的深链是
+          `/room?id=<游戏>`，切语言不该把它弄丢）。
+          ⚠️ 2026-10-16 之前这里用的是 `altHref`（「另一种语言」的地址），那只在两种
+          语言时成立；四种语言下它会变成「不管点哪个都去同一个地方」。
+          加语言时这里是必须改的一处。
 
           **不做 `roomBusy` 拦截**（和「游戏列表」那条不同）：切语言本来就要整页换掉，
           这条又在**第一位**、比「游戏列表」还靠外，拦一道只是挡路。它原先是 `<Link>`
@@ -3332,7 +3368,7 @@ export default function ConsoleScene({
                       rememberLocale(option.value);
                       // 这颗下拉不是 `<a>`，顶部加载条那个包听不见 —— 手动喊一声
                       topLoader.start();
-                      router.push(altHref);
+                      router.push(hrefIn(option.value));
                     }}
                   >
                     {option.label}
@@ -3835,8 +3871,8 @@ export default function ConsoleScene({
           {/*
             有待看的提示时点一颗灯。
             载入失败是**静默**的（屏幕里什么都不说），提示又只写在弹窗里 ——
-            不点这一下用户根本不会去翻。7z / rar 那条（`archiveHint`）本来也有这个毛病，
-            这次一起受益。
+            不点这一下用户根本不会去翻。7z / rar / 光盘描述文件那条（`archiveHint`）
+            本来也有这个毛病，这次一起受益。
             用 `accent` 而不是 `danger`：这不是错误状态，是「有事要说」。
           */}
           {(archiveHint || biosHint) && (
@@ -4572,10 +4608,15 @@ export default function ConsoleScene({
                 **玩家 2 那一行单人机不画**（NDS）：它没有第二个手柄口，列一行
                 「2P …」等于告诉用户这台机器能双人。键位面板里的页签同理，见
                 KeyBindingsPanel 的 soloOnly。
+
+                两边都套 `renderPadGlyphs`：`playerLegend` 给的是**纯字符串**，
+                里面 PS1 那四颗（△ ○ × □）在 Unicode 里跨两个区、同字号下大小对不齐，
+                得当场换成图形（根因与画法见 components/PadGlyph.tsx）。
+                别的机种那行（`A` / `Y` / `L`）原样是文字，套上去无副作用。
               */}
-              <p>{playerLegend(bindings.p1, 1, t, rom?.console ?? null)}</p>
+              <p>{renderPadGlyphs(playerLegend(bindings.p1, 1, t, rom?.console ?? null))}</p>
               {rom?.console !== 'nds' && (
-                <p>{playerLegend(bindings.p2, 2, t, rom?.console ?? null)}</p>
+                <p>{renderPadGlyphs(playerLegend(bindings.p2, 2, t, rom?.console ?? null))}</p>
               )}
               {/* 手柄不列键位 —— 它是固定的标准布局，改不了，见 lib/gamepad.ts */}
               <p>{t('legend.gamepad')}</p>
@@ -4585,7 +4626,18 @@ export default function ConsoleScene({
                 现在不会有任何反应的事。暂停 / 重置 / 存档 / 读档都在机身前面板上，
                 按钮上写的字和这里原来那句一模一样，不需要再说明一遍。
               */}
-              {archiveHint && <p>{t('legend.needZip', { ext: archiveHint })}</p>}
+              {/*
+                格式那一行。三种来源共用一个通道：
+                  · `7z` / `rar` —— 压缩格式吃不下的，要带 `{ext}` 参数；
+                  · `disc` —— **多文件光盘镜像的描述文件**（`.cue` / `.m3u` / `.toc` / `.ccd`），
+                    这条不用参数（它说的不是「哪种格式」而是「要单文件」）。
+              */}
+              {archiveHint &&
+                (archiveHint === 'disc' ? (
+                  <p>{t('legend.needDisc')}</p>
+                ) : (
+                  <p>{t('legend.needZip', { ext: archiveHint })}</p>
+                ))}
               {/*
                 Neo Geo 缺 BIOS。判据是**猜**的（`looksLikeNeoGeoRomset` 按 rom 名认），
                 所以文案写的是「看着像…需要」，别改成断言。

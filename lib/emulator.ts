@@ -4,7 +4,7 @@ import { Nostalgist } from 'nostalgist';
 import { resolveArcadeCore } from './arcade-core';
 import { installAudioTap, trackEmulatorAudio } from './audio-tap';
 import { releaseEmulatorRuntime, trackCanvasRuntime, trackRuntimeListeners, type EmulatorRuntime } from './emulator-runtime';
-import { NEOGEO_BIOS_NAME } from './bios';
+import { biosTypeFor } from './bios';
 import { downloadFile } from './download';
 import { captureEjsState, restoreEjsState } from './emulator-state';
 import {
@@ -54,6 +54,15 @@ export type ConsoleType =
   | '32x'
   | 'ws'
   | 'ngp'
+  /*
+   * PS1（2026-10-16 加）—— **第一台光盘机种**。
+   *
+   * 它和上面那十三台最大的不同不在核心，在**输入形态**：光盘机种的 ROM 天然是
+   * 「一张盘」而不是「一盘卡带」，网上流通的形态有 `.pbp`（单文件）、`.iso`（单文件）、
+   * `.bin` + `.cue`（**两个文件**，2026-10-16 不支持，见 `EXTENSION_MAP` 那段）。
+   * 这个项目「拖一个文件进来」的入口决定了只能吃前两种。
+   */
+  | 'ps1'
   | 'arcade';
 
 export interface LoadedRom {
@@ -155,6 +164,24 @@ const CORE_MAP: Record<ConsoleType, string> = {
    */
   ws: 'mednafen_wswan',
   ngp: 'mednafen_ngp',
+  /*
+   * PS1 走 `pcsx_rearmed`（2026-10-16 加）。
+   *
+   * ⚠️ 它是 `retroarch-emscripten-build@v1.22.2` 那个构建里**唯一**的 PS1 核心 ——
+   *    没有 `beetle_psx` / `mednafen_psx` / `swanstation`，所以没有「换个更准的核心」
+   *    这条路可走（除非像 NDS 那样从别处搬一个构建，见 `ConsoleType` 上面那段）。
+   *
+   * 挑它的另一个理由：**参考站 retrogamesnexus 跑 PS1 用的就是它**
+   * （`playstation: "pcsx_rearmed"`，2026-10-16 实测其 chunk），
+   * 也就是说「浏览器里单线程跑得动 PS1」这件事有活证据。
+   *
+   * 体积上它是这批里最轻的之一：包 1.14 MB / wasm 2.9 MB（对比 fbneo 的 36 MB）。
+   * 支持的光盘镜像形态（wasm 里声明的 valid_extensions）：
+   *   `bin|cue|img|mdf|pbp|toc|cbn|m3u|chd|iso|exe`
+   * ⚠️ 但 `.chd` **存疑**：wasm 里 `libchdr` / `MComprHD`（CHD v5 魔数）都是 0 次，
+   *    大概率没编进去，别承诺。
+   */
+  ps1: 'pcsx_rearmed',
   arcade: 'fbneo',
 };
 
@@ -237,6 +264,8 @@ const LOCAL_CORE_CONSOLES = new Set<ConsoleType>([
   '32x',
   'ws',
   'ngp',
+  // PS1 的 pcsx_rearmed 上游构建里有，但和其余机种同一条理由：jsdelivr 在国内不可靠
+  'ps1',
   'arcade',
 ]);
 
@@ -283,6 +312,25 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
   wsc: 'ws',
   ngp: 'ngp',
   ngc: 'ngp',
+  /*
+   * PS1（2026-10-16 加）。**只收单文件镜像** —— 这个项目的入口是「拖一个文件进来」，
+   * 多文件镜像（`.cue` + `.bin`）根本表达不了，所以刻意不收 `.cue` / `.m3u` / `.toc` /
+   * `.ccd` 那几张**描述文件**：收了只会让核心起不来（它找不到被指向的 `.bin`），
+   * 失败还是静默的。那几种在 `unsupportedArchive()` 里被认出来，界面会给一句准话。
+   *
+   *   · `.pbp` —— PSP 的 EBOOT 封装，**整张盘一个文件**。参考站发的 PS1 游戏多半是它
+   *     （`tekken3-ps1.PBP` 这种），而且有固定魔数（见 `looksLikePbp`），
+   *     改过名也认得出。**这是最该走的那条路**。
+   *   · `.iso` / `.img` —— 裸盘镜像，也是单文件，靠 ISO9660 魔数认（见 `looksLikeIso9660`）。
+   *     比 `.pbp` 大（没压缩），但来源更广。
+   *
+   * ⚠️ **`.bin` 仍然不收**（这是从加机种之前就定下的规矩，见下面那段 ⚠️）——
+   *    PS1 的裸轨道镜像也叫 `.bin`，但「裸的单个 `.bin`」既分不出是哪台机器、
+   *    也分不出是哪条轨道，收进来只会把「机种不认识」换成「核心静默失败」。
+   */
+  pbp: 'ps1',
+  iso: 'ps1',
+  img: 'ps1',
   zip: 'arcade',
 };
 
@@ -460,6 +508,46 @@ function looksLikeZip(bytes: Uint8Array): boolean {
   return bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 }
 
+/**
+ * PS1 的 `.pbp`（PSP 的 EBOOT 封装）魔数：`\0PBP`，即 `00 50 42 50`。
+ *
+ * 为什么这条最该认：**PBP 把整张盘封成一个文件**（`data.psar` 里那段
+ * `PSISOIMG0000` 就是原盘镜像），正好是「拖一个文件进来」这个入口能吃的形态 ——
+ * 参考站 retrogamesnexus 发的 PS1 游戏多半就是 `.pbp`（`tekken3-ps1.PBP` 这种）。
+ * 而且它是固定 4 字节魔数，改过名也认得出。
+ *
+ * ⚠️ **已知的误判面**：PSP 自己的游戏也是 EBOOT.PBP（同样的魔数），所以一个 PSP 游戏的
+ *    `EBOOT.PBP` 会被判成 PS1。要分清得往 `data.psar` 里找 `PSISOIMG` / `PSPGAME`，
+ *    而那段落在图标之后、不一定在 64 KB 的头部窗口里 —— 不值得为这个边角情况去读整包。
+ */
+function looksLikePbp(bytes: Uint8Array): boolean {
+  return bytes[0] === 0x00 && bytes[1] === 0x50 && bytes[2] === 0x42 && bytes[3] === 0x50;
+}
+
+/** PS1 的可执行文件（PS-EXE）头，正好在 0x00。pcsx_rearmed 的扩展名表里有 `exe`。 */
+const PSX_EXE_SIGNATURE = 'PS-X EXE';
+
+/**
+ * ISO9660 的卷描述符标识 `CD001`，紧跟在第 16 个扇区（0x10）里那一个「类型字节」之后。
+ *
+ * 扇区大小不同，它落的位置就不同 —— 三个都认，因为 `.img` 这种裸镜像两种都有：
+ *
+ *   · `0x8001` —— 2048 字节/扇区（标准 `.iso`）：16 × 2048 = 0x8000，`CD001` 在 +1；
+ *   · `0x9311` —— 2352 字节/扇区、Mode 1：16 × 2352 = 0x9300，用户数据在 +16；
+ *   · `0x9319` —— 2352 字节/扇区、Mode 2 Form 1：用户数据在 +24。
+ *
+ * 5 个 ASCII 字符落在固定偏移上，撞车的概率可以忽略；但它**必须排在 GB / GBA 之前**
+ * （理由见 `detectConsole` 的顺序说明）。
+ */
+const ISO9660_SIGNATURE = 'CD001';
+const ISO9660_OFFSETS = [0x8001, 0x9311, 0x9319];
+
+function looksLikeIso9660(bytes: Uint8Array): boolean {
+  return ISO9660_OFFSETS.some(
+    (offset) => ascii(bytes, offset, ISO9660_SIGNATURE.length) === ISO9660_SIGNATURE
+  );
+}
+
 export function consoleFromExtension(fileName: string): ConsoleType | null {
   const ext = fileName.toLowerCase().split('.').pop() ?? '';
   return EXTENSION_MAP[ext] ?? null;
@@ -473,14 +561,20 @@ export function consoleFromExtension(fileName: string): ConsoleType | null {
  *
  *   1. iNES / NES 2.0 / FDS / UNIF —— 固定 magic；
  *   2. `PK\x03\x04` → 街机 romset（真 romset 就是 zip）；
- *   3. GB / GBC —— 任天堂 logo，**必须在 GBA 之前**（理由见 `looksLikeGb`）；
- *   4. GBA —— 0xB2 那个固定值；
- *   5. 世嘉 16 位（MD / 32X）—— 0x100 的主机名；
- *   6. Neo Geo Pocket —— 0x00 的 SNK 版权行；
- *   7. 世嘉 8 位（SMS / GG）—— 0x7FF0 的 `TMR SEGA`；
- *   8. **SNES 放最后** —— 它是这一串里**唯一靠启发式**（校验和互为反码 + 大小取模）
+ *   3. PS1 —— `.pbp` 的 `\0PBP`、PS-EXE 的 `PS-X EXE`、ISO9660 的 `CD001`（见下面 ⚠️）；
+ *   4. GB / GBC —— 任天堂 logo，**必须在 GBA 之前**（理由见 `looksLikeGb`）；
+ *   5. GBA —— 0xB2 那个固定值；
+ *   6. 世嘉 16 位（MD / 32X）—— 0x100 的主机名；
+ *   7. Neo Geo Pocket —— 0x00 的 SNK 版权行；
+ *   8. 世嘉 8 位（SMS / GG）—— 0x7FF0 的 `TMR SEGA`；
+ *   9. **SNES 放最后** —— 它是这一串里**唯一靠启发式**（校验和互为反码 + 大小取模）
  *      的一条，撞上别的东西的概率不为零，所以让所有固定字符串指纹先过一遍；
- *   9. 全都认不出 → 扩展名回退（`EXTENSION_MAP`）。
+ *   10. 全都认不出 → 扩展名回退（`EXTENSION_MAP`）。
+ *
+ * ⚠️ **PS1 那三条排在 GB / GBA 之前**，不是随手放的：GBA 的判据只是 0xB2 一个字节
+ * （256 分之一会误判），而光盘镜像动辄几百 MB、必然过得了 `size >= 0x30000` 那道门槛，
+ * 0xB2 又正好落在盘镜像的数据区里 —— 一张盘被判成 GBA 是完全可能的。反过来，
+ * `\0PBP` / `CD001` 都是 4~5 字节的固定串，先让它们过一遍代价为零。
  *
  * WonderSwan **没有固定指纹**（ROM 头就是几条跳转指令加校验和，不像上面那些有
  * 版权串可认），所以它只能靠扩展名（`.ws` / `.wsc`）。
@@ -513,6 +607,14 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
   if (looksLikeZip(head)) {
     return 'arcade';
   }
+
+  /*
+   * PS1（2026-10-16 加）。三条判据都是固定串，位置和理由见上面那段 ⚠️。
+   * `.pbp` 和 `.iso` / `.img` 都是**单文件**形态，正是这个入口能吃的。
+   */
+  if (looksLikePbp(head)) return 'ps1';
+  if (ascii(head, 0, PSX_EXE_SIGNATURE.length) === PSX_EXE_SIGNATURE) return 'ps1';
+  if (looksLikeIso9660(head)) return 'ps1';
 
   // 任天堂掌机一系：GB / GBC 在 GBA 之前（见 looksLikeGb）
   const gb = looksLikeGb(head, file.size);
@@ -555,14 +657,25 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
 }
 
 /**
- * 认出「网上常见、但这个项目不吃」的压缩格式。
+ * 认出「网上常见、但这个项目不吃」的格式。
  *
- * 街机 romset 大量以 `.7z` / `.rar` 流通，而 FBNeo 只认 `.zip`。这两种在
- * `detectConsole` 里会落到「机种认不出」—— 如果就这么静默失败，用户根本想不到
- * 是压缩格式的问题（他会以为是 ROM 坏了或者模拟器不行）。这个函数存在的意义，
- * 就是给那种情况一句准话。
+ * 两类，都靠 `detectConsole` 走到「机种认不出」之后给用户一句准话 ——
+ * 静默失败的话用户根本想不到是格式问题（他会以为 ROM 坏了或者模拟器不行）：
+ *
+ *   1. **`7z` / `rar`**：街机 romset 大量以这两种流通，而 FBNeo 只认 `.zip`
+ *      （真 7z 现在会被 `unwrapRom` 先拆开，走到这儿的只有「拆包失败」和 rar）。
+ *   2. **`disc`（2026-10-16 加）**：PS1 的光盘镜像有一大半是**多文件**的 ——
+ *      `.cue` / `.m3u` / `.toc` / `.ccd` 只是**描述文件**，真正的数据在同目录的
+ *      `.bin` 里。这个入口一次只能收一个文件，收下这张描述文件也没用
+ *      （核心找不到它指向的 `.bin`，而且失败是静默的）。
+ *      所以认出来就说清「要单文件」——`.pbp` / `.iso` 才是能直接跑的形态。
+ *
+ * ⚠️ 判据刻意**只看扩展名**（不像 `7z` / `rar` 看魔数）：这几种描述文件都是纯文本，
+ *    没有魔数可认，而扩展名是下载站一定会写对的那一项。
  */
-export async function unsupportedArchive(file: File): Promise<'7z' | 'rar' | null> {
+const DISC_DESCRIPTOR_EXTENSIONS = new Set(['cue', 'm3u', 'toc', 'ccd']);
+
+export async function unsupportedArchive(file: File): Promise<'7z' | 'rar' | 'disc' | null> {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
 
   // 7z: 37 7A BC AF 27 1C
@@ -581,6 +694,9 @@ export async function unsupportedArchive(file: File): Promise<'7z' | 'rar' | nul
   if (ascii(head, 0, 4) === 'Rar!' && head[4] === 0x1a && head[5] === 0x07) {
     return 'rar';
   }
+
+  const ext = file.name.toLowerCase().split('.').pop() ?? '';
+  if (DISC_DESCRIPTOR_EXTENSIONS.has(ext)) return 'disc';
 
   return null;
 }
@@ -1158,10 +1274,12 @@ export class EmulatorController {
    * `onProgress` 是可选的：核心第一次要从 CDN 下几 MB，界面靠它画进度条
    * （实现见 `watchCoreDownload`）。不传就完全按老样子走。
    *
-   * `bios` 也是可选的，目前只有街机用得上：FBNeo 跑 Neo Geo 游戏时要去 system 目录
-   * 找 `neogeo.zip`，拿不到就直接不加载。这份 BIOS 由 `lib/bios.ts` 的 `ensureBios()`
-   * 负责备齐（站点自带一份在 `public/bios/`，用户自己拖一份可以覆盖），
-   * 引擎只负责把它交给 Nostalgist —— 存哪儿、从哪儿取，不归引擎管。
+   * `bios` 也是可选的。需要 BIOS 的机种有两台，性质不一样（见 `lib/bios.ts` 的文件头）：
+   * 街机（FBNeo 跑 Neo Geo 要 `neogeo.zip`，**拿不到就不加载**）和
+   * PS1（`pcsx_rearmed` **找不到真 BIOS 会回落 HLE**，游戏照跑）。
+   * 这份 BIOS 由 `lib/bios.ts` 的 `ensureBios()` 负责备齐（街机那份站点自带在
+   * `public/bios/`，PS1 那份只认用户自己拖的），引擎只负责把它交给 Nostalgist ——
+   * 存哪儿、从哪儿取、叫什么名字，都不归引擎管。
    */
   async loadRom(
     file: File,
@@ -1210,21 +1328,29 @@ export class EmulatorController {
     }
 
     /*
-     * 街机不带 BIOS 时不拦 —— CPS1 / CPS2 那类本来就不需要，拦了反而把它们也挡住。
-     * 只在 console 里说一句，因为 Neo Geo 游戏缺 BIOS 的失败是**完全静默**的
+     * 需要 BIOS 的机种（街机 / PS1）**不带 BIOS 时不拦** —— 两台各有各的理由：
+     *   · 街机：CPS1 / CPS2 那类本来就不需要，拦了反而把它们也挡住；
+     *   · PS1：pcsx_rearmed 找不到真 BIOS 会回落 HLE，游戏照跑（兼容性差一点）。
+     *
+     * 只在 console 里说一句，因为缺 BIOS 的失败往往是**完全静默**的
      * （核心不报错、界面照常出雪花），没有这句话就彻底没有排查入口。
      *
      * 走到这里 `bios` 还是 null，说明**本地和站点自带那两份都没拿到** ——
-     * `ConsoleScene` 在拖入那一刻已经用 `ensureBios()` 兜过一次了（见 `lib/bios.ts`）。
+     * `ConsoleScene` / `PlayScene` 在启动前已经用 `ensureBios()` 兜过一次了（见 `lib/bios.ts`）。
      *
      * 面向**用户**的那条提示不在这里：要判断「这盘是不是 Neo Geo」得读 romset 的中央目录，
      * 而这里已经拿不到拖入那个时机了（`loadRom` 只管启动）。它在 `ConsoleScene` 里做
      * （`biosHint`），判据在 `lib/bios.ts` 的 `looksLikeNeoGeoRomset`。
      */
-    if (consoleType === 'arcade' && !bios) {
+    const biosType = biosTypeFor(consoleType);
+    if (biosType && !bios) {
       console.warn(
-        '[nesload] 街机 ROM 启动时没有 BIOS。如果这是 Neo Geo 游戏（合金弹头、拳皇、侍魂…），' +
-          '它需要 neogeo.zip —— 把 neogeo.zip 拖进页面就能装上；CPS1 / CPS2 那类不需要。'
+        biosType === 'arcade'
+          ? '[nesload] 街机 ROM 启动时没有 BIOS。如果这是 Neo Geo 游戏（合金弹头、拳皇、侍魂…），' +
+            '它需要 neogeo.zip —— 把 neogeo.zip 拖进页面就能装上；CPS1 / CPS2 那类不需要。'
+          : '[nesload] PS1 ROM 启动时没有 BIOS，核心会回落 HLE —— 多数游戏照跑，' +
+            '少数依赖真 BIOS 的（部分游戏的开机 / 存档行为）可能异常。' +
+            '把 SCPH1001.BIN（或 SCPH5501 / 7001 / 101）拖进页面就能装上。'
       );
     }
 
@@ -1375,11 +1501,16 @@ export class EmulatorController {
          * 直接传 File 对象会走 ResolvableFile 的 `isBlob` 分支，而那条路**不读 File.name**
          * （`isBlob` 在 `loadFileSystemFileHandle` 之前），最后落到 `generateValidFileName()`
          * 生成一个随机名（`data<随机>.zip`）—— 文件被写进 system 目录时名字不对，
-         * FBNeo 照样找不到。所以名字必须自己钉死。
+         * FBNeo 照样找不到。所以名字必须自己带上。
+         *
+         * ⚠️ 名字用 `bios.name`，**规范化的责任在 `lib/bios.ts`**（`BiosSpec.nameFor`）：
+         *    街机那一档钉死成 `neogeo.zip`（用户那份可能叫 `NeoGeo(1).zip`），
+         *    PS1 那一档保留原样（核心认 SCPH1001 / 5501 / 7001 / 101 四个名字）。
+         *    引擎只转交，不在这里再写一遍命名规则 —— 两处各写一遍必然漂。
          *
          * （nostalgist.d.ts 里那段注释写成 `filename` 是笔误，实现读的是 `fileName`。）
          */
-        bios: bios ? { fileName: NEOGEO_BIOS_NAME, fileContent: bios } : undefined,
+        bios: bios ? { fileName: bios.name, fileContent: bios } : undefined,
         /*
          * 电池存档在**启动前**写进虚拟文件系统，核心 boot 时读进内存 ——
          * 这就是「读档」落地的地方（见 `stageBatterySave`）。

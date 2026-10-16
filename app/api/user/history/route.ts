@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { assertUser } from '@/lib/server/app-guard';
-import { getGame } from '@/lib/server/games';
+import { getGame, localizeTexts } from '@/lib/server/games';
 import { clearUserHistory, listUserHistory, recordHistory } from '@/lib/server/user-data';
 
 export const runtime = 'nodejs';
@@ -58,7 +58,12 @@ export async function POST(request: Request) {
 
     await recordHistory(guard.user.uid, {
       gameId: game.id,
-      title: game.title,
+      /*
+       * 快照字段：`user_history.title` 只是「当时叫什么」的留档 ——
+       * 列表读取时走 JOIN `game_texts` 现取（见 lib/server/user-data.ts），
+       * 所以这里取**中文原文**（站内主名字），取不到就退到别的语言那一份。
+       */
+      title: localizeTexts(game.texts, 'zh').title,
       imageUrl: game.imageUrl,
       romName: game.romName,
       consoleType: game.consoleType,

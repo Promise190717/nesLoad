@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Fragment, type ReactNode } from 'react';
-import { SITE_NAME, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import { SITE_NAME, dateLocale, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import { SUPPORT_EMAIL, legalDoc, otherLegalKind, type LegalKind } from '@/lib/legal';
 import BackLink from './BackLink';
 import TopBar from './TopBar';
@@ -37,8 +37,10 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
   /*
    * 日期按语言格式化。刻意**不复用 lib/i18n.ts 的 `formatTime`** —— 那个是存档 /
    * 历史列表用的，带小时分钟（「2026/10/08 16:21」），法务页只要年月日。
+   * ⚠️ 但语言标签要走 `dateLocale()`（同一份映射），别在这里再写一个三元表达式 ——
+   *    那种写法 2026-10-16 加日韩时就会漏掉新语言。
    */
-  const updated = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
+  const updated = new Intl.DateTimeFormat(dateLocale(locale), {
     year: 'numeric',
     month: 'long',
     day: 'numeric',

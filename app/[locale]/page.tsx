@@ -34,10 +34,10 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   同一句话写两遍，而且两份迟早会漂。
  *
  * - **数据全部走带缓存的那几个函数**（`listConsolesCached` / `countGamesByConsoleCached`
- *   / `listTopDevelopersCached`，TTL 都是 12 小时）：这一页是给爬虫和过路访客看的，
+ *   / `listTopDevelopersCached`，TTL 都是 24 小时）：这一页是给爬虫和过路访客看的，
  *   内容变得很慢（只有后台上传游戏时才变），每次渲染打三趟 D1 不划算。
- *   副作用和后台上传游戏那条一样：新传的游戏最多晚 12 小时出现在首页
- *   （`/games` 那边 2026-10-14 起也是 12 小时，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
+ *   副作用和后台上传游戏那条一样：新传的游戏最多晚 24 小时出现在首页
+ *   （`/games` 那边 2026-10-16 起也是 24 小时，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
  *
  * - ⚠️ **这里没有、也不该有 `export const revalidate`**：写它不会让这一页的 HTML 被缓存。
  *   根布局 `app/layout.tsx` 要读 cookie / 请求头决定语言（`readLocale()`），
@@ -378,7 +378,7 @@ export default async function HomePage({
           >
             <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
               {developers.map((developer, index) => {
-                /* 名字按当前语言取一份（英文站空值回退中文，见 localizeDeveloper） */
+                /* 名字按当前语言取一份（只有英文站取英文名，中日韩读中文原文，见 localizeDeveloper） */
                 const text = localizeDeveloper(developer, locale);
                 return (
                   <li

@@ -3,9 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
 import type { ConsoleType } from '@/lib/emulator';
+import { localizeTexts, type GameTexts, type LocalizedGameText } from '@/lib/game-text';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { gameLanguageLabel } from '@/lib/rom-lang';
-import { localizeGame, type LocalizedGameText } from '@/lib/server/games';
 import type { Cartridge } from '@/lib/library';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from './CartridgeSprite';
 import { useI18n } from './I18nProvider';
@@ -14,109 +14,55 @@ import { useI18n } from './I18nProvider';
  * `/api/games` 返回的条目（字段与 lib/server/games.ts 的 Game 对齐）。
  * 这里刻意只留展示 + 载入需要的字段：真实 ROM 地址不在响应里。
  *
- * ⚠️ 中英两份文案**都在**（`title` + `titleEn` 那种）—— 房间里的语言是运行时切的，
- *    不是每次请求都重取数据，所以两份都得拿到手上，由 `localizeGame` 现挑一份。
+ * ⚠️ 文案是**按语言索引的字典**（`texts`，见 lib/game-text.ts）—— 房间里的语言是运行时
+ *    切的，不是每次请求都重取数据，所以库里有的语言全都拿在手上，由
+ *    `localizeLibraryGame` 现挑一份。原来是 `title` + `titleEn` 那套平铺字段，2026-10-16 换掉。
+ *
+ * ⚠️ 这份形状**必须能接住服务端的 `Game`**：`ConsoleScene` 的 `serverGame` prop 就是一个
+ *    `Game`，直接塞进 `LibraryGame` 那个 state（见那边注释）。所以字段只能多不能少 ——
+ *    改 `Game` 时这里要跟着看一眼。
  */
 export interface LibraryGame {
   id: string;
-  title: string;
-  /** 英文名（可空）。空 = 英文站回退 `title`。2026-10-13 加。 */
-  titleEn: string | null;
+  texts: GameTexts;
   imageUrl: string;
   romName: string;
   consoleType: ConsoleType;
   language: string | null;
-  series: string | null;
-  seriesEn: string | null;
   year: number | null;
-  developer: string | null;
-  developerEn: string | null;
-  /** 说明 / 简介（可空，后台那个「说明」字段）。卡片太小放不下正文，只当悬停提示用。 */
-  description: string | null;
-  descriptionEn: string | null;
-  createdAt: number;
+  /** 开发商外键（卡片上不显示，是服务端 `Game` 带下来的）。 */
+  developerId: string | null;
+  /** 只有 `/api/games` 那条带它；收藏那条不带（卡片上不显示），所以是可选的。 */
+  createdAt?: number;
 }
 
 type LoadState = 'loading' | 'ready' | 'error';
 
 /**
- * `/api/user/favorites` 返回的条目（字段与 lib/server/user-data.ts 的 `UserFavoriteItem` 对齐）。
+ * `/api/user/favorites` 返回的条目 = 游戏本身 + 一个收藏时间。
  *
- * 和 `LibraryGame` 是两份形状：收藏那份多一个 `favoritedAt`（收藏时间，列表按它倒序），
- * 但结构上就是「游戏的字段 + 一个时间戳」。所以要转一次 —— 见下面的 `favoriteToGame`。
+ * 和 `LibraryGame` 只差一个 `favoritedAt`（收藏时间，那个 tab 的列表按它倒序），
+ * 所以**不再单独定义一份接口、也不再写转换函数**（原来那份 `favoriteToGame`
+ * 是手抄字段的搬运工，加字段时很容易漏 —— 2026-10-16 撤掉）。
+ * 服务端那边（lib/server/user-data.ts 的 `UserFavoriteItem`）就是按这个形状吐的。
  */
-interface UserFavoriteItem {
-  id: string;
-  title: string;
-  titleEn: string | null;
-  imageUrl: string;
-  romName: string;
-  consoleType: ConsoleType;
-  language: string | null;
-  series: string | null;
-  seriesEn: string | null;
-  year: number | null;
-  developer: string | null;
-  developerEn: string | null;
-  description: string | null;
-  descriptionEn: string | null;
-  favoritedAt: number;
-}
-
-/**
- * 收藏条目 → 卡片要的 `LibraryGame`。
- *
- * 转的理由：收藏 tab 里那些卡片点下去走的是**和在线库完全同一条路**（`onPick(game)`，
- * 父级 `loadRemoteGame`）—— 那边收的就是 `LibraryGame`。为了少转这一次而给 `onPick`
- * 加一个联合类型，会让 ConsoleScene 那边多一层分支，划不来。
- *
- * `createdAt` 补 0：它只在详情页那些地方被用到，卡片上不显示。
- * 而**收藏时间单独留着**（下面列表里那行小字用它），所以不能直接丢掉。
- */
-function favoriteToGame(item: UserFavoriteItem): LibraryGame & { favoritedAt: number } {
-  return {
-    id: item.id,
-    title: item.title,
-    titleEn: item.titleEn,
-    imageUrl: item.imageUrl,
-    romName: item.romName,
-    consoleType: item.consoleType,
-    language: item.language,
-    series: item.series,
-    seriesEn: item.seriesEn,
-    year: item.year,
-    developer: item.developer,
-    developerEn: item.developerEn,
-    description: item.description,
-    descriptionEn: item.descriptionEn,
-    createdAt: 0,
-    favoritedAt: item.favoritedAt,
-  };
-}
+type FavoriteGame = LibraryGame & { favoritedAt: number };
 
 /**
  * 按语言取一条游戏在本面板里要显示的那几样文字。
  *
- * 为什么不直接用 `lib/server/games.ts` 的 `localizeGame`：那个收的是服务端那份 `Game`
- * （字段一模一样，但 `Game` 是「服务端结构」的语义）。这里拿到的是接口 JSON 的形状
- * （`LibraryGame`），两者字段虽然对齐，跨层直接喂进去容易在将来某一侧加字段时悄悄错开。
- * 所以这里做一次显式的字段搬运 —— 出错时是类型错误，而不是渲染出一个空标题。
+ * 直接转发 `lib/game-text.ts` 的 `localizeTexts` —— 那份是**纯函数、服务端与客户端共用**
+ * （服务端的 `localizeGame` 也是它）。
+ *
+ * ⚠️ 2026-10-16 之前这里**抄了一份**「英文站空值回退中文」的实现，理由是「跨层直接喂进去
+ *    容易在将来某一侧加字段时悄悄错开」。现在两边是同一个函数、同一份类型，那个理由不成立了 ——
+ *    抄一份的真实代价是「加语言时只改一处、另一处悄悄不生效」。
+ *
+ * 仍然保留这个包装（而不是让调用方直接调 `localizeTexts`）：面板里九处调用点写的都是
+ * `localizeLibraryGame(game, locale)`，多一层薄壳换「改动集中在一个地方」。
  */
 export function localizeLibraryGame(game: LibraryGame, locale: Locale): LocalizedGameText {
-  if (locale !== 'zh') {
-    return {
-      title: game.titleEn || game.title,
-      series: game.seriesEn || game.series,
-      developer: game.developerEn || game.developer,
-      description: game.descriptionEn || game.description,
-    };
-  }
-  return {
-    title: game.title,
-    series: game.series,
-    developer: game.developer,
-    description: game.description,
-  };
+  return localizeTexts(game.texts, locale);
 }
 
 /*
@@ -479,7 +425,7 @@ export default function GameLibraryPanel({
    *
    * 惰性拉取：`favorites` 为 null 表示还没拉过，切到那个 tab 的 effect 去拉。
    */
-  const [favorites, setFavorites] = useState<(LibraryGame & { favoritedAt: number })[] | null>(null);
+  const [favorites, setFavorites] = useState<FavoriteGame[] | null>(null);
   const [favoritesState, setFavoritesState] = useState<LoadState>('loading');
   const favoritesRequestId = useRef(0);
 
@@ -500,11 +446,11 @@ export default function GameLibraryPanel({
     fetch('/api/user/favorites')
       .then((res) => {
         if (!res.ok) throw new Error(String(res.status));
-        return res.json() as Promise<{ items: UserFavoriteItem[] }>;
+        return res.json() as Promise<{ items: FavoriteGame[] }>;
       })
       .then((data) => {
         if (favoritesRequestId.current !== requestId) return;
-        setFavorites(data.items.map(favoriteToGame));
+        setFavorites(data.items);
         setFavoritesState('ready');
       })
       .catch(() => {

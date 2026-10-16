@@ -17,8 +17,8 @@ import { CONSOLE_LABEL } from './CartridgeSprite';
  * 后台 · 机种库 tab（2026-10-14 加）。
  *
  * 和 AdminDevelopers（同一套版式的「兄弟」组件）的**本质区别**：机种清单是代码里
- * 定死的四个（`CONSOLE_TYPES`），所以这里**没有「添加」、没有搜索、没有翻页** ——
- * 列表恒定四行，每行只有「编辑」与「重置资料」两个动作：
+ * 定死的（`CONSOLE_TYPES`），所以这里**没有「添加」、没有搜索、没有翻页** ——
+ * 列表恒 N 行，每行只有「编辑」与「重置资料」两个动作：
  *   · 编辑 → PATCH `/api/admin/consoles/<type>`（资料行不存在时服务端顺带创建，upsert）；
  *   · 重置 → DELETE（删掉资料行，前台退回内置默认信息；**游戏不受影响**，
  *     所以没有开发商那套「名下有游戏不许删」的拦截）。
@@ -29,11 +29,17 @@ interface AdminConsole {
   type: string;
   name: string;
   nameEn: string | null;
+  nameJa: string | null;
+  nameKo: string | null;
   imageUrl: string | null;
   summary: string | null;
   summaryEn: string | null;
+  summaryJa: string | null;
+  summaryKo: string | null;
   description: string | null;
   descriptionEn: string | null;
+  descriptionJa: string | null;
+  descriptionKo: string | null;
   releaseYear: number | null;
   gameCount: number;
   /** consoles 表里有没有这一行。false = 前台在用内置默认信息。 */
@@ -71,22 +77,26 @@ export default function AdminConsoles() {
   const [modalNotice, setModalNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // 表单字段：机种只有一份资料，没有「中英双份 + 年份 + 图」之外的任何东西
+  // 表单字段
   const [name, setName] = useState('');
   const [nameEn, setNameEn] = useState('');
+  const [nameJa, setNameJa] = useState('');
+  const [nameKo, setNameKo] = useState('');
   const [releaseYear, setReleaseYear] = useState('');
   const [summary, setSummary] = useState('');
   const [summaryEn, setSummaryEn] = useState('');
+  const [summaryJa, setSummaryJa] = useState('');
+  const [summaryKo, setSummaryKo] = useState('');
   const [description, setDescription] = useState('');
   const [descriptionEn, setDescriptionEn] = useState('');
+  const [descriptionJa, setDescriptionJa] = useState('');
+  const [descriptionKo, setDescriptionKo] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [imageLabel, setImageLabel] = useState('');
   const imageRef = useRef<HTMLInputElement>(null);
 
   const reloadList = useCallback(() => setListVersion((n) => n + 1), []);
 
-  // 四行固定数据，一次拉全（接口本身就只返回四个机种）。setState 走 .then/.catch
-  // —— 直接在 effect 体里同步 setState 会被 react-hooks/set-state-in-effect 拦下。
   useEffect(() => {
     let alive = true;
 
@@ -131,11 +141,17 @@ export default function AdminConsoles() {
   const resetForm = () => {
     setName('');
     setNameEn('');
+    setNameJa('');
+    setNameKo('');
     setReleaseYear('');
     setSummary('');
     setSummaryEn('');
+    setSummaryJa('');
+    setSummaryKo('');
     setDescription('');
     setDescriptionEn('');
+    setDescriptionJa('');
+    setDescriptionKo('');
     setImage(null);
     setImageLabel('');
     if (imageRef.current) imageRef.current.value = '';
@@ -145,14 +161,18 @@ export default function AdminConsoles() {
     setEditingType(console.type);
     setName(console.name);
     setNameEn(console.nameEn ?? '');
+    setNameJa(console.nameJa ?? '');
+    setNameKo(console.nameKo ?? '');
     setReleaseYear(console.releaseYear === null ? '' : String(console.releaseYear));
     setSummary(console.summary ?? '');
     setSummaryEn(console.summaryEn ?? '');
+    setSummaryJa(console.summaryJa ?? '');
+    setSummaryKo(console.summaryKo ?? '');
     setDescription(console.description ?? '');
     setDescriptionEn(console.descriptionEn ?? '');
+    setDescriptionJa(console.descriptionJa ?? '');
+    setDescriptionKo(console.descriptionKo ?? '');
     setImage(null);
-    // 编辑时输入框默认是空的（浏览器不许我们往里塞值）；把现有文件名写在旁边，
-    // 用户才知道「不选就是保持原图」而不是「图没了」（和 AdminDevelopers 同一条注释）
     setImageLabel(console.imageUrl ? console.imageUrl.split('/').pop() ?? '' : '');
     setModalNotice(null);
     setModalOpen(true);
@@ -192,11 +212,17 @@ export default function AdminConsoles() {
     const form = new FormData();
     form.set('name', trimmedName);
     form.set('name_en', nameEn.trim());
+    form.set('name_ja', nameJa.trim());
+    form.set('name_ko', nameKo.trim());
     form.set('release_year', releasedText);
     form.set('summary', summary.trim());
     form.set('summary_en', summaryEn.trim());
+    form.set('summary_ja', summaryJa.trim());
+    form.set('summary_ko', summaryKo.trim());
     form.set('description', description.trim());
     form.set('description_en', descriptionEn.trim());
+    form.set('description_ja', descriptionJa.trim());
+    form.set('description_ko', descriptionKo.trim());
     if (image) form.set('image', image);
 
     try {
@@ -223,7 +249,6 @@ export default function AdminConsoles() {
   };
 
   const resetConsole = async (console: AdminConsole) => {
-    // 重置 = 删资料行（前台退回默认名字），游戏不受影响 —— 接口的 404 说明「本来就没资料」
     if (!window.confirm(`重置「${console.name}」？它的资料（名字 / 图片 / 介绍）会被清掉，前台退回内置默认信息。游戏本身不受影响。`)) return;
     try {
       const res = await fetch(`/api/admin/consoles/${console.type}`, { method: 'DELETE' });
@@ -244,7 +269,6 @@ export default function AdminConsoles() {
       <section className="bg-ink-800 pixel-edge pxw-3 pxc-600 p-4">
         <div className="mb-3 flex items-center gap-3">
           <h2 className="shrink-0 text-[12px] text-ink-200">{'机种库'}</h2>
-          {/* 机种清单是代码定死的四个：这里没有「添加」钮，也没有搜索框 */}
         </div>
 
         {pageNotice && (
@@ -266,7 +290,6 @@ export default function AdminConsoles() {
         <ul className="flex flex-col divide-y-2 divide-ink-900">
           {list.map((console) => (
             <li key={console.type} className="flex items-center gap-3 py-2">
-              {/* 没机图的不画破图，用卡带丝印词占位（和前台同一套兜底） */}
               {console.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -280,7 +303,6 @@ export default function AdminConsoles() {
                 </span>
               )}
 
-              {/* 名字 + 简介 / 未填提示两行，和开发商列表那条同一个版式 */}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-[12px] text-ink-100">
                   {console.name}
@@ -316,7 +338,6 @@ export default function AdminConsoles() {
               >
                 {'编辑'}
               </button>
-              {/* 只重置「已经填过资料」的行 —— 没资料时重置是个空操作，按钮就不画 */}
               {console.filled && (
                 <button
                   type="button"
@@ -336,7 +357,7 @@ export default function AdminConsoles() {
           onMouseDown={onBackdrop}
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950/80 p-6"
         >
-          <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[620px] p-4">
+          <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 w-full max-w-[680px] p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
               {'编辑机种'}
               <span className="ml-2 font-pixel text-[10px] text-ink-500">{editingType}</span>
@@ -345,20 +366,20 @@ export default function AdminConsoles() {
             <form onSubmit={(e) => void submit(e)} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {'名字'}
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={name} onChange={(e) => setName(e.target.value)} className={FIELD_CLASS} />
               </label>
 
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {'名字 (EN)'}
-                <input
-                  value={nameEn}
-                  onChange={(e) => setNameEn(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'名字 (JA)'}
+                <input value={nameJa} onChange={(e) => setNameJa(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'名字 (KO)'}
+                <input value={nameKo} onChange={(e) => setNameKo(e.target.value)} className={FIELD_CLASS} />
               </label>
 
               <label className={LABEL_CLASS}>
@@ -371,10 +392,6 @@ export default function AdminConsoles() {
                 />
               </label>
 
-              {/*
-                机图。**编辑时不强制重选**：留空 = 保持原图（接口那边也是这么处理的），
-                旁边那行小字把「当前这张叫什么」写出来。
-              */}
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {'机图 / 图片'}
                 <input
@@ -396,20 +413,20 @@ export default function AdminConsoles() {
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
                 {'简介'}
-                <input
-                  value={summary}
-                  onChange={(e) => setSummary(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={summary} onChange={(e) => setSummary(e.target.value)} className={FIELD_CLASS} />
               </label>
 
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {'简介 (EN)'}
-                <input
-                  value={summaryEn}
-                  onChange={(e) => setSummaryEn(e.target.value)}
-                  className={FIELD_CLASS}
-                />
+                <input value={summaryEn} onChange={(e) => setSummaryEn(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'简介 (JA)'}
+                <input value={summaryJa} onChange={(e) => setSummaryJa(e.target.value)} className={FIELD_CLASS} />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'简介 (KO)'}
+                <input value={summaryKo} onChange={(e) => setSummaryKo(e.target.value)} className={FIELD_CLASS} />
               </label>
 
               <label className={`${LABEL_CLASS} sm:col-span-2`}>
@@ -422,11 +439,29 @@ export default function AdminConsoles() {
                 />
               </label>
 
-              <label className={`${LABEL_CLASS} sm:col-span-2`}>
+              <label className={LABEL_CLASS}>
                 {'介绍 (EN)'}
                 <textarea
                   value={descriptionEn}
                   onChange={(e) => setDescriptionEn(e.target.value)}
+                  rows={4}
+                  className={`${FIELD_CLASS} resize-y`}
+                />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'介绍 (JA)'}
+                <textarea
+                  value={descriptionJa}
+                  onChange={(e) => setDescriptionJa(e.target.value)}
+                  rows={4}
+                  className={`${FIELD_CLASS} resize-y`}
+                />
+              </label>
+              <label className={LABEL_CLASS}>
+                {'介绍 (KO)'}
+                <textarea
+                  value={descriptionKo}
+                  onChange={(e) => setDescriptionKo(e.target.value)}
                   rows={4}
                   className={`${FIELD_CLASS} resize-y`}
                 />

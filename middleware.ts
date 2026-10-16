@@ -1,21 +1,26 @@
 /*
  * 两件事，一个文件：**语言前缀的搬运** 和 **后台守卫**。
  *
- * 1) 语言路由（2026-10-13 加）
+ * 1) 语言路由（2026-10-13 加；2026-10-16 从两种语言扩到四种）
  *
- * 地址规则：英文是默认语言、**不占前缀**；中文占 `/zh`。
+ * 地址规则：英文是默认语言、**不占前缀**；中文 `/zh`、日文 `/ja`、韩文 `/ko`。
  * 前台页面都在 `app/[locale]/` 下（`app/[locale]/games/page.tsx` 同时服务
- * `/zh/games` 和 `/games`），把「无前缀」接到那个动态段上的就是这里：
+ * `/zh/games`、`/ja/games`、`/ko/games` 和 `/games`），把「无前缀」接到那个动态段上的
+ * 就是这里：
  *
- *   · `/zh/x`  → 原样放行（`[locale]` 直接命中），只补一个语言请求头。
+ *   · `/zh/x` `/ja/x` `/ko/x` → 原样放行（`[locale]` 直接命中），只补一个语言请求头。
  *                带前缀的地址**不查 cookie**（2026-10-13 用户定）：它是显式选择，
  *                别人分享的 `/zh/games` 不该被弹走；
  *   · `/en/x`  → 301 回 `/x`。显式英文前缀和默认地址是同一页，
  *                两套地址并存就是重复内容，`hreflang` 也只能指一个；
  *   · 无前缀   → **只看 cookie**（用户有没有主动设置过）：
- *                  · cookie = zh → 307 到 `/zh/x`；
+ *                  · cookie = zh / ja / ko → 307 到 `/xx/x`；
  *                  · 没 cookie / cookie = en → **rewrite** 成 `/en/x`
  *                    （地址栏不变，`[locale]` 接住）。
+ *
+ * ⚠️ **加语言时这个文件基本不用动**（下面那个 `for` 循环会自动覆盖新前缀）——
+ *    真正要改的是 `lib/i18n.ts` 的 `LOCALES` / `LOCALE_PREFIX` 和四张文案表。
+ *    2026-10-16 加日韩时，这里就是把写死的 `/zh` 判断换成了循环。
  *
  * ⚠️ **2026-10-13 用户明确要求「没有主动设置过，访问哪个就是哪个，不要跳转」** ——
  * 所以这里**不再看 Accept-Language**。浏览器是中文、地址栏是 `/games`，就老老实实
@@ -58,6 +63,7 @@ import {
   LOCALE_COOKIE,
   LOCALE_HEADER,
   LOCALE_PREFIX,
+  LOCALES,
   isLocale,
   type Locale,
 } from '@/lib/i18n';
@@ -112,15 +118,27 @@ function routeLocale(request: NextRequest): NextResponse | null {
     return NextResponse.redirect(url, 301);
   }
 
-  // 中文前缀：原样放行，`app/[locale]/` 直接接住，只把语言写进请求头
-  if (pathname === LOCALE_PREFIX.zh || pathname.startsWith(`${LOCALE_PREFIX.zh}/`)) {
-    return NextResponse.next({
-      request: { headers: withLocale(request.headers, 'zh') },
-    });
+  /*
+   * 其余语言的显式前缀（`/zh` `/ja` `/ko`）：原样放行，`app/[locale]/` 直接接住，
+   * 只把语言写进请求头。
+   *
+   * ⚠️ 遍历 `LOCALES` 而不是逐个 `if` —— 英文（前缀是空串）要跳过，
+   *    否则 `startsWith('/')` 会把所有地址都吃掉。
+   *    2026-10-16 加日韩时这里就是把写死的 `/zh` 判断换成这个循环，别的没动；
+   *    以后再添语言，这里不用再改。
+   */
+  for (const locale of LOCALES) {
+    const prefix = LOCALE_PREFIX[locale];
+    if (!prefix) continue;
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
+      return NextResponse.next({
+        request: { headers: withLocale(request.headers, locale) },
+      });
+    }
   }
 
   /*
-   * 无前缀 —— 只有**用户主动设置过中文**才把人送去 `/zh`。
+   * 无前缀 —— 只有**用户主动设置过非默认语言**才把人送去带前缀那份。
    *
    * 没设置过（或设置的就是英文）一律留在原地，rewrite 进 `[locale]` 段渲染英文。
    * 这里**不看 Accept-Language**：浏览器是中文也照样渲染英文，改由客户端
@@ -141,7 +159,7 @@ function routeLocale(request: NextRequest): NextResponse | null {
   const url = request.nextUrl.clone();
   url.pathname = `${EN_PREFIX}${pathname === '/' ? '' : pathname}`;
   return NextResponse.rewrite(url, {
-    request: { headers: withLocale(request.headers, 'en') },
+    request: { headers: withLocale(request.headers, DEFAULT_LOCALE) },
   });
 }
 

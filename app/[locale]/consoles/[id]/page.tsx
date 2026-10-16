@@ -12,14 +12,19 @@ import {
   alternatesFor,
   localePath,
   ogLocale,
-  otherLocale,
+  otherLocales,
   translate,
   type Locale,
   type MessageKey,
 } from '@/lib/i18n';
 import { pageCountOf, parsePageParam } from '@/lib/pager';
+import { GAME_LANGUAGE_LABEL, GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
 import { getConsole, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
-import { listGamesByConsoleCached, listGamesPageCached } from '@/lib/server/games';
+import {
+  countConsoleGamesByLanguageCached,
+  listGamesByConsoleCached,
+  listGamesPageCached,
+} from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
 
@@ -38,9 +43,35 @@ import { resolveSiteOrigin } from '@/lib/site';
  *    「游戏数」一项。首页与 `/consoles` 的卡片永远指得到这里 —— 绝不 404。
  *
  * ⚠️ 机种自己的资料**不缓存**（后台改完刷新就看到）；名下游戏列表走
- *    `listGamesByConsoleCached`（12 小时 TTL，和 `/games`、开发商详情页一致）。
+ *    `listGamesByConsoleCached`（24 小时 TTL，和 `/games`、开发商详情页一致）。
  *    「x款游戏」也取自那次的 total（countGamesCached）—— 2026-10-14 起不再用
  *    资料行上的 gameCount，那个子查询是每请求全表 COUNT（详见 generateMetadata）。
+ *
+ * ---------------------------------------------------------------------------
+ * 语种筛选（2026-10-16 加）：`?lang=<zh|en|ja|ko|all>`
+ *
+ * 这一页原来是「这个机种下的全部游戏」，一个机种下面往往同时躺着中日英韩四份 ROM，
+ * 用户要的是「只看中文版」。于是加了一条筛选条（一排链接，和 `/games` 的机种筛选同款），
+ * **筛的是 `games.language`，也就是游戏自己的语种**（不是界面语言）。
+ *
+ * ⚠️ **不写 `?lang=` 时默认 = 全部**（2026-10-16 用户要求：原来是「按界面语言挑一份」，
+ *    改成「先给全部」）：在中文站打开 `/zh/consoles/nes` 看到的是这个机种下的全部游戏，
+ *    想只看中文版再点那一颗。
+ *    ⇒ 于是「默认那一份」的地址**就是裸路径**，点「全部」那颗也不会在地址里留下 `?lang=`
+ *    （`?lang=all` 会被 307 收敛回裸地址 —— 同一份内容不能有两个 URL，
+ *    和 `/games` 的 `?console=xxx`、`?page=01` 同一条规矩）。这也是「刷新不丢」的做法：
+ *    地址栏里写着的就是用户选的那一份，界面语言在路径里，两者都是可复制、可收藏的。
+ *
+ * ⚠️ **认不出的 `?lang=xxx` 与重复参数一律当没给**（于是 307 收敛回裸地址），
+ *    和 `/games?console=xxx` 一个字不差。
+ *
+ * ⚠️ 收录策略：**带 `?lang=` 的那几份 `noindex, follow`**（`?q=` 同款，见 generateMetadata）。
+ *    它们只是同一份列表的子集，语种只有四个，全收进去就是四份重复内容。默认那一份
+ *    （裸地址）照常收录 —— 它就是「这个机种下的全部游戏」，和加筛选之前一模一样。
+ *
+ * ⚠️ 切语种 / 搜索 / 翻页**必须互相带上彼此**（`consoleHref` 一次拼全）：否则搜一下就
+ *    掉回默认那份、筛了语种一翻页就变回全部。第 1 页不写 `page`，规范顺序是
+ *    `q` → `lang` → `page`。
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -54,11 +85,11 @@ const loadConsole = cache(async (type: string) => getConsole(type));
  * 两处要的其实是不同的 `page`，所以真正的作用是同一页里别查两遍。
  */
 const loadGames = cache(
-  async (type: string, page: number, keyword = '') => {
+  async (type: string, page: number, keyword = '', language: string | null = null) => {
     if (!isConsoleType(type)) return { games: [], total: 0, offset: 0, limit: PAGE_SIZE };
     return keyword
-      ? listGamesPageCached((page - 1) * PAGE_SIZE, PAGE_SIZE, keyword, type)
-      : listGamesByConsoleCached(type, (page - 1) * PAGE_SIZE, PAGE_SIZE);
+      ? listGamesPageCached((page - 1) * PAGE_SIZE, PAGE_SIZE, keyword, type, language)
+      : listGamesByConsoleCached(type, (page - 1) * PAGE_SIZE, PAGE_SIZE, language);
   }
 );
 
@@ -68,28 +99,85 @@ const loadGames = cache(
  * 和后台接口那份是两处 —— 加机种时漏掉任何一处都会让专题页 404。
  */
 
+/** 「全部语种」在地址里的写法 —— 它**就是默认那一份**，所以这个值只会出现在被收敛掉的地址里。 */
+const FILTER_ALL = 'all';
+
+/** 这个短码是不是站内认得的游戏语种。白名单来自 lib/rom-lang.ts，别在这儿另抄一张。 */
+function isGameLanguage(value: string): boolean {
+  return (GAME_LANGUAGE_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * 「筛的是哪个语种」→「写进地址里的那一串」。
+ *
+ * 两态：**「全部」（null）⇒ 空串**（整段不写，默认那份地址就是裸路径）；其余 ⇒ 短码本身。
+ * **判断「这个地址规范不规范」和「拼链接」用的是同一个函数**，两处各写一份迟早会漂。
+ * （2026-10-16 之前这里还有第三态「等于界面语言 ⇒ 空串」；默认改成全部之后，
+ * 界面语言只是一门普通的语种，没有特殊写法了。）
+ */
+function languageParamOf(language: string | null): string {
+  return language ?? FILTER_ALL;
+}
+
+/**
+ * 解析 `?lang=`。返回的 `language` 是**实际要筛的语种**（null = 全部），`param` 是它
+ * 写进地址的形态，`canonical` 表示这个地址本身是不是规范形式（不是的话调用方 307）。
+ *
+ * ⚠️ `canonical` 的判据是「**参数在不在**」而不是「参数是不是空串」：重复参数
+ *    （`?lang=a&lang=b`）在 `typeof raw === 'string'` 上就落空了，用「在不在」才能把它们
+ *    一起收敛掉（`lib/pager.ts` 的 `parsePageParam` 同一条规矩）。
+ * ⚠️ 认不出的值、`all`（＝默认那份的写法）**一律当没给**（都返回 null = 全部），于是
+ *    `?lang=xxx` / `?lang=all` 会被判为非规范 ⇒ 307 回裸地址 —— 少了这一步，一个拼错的
+ *    语种会静默渲染出一整页「全部」，同一份内容凭空多一个 URL
+ *    （和 `/games` 的 `?console=xxx` 同一个理由）。
+ */
+function parseLanguage(
+  raw: string | string[] | undefined
+): { language: string | null; param: string; canonical: boolean } {
+  const value = typeof raw === 'string' ? raw : '';
+  const language = isGameLanguage(value) ? value : null;
+  const param = languageParamOf(language);
+
+  return { language, param, canonical: param ? value === param : raw === undefined };
+}
+
 /**
  * 第几页的地址。**语言前缀在这里加**（`lib/pager.ts` 的 `pageHref` 只认裸路径）。
+ *
+ * `langParam` 收的是**已经归一化过的那一串**（`parseLanguage` 的 `param` /
+ * `languageParamOf` 的结果），不是「哪个语种」—— 归一化只有一处，见那个函数的注释。
+ * 参数顺序固定成 `q` → `lang` → `page`（服务端按地址字符串比对是否规范，顺序不同也是两个 URL）。
  */
-function consoleHref(locale: Locale, type: string, page: number, keyword = ''): string {
+function consoleHref(
+  locale: Locale,
+  type: string,
+  page: number,
+  keyword = '',
+  langParam = ''
+): string {
   const query = new URLSearchParams();
   if (keyword) query.set('q', keyword);
+  if (langParam) query.set('lang', langParam);
   if (page > 1) query.set('page', String(page));
   return localePath(locale, `/consoles/${type}`) + (query.size ? `?${query}` : '');
 }
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
+  searchParams: Promise<SearchParams>;
 }): Promise<Metadata> {
-  const { id } = await params;
+  const [{ id }, rawQuery] = await Promise.all([params, searchParams]);
   const locale = await readLocaleParam(params);
 
   /* 不在枚举里 → 404。在 metadata 里就抛掉，是为了让 404 的响应连 head 一起是对的 */
   if (!isConsoleType(id)) notFound();
 
-  const [row, games] = await Promise.all([loadConsole(id), loadGames(id, 1)]);
+  const lang = parseLanguage(rawQuery.lang);
+
+  const [row, games] = await Promise.all([loadConsole(id), loadGames(id, 1, '', lang.language)]);
 
   /*
    * 没资料行就用默认名字（NES / SFC / GBA / ARC）—— 两种语言下它本来就不变，
@@ -99,11 +187,13 @@ export async function generateMetadata({
     ? localizeConsole(row, locale)
     : { name: CONSOLE_LABEL[id], summary: null, description: null };
   /*
-   * 条数：**一律用游戏列表那次查询的 total**（`countGamesCached`，12 小时缓存）。
+   * 条数：**一律用游戏列表那次查询的 total**（`countGamesCached`，24 小时缓存）。
    * 2026-10-14 之前这里优先用资料行上「顺带」算出来的 gameCount —— 但那个子查询
    * 没有 console_type 索引、getConsole 又不缓存，等于每个请求全表 COUNT 一遍
    * （见 lib/server/consoles.ts）。改用 total 后这条全表扫描消失，
-   * 代价是后台加/删游戏后这个数字最多晚 12 小时更新 —— 和列表本身同一口径。
+   * 代价是后台加/删游戏后这个数字最多晚 24 小时更新 —— 和列表本身同一口径。
+   * ⚠️ 传了 `lang.language`，所以这个数是**当前语种那份**的条数 —— 和页面上真正列出来的
+   *    条目对得上（描述里那句「共 N 款」不该比用户看到的列表多）。
    */
   const count = games.total;
 
@@ -112,11 +202,17 @@ export async function generateMetadata({
     name: text.name,
     count,
   });
-  const canonical = localePath(locale, `/consoles/${id}`);
+  const canonical = consoleHref(locale, id, 1, '', lang.param);
 
   return {
     title,
     description,
+    /*
+     * hreflang 只指**不带筛选项的那一份**（`/consoles/nes`）：语种那几份是 `noindex`
+     * 的子集（见下面 robots），让它们互指只会把「两份不同内容声明成同一页」，
+     * Google 会直接判这一组标注无效。和 `/games?console=` 那边「hreflang 带上自己的
+     * 筛选参数」不同 —— 那里 `?console=` 是可收录的真实分类，这里不是。
+     */
     alternates: alternatesFor(locale, `/consoles/${id}`),
     openGraph: {
       type: 'website',
@@ -127,8 +223,16 @@ export async function generateMetadata({
       // 没机图就不给 images（别塞一张不存在的图）
       ...(row?.imageUrl ? { images: [{ url: row.imageUrl, alt: text.name }] } : {}),
       locale: ogLocale(locale),
-      alternateLocale: ogLocale(otherLocale(locale)),
+      alternateLocale: otherLocales(locale).map(ogLocale),
     },
+    /*
+     * **带 `?lang=` 的那几份不收录**（`lang.param !== ''`，也就是地址里真带了 `?lang=`）：
+     * 它们是同一份列表的子集，语种只有四个，全收进去就是四份重复内容
+     * （和 `/games` 的 `?q=` 同一个处理）。`follow` 必须留着 —— 爬虫仍要顺着卡片
+     * 走到详情页。⚠️ 默认那一份（裸地址，现在是「全部」）**照常收录**；
+     * 这里不写 `index: true`，由根布局那份兜底（同 `/games` 的注释）。
+     */
+    ...(lang.param ? { robots: { index: false, follow: true } } : {}),
   };
 }
 
@@ -189,13 +293,11 @@ export default async function ConsoleDetailPage({
    */
   const consoleRow: Console = row ?? {
     type: id,
-    name: CONSOLE_LABEL[id],
-    nameEn: CONSOLE_LABEL[id],
+    texts: {
+      zh: { name: CONSOLE_LABEL[id], summary: null, description: null },
+      en: { name: CONSOLE_LABEL[id], summary: null, description: null },
+    },
     imageUrl: null,
-    summary: null,
-    summaryEn: null,
-    description: null,
-    descriptionEn: null,
     releaseYear: null,
     createdAt: 0,
     gameCount: 0,
@@ -204,18 +306,36 @@ export default async function ConsoleDetailPage({
 
   const { page, canonical } = parsePageParam(rawQuery.page);
   const keyword = typeof rawQuery.q === 'string' ? rawQuery.q.trim() : '';
-  // 和 /games 同一套：`?page=1` / `?page=01` / 重复参数都收敛到规范地址
-  if (!canonical || (rawQuery.q !== undefined && rawQuery.q !== keyword) || rawQuery.q === '') {
-    redirect(consoleHref(locale, id, page, keyword));
+  const lang = parseLanguage(rawQuery.lang);
+  /*
+   * 和 /games 同一套：`?page=1` / `?page=01` / 重复参数、认不出的 `?lang=`、
+   * 「写了但等于默认」的 `?lang=all`，统统收敛到规范地址。
+   */
+  if (
+    !canonical ||
+    (rawQuery.q !== undefined && rawQuery.q !== keyword) ||
+    rawQuery.q === '' ||
+    !lang.canonical
+  ) {
+    redirect(consoleHref(locale, id, page, keyword, lang.param));
   }
 
-  const [data, allGames] = await Promise.all([loadGames(id, page, keyword), loadGames(id, 1)]);
+  const [data, allGames, langCounts] = await Promise.all([
+    loadGames(id, page, keyword, lang.language),
+    /*
+     * `allGames` 一律**不筛语种**（最后那个 null）：它是「这个机种一共有几款游戏」，
+     * 资料表里那一行和筛选条上「全部」那颗数字都用它。⛔ 别看它筛掉语种就改成跟着
+     * `lang.language` 走 —— 那样「全部」那颗会显示成当前语种的条数，一页两个假数字。
+     */
+    loadGames(id, 1, '', null),
+    countConsoleGamesByLanguageCached(id),
+  ]);
   const pageCount = pageCountOf(data.total, PAGE_SIZE);
 
-  // 越界（这个机种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
-  if (page > pageCount) redirect(consoleHref(locale, id, pageCount, keyword));
+  // 越界（这个机种 / 这个语种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
+  if (page > pageCount) redirect(consoleHref(locale, id, pageCount, keyword, lang.param));
 
-  // 游戏数：走列表那次查询的 total（countGamesCached，12 小时缓存），理由见 generateMetadata
+  // 游戏数：走列表那次查询的 total（countGamesCached，24 小时缓存），理由见 generateMetadata
   const gameCount = allGames.total;
 
   const facts: { label: string; value: string }[] = [
@@ -301,7 +421,53 @@ export default async function ConsoleDetailPage({
           {t('consolesPage.gamesHeading', { name: text.name })}
         </h2>
 
-        <GamesSearchForm locale={locale} keyword={keyword} consoleType={null} actionPath={`/consoles/${id}`} />
+        <GamesSearchForm
+          locale={locale}
+          keyword={keyword}
+          consoleType={null}
+          /* 带上当前语种：不然在「日本語」里搜一下就掉回默认那份（见组件那段注释） */
+          languageParam={lang.param}
+          actionPath={`/consoles/${id}`}
+        />
+
+        {/*
+          语种筛选条（2026-10-16 加）。版式与行为照抄 `/games` 那条机种筛选：
+          **一排链接**（每个语种一个真地址，能中键新标签、能复制、爬虫也顺得下去），
+          当前那颗 accent 高亮 + `aria-current`，「全部」那颗对应「不筛语种」。
+
+          ⚠️ 每颗后面挂**这个机种下该语种的条数**（用户要求「每个语种还是显示数量」）：
+          数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，24 小时缓存、
+          **不跟关键词走**，和资料表里那个总数同口径）；「全部」那颗用 `gameCount`，
+          也就是这个机种的总数 —— 两者出自同一份数据，不会打架。
+          ⚠️ **不筛掉 0 款的那几颗**：一个机种下没有韩语版是事实，比少一颗按钮更该让用户看到。
+          ⚠️ 切语种时**把关键词带上**、页码一律回第 1 页（换了筛选条件，第 3 页毫无意义）。
+        */}
+        <nav
+          aria-label={t('consolesPage.filterLangLabel')}
+          className="mt-4 flex flex-wrap items-center gap-2"
+        >
+          {[null, ...GAME_LANGUAGE_VALUES].map((code) => {
+            const active = code === lang.language;
+            const count = code ? (langCounts[code] ?? 0) : gameCount;
+            return (
+              <Link
+                key={code ?? FILTER_ALL}
+                /* 「全部」那颗给空串 ⇒ 指回裸地址（唯一的那一份，也是默认那份） */
+                href={consoleHref(locale, id, 1, keyword, languageParamOf(code))}
+                aria-current={active ? 'true' : undefined}
+                className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[12px] transition-colors ${
+                  active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
+                }`}
+              >
+                {/* 语言名用它自己的语言写（简体中文 / English / 日本語 / 한국어），不进文案表 */}
+                {code ? GAME_LANGUAGE_LABEL[code] : t('gamesPage.filterAll')}
+                {/* 条数：不写 `font-pixel`（那一列字形里没有 CJK），跟着标签同一套字体 */}
+                <span className="ml-1.5 opacity-70">{count}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
         {keyword && (
           <p className="mt-4 text-[12px] text-ink-300">
             {t('gamesPage.searchResults', { keyword, count: data.total })}
@@ -309,7 +475,18 @@ export default async function ConsoleDetailPage({
         )}
 
         {data.games.length === 0 ? (
-          <p className="mt-8 text-[13px] text-ink-400">{keyword ? t('gamesPage.searchEmpty', { keyword }) : t('consolesPage.gamesEmpty')}</p>
+          /*
+           * 三种「空」分开说（和 /games 同一个路数）：搜了词没搜到 > 筛了语种但这个机种
+           * 一款都没有 > 这个机种整个是空的。搜索优先 —— 同时有词和语种时说「没搜到这个词」
+           * 比说「没有这个语种的游戏」准确。
+           */
+          <p className="mt-8 text-[13px] text-ink-400">
+            {keyword
+              ? t('gamesPage.searchEmpty', { keyword })
+              : lang.language
+                ? t('consolesPage.gamesEmptyLang', { lang: GAME_LANGUAGE_LABEL[lang.language] })
+                : t('consolesPage.gamesEmpty')}
+          </p>
         ) : (
           /* 满屏都是同一个机种，游戏卡片下面那行依然照常报开发商 / 年份 —— 只有机种那截是重复的 */
           <GameCardGrid games={data.games} locale={locale} />
@@ -317,9 +494,13 @@ export default async function ConsoleDetailPage({
 
         {pageCount > 1 && (
           <nav className="mt-10 flex items-center justify-center gap-4">
+            {/*
+              ⚠️ 翻页链接必须带上**关键词和语种**（`consoleHref` 一起拼）：
+              少了语种，筛着「日本語」翻一页就变回全部了 —— 用户会以为筛选坏了。
+            */}
             {page > 1 ? (
               <Link
-                href={consoleHref(locale, id, page - 1, keyword)}
+                href={consoleHref(locale, id, page - 1, keyword, lang.param)}
                 rel="prev"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
@@ -336,7 +517,7 @@ export default async function ConsoleDetailPage({
 
             {page < pageCount ? (
               <Link
-                href={consoleHref(locale, id, page + 1, keyword)}
+                href={consoleHref(locale, id, page + 1, keyword, lang.param)}
                 rel="next"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
