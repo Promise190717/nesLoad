@@ -24,6 +24,34 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
+ * ⚠️ **函数时长上限，必须显式声明**（2026-10-16 加）。
+ *
+ * 这个接口要**流式转发整个 ROM**，而 Vercel 的默认 `maxDuration` 很短
+ * （Hobby 计划 10 秒）—— 大文件（NDS 卡带常见 128 / 256 MB）根本跑不完。
+ * 表现就是线上 502 / 524，而本地 `next dev` 没有这个限制，**永远复现不出来**。
+ *
+ * 60 是 **Vercel Hobby 计划的上限**；Pro 可以往上调（最高 300s）。
+ * 部署计划变了就把这个数一起改。
+ *
+ * ⚠️ 这**只是把天花板抬高**，不是根治 —— 真要稳，得让函数别中转大文件
+ *    （ROM 落到自己的 R2 + 给 R2 配 CORS，让浏览器直连），见文件头。
+ */
+export const maxDuration = 60;
+
+/**
+ * 回源**首字节**的等待上限（毫秒）。
+ *
+ * ⚠️ **没有它的时候线上就是这么坏的**（2026-10-16）：上游一慢，`fetch` 就无限期挂着，
+ *    函数跟着挂，一直挂到前面那层（Cloudflare）等满 100 秒、吐一个 **Error 524** ——
+ *    用户只看到一个说不清原因的网关错误，服务端日志里干干净净。
+ *    **快速失败永远好过挂着**：超时后我们自己回一个带原因的 504。
+ *
+ * 只约束「响应头到达」的时间（TTFB），**不约束后续下载** —— 上游正常时 TTFB 是毫秒级，
+ * 给 25 秒非常宽松，不会误杀。
+ */
+const UPSTREAM_TIMEOUT_MS = 25_000;
+
+/**
  * 明显是网页 / 报错的 content-type，一律当成「没拿到文件」。
  *
  * ⚠️ **回源上游这条路必须过这道闸**：上游前置了 Cloudflare，地址失效或触发风控时
@@ -74,13 +102,67 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       cache: 'no-store',
       // 上游前置了 Cloudflare，给个明确 UA 比默认的 node UA 稳
       headers: { accept: '*/*', 'user-agent': 'nesLoad/1.0' },
+      // 见 UPSTREAM_TIMEOUT_MS —— 没有它，上游一慢就把函数挂死到 Cloudflare 524
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
   } catch (error) {
-    console.error('[games] ROM 回源失败', error);
-    return new Response('upstream error', { status: 502 });
+    /*
+     * 超时和「连不上」分开报：前者是上游慢（多半是被限流 / 源站过载），
+     * 后者才是真正的网络问题 —— 两者的修法完全不同，日志里必须分得开。
+     */
+    const timedOut = (error as Error)?.name === 'TimeoutError';
+    console.error('[games] ROM 回源失败', id, timedOut ? '超时' : '连接失败', error, target);
+    return new Response(
+      timedOut
+        ? `upstream error: 上游 ${UPSTREAM_TIMEOUT_MS / 1000} 秒内没有响应（多半是被限流或源站过慢）`
+        : 'upstream error: 连接上游失败',
+      { status: 504 }
+    );
   }
   if (!upstream.ok || !upstream.body) {
-    return new Response('upstream error', { status: 502 });
+    /*
+     * ⚠️ **这条日志是 2026-10-16 补的**：线上报 502 时，这一分支原本只回一句
+     *    'upstream error' 就完了，服务端日志干干净净 —— 分不出是「网络不通」
+     *    （上面那个 catch）还是「上游把请求拒了」（这里）。现在把上游的状态码和
+     *    几个判据一起打出来，一眼能看出是不是被 Cloudflare 限流。
+     *
+     * 📌 实测（2026-10-16）结论，别照着「加 Referer 就好了」的直觉改回去：
+     *    · 上游**不校验 Referer** —— 本机用 `nesLoad/1.0`、不带任何 Referer 直取，
+     *      两个 host 都回 `206`（`site:` 主站与 `files:` 子域各试一条）。
+     *    · 线上拿到的是 **Cloudflare 的限流页**（`content-type: text/html` +
+     *      `retry-after: 60` + `cf-ray`，即 Error 1015 那类速率限制）。
+     *    ⇒ 所以「模拟源站自己发起的请求」解决不了这个：它不是防盗链，是**限流**。
+     *      根因是**所有访客的开局请求都从本站这一个出口 IP 回源** —— 本地只有你一个人
+     *      访问，频率低，所以本地永远复现不出来。
+     *      真正的解法是让回源**只发生一次**（取回后落到自己的 R2），见文件头。
+     */
+    const upstreamType = upstream.headers.get('content-type') ?? '-';
+    const retryAfter = upstream.headers.get('retry-after');
+    const cfRay = upstream.headers.get('cf-ray') ?? '-';
+    console.error(
+      '[games] ROM 回源被上游拒绝',
+      id,
+      `status=${upstream.status}`,
+      `type=${upstreamType}`,
+      `retry-after=${retryAfter ?? '-'}`,
+      `cf-ray=${cfRay}`,
+      target
+    );
+    /*
+     * ⚠️ **错误正文里带上原因**（2026-10-16 改）：原来无论哪种失败都只回一句
+     *    'upstream error'，在浏览器里打开这个接口看不出任何东西 —— 文件没了、
+     *    被限流了、还是拿到一张挑战页，全得靠猜（线上 502 排查就卡死在这里）。
+     *    现在把上游的状态码 / content-type / retry-after 写进正文，直接看得见。
+     */
+    const detail = upstream.body
+      ? `HTTP ${upstream.status}, content-type: ${upstreamType}${
+          retryAfter ? `, retry-after: ${retryAfter}s` : ''
+        }`
+      : `HTTP ${upstream.status}（响应没有 body）`;
+    return new Response(`upstream error: ${detail}`, {
+      status: 502,
+      headers: retryAfter ? { 'Retry-After': retryAfter } : undefined,
+    });
   }
 
   /*
@@ -89,8 +171,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
    */
   const contentType = (upstream.headers.get('content-type') ?? '').split(';')[0].trim();
   if (HTML_LIKE.test(contentType)) {
-    console.error('[games] 回源拿到的不是文件，已拦下', id, contentType, target);
-    return new Response('upstream error', { status: 502 });
+    /*
+     * 上游回的是网页 —— 大概率是 Cloudflare 的挑战 / 限流页（HTTP 200 + text/html）。
+     * 正文里带上它，用户直接在浏览器打开这个接口就能看出是哪一类。
+     */
+    console.error(
+      '[games] 回源拿到的不是文件，已拦下',
+      id,
+      contentType,
+      `cf-ray=${upstream.headers.get('cf-ray') ?? '-'}`,
+      target
+    );
+    return new Response(
+      `upstream error: 上游返回的是网页而不是文件（content-type: ${contentType}）`,
+      { status: 502 }
+    );
   }
 
   const headers: Record<string, string> = {

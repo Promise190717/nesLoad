@@ -39,7 +39,11 @@
 
 import { baseName, inflateEntry, readZipEntries, rebuildZip, type ZipEntry } from './zip';
 
-/** 街机可用的核心名（都放在 `public/cores/<core>_libretro.{js,wasm}`）。 */
+/**
+ * 街机可用的核心名（都放在 `public/cores/<core>_libretro.{js,wasm}`）。
+ * ⚠️ 例外：`fbneo` 的 wasm 超了部署平台的单文件上限，仓库里只存 `<core>_libretro.wasm.gz`
+ * （启动时由 `lib/emulator.ts` 的 `GZIP_CORES` / `fetchGzippedCore` 解开）。
+ */
 export type ArcadeCoreName = 'fbneo' | 'fbalpha2012_cps1';
 
 /** `[rom 文件名, CRC32]` */

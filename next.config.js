@@ -13,7 +13,8 @@ const nextConfig = {
   /**
    * 大文件的缓存策略 —— 自托管的 WASM 核心（`/cores/`）和站点自带的街机 BIOS（`/bios/`）。
    *
-   * 背景：这两个目录里是 `fbneo_libretro.wasm`（36 MB）那种大文件，`public/` 的默认策略
+   * 背景：这两个目录里是 `fbneo_libretro.wasm.gz`（9.7 MB；解开的 wasm 是 34 MB，
+   * 见 `lib/emulator.ts` 的 `GZIP_CORES`）那种大文件，`public/` 的默认策略
    * （Next 给 `max-age=0`）意味着**每次换卡带都要回服务器验一次**。虽然 304 不带 body，
    * 但国内网络下这个往返还是一直要等，能给 CDN 缓存就该给。
    *

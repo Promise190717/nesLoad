@@ -245,6 +245,9 @@ const INITIAL_SIZE: Partial<Record<ConsoleType, { width: number; height: number 
  * 以后再加核心，同样从上面那个仓库的 `retroarch/<core>_libretro.zip` 里解出来放这儿
  * —— ⚠️ `.js` 和 `.wasm` **两个都要放**，少一个就是 404，表现是「拖进去毫无反应」
  * （Next 会把 404 页面当成核心 js 喂给核心加载器）。
+ *
+ * ⚠️ **唯一的例外**是 `GZIP_CORES` 里那几个（现在只有街机的 `fbneo`）：它们的 wasm
+ *    太大，仓库里**只存 `.wasm.gz`**，由启动代码自己解开 —— 因果见那一段的注释。
  */
 const LOCAL_CORE_DIR = '/cores';
 
@@ -268,6 +271,70 @@ const LOCAL_CORE_CONSOLES = new Set<ConsoleType>([
   'ps1',
   'arcade',
 ]);
+
+/**
+ * 在 `public/cores/` 里**存成 `.wasm.gz`** 的核心（而不是裸 `.wasm`）。现在只有 `fbneo`。
+ *
+ * ## 为什么会有这一档（2026-10-16，Cloudflare 部署报错逼出来的）
+ *
+ * 部署到 Cloudflare（Pages / Workers 的静态资源都一样）时，**单个资源文件的硬上限是
+ * 25 MiB**，超了连构建都过不去，报的是：
+ *
+ *     Error: Asset too large.
+ *     Cloudflare Workers supports assets with sizes of up to 25 MiB. We found a file
+ *     .../.open-next/assets/cores/fbneo_libretro.wasm with a size of 34.4 MiB.
+ *
+ * 而 `fbneo_libretro.wasm` 是 **34.4 MiB** —— 全站唯一一个超线的文件（第二大的 melonds
+ * 才 5.1 MiB，离上限差得远）。压成 gzip 之后是 **9.7 MiB**，只剩 28%，顺带把用户第一次
+ * 拉街机核心的流量也砍到四分之一（这个文件本来就是要下到本地的，越小越好）。
+ *
+ * ## 做法
+ *
+ * `public/cores/` 下**只放 `.gz`、不放裸 `.wasm`** —— 两个都放等于没解决问题，超线的
+ * 正是那个裸文件。启动时 `resolveCoreWasm` 自己 fetch 这个 `.gz`、用浏览器的
+ * `DecompressionStream` 解开，把解出来的 Blob 直接交给 Nostalgist（见 `fetchGzippedCore`）。
+ *
+ * 凭什么能交 Blob 而不是 URL：Nostalgist 的 `resolveCoreWasm` 返回值走 `ResolvableFile`，
+ * 它本来就接受 Blob / Uint8Array / ArrayBuffer / Response（默认实现返回的就是从核心 zip
+ * 里解出来的 Blob），而且 `setupEmscripten` 用的是 `wasm.getArrayBuffer()` 当
+ * `Module.wasmBinary`，**不是**让核心自己去 fetch 那个文件 —— 所以「URL 换成 Blob」
+ * 对核心完全透明，`locateFile` 那套 blob URL 也是 Nostalgist 自己建的。
+ *
+ * ⚠️ **换核心时必须重新压**。`.gz` 和裸 `.wasm` 一样是**同名覆盖、文件名不带内容 hash**，
+ *    忘了重新压 = 线上继续跑旧核心（现象和「补丁没生效」一模一样）。压完**把裸 `.wasm`
+ *    删掉**，它不该进仓库、也不该进部署产物。命令（Node 内置 zlib 就够）：
+ *
+ *         node -e "const z=require('zlib'),f=require('fs');f.writeFileSync('public/cores/fbneo_libretro.wasm.gz',z.gzipSync(f.readFileSync('public/cores/fbneo_libretro.wasm'),{level:9}))"
+ *
+ * ⚠️ 其余核心**故意不动**：它们都远在 25 MiB 之下，多压一层只是多一个「换文件忘了压」
+ *    的坑（而且核心文件是**运行时才下载**的东西，压错了表现成「拖进去毫无反应」，
+ *    最难查）。真超线了再把名字加进这个 Set —— 这条规则就是为它准备的。
+ */
+const GZIP_CORES = new Set<string>(['fbneo']);
+
+/**
+ * 取一个「压缩存储的核心」的字节并解成 Blob，交给 Nostalgist。
+ *
+ * ⚠️ **先认 gzip 魔数（`1f 8b`）再决定解不解**：万一中间那一层（CDN / 反向代理）
+ *    自己给这个响应补上了 `Content-Encoding: gzip`，浏览器会**替我们解一遍**，
+ *    于是这里拿到的就已经是裸 wasm —— 那时再丢给 `DecompressionStream` 会直接抛错，
+ *    表现是「街机盘拖进去毫无反应」，而且**只有线上能复现**（本地 dev 没有那一层）。
+ *    两个字节的判断换掉一整类这种故障，值。
+ *
+ * 读完整份再解（而不是拿 `response.body` 直接 pipeThrough）：一来要嗅那两个字节，
+ * 二来 9.7 MB 的中间态无所谓。**进度条不受影响** —— 这条路走的是普通 `fetch`，
+ * `watchCoreDownload` 那个补丁照样能看见（见那里的注释）。
+ */
+async function fetchGzippedCore(url: string): Promise<Blob> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load core wasm: ${url} (${response.status})`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return new Blob([bytes]);
+  const gunzipped = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return await new Response(gunzipped).blob();
+}
 
 /**
  * 扩展名 → 机种。**仅在文件头识别失败时作为回退。**
@@ -714,6 +781,10 @@ export async function unsupportedArchive(file: File): Promise<'7z' | 'rar' | 'di
  * 只认 URL 里带 `_libretro.zip`（Nostalgist 从 CDN 拉的核心包）或 `_libretro.wasm`
  * （街机改走本地之后拉的是这个）的请求，其余请求原样放行。核心已经在 CacheStorage 里、
  * 或者走的是本地小文件时，回调可能一次都不触发，界面据此退回「不确定」进度。
+ *
+ * ⚠️ 压缩存储的核心（`GZIP_CORES`）拉的是 `<核心>_libretro.wasm.gz` —— 它**仍然包含**
+ *    上面那个子串，所以进度照样有；而且计数按**压缩后**的字节走，和 `content-length`
+ *    是同一个口径，比例仍然对（不用为它改这里，但以后想「收紧匹配」时别忘了这条）。
  */
 function watchCoreDownload(onProgress: (loaded: number, total: number) => void): () => void {
   const original = window.fetch;
@@ -1418,6 +1489,11 @@ export class EmulatorController {
      * `mgba` 一个核心，街机那个 `core` 还是 `resolveArcadeCore()` 现挑出来的
      * （`fbneo` / `fbalpha2012_cps1`），按机种判断才不会漏。
      *
+     * ⚠️ 但**取哪个文件**是另一回事，得看 `core` 的名字：`GZIP_CORES` 里那几个
+     * （现在只有 `fbneo`）在 `public/cores/` 里只存 `.wasm.gz`，得自己解开再交给
+     * Nostalgist —— 所以 `resolveCoreWasm` 这一支是**异步的、而且可能返回 Blob 而不是
+     * URL 字符串**。Nostalgist 那边两条路都收（见 `fetchGzippedCore` 的注释）。
+     *
      * 参数类型写 `unknown` 是刻意的：Nostalgist 把这两个回调的参数声明成
      * `NostalgistCoreDict | string`（那个类型没导出，我们引不到），而它实际传进来的
      * **永远是核心名字符串** —— `updateCore()` 里是 `resolver(core, options)`。
@@ -1427,8 +1503,11 @@ export class EmulatorController {
     const coreSource = LOCAL_CORE_CONSOLES.has(consoleType)
       ? {
           resolveCoreJs: (name: unknown) => `${LOCAL_CORE_DIR}/${String(name)}_libretro.js`,
-          resolveCoreWasm: (name: unknown) =>
-            `${LOCAL_CORE_DIR}/${String(name)}_libretro.wasm`,
+          resolveCoreWasm: (name: unknown) => {
+            const core = String(name);
+            const url = `${LOCAL_CORE_DIR}/${core}_libretro.wasm`;
+            return GZIP_CORES.has(core) ? fetchGzippedCore(`${url}.gz`) : url;
+          },
         }
       : {};
 

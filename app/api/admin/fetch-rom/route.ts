@@ -76,7 +76,18 @@ export async function POST(request: Request) {
       headers: { accept: '*/*', 'user-agent': 'nesLoad-admin/1.0' },
       cache: 'no-store',
     });
-    if (!upstream.ok) return failJson('fetch-failed', `上游返回 HTTP ${upstream.status}`, 502);
+    if (!upstream.ok) {
+      /*
+       * ⚠️ 把 `retry-after` 一起带上（2026-10-16）：上游是 Cloudflare，被限流时
+       *    （429 / Error 1015）会带这个头 —— 光看状态码分不出「文件没了」和「被限流了」。
+       */
+      const retryAfter = upstream.headers.get('retry-after');
+      return failJson(
+        'fetch-failed',
+        `上游返回 HTTP ${upstream.status}${retryAfter ? `（retry-after: ${retryAfter}s）` : ''}`,
+        502
+      );
+    }
 
     // 跟着跳转走完后再核一次最终地址，别让一次 302 绕开上面那道内网检查
     const finalUrl = parsePublicHttpUrl(upstream.url);

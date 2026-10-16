@@ -416,7 +416,7 @@ pnpm dev
 
 ⚠️ 三个刻意的取舍：**`.bin` 不收进扩展名表**（太泛，PS1 光盘镜像也叫 bin，猜成 MD 只会把「不认识」变成「静默失败」；真·MD 的 `.bin` 靠 `0x100` 的 `SEGA` 头认）；**PS1 的多文件形态（`.cue` / `.m3u` / `.toc` / `.ccd`）也不收**（一次只能拖一个文件，收下描述文件也找不到它指向的 `.bin`，失败还是静默的 —— 所以只认 `.pbp` / `.iso` / `.img` 三种单文件镜像）；**WonderSwan 没有文件头判据**（它的 ROM 头就是跳转指令 + 校验和，没有版权串可认），所以只能带对 `.ws` / `.wsc` 扩展名。
 
-核心：**除了 NES / SFC（fceumm / snes9x）在运行时从 CDN 拉，其余十二个机种的核心都随仓库放在 `public/cores/`**，运行时从本站加载 —— 理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有这些包。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`（**NDS 的 melonds 是唯一例外**，它不在那个构建里，是从 EmulatorJS 的 `melonds-wasm.data` 里解出来的）。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
+核心：**除了 NES / SFC（fceumm / snes9x）在运行时从 CDN 拉，其余十二个机种的核心都随仓库放在 `public/cores/`**，运行时从本站加载 —— 理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有这些包。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`（**两个例外**：**NDS 的 melonds** 不在那个构建里，是从 EmulatorJS 的 `melonds-wasm.data` 里解出来的；**街机的 `fbneo`** 体积超了部署平台「单个静态文件 25 MiB」的上限，在仓库里**只存 `.wasm.gz`**，启动时由前端解开 —— 见下）。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
 
 | 机种 | 核心 | 说明 |
 | --- | --- | --- |
@@ -430,9 +430,9 @@ pnpm dev
 | PS1 | `pcsx_rearmed` | 那个构建里**唯一**的 PS1 核心（没有 beetle_psx / swanstation），也是参考站跑 PS1 用的同一个；包 1.14 MB / wasm 2.9 MB，是这批里最轻的之一 |
 | 街机 | `fbneo` / `fbalpha2012_cps1` | 哪个由 `lib/arcade-core.ts` 按 romset 现挑 |
 
-⚠️ **加新核心时记得真把 `.js` 和 `.wasm` 两个文件都放进去**——2026-10-13 就是因为 `public/cores/` 里漏了 mgba 那两个文件，GBA 一拖进去 `Nostalgist.launch` 直接抛错（`/cores/mgba_libretro.js` 是 404，404 页面被当成核心 js 喂给了加载器）。
+⚠️ **加新核心时记得真把 `.js` 和 `.wasm` 两个文件都放进去**——2026-10-13 就是因为 `public/cores/` 里漏了 mgba 那两个文件，GBA 一拖进去 `Nostalgist.launch` 直接抛错（`/cores/mgba_libretro.js` 是 404，404 页面被当成核心 js 喂给了加载器）。**唯一的例外是 `fbneo`**（见下一条）：它太大，仓库里只放 `.wasm.gz`，所以**换它的时候必须重新压一遍**，忘了压等于线上还在跑旧核心。
 
-街机挂的是 **FBNeo** 核心——一套 romset 覆盖 CPS1 / CPS2 / Neo Geo 和大量 8-16 位基板，是「一个核心管一大片」的那个。核心文件随仓库放在 `public/cores/`（`fbneo_libretro.js` + `.wasm`，约 36 MB），运行时从本站加载。四点必须提前知道：
+街机挂的是 **FBNeo** 核心——一套 romset 覆盖 CPS1 / CPS2 / Neo Geo 和大量 8-16 位基板，是「一个核心管一大片」的那个。核心文件随仓库放在 `public/cores/`（`fbneo_libretro.js` + `fbneo_libretro.wasm.gz`，压缩后约 9.7 MB；解开是 34 MB），运行时从本站加载。四点必须提前知道：
 
 - **romset 是版本锁死的**。zip 里的文件必须和 FBNeo 期望的版本对得上，对不上就直接不加载——表现和「格式不支持」一样是静默的（屏幕继续出雪花）。
 - **FBNeo 靠 zip 的「文件名」认驱动名**（去掉扩展名那一截，`kof98.zip` → `kof98`）。romset 被改过名——中文名、下载站加的 `(1)` 后缀——一样静默失败。启动时 `console` 会打出这次用的名字，名字里含非 ASCII 字符时还会额外提醒一句。
@@ -704,7 +704,9 @@ lib/
 public/
   cores/          十二个机种的核心（fbneo / fbalpha2012_cps1 / mgba / genesis_plus_gx / picodrive /
                   mednafen_wswan / mednafen_ngp / melonds / pcsx_rearmed 的 .js + .wasm，
-                  约 64 MB）—— 从本站加载，不走 CDN
+                  约 40 MB）—— 从本站加载，不走 CDN。⚠️ fbneo 那份是 .wasm.gz（9.7 MB），
+                  原始 wasm 是 34 MB、超过部署平台单文件 25 MiB 的上限，所以不入库；
+                  换核心时按 lib/emulator.ts 的 GZIP_CORES 注释重新压一遍
   bios/           街机 BIOS（Neo Geo 的 neogeo.zip，约 1.3 MB）—— 同 cores 一起钉了长缓存；
                   第一次跑街机游戏时自动装进浏览器，之后走本地那份（见 lib/bios.ts）。
                   ⚠️ PS1 的 BIOS **刻意不在这里**（索尼版权物），要用户自己拖进来

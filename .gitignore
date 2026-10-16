@@ -34,3 +34,8 @@ pnpm-debug.log*
 
 # 一次性素材暂存：开发商 logo（已传 R2，见 scripts/fill-developer-logos.mjs）
 scripts/developer-logos/
+
+# 街机核心的裸 wasm 不入库：34 MB，超过部署平台「单文件 25 MiB」的上限，
+# 仓库里只存 fbneo_libretro.wasm.gz（启动时前端解开）。
+# 换核心时重新压完就把裸文件删掉，别让它再进来 —— 见 lib/emulator.ts 的 GZIP_CORES。
+public/cores/fbneo_libretro.wasm
