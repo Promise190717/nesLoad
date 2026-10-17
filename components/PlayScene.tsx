@@ -56,6 +56,7 @@ import { unpackSave } from '@/lib/state-file';
 import { MobileGamepad } from './HandheldConsole';
 import { ExpandIcon, PlayMoonIcon, ReloadIcon, SunIcon } from './icons';
 import { TV_SIZES, type TvSize } from '@/lib/tv-size';
+import { readTheme, saveTheme } from '@/lib/theme';
 
 /*
  * `/play` —— 从游戏详情那颗「联机游戏」进来的**简洁版房间**（2026-10-14 加，用户要求）。
@@ -266,20 +267,13 @@ export default function PlayScene({
   const [volume, setVolume] = useState(VOLUME_MAX);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const pageThemeRef = useRef<HTMLElement | null>(null);
   const themeFadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const page = workspaceRef.current?.closest<HTMLElement>('.play-page');
-    if (!page) return;
-    pageThemeRef.current = page;
-    page.dataset.playTheme =
-      document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
     return () => {
       if (themeFadeTimer.current !== null) clearTimeout(themeFadeTimer.current);
-      page.classList.remove('play-theme-fading');
-      delete page.dataset.playTheme;
-      pageThemeRef.current = null;
+      document.documentElement.classList.remove('play-theme-fading');
+      document.documentElement.style.removeProperty('--theme-fade-duration');
     };
   }, []);
   const [bindings, setBindings] = useState<KeyBindings>(DEFAULT_BINDINGS);
@@ -491,8 +485,7 @@ export default function PlayScene({
      * 塞进微任务是因为 effect 里同步 setState 会撞上 `react-hooks/set-state-in-effect`
      * （本仓库既有规则），和 room 那边推到 `.then()` 里是同一个理由。
      */
-    const storedTheme =
-      document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    const storedTheme = readTheme();
     void Promise.resolve().then(() => setTheme(storedTheme));
 
     /*
@@ -1000,16 +993,15 @@ export default function PlayScene({
   /* ---------------- 主题 / 全屏 ---------------- */
 
   /**
-   * 主题切换只改当前 `.play-page` 的局部色板，保留全站主题。
+   * 主题与 `/room` 共用，保存后在语言切换、刷新和返回时恢复。
    * 这份 state 只喂按钮的 title / aria —— 和 room 那边同一套路，
    * 昼夜切换只做颜色过渡。
    */
   const toggleTheme = useCallback(() => {
-    const root = pageThemeRef.current;
-    if (!root) return;
-    const next = root.dataset.playTheme === 'dark' ? 'light' : 'dark';
+    const root = document.documentElement;
+    const next = readTheme() === 'dark' ? 'light' : 'dark';
     const commit = () => {
-      root.dataset.playTheme = next;
+      saveTheme(next);
       setTheme(next);
     };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

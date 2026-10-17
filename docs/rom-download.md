@@ -1,5 +1,7 @@
 # ROM 下载兼容处理
 
+完整 ROM 响应使用 `Cache-Control: public, max-age=3600, s-maxage=2592000`：浏览器缓存 1 小时，共享 CDN 缓存 30 天。Cloudflare 需为 `/api/games/*/rom` 配置 Eligible for cache，并尊重源站缓存头；若规则覆盖 Edge TTL，则将其设为 30 天（2592000 秒）。替换同一 URL 的 ROM 后需清除 CDN 缓存。范围响应继续使用 `private, no-store`。
+
 `/api/games/[id]/rom` 继续优先读取数据库中的外部来源，来源不存在时读取本站 R2；此次修改不迁移文件或修改数据库记录。
 
 外部来源首次请求沿用服务端 User-Agent。若上游返回普通 403，且没有 `Retry-After` 或 `cf-mitigated: challenge`，最多再尝试一次：使用项目现有的浏览器 User-Agent、上游站点 Referer，并在客户端未指定范围时请求 `Range: bytes=0-`。两次请求共享 25 秒的响应头等待预算。R2 自有来源不执行这个回退。

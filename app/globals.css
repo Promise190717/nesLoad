@@ -377,8 +377,7 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   --floor-seam: rgba(0, 0, 0, 0.32);
 }
 
-:root[data-theme='light'],
-.play-page[data-play-theme='light'] {
+:root[data-theme='light'] {
   color-scheme: light;
 
   /* 浅色主题：中性白背景、灰色面板与暗红强调色。 */
@@ -2603,46 +2602,16 @@ body {
   background: var(--color-ink-500);
 }
 
-/* Local play theme overrides inherited site colors without changing html. */
-.play-page[data-play-theme='dark'] {
-  color-scheme: dark;
-  --color-ink-950: #121212;
-  --color-ink-900: #191919;
-  --color-ink-850: #202020;
-  --color-ink-800: #292929;
-  --color-ink-700: #3b3b3b;
-  --color-ink-600: #505050;
-  --color-ink-500: #707070;
-  --color-ink-400: #939393;
-  --color-ink-300: #b5b5b5;
-  --color-ink-200: #d6d6d6;
-  --color-ink-100: #f2f2f2;
-  --color-wood-950: #16120e;
-  --color-wood-900: #221c15;
-  --color-wood-800: #2e261b;
-  --color-wood-700: #413526;
-  --color-floor: #292929;
-  --color-accent: #d16c70;
-  --color-ok: #4ade80;
-  --color-danger: #f18b80;
-  --color-info: #60a5fa;
-  --color-warn: #facc15;
-  --wall-top: #202020;
-  --wall-bottom: #141414;
-  --wall-seam: rgba(255, 255, 255, 0.04);
-  --shadow-ground: rgba(0, 0, 0, 0.55);
-  --vignette: rgba(0, 0, 0, 0.65);
-}
-.play-page.play-theme-fading,
-.play-page.play-theme-fading *,
-.play-page.play-theme-fading *::before,
-.play-page.play-theme-fading *::after {
+:root.play-theme-fading,
+:root.play-theme-fading *,
+:root.play-theme-fading *::before,
+:root.play-theme-fading *::after {
   transition: background-color .5s ease, color .5s ease, border-color .5s ease,
     box-shadow .5s ease, fill .5s ease, stroke .5s ease !important;
 }
 @media (prefers-reduced-motion: reduce) {
-  .play-page.play-theme-fading,
-  .play-page.play-theme-fading *,
-  .play-page.play-theme-fading *::before,
-  .play-page.play-theme-fading *::after { transition: none !important; }
+  :root.play-theme-fading,
+  :root.play-theme-fading *,
+  :root.play-theme-fading *::before,
+  :root.play-theme-fading *::after { transition: none !important; }
 }

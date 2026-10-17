@@ -200,7 +200,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': contentDisposition(row.rom_name),
-    'Cache-Control': range ? 'private, no-store' : 'public, max-age=3600',
+    'Cache-Control': range ? 'private, no-store' : 'public, max-age=3600, s-maxage=2592000',
   };
   for (const name of ['accept-ranges', 'etag', 'last-modified']) {
     const value = upstream.headers.get(name);
