@@ -54,7 +54,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 必须动态渲染 —— 理由和 app/robots.ts 里那段一样：<loc> 要是绝对地址，
  * 域名只能等请求进来才知道，构建期预渲染会把它烤成兜底值（localhost）。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = 86400;
 
 type ChangeFrequency = NonNullable<MetadataRoute.Sitemap[number]['changeFrequency']>;
 

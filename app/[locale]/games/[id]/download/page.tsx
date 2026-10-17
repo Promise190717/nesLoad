@@ -125,3 +125,6 @@ export default async function GameDownloadPage({
     </GamesShell>
   );
 }
+
+export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';
+export const revalidate = 86400;

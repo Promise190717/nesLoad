@@ -4,9 +4,8 @@ import { SITE_NAME } from './i18n';
 /*
  * 社交卡片图（og:image / twitter:image）的画法。
  *
- * 放在 lib/ 而不是直接写在 app/opengraph-image.tsx 里：og 和 twitter 两张图**必须是同一张**，
- * 而 Next 的文件约定要求两边各有一个文件（app/opengraph-image.* 与 app/twitter-image.*）。
- * 把画法抽到这里，两个约定文件各自只是「声明元信息 + 调一次 render」，改版式只用改一处。
+ * 由 /opengraph-image 和 /twitter-image 两个静态 Route Handler 共用，
+ * 两个独立根布局在 metadata 中显式引用它们。
  *
  * ── 几个刻意的决定 ─────────────────────────────────────────────
  *

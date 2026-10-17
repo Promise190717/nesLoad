@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Existing production Worker, confirmed in the Cloudflare dashboard.
+  "name": "nesload",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "nesload" }],
+  "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "nesload-next-cache" }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "NEXT_CACHE_DO_QUEUE", "class_name": "DOQueueHandler" },
+      { "name": "NEXT_TAG_CACHE_DO_SHARDED", "class_name": "DOShardedTagCache" }
+    ]
+  },
+  "migrations": [{ "tag": "next-cache-v1", "new_sqlite_classes": ["DOQueueHandler", "DOShardedTagCache"] }],
+  "observability": { "enabled": true },
+  "vars": {
+    "SITE_URL": "https://www.retrogamesonline.fun",
+    "NEXT_CACHE_DO_QUEUE_MAX_REVALIDATION": "1"
+  }
+}

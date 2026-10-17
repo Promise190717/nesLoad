@@ -1,8 +1,8 @@
-import type { Metadata } from 'next';
+'use client';
 import Link from 'next/link';
 import GamesShell from '@/components/GamesShell';
 import { localePath, translate } from '@/lib/i18n';
-import { readLocale } from '@/lib/server/locale';
+import { useI18n } from '@/components/I18nProvider';
 
 /**
  * `/games/<id>` 与 `/games/<id>/download` 共用的一页 404。
@@ -17,16 +17,9 @@ import { readLocale } from '@/lib/server/locale';
  * `robots: noindex` 是必须的：404 页面本来就不该被收录（虽然 Next 返回的状态码
  * 已经是 404、搜索引擎自己也不会收，但显式写死更稳）。
  */
-export async function generateMetadata(): Promise<Metadata> {
-  const locale = await readLocale();
-  return {
-    title: translate(locale, 'gamesPage.notFoundTitle'),
-    robots: { index: false, follow: true },
-  };
-}
 
-export default async function GameNotFound() {
-  const locale = await readLocale();
+export default function GameNotFound() {
+  const { locale } = useI18n();
   const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
   const allGames = localePath(locale, '/games');
 

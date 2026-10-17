@@ -1,8 +1,8 @@
-import type { Metadata } from 'next';
+'use client';
 import Link from 'next/link';
 import GamesShell from '@/components/GamesShell';
 import { localePath, translate } from '@/lib/i18n';
-import { readLocale } from '@/lib/server/locale';
+import { useI18n } from '@/components/I18nProvider';
 
 /**
  * `/consoles/<type>` 的 404。
@@ -15,16 +15,9 @@ import { readLocale } from '@/lib/server/locale';
  *
  * `robots: noindex` 显式写死：404 本来就不该被收录，写出来更稳。
  */
-export async function generateMetadata(): Promise<Metadata> {
-  const locale = await readLocale();
-  return {
-    title: translate(locale, 'consolesPage.notFoundTitle'),
-    robots: { index: false, follow: true },
-  };
-}
 
-export default async function ConsoleNotFound() {
-  const locale = await readLocale();
+export default function ConsoleNotFound() {
+  const { locale } = useI18n();
   const t = (key: Parameters<typeof translate>[1]) => translate(locale, key);
   const allConsoles = localePath(locale, '/consoles');
 

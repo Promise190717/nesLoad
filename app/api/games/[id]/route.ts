@@ -25,8 +25,10 @@ import { NextResponse } from 'next/server';
 import { getGameCached } from '@/lib/server/games';
 
 export const runtime = 'nodejs';
-// 走 D1 实时读，别让构建期把它静态化（构建时并没有数据库凭据）
-export const dynamic = 'force-dynamic';
+// Public game metadata is the same for every viewer, including static players.
+export const dynamic = 'force-static';
+export const revalidate = 86400;
+export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;

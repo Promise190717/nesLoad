@@ -56,6 +56,7 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { catalogRewrite } from '@/lib/catalog-route';
 import { SESSION_COOKIE, verifySession } from '@/lib/server/session';
 import {
   DEFAULT_LOCALE,
@@ -102,6 +103,36 @@ function adminLocale(): Locale {
  * 语言路由。返回一个响应就表示「这条请求到此为止」，返回 null 表示
  * 「没有特殊处理，交给调用方放行」。
  */
+function publicRoute(request: NextRequest, locale: Locale, path: string): NextResponse {
+  const url = request.nextUrl.clone();
+  // Keep old shared room links working before serving the static landing page.
+  if (path === '/') {
+    const old = new URLSearchParams();
+    for (const key of ['id', 'room']) {
+      const values = url.searchParams.getAll(key);
+      if (values.length === 1 && values[0].trim()) old.set(key, values[0].trim());
+    }
+    if (old.size) {
+      url.pathname = LOCALE_PREFIX[locale] + '/room';
+      url.search = old.toString();
+      return NextResponse.redirect(url, 307);
+    }
+  }
+  let variant: string | null;
+  try {
+    variant = catalogRewrite(path, url.searchParams);
+  } catch {
+    return new NextResponse('Query is too long', { status: 414 });
+  }
+  if (variant) {
+    url.pathname = '/' + locale + variant;
+    return NextResponse.rewrite(url, { request: { headers: withLocale(request.headers, locale) } });
+  }
+  if (locale !== DEFAULT_LOCALE) return NextResponse.next({ request: { headers: withLocale(request.headers, locale) } });
+  url.pathname = EN_PREFIX + (path === '/' ? '' : path);
+  return NextResponse.rewrite(url, { request: { headers: withLocale(request.headers, locale) } });
+}
+
 function routeLocale(request: NextRequest): NextResponse | null {
   const { pathname } = request.nextUrl;
 
@@ -131,9 +162,7 @@ function routeLocale(request: NextRequest): NextResponse | null {
     const prefix = LOCALE_PREFIX[locale];
     if (!prefix) continue;
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
-      return NextResponse.next({
-        request: { headers: withLocale(request.headers, locale) },
-      });
+      return publicRoute(request, locale, pathname.slice(prefix.length) || '/');
     }
   }
 
@@ -156,11 +185,7 @@ function routeLocale(request: NextRequest): NextResponse | null {
   }
 
   // 英文：rewrite 进 `[locale]` 段（地址栏不变），顺手把语言写进请求头
-  const url = request.nextUrl.clone();
-  url.pathname = `${EN_PREFIX}${pathname === '/' ? '' : pathname}`;
-  return NextResponse.rewrite(url, {
-    request: { headers: withLocale(request.headers, DEFAULT_LOCALE) },
-  });
+  return publicRoute(request, DEFAULT_LOCALE, pathname);
 }
 
 export async function middleware(request: NextRequest) {

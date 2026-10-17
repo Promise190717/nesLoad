@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { trackSiteHistory } from '@/lib/site-history';
 import {
   LOCALE_COOKIE,
@@ -42,7 +42,7 @@ function isAdminPath(pathname: string): boolean {
 /**
  * 语言上下文。
  *
- * **首屏的 locale 从哪来**：`app/layout.tsx` 在服务端按路径算好（`readLocale()`），
+ * **首屏的 locale 从哪来**：`app/[locale]/layout.tsx` 在服务端从路径参数算好，
  * 但这里**不用它当最终答案** —— 客户端导航（`<Link>` 点一下）不会重新渲染根布局，
  * 那个 prop 会一直停在首屏的值上，从 `/` 点进 `/zh/games` 之后它还是 `en`。
  * 所以真正的来源是 **`usePathname()`**：地址变了它就跟着变，这是唯一能跟上导航的信号。
@@ -64,7 +64,6 @@ export function I18nProvider({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   useEffect(trackSiteHistory, []);
 
   const admin = isAdminPath(pathname);
@@ -106,7 +105,7 @@ export function I18nProvider({
      */
     const hrefIn = (next: Locale) => {
       if (admin) return pathname;
-      const query = searchParams.toString();
+      const query = typeof window === 'undefined' ? '' : window.location.search.slice(1);
       return localePath(next, splitLocalePath(pathname).path) + (query ? `?${query}` : '');
     };
 
@@ -117,7 +116,7 @@ export function I18nProvider({
       hrefIn,
       rememberLocale,
     };
-  }, [locale, pathname, searchParams, rememberLocale]);
+  }, [locale, pathname, admin, rememberLocale]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

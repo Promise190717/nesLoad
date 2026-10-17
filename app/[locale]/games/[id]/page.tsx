@@ -1,6 +1,6 @@
+import { cached } from '@/lib/server/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
 import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
@@ -22,7 +22,6 @@ import {
   type MessageKey,
 } from '@/lib/i18n';
 import { gameLanguageLabel } from '@/lib/rom-lang';
-import { USER_SESSION_COOKIE, verifyUserSession } from '@/lib/server/app-session';
 import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
@@ -46,9 +45,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * `/room?id=` —— 而**首页也认这两个参数**（`?id=` / `?room=` 一律 307 透传到 `/room`），
  * 所以老链接照样能用。见 `app/[locale]/page.tsx` 里那段重定向。
  *
- * **不用 `generateStaticParams` 预渲染**：游戏是后台上传的、库随时在变，构建期
- * 并不知道有哪些 id；而且语言要先读 cookie。所以这条路由是**按需动态渲染**的
- * （本来也不会被静态化：读 cookie + 读 D1）。
+ * 常用游戏构建期预生成，剩余详情按需生成；公共 HTML 缓存 24 小时。
  */
 const loadGame = cache(async (id: string) => getGameCached(id));
 
@@ -64,11 +61,7 @@ const loadGame = cache(async (id: string) => getGameCached(id));
  *
  * 用 `cache()` 包一层（同 `loadGame`）：一次渲染里它只会被读一遍。
  */
-const readViewer = cache(async (): Promise<string | null> => {
-  const store = await cookies();
-  const session = await verifyUserSession(store.get(USER_SESSION_COOKIE)?.value);
-  return session?.uid ?? null;
-});
+
 
 /**
  * 说明文字的长度上限。
@@ -252,12 +245,11 @@ export default async function GameDetailPage({
    *   · `readViewer` —— 评论模块要的登录态（**不查库**，见上面那个函数的注释）。
    * 代价是 404 时那几句查询白跑一次 —— 404 是少数，不值得为它让每个正常页面多等一程。
    */
-  const [locale, game, origin, favoriteCount, viewer] = await Promise.all([
+  const [locale, game, origin, favoriteCount] = await Promise.all([
     readLocaleParam(params),
     loadGame(id),
     resolveSiteOrigin(),
-    countGameFavorites(id),
-    readViewer(),
+    countFavorites(id),
   ]);
   if (!game) notFound();
 
@@ -525,7 +517,12 @@ export default async function GameDetailPage({
         传下去的两样东西都在这儿现算：`signedIn` 来自 `readViewer()`（服务端读 cookie，
         **所以首屏就是对的**，不会先画输入框再跳成「去登录」），`signInHref` 见上面那段注释。
       */}
-      <GameComments gameId={game.id} signedIn={viewer !== null} signInHref={signInHref} />
+      <GameComments gameId={game.id} signInHref={signInHref} />
     </GamesShell>
   );
 }
+
+export const revalidate = 86400;
+const countFavorites = cached(countGameFavorites, ['game-favorite-count'], { revalidate: 86400 });
+
+export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';

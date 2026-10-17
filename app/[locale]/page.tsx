@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import ConsoleCard from '@/components/ConsoleCard';
@@ -39,11 +38,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   副作用和后台上传游戏那条一样：新传的游戏最多晚 24 小时出现在首页
  *   （`/games` 那边 2026-10-16 起也是 24 小时，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
  *
- * - ⚠️ **这里没有、也不该有 `export const revalidate`**：写它不会让这一页的 HTML 被缓存。
- *   根布局 `app/layout.tsx` 要读 cookie / 请求头决定语言（`readLocale()`），
- *   整个应用因此都走动态渲染，页面级 `revalidate` 对路由缓存不起作用。
- *   首页真正在用的 Next 缓存是**数据层**那三个 `unstable_cache`（见上一条），
- *   这也正是本项目一贯的做法：缓存留在「页-侧」，不要下沉到数据层。
+ * - 公共 HTML 按 locale 预生成并缓存 24 小时；旧房间查询链接由 middleware 转发。
  *
  * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），
  *   最后按开发商（八家）。参考站还有「类型 / 系列」两个维度，本站没有那两张表
@@ -54,7 +49,6 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   和联机分享出去的房间链接（`?room=<码>`）在 2026-10-13 之前都是挂在 `/` 上的，
  *   已经分享出去的地址不该因为这次拆分失效。见下面那段重定向。
  */
-type SearchParams = Record<string, string | string[] | undefined>;
 
 /** 「按开发商浏览」取 8：两行正好排满（sm 起一行 4 个）。 */
 const DEVELOPER_COUNT = 8;
@@ -67,7 +61,7 @@ const HOME_CONSOLE_COUNT = 8;
  * ⚠️ 顺序不重要（透传时按这里的顺序重排一遍），但**只认这三个**：别的参数
  * （比如广告投放带进来的 `utm_*`）跟着透传只会把 `/room` 的地址弄脏。
  */
-const ROOM_PARAMS = ['id', 'room'] as const;
+
 
 /**
  * 折叠问答。写成「键名的两两配对」而不是在 JSX 里拼字符串：
@@ -122,31 +116,10 @@ function Section({
   );
 }
 
-export default async function HomePage({
-  params: routeParams,
-  searchParams,
-}: {
-  params: Promise<{ locale: string }>;
-  searchParams: Promise<SearchParams>;
-}) {
-  const [locale, params] = await Promise.all([readLocaleParam(routeParams), searchParams]);
+export const revalidate = 86400;
+export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
+  const locale = await readLocaleParam(params);
 
-  /*
-   * 旧地址透传。**必须排在任何取数之前** —— 这一步是纯地址纠正，不该先白打三趟 D1
-   * 再把人踢走。
-   *
-   * 用 `redirect()`（307，非永久）而不是 301：目标地址**依赖 query**（`?id=` 的值要跟着走），
-   * 永久重定向会被浏览器和 CDN 缓存成「`/` 永远是 `/room`」，把首页自己弄没了。
-   */
-  const passthrough = new URLSearchParams();
-  for (const key of ROOM_PARAMS) {
-    const value = params[key];
-    /* 重复参数（`?id=a&id=b`）不是字符串 —— 一律当没给，和列表页 `single()` 同一套规矩 */
-    if (typeof value === 'string' && value.trim()) passthrough.set(key, value.trim());
-  }
-  if ([...passthrough.keys()].length > 0) {
-    redirect(localePath(locale, `/room?${passthrough.toString()}`));
-  }
 
   /*
    * 三份数据互不依赖，并行取。

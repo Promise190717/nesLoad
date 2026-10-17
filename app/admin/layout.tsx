@@ -1,9 +1,11 @@
+import SiteDocument, { siteMetadata } from '@/components/SiteDocument';
+export { viewport } from '@/components/SiteDocument';
 import type { Metadata } from 'next';
 
 /*
  * /admin 整个子树的 metadata。
  *
- * 这个 layout 自己不渲染任何东西（`children` 原样返回）—— 它存在的唯一理由是
+ * 这个独立根布局提供固定中文的 SiteDocument，同时
  * **给后台挂一道 noindex**，而 metadata 只能在 layout / page 里导出。
  *
  * 为什么放在 `app/admin/layout.tsx` 而不是 `(panel)/layout.tsx`：
@@ -19,6 +21,7 @@ import type { Metadata } from 'next';
  */
 export async function generateMetadata(): Promise<Metadata> {
   return {
+    ...await siteMetadata('zh'),
     title: '后台',
     robots: {
       index: false,
@@ -30,5 +33,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return <SiteDocument locale="zh">{children}</SiteDocument>;
 }

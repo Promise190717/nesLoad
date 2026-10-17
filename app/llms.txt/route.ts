@@ -23,7 +23,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * http://localhost:3000 的 llms.txt。显式声明动态渲染，等于把「每次请求现算」
  * 写死在路由配置里，不再依赖 headers() 抛内部错误那套隐式机制。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = 86400;
 
 export async function GET() {
   const origin = await resolveSiteOrigin();
