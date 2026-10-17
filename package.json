@@ -11,7 +11,8 @@
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare preview",
     "cf:deploy": "opennextjs-cloudflare deploy",
-    "test:static": "node scripts/test-static-routing.mjs"
+    "test:static": "node scripts/test-static-routing.mjs",
+    "test:rom": "node scripts/test-rom-proxy.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1148.0",

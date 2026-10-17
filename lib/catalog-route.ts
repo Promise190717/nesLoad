@@ -17,7 +17,11 @@ export function catalogRewrite(path: string, query: URLSearchParams): string | n
 
 export function decodeCatalogQuery(query: string): Record<string, string | string[]> {
   const result: Record<string, string | string[]> = Object.create(null);
-  const values = new URLSearchParams(query);
+  // Next may pass the encoded path segment to the page, but the decoded
+  // segment to metadata. A serialized query always has a literal '=';
+  // only unwrap the path encoding when that separator is still encoded.
+  // Decoding an already-unwrapped query would corrupt escaped '&' and '+'.
+  const values = new URLSearchParams(query.includes('=') ? query : decodeURIComponent(query));
   for (const key of values.keys()) {
     const all = values.getAll(key);
     result[key] = all.length === 1 ? all[0] : all;

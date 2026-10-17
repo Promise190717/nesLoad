@@ -2,6 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   // Existing production Worker, confirmed in the Cloudflare dashboard.
   "name": "nesload",
+  // Runtime variables are also maintained in the Cloudflare dashboard.
+  // Preserve entries not explicitly listed in vars when publishing new code.
+  "keep_vars": true,
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],

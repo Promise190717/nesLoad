@@ -10,6 +10,23 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
 4. Cloudflare Git 构建命令使用 `pnpm cf:build`，部署命令使用 `pnpm cf:deploy`。部署命令会填充构建期缓存；不要直接用裸 `wrangler deploy` 跳过这一步。
 5. 本地验证：`pnpm cf:build` 后运行 `pnpm cf:preview`，它使用本地存储，不会发布到线上。OpenNext 推荐在 Linux/WSL 或 Cloudflare 的 Linux 构建环境打包。
 
+### 构建变量与运行时变量必须分别配置
+
+Cloudflare 的「设置 → 构建 → 构建变量和机密」只供构建使用；线上接口需要在「设置 → 变量和机密」另行配置。预生成页面可以正常展示，并不代表动态接口已经有数据库凭据。
+
+| 变量 | 构建环境 | 运行时环境 |
+| --- | --- | --- |
+| `CF_ACCOUNT_ID` | 必需 | 必需 |
+| `D1_DATABASE_ID` | 必需 | 必需 |
+| `CF_D1_API_TOKEN` | 必需，设为机密 | 必需，设为机密 |
+| `R2_PUBLIC_BASE` | 必需 | 必需 |
+| `SITE_URL` | 建议显式配置 | 已在 Wrangler 的 vars 中配置 |
+| `SESSION_SECRET` | 不需要 | 登录和账户功能必需，设为机密 |
+
+运行时的 R2 上传凭据、Turnstile 等其他配置也应保留原值，不要因补数据库变量而重置。保存控制台变量时点击「部署」使它们应用到正式 Worker。
+
+`wrangler.jsonc` 已设置 `keep_vars: true`，以保留控制台中的普通运行时变量。这个选项只能防止后续部署覆盖变量，无法恢复此前已删除的值。机密值不应写入仓库；可从本地 `.env.local` 复制相应值到控制台。
+
 DO 使用 SQLite 类，配置未要求升级 Workers Paid；R2、DO 和 Workers 各有自己的免费额度，仍需在控制台查看实际用量。此次修改没有创建远程资源、修改套餐或发布 Worker。
 
 ## 页面策略

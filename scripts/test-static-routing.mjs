@@ -18,6 +18,13 @@ const encoded = route('/games', 'q=超级马里奥&page=2&page=3').split('/').at
 const decoded = decodeCatalogQuery(decodeURIComponent(encoded));
 assert.equal(decoded.q, '超级马里奥');
 assert.deepEqual(decoded.page, ['2', '3']);
+for (const query of ['lang=zh', 'lang=ja&page=2', 'q=A%26B%2BC%3D%25&lang=zh', 'lang=zh&lang=en']) {
+  const segment = route('/consoles/arcade', query).split('/').at(-1);
+  const expected = decodeCatalogQuery(decodeURIComponent(segment));
+  assert.deepEqual(decodeCatalogQuery(segment), expected);
+}
+assert.equal(decodeCatalogQuery('lang%3Dzh').lang, 'zh');
+assert.equal(decodeCatalogQuery('q%3DA%2526B%252BC%253D%2525').q, 'A&B+C=%');
 assert.throws(() => route('/games', `q=${'x'.repeat(2049)}`), RangeError);
 console.log('Catalog cache keys: language-independent payload, query isolation, Unicode, duplicate params and private-route exclusion passed.');
 
@@ -43,6 +50,12 @@ if (process.env.TEST_BASE_URL) {
     assert.match(again.response.headers.get('cache-control'), /s-maxage=86400/);
   }
   const second = await get('/games?page=2');
+  const filtered = await get('/zh/consoles/arcade?lang=zh');
+  assert.equal(filtered.response.status, 200);
+  const selectedLanguage = filtered.html.match(/<a\b[^>]*aria-current="true"[^>]*>[\s\S]*?<\/a>/g) ?? [];
+  assert.equal(selectedLanguage.length, 1);
+  assert.match(selectedLanguage[0], /href="\/zh\/consoles\/arcade\?lang=zh"/);
+  assert.match(selectedLanguage[0], /简体中文/);
   assert.match(second.html, /<title>[^<]*\(2\)/);
   const search = await get('/games?q=mario');
   assert.match(search.html, /<title>[^<]*mario/);
