@@ -6,7 +6,6 @@ import { useI18n } from '@/components/I18nProvider';
 
 /**
  * 全站 404。
- *
  * 谁会用上它：`app/[locale]/` 里没有对应路径的任何地址
  * （`/zh/foo`、`/games/typo` 那种连段都没匹配上的），以及
  * `app/[locale]/layout.tsx` 里那个「locale 不合法」的 `notFound()`。
@@ -46,7 +45,9 @@ export default function NotFound() {
       /* 不挂顶栏，所以左上角那行右边补一颗「首页」（2026-10-13 用户要求，见 GamesShell） */
       showHomeLink
     >
-      <p className="mt-8 text-[13px] leading-7 text-ink-400">{t('notFound.description')}</p>
+      <p className="mt-8 text-[13px] leading-7 text-ink-400">
+        {t('notFound.description')}
+      </p>
       <p className="mt-4">
         <Link
           href={room}
