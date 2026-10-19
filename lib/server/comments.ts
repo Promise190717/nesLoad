@@ -29,7 +29,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { query } from './d1';
-import { publicUrl } from './r2';
+import { publicUrlOrNull } from './r2';
 
 /** 一页多少条。评论比留言本密（一款热门的下面可能攒几十条），一次多给几条。 */
 export const COMMENT_PAGE_SIZE = 10;
@@ -99,7 +99,8 @@ function toComment(row: CommentRow): Comment {
     gameId: row.game_id,
     userId: row.user_id,
     username: row.live_username ?? row.username,
-    avatarUrl: row.avatar_key ? publicUrl(row.avatar_key) : null,
+    // 头像同样是**展示用**字段，用软版拼（缺 R2_PUBLIC_BASE 时回 null，不把整页评论带走）
+    avatarUrl: publicUrlOrNull(row.avatar_key),
     content: row.content,
     rating: row.rating,
     createdAt: row.created_at,

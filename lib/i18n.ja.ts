@@ -294,6 +294,7 @@ export const ja: Record<MessageKey, string> = {
   'play.downloading': 'ROM をダウンロード中…',
   'play.booting': 'コアを起動中…',
   'play.loadFail': 'このカセットは読み込めませんでした。',
+  'play.romIncomplete': 'ROM ファイルが不完全です。もう一度読み込んでください。',
   'play.notFound': 'そのゲームは見つかりませんでした。',
   'play.fullscreen': '全画面',
   'play.volume': '音量',

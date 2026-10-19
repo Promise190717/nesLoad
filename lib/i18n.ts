@@ -778,6 +778,7 @@ const en = {
   'play.downloading': 'Downloading the ROM…',
   'play.booting': 'Starting the core…',
   'play.loadFail': 'This cartridge failed to load.',
+  'play.romIncomplete': 'The ROM file is incomplete — please load it again.',
   'play.notFound': 'That game could not be found.',
   'play.fullscreen': 'Fullscreen',
   /* 右侧操作表上那个音量行的说明词（音量档位本身复用 `volume.*`） */
@@ -1909,6 +1910,7 @@ const zh: Record<MessageKey, string> = {
   'play.downloading': '正在下载游戏文件…',
   'play.booting': '正在启动核心…',
   'play.loadFail': '这盘游戏载入失败。',
+  'play.romIncomplete': '游戏文件不完整，请重新载入。',
   'play.notFound': '找不到这个游戏。',
   'play.fullscreen': '全屏',
   'play.volume': '音量',

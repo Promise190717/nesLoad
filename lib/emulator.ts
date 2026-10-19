@@ -3,6 +3,7 @@
 import { Nostalgist } from 'nostalgist';
 import { resolveArcadeCore } from './arcade-core';
 import { installAudioTap, trackEmulatorAudio } from './audio-tap';
+import { checkChdIntegrity } from './chd';
 import { releaseEmulatorRuntime, trackCanvasRuntime, trackRuntimeListeners, type EmulatorRuntime } from './emulator-runtime';
 import { biosTypeFor } from './bios';
 import { downloadFile } from './download';
@@ -81,6 +82,22 @@ export class UnsupportedRomError extends Error {
   constructor() {
     super('unsupported-rom');
     this.name = 'UnsupportedRomError';
+  }
+}
+
+/**
+ * ROM 文件本身不完整（目前只有 `.chd` 会抛，判据见 `lib/chd.ts`）。
+ *
+ * 和 `UnsupportedRomError` 一样只带错误码 —— 文案由界面层按语言翻。
+ *
+ * 为什么值得单列一个类型：这一类失败**不是格式不认，而是文件坏了**，
+ * 能给的准话是「重新下一遍」，而「这盘游戏载入失败」那种泛泛的提示会让人
+ * 以为换一盘游戏就好。更糟的是它以前根本不报错（核心静默退回主菜单）。
+ */
+export class IncompleteRomError extends Error {
+  constructor() {
+    super('incomplete-rom');
+    this.name = 'IncompleteRomError';
   }
 }
 
@@ -1293,6 +1310,111 @@ function attachEjsKeyboard(
   };
 }
 
+/*
+ * ===== 大文件落盘：绕开 Nostalgist 的 `writeFile` =====
+ *
+ * 背景（2026-10-19，PS1 大批游戏报「载入失败：TypeError: out of memory」）：
+ *
+ * `EmulatorFileSystem.writeFile`（nostalgist.js:2314）为了写**一个**文件要拷四份：
+ *
+ *   1. `ResolvableFile.getUint8Array()` → `blob.arrayBuffer()`，整份进 JS 堆，
+ *      而且这份**会一直挂在 `options.rom` 上** —— `loadContent()` 末尾那句
+ *      `isZip(await this.getUint8Array())` 让它在启动时就materialize，不是惰性的；
+ *   2. `FS.createDataFile("/", name, buffer, true, false)` —— `canOwn` 为假，再拷一份；
+ *   3. `readFile(name, "binary")` —— 又拷一份；
+ *   4. `FS.writeFile(filePath, data, …)` —— 再拷一份落到目标路径。
+ *
+ * 306 MiB 的 `.chd` 峰值就是 ~1.2 GiB；站上还有 790 MiB 的 bin（PS1 里 85 个 > 512 MiB），
+ * 那条路必然把标签页打死 —— 核心根本没机会启动，所以症状是「载入失败」而不是黑屏。
+ *
+ * 这里换个走法：内容**不进 `rom`**（换成 0 字节占位，只为让 Nostalgist 照原样建好目录、
+ * 算出 `rom[0].name` 那条启动路径和存档路径），真字节在 `beforeLaunch` 里直接写进虚拟
+ * 文件系统 —— 一次 `new Uint8Array(size)` + 8 MiB 的 Blob 切片，峰值就是「文件本身一份」。
+ *
+ * 为什么落在 `beforeLaunch`：Nostalgist 的启动顺序是
+ * `setupFileSystem()`（写 rom/bios/sram）→ `beforeLaunch`（**await 过的**）→ `runMain()`，
+ * 这是唯一「文件系统已就绪、核心还没开始读」的可插入点。
+ * ⚠️ 别挪去 `preRun`：那会儿 `setupFileSystem` 还没跑，写进去会被占位文件盖掉。
+ * ⚠️ 也别指望改 `FS.writeFile` / `FS.createDataFile` 打补丁 —— 第 1 份拷贝在
+ *    `ResolvableFile` 里，补丁够不着。
+ */
+
+/** 超过这个大小才走上面的分流；小文件继续走 Nostalgist 原路，少改一条本来没事的路。 */
+const STREAM_ROM_THRESHOLD = 32 * 1024 * 1024;
+
+/** 流式写入的切片大小 —— 也就是「临时多出来的那点内存」的上限。 */
+const ROM_STREAM_CHUNK = 8 * 1024 * 1024;
+
+/**
+ * 内容目录。
+ * ⚠️ 手抄自 nostalgist.js 的 `EmulatorFileSystem.contentDirectory`（那里是
+ * `path.join(userdataDirectory, "content")`），升级 Nostalgist 要核一眼。
+ */
+const CONTENT_DIRECTORY = '/home/web_user/retroarch/userdata/content';
+
+/** 占位用的空内容 —— 名字还在，字节由 `writeRomIntoFs` 事后补上。 */
+const EMPTY_BLOB = new Blob([]);
+
+/**
+ * 虚拟文件系统里**写入**要用的那几个接口（`Module.FS`）。
+ * 和上面 `EmscriptenFs`（只读、读存档用）分开，免得一个接口越滚越大。
+ */
+interface WritableEmscriptenFs {
+  mkdirTree(path: string): void;
+  unlink(path: string): void;
+  createDataFile(
+    parent: string,
+    name: string,
+    data: Uint8Array | null,
+    canRead: boolean,
+    canWrite: boolean,
+    canOwn: boolean
+  ): unknown;
+}
+
+/** 一个待流式落盘的 ROM：`index` 是它在 `rom` 数组里的位置（真名得回去问 Nostalgist）。 */
+interface StagedRom {
+  index: number;
+  blob: Blob;
+}
+
+/**
+ * 把 `source` 的字节写进虚拟文件系统的 `path`，**全程只有一份副本**。
+ *
+ * `canOwn = true` 是关键：MEMFS 的 `write()` 遇到它直接
+ * `node.contents = buffer.subarray(…)`，不复制（见核心 js 里的 MEMFS.write）；
+ * 传 false 会走 `expandFileStorage()` + `set()`，又是一整份。
+ *
+ * ⚠️ 传进来的数组**不能**是 `HEAP8` 的视图 —— MEMFS 对那种会强制 `canOwn = false`。
+ *    这里是普通 JS 堆上的 `new Uint8Array`，没问题。
+ */
+async function writeRomIntoFs(
+  fs: WritableEmscriptenFs,
+  path: string,
+  source: Blob
+): Promise<void> {
+  const cut = path.lastIndexOf('/');
+  const directory = path.slice(0, cut);
+  const name = path.slice(cut + 1);
+  fs.mkdirTree(directory);
+  const bytes = new Uint8Array(source.size);
+  for (let offset = 0; offset < bytes.length; offset += ROM_STREAM_CHUNK) {
+    const end = Math.min(offset + ROM_STREAM_CHUNK, bytes.length);
+    const chunk = await source.slice(offset, end).arrayBuffer();
+    bytes.set(new Uint8Array(chunk), offset);
+  }
+  /*
+   * 占位文件已经在那儿了，而 `createDataFile` 内部是
+   * `FS.open(path, O_CREAT|O_EXCL|O_WRONLY)` —— 不先删会 EEXIST。
+   */
+  try {
+    fs.unlink(path);
+  } catch {
+    /* 占位文件不在了也无所谓。 */
+  }
+  fs.createDataFile(directory, name, bytes, true, true, true);
+}
+
 export class EmulatorController {
   private instance: Nostalgist | null = null;
   private currentRom: LoadedRom | null = null;
@@ -1537,6 +1659,26 @@ export class EmulatorController {
     }
 
     /*
+     * PS1 的 `.chd` 在交给核心之前先做一次**结构自检**（判据在 `lib/chd.ts`）。
+     *
+     * 为什么非得在这里拦：`.chd` 的 hunk 映射表在**文件最末尾**，下载链路断一次它就没了。
+     * 核心侧 `chd_open()` 读 map 短读 → 返回错误 → `retro_load_game()` 返回 false →
+     * RetroArch **静默退回主菜单**（屏幕上只有「Select which core to use.」）。
+     * 那条失败路径和「游戏启动了但没画面」长得一模一样，日志里也留不下东西 ——
+     * 与其让用户对着一个菜单猜，不如在这里给一句准话。
+     */
+    if (consoleType === 'ps1' && /\.chd$/i.test(romFileName)) {
+      const integrity = await checkChdIntegrity(romContent);
+      if (integrity === 'truncated') {
+        console.error(
+          `[nesload] 「${romFileName}」结构不完整：CHD 的 map 表越过了文件末尾` +
+            `（文件只有 ${romContent.size} 字节）—— 多半是下载被截断，重新下一遍。`
+        );
+        throw new IncompleteRomError();
+      }
+    }
+
+    /*
      * 喂给 Nostalgist 的内容：**普通情况是一个文件，光盘套装是「cue + bin」一串**。
      *
      * `rom` 选项本来就收数组（Nostalgist 的 d.ts 里官方示例是
@@ -1554,6 +1696,18 @@ export class EmulatorController {
     for (const companion of unwrapped?.companions ?? []) {
       romFiles.push({ fileName: companion.name, fileContent: companion });
     }
+
+    /*
+     * 大文件分流（来龙去脉见 `writeRomIntoFs` 上面那段）：
+     * 超过阈值的**内容换成 0 字节占位**，真字节留给 `beforeLaunch` 流式写。
+     * 名字一个都不动 —— 核心加载哪一盘、存档落在哪儿，全看 `rom[0].name`。
+     */
+    const stagedRoms: StagedRom[] = [];
+    const romPayload = romFiles.map((entry, index) => {
+      if (entry.fileContent.size <= STREAM_ROM_THRESHOLD) return entry;
+      stagedRoms.push({ index, blob: entry.fileContent });
+      return { fileName: entry.fileName, fileContent: EMPTY_BLOB };
+    });
 
     /*
      * 核心从哪儿来：**除了 NES / SFC，全部走本站静态文件**（`public/cores/`）。
@@ -1626,9 +1780,42 @@ export class EmulatorController {
     };
     try {
       nostalgist = await Nostalgist.launch({
-        beforeLaunch: (instance) => {
+        /*
+         * ⚠️ 这个回调**是 await 的**（nostalgist.js 的 `await this.runEventListeners("beforeLaunch")`），
+         * 所以大文件可以在这里慢条斯理地写完再放核心进 `runMain()`。
+         * 见 `writeRomIntoFs` 上面那段：这里是唯一「文件系统已就绪、核心还没开始读」的点。
+         */
+        beforeLaunch: async (instance) => {
           starting = instance;
           listeners = trackRuntimeListeners([window, document, canvas]);
+          if (stagedRoms.length === 0) return;
+          const fs = instance.getEmscriptenFS() as WritableEmscriptenFs;
+          /*
+           * 文件名回去问 Nostalgist，别自己拿 `romFiles[i].fileName` 拼：
+           * `ResolvableFile` 的构造会过一遍 `extractValidFileName()`，
+           * 把 `" % * / : < > ? \ |` 一律换成 `-` —— 自己拼可能和它写进去的那个对不上。
+           */
+          const roms = instance.getEmulatorOptions().rom as unknown as { name: string }[];
+          for (const staged of stagedRoms) {
+            const name = roms[staged.index]?.name;
+            if (!name) {
+              // 走到这里说明 Nostalgist 换了 rom 的排布方式，宁可炸也别静默少一盘数据。
+              throw new Error(`staged rom has no name at index ${staged.index}`);
+            }
+            await writeRomIntoFs(fs, `${CONTENT_DIRECTORY}/${name}`, staged.blob);
+            /*
+             * 留痕：这条路绕开了 Nostalgist 的写入，「文件到底进没进虚拟文件系统」
+             * 从日志上看不出来了，所以自己报一句（成功才会打出来）。
+             */
+            console.info(
+              `[nesload] 大文件直写：${name}（${staged.blob.size} 字节）→ ${CONTENT_DIRECTORY}`
+            );
+          }
+          /*
+           * 字节已经在虚拟文件系统里了，把 Blob 引用放掉 —— 这个回调会被
+           * `emulatorOptions` 一直攥着，不清就是几百 MiB 一直钉在页面上。
+           */
+          stagedRoms.length = 0;
         },
         onLaunch: stopListening,
         element: canvas,
@@ -1652,8 +1839,12 @@ export class EmulatorController {
          * ⚠️ 光盘套装（`.cue` + `.bin`）给的是**数组**，见上面 `romFiles` 那段：
          *    第一项是 `.cue`（核心按它找 bin），后面是数据文件。普通 ROM 长度恒为 1，
          *    这里退回单个对象，和以前的调用形状一模一样。
+         *
+         * ⚠️ 喂的是 `romPayload` 而不是 `romFiles`：超过 32 MiB 的那几项内容已经被换成
+         *    0 字节占位，真字节由上面的 `beforeLaunch` 流式写入（见 `writeRomIntoFs`）。
+         *    名字和顺序都没变，所以 `runMain()` 拿到的启动路径、存档路径也不变。
          */
-        rom: romFiles.length === 1 ? romFiles[0] : romFiles,
+        rom: romPayload.length === 1 ? romPayload[0] : romPayload,
         ...coreSource,
         /*
          * BIOS 只能以 `{ fileName, fileContent }` 的形式给。
@@ -1753,6 +1944,20 @@ export class EmulatorController {
         `[nesload] 启动核心失败：${file.name}（${consoleType} / ${core}）`,
         e
       );
+      /*
+       * 内存耗尽单独点一句 —— 这一类**不是文件坏了**，是这盘盘太大 / 设备可用内存不够。
+       *
+       * 只能按消息文本认：各浏览器抛的类型不一样（有 RangeError，也有环境抛 TypeError），
+       * 判据宁可宽一点。真的走到这里，说明 `writeRomIntoFs` 那份「只留一份」还是不够，
+       * 下一手要看的是这盘的字节数 vs. 设备内存，而不是 CHD 结构。
+       */
+      if (e instanceof Error && /out of memory|allocation failed|array buffer/i.test(e.message)) {
+        console.error(
+          `[nesload] 上面这条是**内存不足**，不是文件坏了：「${romFileName}」${romContent.size} 字节，` +
+            '写进虚拟文件系统后至少还要占同样多的一份。先关掉别的标签页再试；' +
+            '还不行就是这盘超过了这台设备能载入的上限。'
+        );
+      }
       throw e;
     } finally {
       stopListening();

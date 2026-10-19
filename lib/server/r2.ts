@@ -86,14 +86,40 @@ export async function uploadObject(
   );
 }
 
-/** 由对象 key 拼出公网读取地址。 */
-export function publicUrl(key: string): string {
-  const base = requireEnv('R2_PUBLIC_BASE').replace(/\/+$/, '');
+/** key → 公网地址（`publicUrl` 与 `publicUrlOrNull` 共用的拼法）。 */
+function joinPublicUrl(base: string, key: string): string {
   const path = key
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
-  return `${base}/${path}`;
+  return `${base.replace(/\/+$/, '')}/${path}`;
+}
+
+/** 由对象 key 拼出公网读取地址。**缺配置就抛** —— 拿不到地址这一类请求就没法继续。 */
+export function publicUrl(key: string): string {
+  return joinPublicUrl(requireEnv('R2_PUBLIC_BASE'), key);
+}
+
+/**
+ * 展示用字段的「软」版本：没配 `R2_PUBLIC_BASE` 就回 null，**不抛**。
+ *
+ * 为什么要有这一版（2026-10-19 线上事故）：线上 Worker 少了 `R2_PUBLIC_BASE` 这个变量，
+ * 而头像地址挂在 `toAppUser` 上、`toAppUser` 又挂在 `assertUser` 上 —— 于是那一抛
+ * 把**整个** `/api/user/*` 全带走了：个人中心的收藏 / 历史 / 存档 / 资料四个 tab 一起回
+ * 空 500（响应体是空的，连 `{error}` 都没有，因为异常发生在 try 之前）。
+ * 排查很久才落到「资源就是少了一个环境变量」。
+ *
+ * 判据：**拼不出头像地址 ≠ 这次请求该失败**。头像没有就画默认头像 —— 前端本来就支持 null
+ * （`avatarUrl: null` 是正常态，没设过头像的人天天走这条）。
+ *
+ * 仍然用严格版 `publicUrl` 的地方：上传（`uploadObject` 后要回写地址）、ROM 代理、
+ * 存档下载 —— 那些没有这配置根本没法工作，就该明确报错。
+ */
+export function publicUrlOrNull(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const base = process.env.R2_PUBLIC_BASE?.replace(/\/+$/, '');
+  if (!base) return null;
+  return joinPublicUrl(base, key);
 }
 
 /** 删除一个对象。删游戏时用来清理附件，属尽力而为，失败应被调用方忽略。 */

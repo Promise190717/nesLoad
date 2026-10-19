@@ -290,6 +290,7 @@ export const ko: Record<MessageKey, string> = {
   'play.downloading': 'ROM을 내려받는 중…',
   'play.booting': '코어를 시작하는 중…',
   'play.loadFail': '이 카트리지는 불러오지 못했습니다.',
+  'play.romIncomplete': 'ROM 파일이 불완전합니다. 다시 불러와 주세요.',
   'play.notFound': '그 게임을 찾을 수 없습니다.',
   'play.fullscreen': '전체 화면',
   'play.volume': '볼륨',

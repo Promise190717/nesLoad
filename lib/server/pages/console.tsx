@@ -439,7 +439,9 @@ export default async function ConsoleDetailPage({
           数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，24 小时缓存、
           **不跟关键词走**，和资料表里那个总数同口径）；「全部」那颗用 `gameCount`，
           也就是这个机种的总数 —— 两者出自同一份数据，不会打架。
-          ⚠️ **不筛掉 0 款的那几颗**：一个机种下没有韩语版是事实，比少一颗按钮更该让用户看到。
+          ⚠️ **0 款的语种不画**（2026-10-19 用户要求：`/consoles/nds` 上没有的语种别占位置）。
+          唯一例外是**当前正筛着的那一颗**：那份地址可能来自收藏 / 外链，标签一消失，
+          页面上就只剩一句「没有这个语种的游戏」而看不出自己在筛什么，也回不去「全部」。
           ⚠️ 切语种时**把关键词带上**、页码一律回第 1 页（换了筛选条件，第 3 页毫无意义）。
         */}
         <nav
@@ -449,6 +451,8 @@ export default async function ConsoleDetailPage({
           {[null, ...GAME_LANGUAGE_VALUES].map((code) => {
             const active = code === lang.language;
             const count = code ? (langCounts[code] ?? 0) : gameCount;
+            /* 0 款的不画；「全部」那颗（`code === null`）永远在 —— 它是默认那一份的入口 */
+            if (code && count === 0 && !active) return null;
             return (
               <Link
                 key={code ?? FILTER_ALL}

@@ -26,6 +26,7 @@ import { saveTheme } from '@/lib/theme';
 import { readMobileFlag } from '@/lib/device';
 import {
   EmulatorController,
+  IncompleteRomError,
   VOLUME_MAX,
   detectConsole,
   unsupportedArchive,
@@ -58,7 +59,7 @@ import {
   type KeyBindings,
 } from '@/lib/keybindings';
 import { readGamepads } from '@/lib/gamepad';
-import { isAbortError, readBodyWithProgress } from '@/lib/http';
+import { IncompleteBodyError, isAbortError, readBodyWithProgress } from '@/lib/http';
 import {
   listCartridges,
   pruneCartridges,
@@ -1558,6 +1559,14 @@ export default function ConsoleScene({
          */
         console.error('[nesload] 载入失败：', file.name, e);
         /*
+         * 「文件不完整」是少数几类**有准话可给**的失败之一（判据见 `lib/chd.ts` /
+         * `lib/http.ts`）：屏幕那边照旧出雪花，但至少弹一句「重新载入」，
+         * 别让人以为是这盘卡带本身不支持。
+         */
+        if (e instanceof IncompleteBodyError || e instanceof IncompleteRomError) {
+          setToast({ key: 'play.romIncomplete', kind: 'danger' });
+        }
+        /*
          * 机种认不出（`consoleType` 是 null）时给不出任何准话，只能单独认一次压缩格式 ——
          * 那是最常见的原因：街机 romset 大量以 7z / rar 流通，而 FBNeo 只吃 zip。
          */
@@ -1765,7 +1774,17 @@ export default function ConsoleScene({
       } catch (e) {
         // 用户自己掐的：不是故障，只留一行 info，别惊动 console.error
         if (isAbortError(e)) console.info('[nesload] 已取消载入：', rom.name);
-        else console.error('[nesload] 从游戏库载入失败：', rom.name, e);
+        else {
+          console.error('[nesload] 从游戏库载入失败：', rom.name, e);
+          /*
+           * 下载被截断（`IncompleteBodyError`，判据在 `lib/http.ts`）是这条路径上
+           * 唯一「重下一遍就能好」的失败 —— 它以前是**完全静默**的：坏文件照样交给
+           * 核心，`.chd` 读不到尾部的 map 表，RetroArch 退回主菜单，屏幕上什么都不说。
+           */
+          if (e instanceof IncompleteBodyError || e instanceof IncompleteRomError) {
+            setToast({ key: 'play.romIncomplete', kind: 'danger' });
+          }
+        }
       } finally {
         /*
          * 只清自己那一笔的把手。正常时序下这里不会有别人（下一盘要等

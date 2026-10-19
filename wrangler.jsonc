@@ -21,6 +21,12 @@
   "observability": { "enabled": true },
   "vars": {
     "SITE_URL": "https://www.retrogamesonline.fun",
+    // R2 的公网读取域名（头像 / 封面 / ROM 都由它拼出来）。
+    // ⚠️ 2026-10-19 线上事故：这个变量只在仪表盘里配过、后来掉了，于是带头像的账号
+    // 一调 /api/user/* 就空 500，个人中心四个 tab 全打不开。写进这里跟代码一起发版，
+    // 免得再靠「记得在仪表盘配一下」。它不是机密（浏览器天天在下载这些地址），
+    // 所以放 vars 而不是 secrets；必须和 R2 那边绑定的自定义域名一致。
+    "R2_PUBLIC_BASE": "https://games.retrogamesonline.fun",
     "NEXT_CACHE_DO_QUEUE_MAX_REVALIDATION": "1"
   }
 }

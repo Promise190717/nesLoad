@@ -14,13 +14,14 @@ import { getAudioTrack } from '@/lib/audio-tap';
 import { biosTypeFor, ensureBios } from '@/lib/bios';
 import {
   EmulatorController,
+  IncompleteRomError,
   unsupportedArchive,
   UnsupportedRomError,
   VOLUME_MAX,
   type LoadedRom
 } from '@/lib/emulator';
 import { readGamepads } from '@/lib/gamepad';
-import { isAbortError, readBodyWithProgress } from '@/lib/http';
+import { IncompleteBodyError, isAbortError, readBodyWithProgress } from '@/lib/http';
 import { unwrapRom } from '@/lib/unwrap';
 import { setPlayActive } from '@/lib/play-leave-guard';
 import { localePath, type MessageKey } from '@/lib/i18n';
@@ -680,6 +681,33 @@ export default function PlayScene({
         setRom(controller.rom);
         setPaused(false);
         setPhase('ready');
+
+        /*
+         * 云端历史（登录了才写得进；没登录会回 401，静默忽略）。
+         *
+         * ⚠️ **2026-10-19 补上**：这一页原本刻意不写历史（注释还写着「历史是房间的事」），
+         *    可详情页那颗「开始游戏」早就指向 `/play?id=` 了 —— 于是从它进来的每一局
+         *    都不进历史。现象就是个人中心的历史停在某一天不再动，而**云端存档照常在写**
+         *    （存档控件这一页有），很容易误判成「历史数据丢了」。
+         *    历史讲的是「我最近玩过什么」，和从哪扇门进来无关，所以补齐。
+         *
+         * 只写**在线库里的那款**：`game.id` 来自 `/api/games`，天然成立；本机拖进来的
+         * 文件没有 id（那种走 `load(file)`，`game` 也可能是 null），不进历史。
+         *
+         * ⚠️ 只在 `!file` 这条路上写 —— `file` 有值说明是**重载 / 恢复存档**（同一款、
+         *    时间戳刚写过），那两条不该再刷一次「最近游玩时间」。
+         *
+         * 和房间那边一样不等结果、不管成败：游戏已经跑起来了，历史写不上只是少一行记录。
+         */
+        if (!file && game?.id) {
+          void fetch('/api/user/history', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gameId: game.id }),
+          }).catch((error: unknown) => {
+            console.warn('[play] 写云端历史失败（不影响本局）：', error);
+          });
+        }
       } catch (error) {
         if (!activeRef.current) return;
         // 用户自己掐的：不是故障，回到「设置好了，点开始」那一屏
@@ -697,7 +725,16 @@ export default function PlayScene({
           if (error instanceof UnsupportedRomError && romFile) {
             setArchive(await unsupportedArchive(romFile));
           }
-          setNotice('play.loadFail');
+          /*
+           * 「文件不完整」单独给一句准话：下载短读（`IncompleteBodyError`）和
+           * `.chd` 结构自检失败（`IncompleteRomError`）都是**重下一遍就能好**的那类，
+           * 混进泛泛的「载入失败」会让人以为换一盘游戏才行。
+           */
+          setNotice(
+            error instanceof IncompleteBodyError || error instanceof IncompleteRomError
+              ? 'play.romIncomplete'
+              : 'play.loadFail'
+          );
         }
         setRom(null);
         setPhase('idle');

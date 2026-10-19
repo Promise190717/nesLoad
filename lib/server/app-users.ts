@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { query } from './d1';
-import { publicUrl } from './r2';
+import { publicUrlOrNull } from './r2';
 import { hashPassword, verifyPassword } from './users';
 
 /** 用户名长度下限 / 上限。太短容易撞、太长列表里摆不下。 */
@@ -123,8 +123,12 @@ function toAppUser(row: AppUserRow): AppUser {
      * 头像地址**现拼**：库里只存 key（`avatars/<uid>/<file>`），公网域名由
      * publicUrl() 拼出来。这样换 R2 公网域名 / 加 CDN 前缀时不必回表改数据。
      * 没设过头像（key 是 null）就给 null，前端据此画默认头像。
+     *
+     * ⚠️ 用**软版** `publicUrlOrNull`（2026-10-19 线上事故）：这个结构挂在 `assertUser`
+     *    的路径上，严格版缺少 R2_PUBLIC_BASE 时会抛，把每个 `/api/user/*` 都变成空 500。
+     *    头像拼不出来最多是画默认头像，不该连累整条请求。
      */
-    avatarUrl: row.avatar_key ? publicUrl(row.avatar_key) : null,
+    avatarUrl: publicUrlOrNull(row.avatar_key),
     /*
      * VIP 是**读时判定**：到期时间 > 现在才算。过期的人不用谁去清数据，
      * 下一次读出来自然就是非会员（vipExpiresAt 仍带着过期的那一天，
