@@ -22,6 +22,7 @@ Cloudflare 的「设置 → 构建 → 构建变量和机密」只供构建使�
 | `R2_PUBLIC_BASE` | 必需 | 必需 |
 | `SITE_URL` | 建议显式配置 | 已在 Wrangler 的 vars 中配置 |
 | `SESSION_SECRET` | 不需要 | 登录和账户功能必需，设为机密 |
+| `CATALOG_SOURCE` | 不需要 | 前台目录来源：`upstream`（默认，读源站）/ `d1`（读数据库），已在 Wrangler 的 vars 中配置 |
 
 运行时的 R2 上传凭据、Turnstile 等其他配置也应保留原值，不要因补数据库变量而重置。保存控制台变量时点击「部署」使它们应用到正式 Worker。
 

@@ -9,6 +9,7 @@ import PlayScene from './PlayScene';
 import { useI18n } from './I18nProvider';
 import { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import { consoleLabel } from '@/lib/consoles';
+import { GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
 import type { Locale } from '@/lib/i18n';
 
 /**
@@ -56,11 +57,12 @@ function PlayGameInfo({ game, locale, to }: { game: LibraryGame; locale: Locale;
   );
 }
 
-function PlaySession({ id, game, room, host }: {
+function PlaySession({ id, game, room, host, lang }: {
   id: string;
   game: LibraryGame | null | undefined;
   room: string;
   host: boolean;
+  lang: string;
 }) {
   // Determine NDS restrictions before PlayScene starts joining a room. A shared
   // static document cannot decide this from per-request query parameters.
@@ -70,7 +72,8 @@ function PlaySession({ id, game, room, host }: {
   /* ⚠️ `serverGame` 的三态用 `id ? game : undefined` 传，别写成 `game ?? undefined`：
      后者会把「有 id 但库里没有」（`null`）压成「没有 id」，`PlayScene` 于是又去打一遍接口。 */
   return <PlayScene serverGame={id ? game : undefined} initialMode={effectiveHost ? 'host' : 'solo'}
-    initialRoomCode={effectiveRoom} autoStart={Boolean(id) && !effectiveRoom && !effectiveHost} />;
+    initialRoomCode={effectiveRoom} romLang={lang}
+    autoStart={Boolean(id) && !effectiveRoom && !effectiveHost} />;
 }
 
 /** Query parameters belong to the browser; the document is shared by all players. */
@@ -81,6 +84,12 @@ export default function StaticPlay() {
   const id = single('id');
   const room = single('room');
   const host = single('mode') === 'host';
+  /*
+   * `?lang=` —— 玩哪一份语言版本的 ROM（2026-10-19 加，只对源站那批游戏有意义）。
+   * 只认站内认识的那四个短码，别的当没给（ROM 代理自己也会再兜一次默认版本）。
+   */
+  const rawLang = single('lang');
+  const lang = GAME_LANGUAGE_VALUES.includes(rawLang) ? rawLang : '';
   /*
    * 「这一款在哪」的那条地址：有 `?id=` 就是详情页，没有（本机文件 / 直接开 `/play`）
    * 退回列表页。两个出口共用它 —— 左上那颗「返回」的兜底，和顶栏信息条的点击目标
@@ -115,7 +124,7 @@ export default function StaticPlay() {
       showHeader={false} fill wide showTheme={false}>
       {id && game === undefined
         ? <p role="status" className="p-8 text-center text-[12px] text-ink-400">{t('games.loading')}</p>
-        : <PlaySession key={`${id}:${room}:${host}`} id={id} game={game} room={room} host={host} />}
+        : <PlaySession key={`${id}:${room}:${host}:${lang}`} id={id} game={game} room={room} host={host} lang={lang} />}
     </GamesShell>
   );
 }

@@ -33,20 +33,36 @@ const DELAY_SECONDS = 6;
 export default function RomDownloadGate({
   romUrl,
   romName,
+  languages = [],
+  defaultCode = '',
+  languageLabel,
 }: {
   /** 同源的 ROM 代理地址（`/api/games/<id>/rom`） */
   romUrl: string;
   /** 存进下载目录的文件名。用库里存的原始文件名算 R2 对象名（见下载页注释） */
   romName: string;
+  /**
+   * 可选的 ROM 语言版本（2026-10-19 加，只在源站模式下非空）。
+   * 一个 / 空 = 不画选择条，行为和以前完全一样。
+   */
+  languages?: { code: string; label: string }[];
+  defaultCode?: string;
+  languageLabel?: string;
 }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<'idle' | 'waiting' | 'done'>('idle');
   const [seconds, setSeconds] = useState(DELAY_SECONDS);
+  const [code, setCode] = useState(defaultCode);
+
+  /* 选中的语言拼在 ROM 代理地址上（数据库那条路 `languages` 为空 ⇒ 地址原样） */
+  const targetUrl = code
+    ? `${romUrl}${romUrl.includes('?') ? '&' : '?'}lang=${encodeURIComponent(code)}`
+    : romUrl;
 
   /** 真的把文件甩出去。造链、点一下、掐掉冒泡这些细节都在 lib/download.ts。 */
   const triggerDownload = useCallback(() => {
-    downloadFile(romUrl, romName);
-  }, [romUrl, romName]);
+    downloadFile(targetUrl, romName);
+  }, [targetUrl, romName]);
 
   useEffect(() => {
     if (phase !== 'waiting') return;
@@ -75,6 +91,28 @@ export default function RomDownloadGate({
   return (
     <div className="mt-8">
       <p className="text-[13px] leading-7 text-ink-400">{t('download.hint')}</p>
+
+      {languages.length > 1 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-ink-500">{languageLabel}</span>
+          {languages.map((item) => {
+            const active = item.code === code;
+            return (
+              <button
+                key={item.code}
+                type="button"
+                onClick={() => setCode(item.code)}
+                aria-pressed={active}
+                className={`pixel-edge pxw-2 pxc-500 px-2.5 py-1 text-[12px] transition-colors ${
+                  active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="mt-5 flex flex-wrap items-center gap-4">
         {phase === 'idle' && (

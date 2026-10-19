@@ -35,6 +35,10 @@
  *
  * 挑驱动的优先级（见 `rank`）：驱动名 == 文件名 > 名字全对的条数 > 名字对上的条数 > FBNeo。
  * 三个都拿不到就原样返回，让核心照旧报错 —— 不能因为这里出错反而把原本能跑的弄挂。
+ *
+ * ⚠️ 那张表只覆盖 CPS1（生成自 `d_cps1.cpp`），Cave / NeoGeo / IGS 那些**只能靠文件名**
+ *    认驱动。名字不对的（`pwrinst2.zip` 里其实是 `pwrinst2a` 的内容）靠文件末尾那张
+ *    `EXTRA_DRIVERS` 补 —— 加条目的规矩写在那儿。
  */
 
 import { baseName, inflateEntry, readZipEntries, rebuildZip, type ZipEntry } from './zip';
@@ -63,13 +67,69 @@ const MAX_NESTED_ZIPS = 6;
 /** 内层 zip 解压后的体积上限：超过就不挖了（防止拖进来一个几百 MB 的合集）。 */
 const MAX_NESTED_BYTES = 64 * 1024 * 1024;
 
-/** 表是静态资源，只拉一次。拉失败也不抛 —— 退回「不做选择」。 */
-let tablesPromise: Promise<Tables | null> | null = null;
+/**
+ * `public/arcade-romsets.json` 里**没有**、但已经核对过并要参与判定的驱动。
+ *
+ * 为什么需要这一块（2026-10-19，用户报《豪血寺一族2》`/play` 载入失败）：
+ * 生成表只覆盖 CPS1 两个核的驱动（见文件头第 1 步），而站点里大部分街机是 Cave /
+ * NeoGeo / IGS… —— 这些 romset **只能靠文件名**认驱动。文件名叫错就整盘加载不了，
+ * 而且核心是静默失败的。这盘就是：站点里的 zip 叫 `pwrinst2.zip`，内容是
+ * **`pwrinst2a`**（Power Instinct 2 的旧程序 rom 版本）—— 程序 rom 是
+ * `g02.u42…u45`，而 FBNeo 的 `pwrinst2` 驱动要的是 `g02.u42a…u45a`
+ * （CRC ddfff811 / 5561f620 / c4fd5d62 / 56279c1c），一个都对不上。
+ * FBNeo 里两个驱动都有，于是只要**按内容认出这是 pwrinst2a**、把名字换成
+ * `pwrinst2a.zip` 交给核心就通了 —— 文件本身（R2 里那份）不用动。
+ *
+ * ⚠️ 为什么写在代码里、不补进那份 JSON：JSON 是按 CPS1 源码生成的产物，
+ *    重新生成一次就没了；这里的东西得跟代码一起走，而且每条都得有「为什么」。
+ *
+ * ⚠️ 加条目之前先对着 FBNeo 的 `src/burn/drv/<平台>/d_<驱动>.cpp` 核一遍
+ *    `xxxRomDesc[]`：**列全 `BRF_ESS` 的 rom（`BRF_OPT` 的可选 rom 不算）**，
+ *    CRC 一个字都不能差。判定是「全都得在」（`hasAllCrc`），列全了才不会有误判 ——
+ *    误判的表现是「本来能跑的那盘被改了个错名字」，比不认更糟。
+ */
+const EXTRA_DRIVERS: CoreTable = {
+  /* 见上：站点里 `pwrinst2.zip` 的实际内容。取自 FBNeo 的 d_pwrinst2.cpp。 */
+  pwrinst2a: [
+    ['g02.u45', 0x7b33bc43],
+    ['g02.u44', 0x8f6f6637],
+    ['g02.u43', 0x178e3d24],
+    ['g02.u42', 0xa0b4ee99],
+    ['g02.u3a', 0xebea5e1e],
+    ['g02.u61', 0x91e30398],
+    ['g02.u62', 0xd9455dd7],
+    ['g02.u63', 0x4d20560b],
+    ['g02.u64', 0xb17b9b6e],
+    ['g02.u65', 0x08541878],
+    ['g02.u66', 0xbecf2a36],
+    ['g02.u67', 0x52fe2b8b],
+    ['g02.u78', 0x1eca63d2],
+    ['g02.u81', 0x8a3ff685],
+    ['g02.u89', 0x373e1f73],
+    ['g02.82a', 0x4b3567d6],
+    ['g02.u53', 0xc4bdd9e0],
+    ['g02.u54', 0x1357d50e],
+    ['g02.u55', 0x2d102898],
+    ['g02.u56', 0x9ff50dda],
+  ],
+};
 
-function loadTables(): Promise<Tables | null> {
+/** 表是静态资源，只拉一次。拉失败也不抛 —— 那几张表就只剩 `EXTRA_DRIVERS`。 */
+let tablesPromise: Promise<Tables> | null = null;
+
+function loadTables(): Promise<Tables> {
   tablesPromise ??= fetch('/arcade-romsets.json')
     .then((res) => (res.ok ? (res.json() as Promise<Tables>) : null))
-    .catch(() => null);
+    .catch(() => null)
+    /*
+     * 合并放在这里（而不是让 `collect()` 多认一张表）：下游只认 `Tables` 这个形状，
+     * 补丁挂在 `fbneo` 那张上就等于「FBNeo 多认一个驱动」。⚠️ 拉不到 JSON 时
+     * **照样返回一份只有补丁的表** —— 那几盘本来能修好的没必要跟着一起放弃。
+     */
+    .then((fetched) => ({
+      fbneo: { ...fetched?.fbneo, ...EXTRA_DRIVERS },
+      fbalpha2012_cps1: { ...fetched?.fbalpha2012_cps1 },
+    }));
   return tablesPromise;
 }
 
@@ -101,7 +161,6 @@ export async function resolveArcadeCore(file: File): Promise<ArcadeResolution> {
 
   try {
     const tables = await loadTables();
-    if (!tables) return fallback;
 
     const entries = await readZipEntries(file);
     if (!entries) return fallback;

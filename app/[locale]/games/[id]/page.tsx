@@ -5,9 +5,9 @@ import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
 import { consoleLabel } from '@/lib/consoles';
 import FavoriteButton from '@/components/FavoriteButton';
+import GameLanguageActions from '@/components/GameLanguageActions';
 import GameComments from '@/components/GameComments';
 import GamesShell from '@/components/GamesShell';
-import { PlayersIcon } from '@/components/icons';
 import ReportGameButton from '@/components/ReportGameButton';
 import ShareGameButton from '@/components/ShareGameButton';
 import {
@@ -21,7 +21,12 @@ import {
   type Locale,
   type MessageKey,
 } from '@/lib/i18n';
-import { gameLanguageLabel } from '@/lib/rom-lang';
+import {
+  gameLanguageLabel,
+  defaultRomLanguage as defaultRomLanguageOf,
+  romLanguageOptions as romLanguageChoices,
+} from '@/lib/rom-lang';
+import { isD1Unavailable } from '@/lib/server/d1';
 import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
@@ -324,6 +329,25 @@ export default async function GameDetailPage({
     .filter(Boolean)
     .join(' · ');
 
+  /*
+   * 多语言 ROM（`Game.romLanguages`，见 lib/server/games.ts）。
+   * 数据库那条路永远是空数组 ⇒ 语言只在真有多份时才参与（弹框见
+   * `components/GameLanguageActions.tsx`），视觉与以前一字不差。
+   *
+   * ⚠️ 2026-10-19 起**评论 / 收藏 / 举报在源站模式下照旧显示**（用户要求）：
+   *    这些数据始终写我们自己的 D1，`game_id` 就是上游 slug ——
+   *    写的时候由 `getGameForWrite()` 去上游认这一款，读的时候 `loadGameCards()`
+   *    也会去上游补资料（见 lib/server/user-data.ts），不依赖 `games` 表里有没有这一行。
+   *
+   * `defaultRomLanguage` 只给**不弹框的两条路**用（下载钮 / 单语言直达）：界面语言那一份
+   * → 英文 → 第一份（和上游详情页的默认口径一致）。弹框里**刻意不预选**任何一项，
+   * 得先点一项、再点确认（见 GameLanguageActions 头部 2026-10-19 第三轮那段）。
+   */
+  const romLanguages = game.romLanguages ?? [];
+  const romLanguageCodes = romLanguages.map((item) => item.code);
+  const romLanguageOptions = romLanguageChoices(romLanguageCodes);
+  const defaultRomLanguage = defaultRomLanguageOf(romLanguageCodes, locale);
+
   return (
     <GamesShell
       locale={locale}
@@ -406,65 +430,25 @@ export default async function GameDetailPage({
             `FavoriteButton` / `ReportGameButton` 同样得是客户端组件
             （一个要读登录态 + 打接口，一个要开关弹窗 + 提交）。
           */}
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={localePath(locale, `/play?id=${game.id}&mode=solo`)}
-              className="pixel-edge pxw-3 pxc-600 inline-flex items-center gap-1.5 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
-            >
-              {/*
-                `▸` 而不是 `▶`：后者在部分平台带 emoji 呈现，`▸` 没有 emoji 映射，稳。
-                字号 `15px`（钮里的字只有 12px）：钮变小之后（2026-10-13 用户要求缩小）
-                这两个符号跟着降到 10px，用户随即反馈「这仨个按钮前面的图标都太小了」——
-                所以说**钮缩小 ≠ 图标跟着缩**。15px 是照着站内那套 svg 图标定的
-                （`icons.tsx` 一律 `size=16`，配的也是 12px 字，见同页第二层那两枚）；
-                再配 `leading-none`，符号本身的行高只有 15px < 文字的 18px，
-                所以**钮的总高不会因为这个变大**，只是符号在钮里变显眼。
-              */}
-              <span aria-hidden="true" className="text-[15px] leading-none">
-                ▸
-              </span>
-              {t('gamesPage.play')}
-            </Link>
-            {/*
-              「联机游戏」—— 去的是 `/play?id=`（2026-10-14 用户要求加的第二颗）。
-
-              为什么不是把联机塞进「开始游戏」里面：那一页要的是一块**干净的黑屏**
-              （左边画面、右边控件），而房间那边是满屏像素屋 —— 两种意图不该猜。
-              两颗都是 `<Link>`（真地址，能新标签打开 / 被复制），不是 `<button>`。
-
-              它刻意**不带 accent**：这一页只有「开始游戏」配强调色（它才是主行动），
-              联机走的是和「下载 ROM」同一档的灰钮。图标用 `PlayersIcon`（16px svg，
-              和下面第二层那两枚同一个尺寸档）——这一颗是「两个人一起玩」，
-              用文字符号表不出来。
-
-              ⚠️ **NDS 不画这一颗**（2026-10-15 用户要求「nds 不支持双人了，
-                 在游戏详情隐藏入口」）：它没有第二个手柄口，站里的联机也推不动它。
-                 不画是**唯一**正确处置 —— 灰着还留着，用户只会当成「坏了」。
-
-                 这一颗只管「正常入口」。**手打地址栏照样能带上 `?mode=host` /
-                 `?room=`**，那两条由 `/play` 自己忽略（见 `play/page.tsx` 的门禁
-                 和 `PlayScene` 里派生的 `mode`）—— 所以这里藏钮不是唯一防线。
-            */}
-            {game.consoleType !== 'nds' && (
-              <Link
-                href={localePath(locale, `/play?id=${game.id}&mode=host`)}
-                className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
-              >
-                <PlayersIcon size={16} />
-                {t('gamesPage.playOnline')}
-              </Link>
-            )}
+          <GameLanguageActions
+            playHref={localePath(locale, `/play?id=${game.id}&mode=solo`)}
+            hostHref={
+              game.consoleType !== 'nds'
+                ? localePath(locale, `/play?id=${game.id}&mode=host`)
+                : null
+            }
+            downloadHref={localePath(locale, `/games/${game.id}/download`)}
+            languages={romLanguageOptions}
+            defaultCode={defaultRomLanguage}
+            languageTitle={t('gamesPage.selectLanguage')}
+            languageConfirm={t('play.confirm')}
+            languageCancel={t('games.cancel')}
+            playLabel={t('gamesPage.play')}
+            playOnlineLabel={t('gamesPage.playOnline')}
+            downloadLabel={t('gamesPage.download')}
+          >
             <FavoriteButton gameId={game.id} count={favoriteCount} />
-            <Link
-              href={localePath(locale, `/games/${game.id}/download`)}
-              className="pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent"
-            >
-              <span aria-hidden="true" className="text-[15px] leading-none">
-                ↓
-              </span>
-              {t('gamesPage.download')}
-            </Link>
-          </div>
+          </GameLanguageActions>
 
           {/* 第二层：图标 + 文字链接（口径见上面那段注释，字色 = accent） */}
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
@@ -518,6 +502,27 @@ export default async function GameDetailPage({
 }
 
 export const revalidate = 86400;
-const countFavorites = cached(countGameFavorites, ['game-favorite-count'], { revalidate: 86400 });
+
+/**
+ * 收藏数（详情页那一颗钮的初值）。
+ *
+ * ⚠️ 这里查的永远是**我们自己的 D1**：收藏存在 `user_favorites` 里、主键就是
+ *    `game_id`（源站模式下这个 id 是上游 slug），和游戏资料从哪儿取无关 ——
+ *    2026-10-19 用户要求「评论 / 收藏 / 存档照旧用 D1」，所以别再按数据源短路成 0。
+ * ⚠️ D1 不可用（额度用尽之类）时回 0：这颗钮上的数字不该把整页拖成 500。
+ */
+const countFavorites = cached(
+  async (id: string) => {
+    try {
+      return await countGameFavorites(id);
+    } catch (error) {
+      if (!isD1Unavailable(error)) throw error;
+      console.warn('[catalog] D1 不可用，收藏数按 0 显示', id);
+      return 0;
+    }
+  },
+  ['game-favorite-count'],
+  { revalidate: 86400 }
+);
 
 export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';

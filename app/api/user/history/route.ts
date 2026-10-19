@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { assertUser } from '@/lib/server/app-guard';
-import { getGame, localizeTexts } from '@/lib/server/games';
+import { getGameForWrite, localizeTexts } from '@/lib/server/games';
 import { clearUserHistory, listUserHistory, recordHistory } from '@/lib/server/user-data';
 
 export const runtime = 'nodejs';
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   if (!gameId) return NextResponse.json({ error: 'missing-game' }, { status: 400 });
 
   try {
-    const game = await getGame(gameId);
+    const game = await getGameForWrite(gameId);
     // 不在库里的（已下架、或者本机文件随便编的 id）一律不记
     if (!game) return NextResponse.json({ error: 'not-found' }, { status: 404 });
 

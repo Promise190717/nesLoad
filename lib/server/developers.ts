@@ -14,6 +14,7 @@
  */
 
 import { cached } from './cache';
+import { usesUpstreamCatalog } from './catalog-source';
 import { query } from './d1';
 import { CONTENT_LOCALES } from '@/lib/game-text';
 import {
@@ -238,19 +239,40 @@ export async function listDevelopers(
  */
 export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400;
 
-export const countDevelopersCached = cached(
+const countDevelopersCachedRaw = cached(
   async (keyword: string) => countDevelopers({ keyword }),
   ['developers:count'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
 
-export const listDevelopersCached = cached(
+/*
+ * ⚠️ 2026-10-19：开发商库**没有上游替代**（上游站点没有 /developers 页面）。
+ *    源站模式（`CATALOG_SOURCE=upstream`）下一律回空 —— 列表页 / 首页区块显示
+ *    「还没有内容」，而不是给一批指向不存在游戏的链接。
+ *    这里只包了前台读的那几个（后台要真数据，见各接口自己的错误处理）。
+ */
+export async function countDevelopersCached(keyword: string): Promise<number> {
+  if (usesUpstreamCatalog()) return 0;
+  return countDevelopersCachedRaw(keyword);
+}
+
+const listDevelopersCachedRaw = cached(
   async (offset: number, limit: number, keyword: string) =>
     listDevelopers(offset, limit, { keyword }, await countDevelopersCached(keyword)),
   // ⚠️ 键尾版本号改动原因见 consoles.ts 的 listConsolesCached —— 2026-10-16 补日韩文案升到 v4。
   ['developers:list', 'v4'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
+
+/** 开发商列表（源站模式回空列表，见上面那段说明）。 */
+export async function listDevelopersCached(
+  offset: number,
+  limit: number,
+  keyword: string
+): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
+  if (usesUpstreamCatalog()) return { developers: [], total: 0, offset, limit };
+  return listDevelopersCachedRaw(offset, limit, keyword);
+}
 
 /**
  * 首页「按开发商浏览」区块那份缓存的时长（秒）= 24 小时。
@@ -277,12 +299,23 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
   return rows.map((r) => toDeveloper(r, textsMap.get(r.id) ?? {}));
 }
 
-export const listTopDevelopersCached = cached(
+const listTopDevelopersCachedRaw = cached(
   async (limit: number) => listTopDevelopers(limit),
   // ⚠️ 同上，2026-10-16 补日韩文案升到 v4。
   ['developers:top', 'v4'],
   { revalidate: TOP_DEVELOPERS_REVALIDATE_SECONDS }
 );
+
+/**
+ * 首页「按开发商浏览」那一块（源站模式回空数组）。
+ *
+ * 页面本来就写了 `developers.length > 0` 才画这一块，所以回空 = **整块不出现**，
+ * 不会留一排空白卡片。上游没有可替代的开发商数据（见 countDevelopersCached 那段）。
+ */
+export async function listTopDevelopersCached(limit: number): Promise<Developer[]> {
+  if (usesUpstreamCatalog()) return [];
+  return listTopDevelopersCachedRaw(limit);
+}
 
 /* ================================================================ */
 /* 单条读取                                                          */
@@ -300,6 +333,18 @@ export async function getDeveloper(id: string): Promise<Developer | null> {
   if (!rows[0]) return null;
   const texts = (await loadDeveloperTexts([id])).get(id) ?? {};
   return toDeveloper(rows[0], texts);
+}
+
+/**
+ * 前台开发商详情页用的单条资料 —— 源站模式下一律 null（页面走 404，同 `listDevelopersCached`）。
+ *
+ * ⚠️ **为什么不直接改 `getDeveloper`**：它在**写入路径**上也被用
+ *    （`games.ts` 的 `resolveDeveloper`，插入 / 修改游戏时按外键反查厂名写进文案）。
+ *    那个判断要是跟着数据源一起切，源站模式下后台存游戏会把开发商整个丢掉。
+ */
+export async function getDeveloperPageData(id: string): Promise<Developer | null> {
+  if (usesUpstreamCatalog()) return null;
+  return getDeveloper(id);
 }
 
 /** 后台编辑弹窗用：和 `getDeveloper` 同一条查询，但返回 snake_case 的原始行（含 image_url）。 */
@@ -538,7 +583,18 @@ export async function listDeveloperStubs(): Promise<{ id: string; createdAt: num
   return rows.map((row) => ({ id: row.id, createdAt: row.created_at }));
 }
 
-export const listDeveloperStubsCached = cached(
+/**
+ * sitemap 用的开发商 stub。
+ *
+ * ⚠️ 源站模式下给空数组：那几条详情页会 404（`getDeveloper` 同样回 null，
+ *    见上面那段「开发商库没有上游替代」），列进 sitemap 等于交一批死链。
+ */
+export async function listDeveloperStubsCached(): Promise<{ id: string; createdAt: number }[]> {
+  if (usesUpstreamCatalog()) return [];
+  return listDeveloperStubsRaw();
+}
+
+const listDeveloperStubsRaw = cached(
   async () => listDeveloperStubs(),
   ['developers:stubs'],
   { revalidate: 86400 }

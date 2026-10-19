@@ -13,6 +13,10 @@ import {
   translate,
   type MessageKey,
 } from '@/lib/i18n';
+import {
+  defaultRomLanguage as defaultRomLanguageOf,
+  romLanguageOptions as romLanguageChoices,
+} from '@/lib/rom-lang';
 import { getGameCached, localizeGame } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -91,6 +95,12 @@ export default async function GameDownloadPage({
   /* 页面正文用同一份按语言选定的文案（和 generateMetadata 里那份同源） */
   const text = localizeGame(game, locale);
 
+  /*
+   * 源站那一款才有多个语言版本（`Game.romLanguages`，见 lib/server/games.ts）。
+   * 数据库那条路是空数组 ⇒ 不画语言选择条，按钮行为和以前一字不差。
+   */
+  const romLanguages = game.romLanguages ?? [];
+
   return (
     <GamesShell
       locale={locale}
@@ -122,7 +132,13 @@ export default async function GameDownloadPage({
         </span>
       </div>
 
-      <RomDownloadGate romUrl={`/api/games/${id}/rom`} romName={game.romName} />
+      <RomDownloadGate
+        romUrl={`/api/games/${id}/rom`}
+        romName={game.romName}
+        languages={romLanguageChoices(romLanguages.map((item) => item.code))}
+        defaultCode={defaultRomLanguageOf(romLanguages.map((item) => item.code), locale)}
+        languageLabel={t('gamesPage.field.language')}
+      />
     </GamesShell>
   );
 }

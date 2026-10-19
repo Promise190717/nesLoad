@@ -20,7 +20,7 @@
 
 import { NextResponse } from 'next/server';
 import { assertUser } from '@/lib/server/app-guard';
-import { getGame } from '@/lib/server/games';
+import { getGameForWrite } from '@/lib/server/games';
 import {
   addUserFavorite,
   listUserFavoriteIds,
@@ -70,8 +70,8 @@ export async function POST(request: Request) {
   if (!gameId) return NextResponse.json({ error: 'missing-game' }, { status: 400 });
 
   try {
-    // 只让在库的游戏进收藏 —— 和写历史同一个闸
-    const game = await getGame(gameId);
+    // 只让在库的游戏进收藏 —— 和写历史同一个闸（源站模式下「在库」指上游还在）
+    const game = await getGameForWrite(gameId);
     if (!game) return NextResponse.json({ error: 'not-found' }, { status: 404 });
 
     const added = await addUserFavorite(guard.user.uid, gameId);

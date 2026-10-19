@@ -40,7 +40,7 @@ import {
   listGameComments,
   type Comment,
 } from '@/lib/server/comments';
-import { getGame } from '@/lib/server/games';
+import { getGameForWrite } from '@/lib/server/games';
 
 export const runtime = 'nodejs';
 // 实时读 D1，别让构建期把它静态化了（构建时并没有数据库凭据）
@@ -141,7 +141,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   try {
     // 先确认这一款还在库里 —— 免得把评论挂到一条已经下架的 id 上
-    const game = await getGame(id);
+    // （源站模式下「还在库里」指上游还有这一款，见 games.ts 的 getGameForWrite）
+    const game = await getGameForWrite(id);
     if (!game) return fail('not-found', '找不到这款游戏', 404);
 
     const comment = await insertComment({

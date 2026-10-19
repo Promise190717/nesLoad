@@ -19,7 +19,7 @@ import {
 } from '@/lib/i18n';
 import { pageCountOf, parsePageParam } from '@/lib/pager';
 import { GAME_LANGUAGE_LABEL, GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
-import { getConsole, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
+import { getConsolePageData, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
 import {
   countConsoleGamesByLanguageCached,
   countGamesCached,
@@ -79,7 +79,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 /** 每页几款游戏。和 `/games` 列表页、开发商详情页一致（同一套 5 列网格）。 */
 const PAGE_SIZE = 15;
 
-const loadConsole = cached(async (type: string) => getConsole(type), ['static-console'], { revalidate: 86400, tags: ['consoles'] });
+const loadConsole = cached(async (type: string) => getConsolePageData(type), ['static-console'], { revalidate: 86400, tags: ['consoles'] });
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
@@ -337,7 +337,8 @@ export default async function ConsoleDetailPage({
     /* 各语种的条数：**跟着关键词走**（用户 2026-10-19 报「搜了词标签上的数没变」） */
     countConsoleGamesByLanguageCached(id, keyword),
   ]);
-  const pageCount = pageCountOf(data.total, PAGE_SIZE);
+  /* 总页数按这次数据自己报的每页条数算（源站模式下那批一页 18 款，见 games.tsx 同款注释） */
+  const pageCount = pageCountOf(data.total, data.limit || PAGE_SIZE);
 
   // 越界（这个机种 / 这个语种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
   if (page > pageCount) redirect(consoleHref(locale, id, pageCount, keyword, lang.param));

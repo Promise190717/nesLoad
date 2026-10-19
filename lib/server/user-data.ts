@@ -8,10 +8,16 @@
  * 结构上照 lib/server/feedback.ts 的套路：DB 行（snake_case）/ 对外结构（camelCase）
  * 两套类型 + `toXxx()` 映射，列表一律「新的在前」。
  *
- * ⚠️ **历史 / 收藏读的时候一律 JOIN games**，把已经下架的游戏过滤掉。
- *    这两张表里的 `game_id` 没有外键约束（D1 底下 SQLite 默认不校验，见 schema.sql 的注释），
- *    后台删了游戏就会留下孤儿行 —— JOIN 是最省事的兜底（也顺带保证返回给前端的
+ * ⚠️ **历史 / 收藏读的时候要「现查游戏资料」，已下架的过滤掉**。这两张表里的
+ *    `game_id` 没有外键约束（D1 底下 SQLite 默认不校验，见 schema.sql 的注释），
+ *    后台删了游戏就会留下孤儿行 —— 现查是最省事的兜底（也顺带保证返回给前端的
  *    封面 / 名字永远是**最新**的，而不是收藏那一刻的快照）。
+ *
+ * ⚠️ 2026-10-19 起「现查」不再是一句 `JOIN games`，而是 `loadGameCards()`：源站模式
+ *    （`CATALOG_SOURCE=upstream`，默认）下前台给出的 id 是**上游 slug**，`games` 表里
+ *    没有这一行，JOIN 会把用户自己的收藏 / 历史整条丢掉。用户明确要求「评论、收藏、
+ *    存档、注册登录、个人中心照旧用我们自己的 D1」—— 数据写在 D1，**读的时候**再按 id
+ *    去上游补一份游戏资料，两边不打架。
  *
  * ⚠️ 2026-10-16 起**文案走 `game_texts` 侧表**（原来是 JOIN games 上那几列中英文案）：
  *    这里统一用 `lib/server/games.ts` 导出的 `loadGameTexts()` 批量捞，
@@ -25,9 +31,11 @@
 
 import { randomUUID } from 'node:crypto';
 import type { GameTexts } from '@/lib/game-text';
+import { usesUpstreamCatalog } from './catalog-source';
 import { query } from './d1';
 import { loadGameTexts } from './games';
 import { deleteObject, uploadObject, publicUrl } from './r2';
+import { getUpstreamGame } from './upstream-catalog';
 
 /**
  * 每款游戏在云端保留的份数。
@@ -41,6 +49,104 @@ import { deleteObject, uploadObject, publicUrl } from './r2';
 const SAVES_PER_GAME = 1;
 
 /* ================================================================== *
+ * game_id → 卡片信息（历史 / 收藏 / 存档总览共用）
+ * ================================================================== */
+
+/** 个人中心那几列要画的东西：文案 + 封面 + 名字 + 机种。 */
+interface GameCard {
+  id: string;
+  texts: GameTexts;
+  imageUrl: string;
+  romName: string;
+  consoleType: string;
+  language: string | null;
+  year: number | null;
+  developerId: string | null;
+}
+
+/** 一次 IN 查询最多带多少个 id（和 `loadGameTexts` 的 `TEXT_CHUNK` 同一档）。 */
+const CARD_CHUNK = 50;
+
+/**
+ * 批量把 `game_id` 翻成卡片信息（2026-10-19）。
+ *
+ * 为什么要这个函数、而不在 SQL 里 `JOIN games`：源站模式（`CATALOG_SOURCE=upstream`，
+ * 默认）下前台给出的 id 是**上游 slug**，`games` 表里没有这一行 —— JOIN 会把这些
+ * 收藏 / 历史 / 存档整条丢掉，个人中心看起来像「数据没了」。用户明确要求这几块照旧
+ * 写自己的 D1，所以读的时候改成「先按 id 批量查库，查不到的再去上游补一份」。
+ *
+ * 查不到又不在源站模式 ⇒ 这款已经下架，调用方照老规矩过滤掉（原来 JOIN 干的就是这事）。
+ * 上游抓取失败只跳过这一条：个人中心不该因为某款游戏的上游页 502 就整页 500。
+ */
+async function loadGameCards(ids: string[]): Promise<Map<string, GameCard>> {
+  const cards = new Map<string, GameCard>();
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return cards;
+
+  for (let i = 0; i < unique.length; i += CARD_CHUNK) {
+    const chunk = unique.slice(i, i + CARD_CHUNK);
+    const placeholders = chunk.map((_, index) => `?${index + 1}`).join(', ');
+    const rows = await query<{
+      id: string;
+      image_url: string;
+      rom_name: string;
+      console_type: string;
+      language: string | null;
+      year: number | null;
+      developer_id: string | null;
+    }>(
+      `SELECT id, image_url, rom_name, console_type, language, year, developer_id
+         FROM games
+        WHERE id IN (${placeholders})`,
+      chunk
+    );
+    const texts = await loadGameTexts(rows.map((row) => row.id));
+    for (const row of rows) {
+      cards.set(row.id, {
+        id: row.id,
+        texts: texts.get(row.id) ?? {},
+        imageUrl: row.image_url,
+        romName: row.rom_name,
+        consoleType: row.console_type,
+        language: row.language,
+        year: row.year,
+        developerId: row.developer_id,
+      });
+    }
+  }
+
+  if (!usesUpstreamCatalog()) return cards;
+
+  /* 库里查不到的那几款：源站模式下它们本来就是上游的游戏，去补一份资料 */
+  const missing = unique.filter((id) => !cards.has(id));
+  const fetched = await Promise.all(
+    missing.map(async (id) => {
+      try {
+        return [id, await getUpstreamGame(id)] as const;
+      } catch (error) {
+        console.warn('[nesload] 读取上游游戏失败，个人中心跳过这一条：', id, error);
+        return [id, null] as const;
+      }
+    })
+  );
+  for (const [id, data] of fetched) {
+    if (!data) continue;
+    cards.set(id, {
+      id,
+      texts: data.texts,
+      imageUrl: data.imageUrl,
+      romName: data.romName,
+      consoleType: data.consoleType,
+      language: data.language,
+      year: data.year,
+      /* 上游没有开发商这个维度（见 upstream-catalog 文件头） */
+      developerId: null,
+    });
+  }
+  return cards;
+}
+
+/* ================================================================== *
  * 历史
  * ================================================================== */
 
@@ -50,6 +156,7 @@ export const MAX_HISTORY = 10;
 /** DB 行（文案不在这张表上，由 `game_texts` 现取，见 `listUserHistory`）。 */
 interface HistoryRow {
   game_id: string;
+  title: string;
   image_url: string;
   rom_name: string;
   console_type: string;
@@ -84,35 +191,55 @@ export interface UserHistoryItem {
 /**
  * 某人的云端历史，最近玩的在前。
  *
- * JOIN games 把下架的过滤掉（见文件头注释）；`romUrl` 由 game_id 现拼。
- * 上限 MAX_HISTORY 条 —— 和本地那份一样，是「最近玩过的 N 款」而不是全量流水。
+ * 资料走 `loadGameCards` 现取（D1 有就用库里那份，源站模式下没有的再去上游补），
+ * `romUrl` 由 game_id 现拼。上限 MAX_HISTORY 条 —— 和本地那份一样，
+ * 是「最近玩过的 N 款」而不是全量流水。
  *
- * ⚠️ 标题**取 game_texts 现取**（不是 `user_history.title` 那个快照）——
- *    快照是写入时定的，英文站会看到中文名。
- * ⚠️ JOIN games 不能省：`game_texts` 的行会随游戏一起删（见 games.ts 的 deleteGame），
- *    没有这个 JOIN 的话，下架游戏的孤儿历史会变成一行**空标题**而不是被过滤掉。
+ * ⚠️ 标题**取现取的那份**（不是 `user_history.title` 那个快照）——
+ *    快照是写入时定的，英文站会看到中文名。只有在上游也取不到时才退回快照，
+ *    免得列表上出现一行空标题。
+ * ⚠️ D1 模式下查不到资料 = 已下架，过滤掉（和以前 `JOIN games` 的效果一致）；
+ *    源站模式照旧列出（那些 id 本来就不在库里）。
  */
 export async function listUserHistory(userId: string): Promise<UserHistoryItem[]> {
   const rows = await query<HistoryRow>(
-    `SELECT h.game_id, h.image_url, h.rom_name, h.console_type, h.played_at
-       FROM user_history h
-       JOIN games g ON g.id = h.game_id
-      WHERE h.user_id = ?
-      ORDER BY h.played_at DESC
+    `SELECT game_id, title, image_url, rom_name, console_type, played_at
+       FROM user_history
+      WHERE user_id = ?
+      ORDER BY played_at DESC
       LIMIT ?`,
     [userId, MAX_HISTORY]
   );
 
-  const texts = await loadGameTexts(rows.map((row) => row.game_id));
-  return rows.map((row) => ({
-    id: row.game_id,
-    texts: texts.get(row.game_id) ?? {},
-    romUrl: `/api/games/${row.game_id}/rom`,
-    imageUrl: row.image_url,
-    romName: row.rom_name,
-    console: row.console_type,
-    playedAt: row.played_at,
-  }));
+  const cards = await loadGameCards(rows.map((row) => row.game_id));
+  const items: UserHistoryItem[] = [];
+  for (const row of rows) {
+    const card = cards.get(row.game_id);
+    if (!card && !usesUpstreamCatalog()) continue;
+    items.push({
+      id: row.game_id,
+      texts: card?.texts ?? snapshotTexts(row.title),
+      romUrl: `/api/games/${row.game_id}/rom`,
+      imageUrl: card?.imageUrl ?? row.image_url,
+      romName: card?.romName ?? row.rom_name,
+      console: card?.consoleType ?? row.console_type,
+      playedAt: row.played_at,
+    });
+  }
+  return items;
+}
+
+/**
+ * 只拎得出一句标题时的兜底文案（形如 `GameTexts`）。
+ *
+ * 历史表自己存了 `title` 快照 —— 上游那趟抓失败时拿它顶上，
+ * 总比让个人中心画一行空白卡片强。四种语言都给同一句：这是快照，
+ * 本来就没有多语言之分。
+ */
+function snapshotTexts(title: string): GameTexts {
+  if (!title) return {};
+  const text = { title, series: null, developer: null, description: null };
+  return { zh: text, en: text, ja: text, ko: text };
 }
 
 export interface HistoryInput {
@@ -442,51 +569,49 @@ export interface UserFavoriteItem {
   favoritedAt: number;
 }
 
-/** DB 行（文案不在这张表上，由 `game_texts` 现取）。 */
+/** 收藏表那一行 —— 只存 id 和时间，游戏资料现查（见 `loadGameCards`）。 */
 interface FavoriteRow {
-  id: string;
-  image_url: string;
-  rom_name: string;
-  console_type: string;
-  language: string | null;
-  year: number | null;
-  developer_id: string | null;
+  game_id: string;
   created_at: number;
 }
 
 /**
  * 某人的收藏，最近收藏的在前。
  *
- * **JOIN games**：收藏列表要显示的就是游戏本身，快照没有意义（改了名字、换了封面
- * 都该跟着变）。顺带把下架的过滤掉 —— 收藏了一款、后来下架，列表里就不该再占一行。
+ * 资料现查：改了名字、换了封面都该跟着变，快照没有意义。顺带把下架的过滤掉
+ * （D1 模式下查不到 = 已下架；源站模式下能查到就是上游那款，照旧列出来）。
  *
  * 文案与游戏列表走**同一条批量读取**（`loadGameTexts`）—— 收藏数是个位到几十的量级，
  * 一次 `WHERE game_id IN (…)` 就够，不必为它单独拼 JOIN。
  */
 export async function listUserFavorites(userId: string): Promise<UserFavoriteItem[]> {
   const rows = await query<FavoriteRow>(
-    `SELECT g.id, g.image_url, g.rom_name, g.console_type,
-            g.language, g.year, g.developer_id,
-            f.created_at
-       FROM user_favorites f
-       JOIN games g ON g.id = f.game_id
-      WHERE f.user_id = ?
-      ORDER BY f.created_at DESC`,
+    `SELECT game_id, created_at
+       FROM user_favorites
+      WHERE user_id = ?
+      ORDER BY created_at DESC`,
     [userId]
   );
 
-  const texts = await loadGameTexts(rows.map((row) => row.id));
-  return rows.map((row) => ({
-    id: row.id,
-    texts: texts.get(row.id) ?? {},
-    imageUrl: row.image_url,
-    romName: row.rom_name,
-    consoleType: row.console_type,
-    language: row.language,
-    year: row.year,
-    developerId: row.developer_id,
-    favoritedAt: row.created_at,
-  }));
+  const cards = await loadGameCards(rows.map((row) => row.game_id));
+  const items: UserFavoriteItem[] = [];
+  for (const row of rows) {
+    const card = cards.get(row.game_id);
+    /* 查不到资料 = 这款没了（D1 下架 / 上游也抓不到），列表里不占一行 */
+    if (!card) continue;
+    items.push({
+      id: card.id,
+      texts: card.texts,
+      imageUrl: card.imageUrl,
+      romName: card.romName,
+      consoleType: card.consoleType,
+      language: card.language,
+      year: card.year,
+      developerId: card.developerId,
+      favoritedAt: row.created_at,
+    });
+  }
+  return items;
 }
 
 /**
@@ -643,13 +768,13 @@ export async function purgeUserData(
  * 列某人**全部**游戏的云端存档（跨游戏总览，个人中心那个「存档」tab 用）。
  *
  * 和 `listAllUserSaves` 的区别：那个是按 user 查、字段是全的但**不带游戏信息**；
- * 这个是个人中心要画的东西 —— 加了 `JOIN games`（拿最新的封面 / 名字），
- * 且**只返回还在库里的**。
+ * 这个是个人中心要画的东西 —— 加了游戏资料（最新的封面 / 名字，走 `loadGameCards`），
+ * 且**只返回拿得到资料的**（源站模式下去上游补，D1 模式下查不到就是下架了）。
  *
- * ⚠️ 为什么这里**要 JOIN**、而 `listUserSaves`（游戏内那个存档列表）**故意不 JOIN**：
- *    两者的用途不同。游戏内读档时游戏一定在线（你正在玩它），JOIN 没有意义；
+ * ⚠️ 为什么这里**要查游戏资料**、而 `listUserSaves`（游戏内那个存档列表）**故意不查**：
+ *    两者的用途不同。游戏内读档时游戏一定在线（你正在玩它），查了也没有意义；
  *    而个人中心是**跨游戏总览**，列出来的每一款都要有封面和名字 ——
- *    下架的游戏在这儿点开也进不去，列着只会让用户困惑，所以过滤掉。
+ *    拿不到资料的游戏在这儿点开也进不去，列着只会让用户困惑，所以过滤掉。
  *    这是有意的分歧，别为「统一」把两边改成一样。
  */
 export interface UserSaveOverviewRow extends UserSaveSlot {
@@ -672,30 +797,33 @@ export async function listUserSaveOverview(userId: string): Promise<UserSaveOver
     title: string;
     size: number;
     created_at: number;
-    image_url: string;
-    console_type: string;
   }>(
-    `SELECT s.id, s.game_id, s.rom_name, s.title, s.size, s.created_at,
-            g.image_url, g.console_type
-       FROM user_saves s
-       JOIN games g ON g.id = s.game_id
-      WHERE s.user_id = ?
-      ORDER BY s.created_at DESC`,
+    `SELECT id, game_id, rom_name, title, size, created_at
+       FROM user_saves
+      WHERE user_id = ?
+      ORDER BY created_at DESC`,
     [userId]
   );
 
-  const texts = await loadGameTexts(rows.map((row) => row.game_id));
-  return rows.map((row) => ({
-    id: row.id,
-    gameId: row.game_id,
-    romName: row.rom_name,
-    title: row.title,
-    size: row.size,
-    createdAt: row.created_at,
-    imageUrl: row.image_url,
-    texts: texts.get(row.game_id) ?? {},
-    consoleType: row.console_type,
-  }));
+  const cards = await loadGameCards(rows.map((row) => row.game_id));
+  const items: UserSaveOverviewRow[] = [];
+  for (const row of rows) {
+    const card = cards.get(row.game_id);
+    /* 拿不到资料就画不出封面 / 名字 —— 这一条不列（其余照常） */
+    if (!card) continue;
+    items.push({
+      id: row.id,
+      gameId: row.game_id,
+      romName: row.rom_name,
+      title: row.title,
+      size: row.size,
+      createdAt: row.created_at,
+      imageUrl: card.imageUrl,
+      texts: card.texts,
+      consoleType: card.consoleType,
+    });
+  }
+  return items;
 }
 
 /** 清空某人**全部**云端存档（个人中心那个「清空存档」按钮）。返回删了几条。 */

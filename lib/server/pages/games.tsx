@@ -342,7 +342,15 @@ export default async function GamesPage({
   if (!canonical) redirect(gamesHref(locale, page, keyword, consoleType));
 
   const data = await loadPage(page, keyword, consoleType);
-  const pageCount = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
+  /*
+   * 总页数按**这次数据自己报的**每页条数算，不是写死 15。
+   *
+   * 源站模式下列表来自上游（一页 18 款，见 upstream-catalog 的 UPSTREAM_PAGE_SIZE），
+   * 而页码 → 上游页码的映射仍用站内的 offset / limit（都是 15）。用 15 去算只会算出
+   * 141 页、最后 23 页全空；读 `data.limit` 两边就都是 118 页。
+   */
+  const pageSize = data.limit || PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(data.total / pageSize));
 
   /*
    * 越界（收藏了一个后来被删空的页码，或关键词 / 机种把结果筛到不够这么多页）退到最后一页。

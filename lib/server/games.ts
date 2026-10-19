@@ -64,8 +64,16 @@ import {
 } from '@/lib/game-text';
 import type { Locale } from '@/lib/i18n';
 import { GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
+import { usesUpstreamCatalog } from './catalog-source';
 import { query } from './d1';
 import { getDeveloper } from './developers';
+import {
+  getUpstreamGame,
+  listUpstreamGamesPage,
+  upstreamConsoleCounts,
+  upstreamGameSlugs,
+  type UpstreamGameData,
+} from './upstream-catalog';
 
 /*
  * 结构和纯函数都在 lib/game-text.ts（客户端组件也要用，不能从服务端模块引）。
@@ -157,6 +165,51 @@ export interface Game {
   /** 开发商页的地址片段（`/developers/<id>`）。为 null 时详情页那个名字就不做链接。 */
   developerId: string | null;
   createdAt: number;
+  /**
+   * 这一款有哪些语言的 ROM 版本（`zh` / `en` / `ja` / `ko` + 那一份的文件名）。
+   *
+   * ⚠️ **只有走源站（`CATALOG_SOURCE=upstream`）时才有值**：数据库那条路里「同一款的
+   *    不同语言版本」是各自一行（语言在 `language` 那一列），所以不需要这个字段。
+   *    上游的详情页把四份 ROM 挂在同一个游戏对象的 `fileName` 里，前台据此画「语言」选择
+   *    （见 `components/GameLanguageActions.tsx`）。
+   * ⚠️ 文件名要带着走：播放时 `PlayScene` 用它给 `File` 起名，解包 / 机种识别看扩展名。
+   */
+  romLanguages?: { code: string; name: string }[];
+}
+
+/** 源站数据 → `Game`（id 就是上游 slug，详情页 / 播放页 / ROM 代理都按它回源）。 */
+function fromUpstream(data: UpstreamGameData): Game {
+  return {
+    id: data.slug,
+    texts: data.texts,
+    imageUrl: data.imageUrl,
+    romName: data.romName,
+    consoleType: data.consoleType,
+    language: data.language,
+    year: data.year,
+    developerId: null,
+    createdAt: data.createdAt,
+    romLanguages: data.romLanguages,
+  };
+}
+
+/**
+ * 「这一份前台数据现在从源站取」的唯一入口（2026-10-19）。
+ *
+ * 触发条件是**环境变量**（`CATALOG_SOURCE=upstream`，默认值），不是 D1 报错 ——
+ * 为什么不做自动切换、以及两套 id 的坑，见 `./catalog-source.ts` 文件头。
+ *
+ * 日志只在**每个进程里第一条**打一次：源站模式是常态（默认值），每次渲染都打
+ * 就是噪音；但排查「线上到底走的哪条」时又必须有一行能看见。
+ */
+const announcedUpstream = new Set<string>();
+
+async function viaUpstream<T>(label: string, load: () => Promise<T>): Promise<T> {
+  if (!announcedUpstream.has(label)) {
+    announcedUpstream.add(label);
+    console.info(`[catalog] 源站模式（CATALOG_SOURCE=upstream）首次读取：${label}`);
+  }
+  return load();
 }
 
 function toGame(row: GameRow, texts: GameTexts): Game {
@@ -614,7 +667,7 @@ export const GAME_DETAIL_REVALIDATE_SECONDS = 86400;
  *    （它们的 SQL 也经过 `buildGamesWhere` / `loadGameTexts`）—— 加索引维度和这次
  *    是两回事，别把 `v1`/`v2` 的来历搞混。
  */
-export const countGamesCached = cached(
+const countGamesCachedRaw = cached(
   async (
     keyword: string,
     consoleType: ConsoleType | null,
@@ -624,6 +677,28 @@ export const countGamesCached = cached(
   ['games:count', 'v2'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
+
+/**
+ * 总数（源站模式下数上游的当前结果集）。
+ *
+ * ⚠️ 上游没有「开发商」这个维度（它的站点没有开发商页），带 `developerId` 时一律 0 ——
+ *    开发商页在源站模式下就是空列表，别去猜一个数字。
+ * ⚠️ `language`（ROM 语种）同理：上游列表页没有这个筛选，此时**忽略**它。
+ */
+export async function countGamesCached(
+  keyword: string,
+  consoleType: ConsoleType | null,
+  developerId: string | null,
+  language: string | null
+): Promise<number> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:count', async () => {
+      if (developerId) return 0;
+      return (await listUpstreamGamesPage(0, 15, keyword, consoleType)).total;
+    });
+  }
+  return countGamesCachedRaw(keyword, consoleType, developerId, language);
+}
 
 /**
  * 首页那几个「由 D1 拼出来的区块」的缓存时长（秒）= 24 小时。
@@ -678,7 +753,7 @@ export const HOME_REVALIDATE_SECONDS = 86400;
  * ⚠️ 别把这里的 `language` 和「界面语言」搞混：它筛的是**游戏自己的语种**
  *    （`games.language`），进键是对的 —— 筛出来的本来就是另一批数据。
  */
-export const listGamesPageCached = cached(
+const listGamesPageCachedRaw = cached(
   async (
     offset: number,
     limit: number,
@@ -698,6 +773,29 @@ export const listGamesPageCached = cached(
 );
 
 /**
+ * 列表页（源站模式下改吃上游）。
+ *
+ * ⚠️ 源站那份的 `limit` 是**上游的一页条数**（18，见 `UPSTREAM_PAGE_SIZE`），
+ *    页面算总页数时必须读它而不是写死的 15 —— 否则第 118 页之后全是空页。
+ * ⚠️ `language` 在源站模式下不生效（上游列表没有这个筛选），返回的是该机种的全量。
+ */
+export async function listGamesPageCached(
+  offset: number,
+  limit: number,
+  keyword: string,
+  consoleType: ConsoleType | null,
+  language: string | null
+): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:list', async () => {
+      const page = await listUpstreamGamesPage(offset, limit, keyword, consoleType);
+      return { ...page, games: page.games.map(fromUpstream) };
+    });
+  }
+  return listGamesPageCachedRaw(offset, limit, keyword, consoleType, language);
+}
+
+/**
  * 首页「最新收录」区块要的那几款 —— 首页专用，**别拿 `listGamesPageCached` 顶替**。
  *
  * 两者查的是同一张表、都从第 0 条开始，**2026-10-14 起 TTL 也一样（2026-10-16 起都是 24 小时）**：
@@ -708,7 +806,7 @@ export const listGamesPageCached = cached(
  * 那几维摆出来只会让人以为首页也能翻页。将来首页真要能翻页，再照着 `listGamesPageCached`
  * 的形状加参数，并且**必须同步改缓存键** —— 键不变而语义变了，旧缓存会串味。
  */
-export const listLatestGamesCached = cached(
+const listLatestGamesCachedRaw = cached(
   // 首页其实不用 `total`，但照样传进去 —— 和列表页共用同一份总数缓存（键相同），
   // 省掉这里再数一遍全表。
   async (limit: number) =>
@@ -716,6 +814,19 @@ export const listLatestGamesCached = cached(
   ['games:latest', 'v2'],
   { revalidate: HOME_REVALIDATE_SECONDS }
 );
+
+/** 首页「最新收录」（源站模式下取上游列表第一页）。 */
+export async function listLatestGamesCached(
+  limit: number
+): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:latest', async () => {
+      const page = await listUpstreamGamesPage(0, limit, '', null);
+      return { ...page, games: page.games.map(fromUpstream) };
+    });
+  }
+  return listLatestGamesCachedRaw(limit);
+}
 
 /**
  * 各机种各有几款游戏 —— 首页那个「按机种浏览」区块的卡片、`/consoles` 列表页用。
@@ -773,7 +884,14 @@ const countGamesByConsoleRaw = cached(
  *    `Record<ConsoleType, number>` 这个类型在运行时也才真的成立。以后加机种也不用改这里。
  */
 export async function countGamesByConsoleCached(): Promise<Record<ConsoleType, number>> {
-  const raw = await countGamesByConsoleRaw();
+  /*
+   * 源站模式下上游首页那张机种条一次就给全了（见 upstream-catalog 的 upstreamConsoles），
+   * 不用按机种各数一遍。
+   */
+  const raw = usesUpstreamCatalog()
+    ? await viaUpstream('games:console-counts', upstreamConsoleCounts)
+    : await countGamesByConsoleRaw();
+
   const counts = {} as Record<ConsoleType, number>;
   for (const type of CONSOLE_TYPES) counts[type] = raw[type] ?? 0;
   return counts;
@@ -790,7 +908,7 @@ export async function countGamesByConsoleCached(): Promise<Record<ConsoleType, n
  * ⚠️ 开发商**本身**（名字 / 简介 / 介绍）**没有缓存** —— 它只是一次单行查询，
  * 而且后台改完名字应当立刻在页面上看到。有缓存的是「这个开发商名下有哪些游戏」。
  */
-export const listGamesByDeveloperCached = cached(
+const listGamesByDeveloperCachedRaw = cached(
   async (developerId: string, offset: number, limit: number) =>
     listGamesPage(
       offset,
@@ -801,6 +919,29 @@ export const listGamesByDeveloperCached = cached(
   ['games:by-developer', 'v2'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
+
+/**
+ * 某个开发商名下的游戏。
+ *
+ * ⚠️ 源站模式下**恒为空列表**：上游站点没有开发商这个维度（`/zh/developers` 是 404），
+ *    没有可以拿来顶替的数据。页面会显示「这个开发商名下还没有游戏」——
+ *    这比编一份出来诚实。
+ */
+export async function listGamesByDeveloperCached(
+  developerId: string,
+  offset: number,
+  limit: number
+): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:by-developer', async () => ({
+      games: [],
+      total: 0,
+      offset,
+      limit,
+    }));
+  }
+  return listGamesByDeveloperCachedRaw(developerId, offset, limit);
+}
 
 /**
  * 机种专题页（`/consoles/<type>`）那段「这个机种下的游戏」—— 和开发商详情页那条
@@ -817,7 +958,7 @@ export const listGamesByDeveloperCached = cached(
  *    这一维，所以「全部 / 只看中文 / 只看日文」各自一份，不会串味。
  *    不筛语种传 `null`（= 那一页的「全部」标签）。
  */
-export const listGamesByConsoleCached = cached(
+const listGamesByConsoleCachedRaw = cached(
   async (consoleType: ConsoleType, offset: number, limit: number, language: string | null) =>
     listGamesPage(
       offset,
@@ -828,6 +969,28 @@ export const listGamesByConsoleCached = cached(
   ['games:by-console', 'v2'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
+
+/**
+ * 某个机种下的游戏（机种专题页在用）。
+ *
+ * 源站模式下改吃上游的**机种专题页**（`/zh/nes-games` 那种）—— 见 upstream-catalog 的
+ * `listPath`：带机种、不带关键词时走这条，因为 `?console=` 吃的是该语言的机种名。
+ * `language` 在源站模式下不生效（上游没有 ROM 语种筛选）。
+ */
+export async function listGamesByConsoleCached(
+  consoleType: ConsoleType,
+  offset: number,
+  limit: number,
+  language: string | null
+): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:by-console', async () => {
+      const page = await listUpstreamGamesPage(offset, limit, '', consoleType);
+      return { ...page, games: page.games.map(fromUpstream) };
+    });
+  }
+  return listGamesByConsoleCachedRaw(consoleType, offset, limit, language);
+}
 
 /**
  * 一个机种下**各语种各有几款** —— 给机种专题页那条语种筛选条上的数字用
@@ -880,7 +1043,15 @@ export async function countConsoleGamesByLanguageCached(
   consoleType: ConsoleType,
   keyword = ''
 ): Promise<Record<string, number>> {
-  const raw = await countConsoleGamesByLanguageRaw(consoleType, keyword.trim());
+  /*
+   * 源站模式下给一份**全 0**：上游的列表页不按 ROM 语种筛，也没有现成的「每个语种几款」。
+   * 机种专题页据此把语种筛选条整条藏起来（见 lib/server/pages/console.tsx），
+   * 而不是挂一排 0 的标签骗人点。
+   */
+  const raw = usesUpstreamCatalog()
+    ? await viaUpstream('games:lang-counts', async () => ({}) as Record<string, number>)
+    : await countConsoleGamesByLanguageRaw(consoleType, keyword.trim());
+
   /* 老条目可能少键（见上），照样补齐一份完整记录再返回 */
   const counts: Record<string, number> = {};
   for (const value of GAME_LANGUAGE_VALUES) counts[value] = raw[value] ?? 0;
@@ -913,6 +1084,27 @@ export async function getGame(id: string): Promise<Game | null> {
 }
 
 /**
+ * 写接口专用的「这一款还在不在」——**源站模式认上游，D1 模式认库**（2026-10-19）。
+ *
+ * 收藏 / 历史 / 存档 / 评论 / 举报这五条写路径都靠它挡「不在库里的 id」。
+ * 源站模式下前台看到的 id 是**上游 slug**，`games` 表里根本没有这一行 ——
+ * 继续用 `getGame` 会把这些操作全部判成 404（用户要求过：评论 / 收藏 / 存档
+ * 照旧写自己的 D1，不受数据源切换影响）。
+ *
+ * ⚠️ 与 `getGameCached` 的区别：D1 模式下这里**不带缓存**。
+ *    写路径要的是「此刻还在不在」，宁可多打一次单行查询，也别让一条刚下架的
+ *    记录在缓存窗口里继续被接受。源站模式那份走上游（`upstream:game` 自己有 24h 缓存，
+ *    上游一款游戏不会在我们的缓存窗口里消失，这个差别可以忽略）。
+ */
+export async function getGameForWrite(id: string): Promise<Game | null> {
+  if (usesUpstreamCatalog()) {
+    const data = await getUpstreamGame(id);
+    return data ? fromUpstream(data) : null;
+  }
+  return getGame(id);
+}
+
+/**
  * 按 id 取一条游戏的**缓存版**（2026-10-16 起 24 小时，后台写入时用
  * `revalidateTag('games')` 主动失效）。
  *
@@ -926,14 +1118,33 @@ export async function getGame(id: string): Promise<Game | null> {
  *    deleteGame 里已经加了），所以「改了名字详情页还是旧的」最多只发生在缓存层
  *    出纰漏的时候，正常情况不存在。
  *
- * ⚠️ 写接口里「校验游戏还在不在」的调用方**继续用无缓存的 `getGame`**：
- *    那些路径要的是「此刻是否存在」，不差这一次单行查询。
+ * ⚠️ 写接口里「校验游戏还在不在」的调用方**不要用这里**：D1 模式下要的是
+ *    「此刻是否存在」，走无缓存的 `getGame`；源站模式下要走上游 —— 两条合起来就是
+ *    `getGameForWrite()`（见下）。
  */
-export const getGameCached = cached(
+const getGameCachedRaw = cached(
   async (id: string) => getGame(id),
   ['games:by-id'],
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
+
+/**
+ * 按 id 取一条游戏（缓存版）—— 源站模式下按**上游 slug** 取详情页（2026-10-19）。
+ *
+ * ⚠️ 来源由 `CATALOG_SOURCE` 决定，**不按错误类型自动切**（见 `./catalog-source.ts`）：
+ *    两套 id 不是一回事（UUID vs slug），中途切换会让评论 / 收藏 / 历史对不上。
+ * ⚠️ 源站数据的 `id` 就是上游 slug（列表页给出的链接本来就是 slug），
+ *    所以详情页 / `/play?id=` / ROM 代理这三条路天然接得上。
+ */
+export async function getGameCached(id: string): Promise<Game | null> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:by-id', async () => {
+      const data = await getUpstreamGame(id);
+      return data ? fromUpstream(data) : null;
+    });
+  }
+  return getGameCachedRaw(id);
+}
 
 /**
  * `getGameRow` 的缓存版 —— **只给 ROM 代理用**。
@@ -1213,11 +1424,29 @@ export async function listGameStubs(): Promise<{ id: string; createdAt: number }
  * tag 挂 `games`：后台增删游戏时 `revalidateTag('games')` 会顺带把这份也刷掉，
  * 所以后台动过库的话新游戏基本是立刻进 sitemap 的（TTL 只约束「谁都没动过库」的情形）。
  */
-export const listGameStubsCached = cached(
+const listGameStubsRaw = cached(
   async () => listGameStubs(),
   ['games:stubs'],
   { revalidate: 86400, tags: ['games'] }
 );
+
+/**
+ * sitemap / 构建期预渲染用的 stub 清单。
+ *
+ * ⚠️ 源站模式下必须换一份：站内详情页地址就是**上游 slug**，数据库那份是 UUID ——
+ *    照旧发出去等于给搜索引擎交了一整批 404。slug 来自上游 `sitemap.xml`（一次请求，
+ *    24 小时缓存），**没有收录时间**，`createdAt` 记 0 表示「不知道」
+ *    （`app/sitemap.ts` 见到 0 会省掉 `lastModified`，也不会拿去排「最新」）。
+ * ⚠️ 上游抓不到时返回空数组 —— sitemap 少一批游戏，好过整张 500。
+ */
+export async function listGameStubsCached(): Promise<{ id: string; createdAt: number }[]> {
+  if (usesUpstreamCatalog()) {
+    return viaUpstream('games:stubs', async () =>
+      (await upstreamGameSlugs()).map((id) => ({ id, createdAt: 0 }))
+    );
+  }
+  return listGameStubsRaw();
+}
 
 /**
  * 由开发商 id 反查名字（中英日韩四份）—— 要跟着一起写的是**三处**：

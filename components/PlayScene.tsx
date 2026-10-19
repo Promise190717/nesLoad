@@ -118,13 +118,21 @@ interface PlaySceneProps {
   initialMode?: 'solo' | 'host';
   autoStart?: boolean;
   initialRoomCode?: string;
+  /**
+   * 这一局用哪个语言版本的 ROM（`?lang=`，2026-10-19 加）。
+   *
+   * 只对**源站模式**（`CATALOG_SOURCE=upstream`）有意义：数据库那条路里 id 已经决定了是哪一份。
+   * 空 = 不带参数，ROM 代理按默认版本回源。
+   */
+  romLang?: string;
 }
 
 export default function PlayScene({
   serverGame,
   initialMode = 'solo',
   autoStart = false,
-  initialRoomCode = ''
+  initialRoomCode = '',
+  romLang = ''
 }: PlaySceneProps) {
   const { t, locale, href } = useI18n();
   const router = useRouter();
@@ -621,11 +629,21 @@ export default function PlayScene({
            * 走**分片**那条（见 `lib/http.ts` 的 `fetchRomWithProgress`）：
            * 一个请求搬不动几百 MB，PS1 的盘动辄 300 MiB，整包 GET 会被截断在几 MB 上。
            */
-          const blob = await fetchRomWithProgress(`/api/games/${game!.id}/rom`, {
+          const romUrl = romLang
+            ? `/api/games/${game!.id}/rom?lang=${encodeURIComponent(romLang)}`
+            : `/api/games/${game!.id}/rom`;
+          const blob = await fetchRomWithProgress(romUrl, {
             signal: ac.signal,
             onProgress: setRomRatio,
           });
-          romFile = new File([blob], game!.romName, {
+          /*
+           * 文件名必须跟着**选中的那一份语言**走（源站模式那批才有多个版本）：
+           * `unwrapRom` / `detectConsole` 看扩展名决定要不要解包 —— 选了中文 `.nes`
+           * 却顶着英文版那个 `.zip` 的名字，就会去解一个根本不是压缩包的文件。
+           */
+          const romName =
+            game!.romLanguages?.find((item) => item.code === romLang)?.name ?? game!.romName;
+          romFile = new File([blob], romName, {
             type: 'application/octet-stream'
           });
         }
@@ -791,7 +809,7 @@ export default function PlayScene({
      * 它是派生的字符串，跟着 `game` / `locale` 走 —— 列在这里是为了让 lint 的
      * `exhaustive-deps` 过，不会因为一次渲染而改变 `load` 的身份。
      */
-    [controller, game, title]
+    [controller, game, title, romLang]
   );
 
   /** 取消正在飞的那一笔 ROM 下载。没有下载在飞时是空操作。 */

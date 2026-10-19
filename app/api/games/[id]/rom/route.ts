@@ -8,16 +8,19 @@
  *   3. 顺便把 rom_name 放进 Content-Disposition，前端可据此还原成带原名的 File
  *      （街机 FBNeo 依赖这个文件名）。
  *
- * ⚠️ **两条来源，来源地址优先**（2026-10-16 用户要求）：
- *   · `source_url` 有值 → 回源上游（后台爬取勾了「不保存 ROM」的那批）；
- *   · 否则读本站 R2（`rom_url`）。
+ * ⚠️ **来源由 `CATALOG_SOURCE` 决定**（2026-10-19 起，默认 `upstream`）：
+ *   · 源站模式 → 按上游 slug（+ `?lang=` 选的语言版本）现解析地址；
+ *   · 数据库模式 → `source_url` 有值就回源上游（后台爬取勾了「不保存 ROM」的那批），
+ *     否则读本站 R2（`rom_url`）。
  *   两条都是**流式转发**：`upstream.body` 直接交给 `Response`，字节来一坨转一坨，
  *   不落盘、不攒整包 —— 服务端内存只占一个 chunk（不是整个 128 MiB）。
  *   ⚠️ 别在这条路上写 `await res.arrayBuffer()` / `.blob()`，那会把流式打回全量落地。
  */
 
 import { getGameRowCached, type GameRow } from '@/lib/server/games';
+import { usesUpstreamCatalog } from '@/lib/server/catalog-source';
 import { publicUrl } from '@/lib/server/r2';
+import { upstreamRomTarget } from '@/lib/server/upstream-catalog';
 import { sourceFileUrl, UPSTREAM_SITE, UPSTREAM_USER_AGENT } from '@/lib/server/upstream';
 import { fetchRomUpstream, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
 
@@ -78,35 +81,63 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     return new Response('Only a single valid byte range is supported', { status: 416, headers: { 'Cache-Control': 'no-store' } });
   }
 
-  let row: GameRow | null;
-  try {
+  /*
+   * `?lang=` 是「这一款用哪个语言版本的 ROM」（2026-10-19 加）。
+   *
+   * 数据库那条路不看它 —— 同款的不同语言版本在库里**各是一行**，id 已经决定了是哪一份。
+   * 它只给源站模式用：上游把四份 ROM 挂在同一个游戏对象的 `fileName` 里，
+   * 详情页 / 播放页选好的语言就靠这个参数带过来（见 upstream-catalog 的 upstreamRomTarget）。
+   */
+  const lang = new URL(request.url).searchParams.get('lang')?.trim() || null;
+
+  /*
+   * 回源目标：
+   *   · 源站模式（`CATALOG_SOURCE=upstream`，默认）—— 按上游 slug + 语言版本现解析；
+   *   · 数据库模式 —— **有来源地址就优先走上游**，否则读本站 R2（见文件头那段）。
+   *
+   * ⚠️ 走哪条**只看环境变量**，不按 D1 的报错自动切（理由见 lib/server/catalog-source.ts）。
+   */
+  let target: string | null = null;
+  let fileName = 'rom';
+  let fromUpstream = true;
+
+  if (usesUpstreamCatalog()) {
+    const fallback = await upstreamRomTarget(id, lang);
+    if (!fallback) {
+      console.error('[games] 上游找不到这一款的 ROM', id, lang ?? '');
+      return new Response('not found', { status: 404 });
+    }
+    target = fallback.url;
+    fileName = fallback.name;
+  } else {
     /*
      * 缓存版（24 小时 / 后台写入失效 tag）：ROM 代理是全站请求量最大的单条查询，
      * 每次开局都打一遍 D1 不值当。元数据在缓存窗口里不变（换 ROM 走删除重传，会失效 tag）。
      */
-    row = await getGameRowCached(id);
-  } catch (error) {
-    console.error('[games] ROM 查询失败', error);
-    return new Response('lookup failed', { status: 500 });
-  }
-  if (!row) return new Response('not found', { status: 404 });
+    let row: GameRow | null;
+    try {
+      row = await getGameRowCached(id);
+    } catch (error) {
+      console.error('[games] ROM 查询失败', error);
+      return new Response('lookup failed', { status: 500 });
+    }
+    if (!row) return new Response('not found', { status: 404 });
 
-  /*
-   * 回源目标：**有来源地址就优先走上游**，否则读本站 R2（见文件头那段）。
-   * 两者都没有（不存 ROM 的行 `rom_url` 是空串、来源地址又认不出）→ 当作没有。
-   */
-  const source = sourceFileUrl(row.source_url);
-  const target = source ?? (row.rom_url ? publicUrl(row.rom_url) : null);
-  if (!target) {
-    console.error('[games] 这一行既没有可用的来源地址，也没有 R2 对象', id);
-    return new Response('not found', { status: 404 });
+    const source = sourceFileUrl(row.source_url);
+    target = source ?? (row.rom_url ? publicUrl(row.rom_url) : null);
+    fileName = row.rom_name;
+    fromUpstream = Boolean(source);
+    if (!target) {
+      console.error('[games] 这一行既没有可用的来源地址，也没有 R2 对象', id);
+      return new Response('not found', { status: 404 });
+    }
   }
 
   let upstream: Response;
   try {
     upstream = await fetchRomUpstream(target, request, {
       timeoutMs: UPSTREAM_TIMEOUT_MS,
-      compatibility: source ? { userAgent: UPSTREAM_USER_AGENT, referer: `${UPSTREAM_SITE}/` } : undefined,
+      compatibility: fromUpstream ? { userAgent: UPSTREAM_USER_AGENT, referer: `${UPSTREAM_SITE}/` } : undefined,
     });
   } catch (error) {
     /*
@@ -199,7 +230,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
-    'Content-Disposition': contentDisposition(row.rom_name),
+    'Content-Disposition': contentDisposition(fileName),
     'Cache-Control': range ? 'private, no-store' : 'public, max-age=3600, s-maxage=2592000',
   };
   for (const name of ['accept-ranges', 'etag', 'last-modified']) {

@@ -17,7 +17,7 @@
 
 import { NextResponse } from 'next/server';
 import { assertUser } from '@/lib/server/app-guard';
-import { getGame } from '@/lib/server/games';
+import { getGameForWrite } from '@/lib/server/games';
 import {
   createUserSave,
   listUserSaves,
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
      *    是**跟着存档一起存下去的**，即使用户改名了也不影响正确性。
      *    这里只用 games 表做「这一款还在不在」的判定。
      */
-    const game = await getGame(gameId);
+    const game = await getGameForWrite(gameId);
     if (!game) return NextResponse.json({ error: 'not-found' }, { status: 404 });
 
     const bytes = new Uint8Array(await state.arrayBuffer());

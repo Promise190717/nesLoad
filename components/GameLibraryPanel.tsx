@@ -35,6 +35,11 @@ export interface LibraryGame {
   developerId: string | null;
   /** 只有 `/api/games` 那条带它；收藏那条不带（卡片上不显示），所以是可选的。 */
   createdAt?: number;
+  /**
+   * 源站数据里的多语言 ROM 版本（`Game.romLanguages` 的子集）——
+   * 播放时据此给 `File` 起名（`?lang=` 选中的那一份用的是它自己的文件名）。
+   */
+  romLanguages?: { code: string; name: string }[];
 }
 
 type LoadState = 'loading' | 'ready' | 'error';

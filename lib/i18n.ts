@@ -1525,6 +1525,8 @@ const en = {
   'gamesPage.field.developer': 'Developer',
   'gamesPage.field.series': 'Series',
   'gamesPage.field.language': 'Language',
+  /* 详情页点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */
+  'gamesPage.selectLanguage': 'Choose language',
   /*
    * 全站 404（app/not-found.tsx）。和下面那条 `gamesPage.notFoundTitle` 分开命名：
    * 那条讲的是「这个游戏从库里没了」，这条讲的是「这个地址本来就不存在」。
@@ -2322,6 +2324,7 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.field.developer': '开发商',
   'gamesPage.field.series': '系列',
   'gamesPage.field.language': '语言',
+  'gamesPage.selectLanguage': '选择语言',
   'notFound.title': '这个页面不存在',
   'notFound.description': '这个地址在 {site} 上不存在。检查一下链接，或者回房间里看看。',
   'gamesPage.notFoundTitle': '找不到这个游戏',

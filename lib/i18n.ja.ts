@@ -650,6 +650,7 @@ export const ja: Record<MessageKey, string> = {
   'gamesPage.field.developer': '開発元',
   'gamesPage.field.series': 'シリーズ',
   'gamesPage.field.language': '言語',
+  'gamesPage.selectLanguage': '言語を選択',
 
   'notFound.title': 'ページが見つかりません',
   'notFound.description':

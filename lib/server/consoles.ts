@@ -20,7 +20,11 @@
  */
 
 import { cached } from './cache';
+import { usesUpstreamCatalog } from './catalog-source';
 import { query } from './d1';
+import { upstreamConsoles } from './upstream-catalog';
+import { CONSOLE_TYPES, consoleLabel } from '@/lib/consoles';
+import type { ConsoleType } from '@/lib/emulator';
 import {
   EMPTY_ENTITY_TEXT,
   isBlankEntityText,
@@ -156,11 +160,45 @@ export const CONSOLES_PAGE_REVALIDATE_SECONDS = 86400;
  *    2026-10-16 加多语言侧表升到 v4，同日补日韩文案升到 v5，同日加 ps1 机种升到 v6，
  *    2026-10-19 nes 中文名改「红白机（FC）」升到 v7）。
  */
-export const listConsolesCached = cached(
+const listConsolesCachedRaw = cached(
   async () => listConsoles(),
   ['consoles:list', 'v7'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
+
+/**
+ * 上游首页那张「机种条」→ 站内 `Console`（源站模式下用，2026-10-19）。
+ *
+ * 名字按语言各写一份：中文用上游那套（红白机FC / 超任SFC），英日韩用站内短标签
+ * （NES / FC — 和 `consoleLabel` 的口径一致，英文站认美版名、中日韩认日版名）。
+ * 没有任何简介 / 发行年份 —— 上游那张条子上没有，宁缺勿编。
+ */
+async function listUpstreamConsoles(): Promise<Console[]> {
+  const rows = await upstreamConsoles();
+  return rows.map((row) => {
+    const type = row.type as ConsoleType;
+    const texts: EntityTexts = {
+      zh: { name: row.name, summary: null, description: null },
+      en: { name: consoleLabel(type, 'en'), summary: null, description: null },
+      ja: { name: consoleLabel(type, 'ja'), summary: null, description: null },
+      ko: { name: consoleLabel(type, 'ko'), summary: null, description: null },
+    };
+    return {
+      type: row.type,
+      texts,
+      imageUrl: row.imageUrl,
+      releaseYear: null,
+      createdAt: 0,
+      gameCount: row.gameCount,
+    };
+  });
+}
+
+/** 全部机种资料 —— 源站模式下改吃上游首页那张机种条（只有一个请求，见 upstream-catalog）。 */
+export async function listConsolesCached(): Promise<Console[]> {
+  if (usesUpstreamCatalog()) return listUpstreamConsoles();
+  return listConsolesCachedRaw();
+}
 
 /**
  * 按机种标识取一条资料。机种专题页在用。
@@ -182,6 +220,22 @@ export async function getConsole(type: string): Promise<Console | null> {
   if (!rows[0]) return null;
   const texts = (await loadConsoleTexts([type])).get(type) ?? {};
   return toConsole(rows[0], texts);
+}
+
+/**
+ * 前台机种专题页用的单条资料 —— 比 `getConsole` 多一层「数据从哪儿取」的判断。
+ *
+ * ⚠️ **为什么不在 `getConsole` 里判断**：那个函数后台也在用
+ *    （`/api/admin/consoles/[id]` 的 GET / PATCH），后台必须永远读库 ——
+ *    否则源站模式下后台点开一条机种资料会变成 404，再也改不了。
+ *    同样的坑还有一个：`games.ts` 的写入路径用 `getDeveloper` 反查厂名，
+ *    那边也不能跟着切（见 `developers.ts` 的 `getDeveloper`）。
+ */
+export async function getConsolePageData(type: string): Promise<Console | null> {
+  if (!usesUpstreamCatalog()) return getConsole(type);
+  /* 上游那张机种条本来就带全 14 台的资料，按机种挑一条即可（`upstreamConsoles` 自带 24 小时缓存） */
+  const rows = await listUpstreamConsoles();
+  return rows.find((row) => row.type === type) ?? null;
 }
 
 export interface ConsoleInput {
@@ -260,8 +314,18 @@ export async function listConsoleStubs(): Promise<{ type: string; createdAt: num
 
 /**
  * sitemap 用的 stub 读取 —— 缓存 24 小时（理由同 games.ts 的 listGameStubsCached）。
+ *
+ * ⚠️ 源站模式下**不查库**：那十四台机种的专题页永远可访问（资料行删了也会退回默认渲染，
+ *    见本文件头部），所以照 `CONSOLE_TYPES` 直接给全量、`createdAt` 记 0（= 不知道收录时间）。
  */
-export const listConsoleStubsCached = cached(
+export async function listConsoleStubsCached(): Promise<{ type: string; createdAt: number }[]> {
+  if (usesUpstreamCatalog()) {
+    return CONSOLE_TYPES.map((type) => ({ type, createdAt: 0 }));
+  }
+  return listConsoleStubsRaw();
+}
+
+const listConsoleStubsRaw = cached(
   async () => listConsoleStubs(),
   ['consoles:stubs'],
   { revalidate: 86400 }

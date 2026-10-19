@@ -146,12 +146,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
      */
     ...stubs.flatMap((stub) => [
       ...entries(origin, `/games/${stub.id}`, {
-        lastModified: new Date(stub.createdAt),
+        /* `createdAt === 0` = 不知道收录时间（源站模式下上游 sitemap 不给日期）*/
+        lastModified: stub.createdAt ? new Date(stub.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.8,
       }),
       ...entries(origin, `/games/${stub.id}/download`, {
-        lastModified: new Date(stub.createdAt),
+        lastModified: stub.createdAt ? new Date(stub.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.6,
       }),
@@ -182,7 +183,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       : []),
     ...consoles.flatMap((console) =>
       entries(origin, `/consoles/${console.type}`, {
-        lastModified: new Date(console.createdAt),
+        /* 同上：0 = 不知道收录时间（源站模式下按机种枚举，不查库）*/
+        lastModified: console.createdAt ? new Date(console.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.6,
       })

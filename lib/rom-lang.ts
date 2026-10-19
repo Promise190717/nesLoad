@@ -82,3 +82,31 @@ export function romLangToFormValue(lang: string | null | undefined): string | nu
   if (!lang) return null;
   return ROM_LANG_TO_FORM[lang.toLowerCase()] ?? null;
 }
+
+/**
+ * 源站数据里那串语言短码 → 界面上那排按钮要的 `{code,label}`（2026-10-19）。
+ *
+ * 顺序跟着 `GAME_LANGUAGES`（中 → 英 → 日 → 韩），和详情页「语言」资料行、
+ * 下载页选择条用的是同一份全称，别在组件里另抄。
+ */
+export function romLanguageOptions(
+  languages: readonly string[]
+): { code: string; label: string }[] {
+  return GAME_LANGUAGES.filter((item) => languages.includes(item.value)).map((item) => ({
+    code: item.value,
+    label: item.label,
+  }));
+}
+
+/**
+ * 进详情页 / 下载页时默认选中哪一份语言。
+ *
+ * 规则：**界面语言那一份** → 英文 → 第一份；只有一份或没有就返回空串
+ * （空串 = 链接不带 `?lang=`，行为和没有这个功能时完全一样）。
+ */
+export function defaultRomLanguage(languages: readonly string[], locale: string): string {
+  if (languages.length <= 1) return '';
+  if (languages.includes(locale)) return locale;
+  if (languages.includes('en')) return 'en';
+  return languages[0];
+}

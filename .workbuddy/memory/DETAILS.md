@@ -196,3 +196,39 @@
 - 控制台 Storage 是**日采样**（`r2StorageAdaptiveGroups`）、账单按每日峰值均摊 ⇒ 删了对象数字只会慢慢衰减。核「删没删」直接 `ListObjectsV2` 跟 D1 对账。
 - 桶 `games` ~255 MiB，大头是封面 `images/`（1702 张 154 MiB）。
 - 无版本控制，删 ROM 永久丢 ⇒ 别拿生产数据做删除类测试。
+
+## 目录来源开关 `CATALOG_SOURCE` 与上游数据层（2026-10-19）
+
+- 需求演进：最初是「D1 没额度时前台改吃上游」（自动判断），用户随后否掉 —— **改成环境变量说了算**，并且**默认就是源站**。
+- 开关：`lib/server/catalog-source.ts` 的 `catalogSource()` / `usesUpstreamCatalog()`。`CATALOG_SOURCE=upstream`（默认）/ `d1`；大小写不敏感、认不出按默认、不报错。已写进 `wrangler.jsonc` 的 `vars`（`keep_vars: true`，仪表盘里改也认）与 `.env.example`。
+- ⚠️ **为什么不做自动切换**（写进那个文件头的三条）：① 两套 id 不是一回事（D1 是 UUID、上游是 slug），中途切换会让评论/收藏/历史对不上；② 额度用没用完、何时恢复，代码只能猜；③ 自动切换只在出问题那天发生，本地和 CI 复现不出来。
+- `lib/server/d1.ts` 仍保留 `D1UnavailableError` / `isD1Unavailable()` / 60 秒熔断，但**没有调用方拿它分支**了 —— 只用于「日志里分得清是 D1 挂了还是 SQL 写错」，以及 D1 挂着时别再反复重试。
+- ⚠️ 只影响**前台读**：评论、收藏、历史、存档、账号、后台、所有写入路径照旧走 D1。
+- ⚠️⚠️ **两个不能加判断的函数**：`getConsole()`（`/api/admin/consoles/[id]` 的 GET/PATCH 在用）与 `getDeveloper()`（`games.ts` 的 `resolveDeveloper` 在存游戏时反查厂名）。把来源判断写进去 = 源站模式下后台改不了机种资料、存游戏丢开发商。前台单条改走 `getConsolePageData()` / `getDeveloperPageData()`，并在 `lib/server/pages/console.tsx` / `developer.tsx` 的 `cached` 包里调用。
+- 前台读路径的改法：每个缓存函数保留 `xRaw = cached(...)`，导出的 `x()` 先判 `usesUpstreamCatalog()` 再决定走 Raw 还是上游 —— **没有 try/catch 兜底了**（D1 出错就报错，这是刻意的）。`viaUpstream()` 只做「每个 label 在进程里打一次日志」，默认模式不该刷屏。
+- 各函数在源站模式下的行为：`countGamesCached` 取上游总数（带 `developerId` 时 0）、`listGamesPageCached` / `listLatestGamesCached` / `listGamesByConsoleCached` 走上游、`listGamesByDeveloperCached` 恒空、`countConsoleGamesByLanguageCached` 恒 0（专题页据此藏掉语种条）、`getGameCached` 走 `getUpstreamGame(id)`（**id 就是上游 slug**）、`listConsolesCached` 走 `upstreamConsoles()`、`countDevelopersCached` 0、`listDevelopersCached`/`listTopDevelopersCached` 空、开发商/机种单条走上面那两个 PageData 函数。
+- sitemap / 预渲染：`listGameStubsCached` 源站模式下读**上游 `sitemap.xml`**（`upstreamGameSlugs()`，24h 缓存，正则 `/games/<slug>`，少于 100 条视为结构变化直接丢弃），`createdAt: 0` = 不知道时间 ⇒ `app/sitemap.ts` 见到 0 就不写 `lastModified`；`listConsoleStubsCached` 按 `CONSOLE_TYPES` 枚举（专题页永不 404）；`listDeveloperStubsCached` 空（详情页会 404）。`gameStaticParams()` 源站模式返回 `[]`（每个 slug 要抓四份上游页，24 款 × 四语言 × 两个页面会把构建拖垮，改成按需 ISR）。
+- `lib/server/upstream-catalog.ts` 解析细节（不变）：
+  - 上游也是 App Router ⇒ 数据在 `self.__next_f.push([1,"…"])` flight 流里；解析 = 拼接片段 → 找 `"game":` → 括号配对切片 → `JSON.parse`。**别用正则整段抠 JSON**（转义引号会断）。
+  - 列表/详情**按四语言各抓一份**拼 `texts`（`/zh` `/games` `/ja` `/ko` 都是真翻译，标题如「スーパーマリオブラザーズ」）。
+  - ⚠️ `?console=` 吃的是**该语言页面的机种名**（`红白机FC`），不是 `nes` ⇒ 用 `CONSOLE_FILTER_LABEL`；带机种且无关键词时直接走机种专题页 `/zh/nes-games`。
+  - ⚠️ `?search=` 只匹配本语言标题 ⇒ **有关键词时只取中文页**。
+  - ⚠️ 上游 `numberOfItems` 搜索时恒 2110（不变）⇒ 优先取 flight 里 `"className":"font-semibold","children":N`（「共 N 款」），`numberOfItems` 只兜底。
+  - `UPSTREAM_PAGE_SIZE = 18`（上游一页 18 款）⇒ 分页页数必须用 `data.limit`（`lib/server/pages/games.tsx` / `console.tsx`），写死 15 会算出 141 页、后 23 页全空。
+  - 缓存 `['upstream:games-page'|'game'|'rom'|'consoles'|'slugs','v1']`，24 小时。⚠️ `fetch` 用 `next: { revalidate: 86400 }`，**不能用 `cache:'no-store'`**（会把详情页 ISR 拖成动态渲染）。
+- 多语言 ROM（上游一支游戏带 `fileName` 四份 en/zh/ja/ko）：
+  - `Game.romLanguages?: {code,name}[]` **只在回退数据里有值**；`fromUpstream()` 填。存 `{code,name}` 不存裸 string：**文件名必须用选中版本那份**，选中文 `.nes` 却拿英文 `.zip` 的名字会让 `unwrapRom` 误解包。
+  - `lib/rom-lang.ts` 加 `romLanguageOptions(languages)` / `defaultRomLanguage(languages, locale)`（界面语言 → en → 第一份；≤1 份返空串）。
+  - 详情页第一层四颗钮整体换成客户端组件 `components/GameLanguageActions.tsx`（`withLang()` 把 `?lang=` 拼进开始游戏/联机/下载），原因：**`?lang=` 若走 searchParams 服务端渲染会废掉详情页 24 小时 ISR**。同理下载页由 `RomDownloadGate` 收 `languages`/`defaultCode`。
+  - `StaticPlay` 读 `?lang=`（只认 `GAME_LANGUAGE_VALUES` 短码）→ `PlayScene romLang`：ROM 地址拼 `?lang=`、`File` 名换成选中版本的 `name`、`load` 依赖补 `romLang`、`key` 加 `${lang}`。
+  - `/api/games/[id]/rom?lang=` **只服务回退路径**（D1 正常时忽略）；`upstreamRomTarget(id, lang)` 里 `files:` / `site:` 两个 host **不可互换**（`absoluteUrl()` 保留原样，别擅自换 host）。
+  - 回退来的游戏没有评论/收藏/举报（无 D1 行）⇒ 详情页 `upstreamGame` 时那几块不画，`countFavorites` 包一层 try/catch 回 0。
+
+## `/play` 外壳与右栏（细节）
+
+- 外壳 = `GamesShell`（`showHeader={false}` + `fill`，只有它用）；视觉与网站一致：描边 `pixel-edge pxw-* pxc-*`、屏里那层 `crt-*`（底永远黑）。「不要 room 的样式」= 别搬布景/电视机/抽屉/键帽。别给 `.screen` 挂 max-h。
+- 资料条（封面 + 名字 + 机种/年份/开发商）**在顶栏水平居中**（`StaticPlay` 的 `PlayGameInfo` → `GamesShell` 的 `navExtra`）；右栏从按键设置开始。数据只在 `StaticPlay` 这一层取，别再在 `PlaySession` 里取第二遍。
+- 右栏整栏收起（`PlayScene` 的 `sidebarOpen`，不落盘）：收起 = 三块面板 `display:none` + 40px 窄轨；`[data-sidebar='closed']` 那条网格规则**只能写在 `@media(min-width:1024px)` 里**。
+- 收起钮两颗（靠 CSS 分工，都得留 `.play-sidebar-toggle` 类名）：展开时那颗**骑在「按键设置 / 游戏控制」的分隔线上、贴右沿**＝`.play-sidebar-seam`（`absolute bottom:0 + translateY(50%)`，不占高度）；收起后 `aside` 的直接孩子那颗接班。
+- ⚠️ lg 档 `.play-display` 的 `max-width` 是 `min(100%, var(--play-stage-width))`，别改回 `none`（否则 4:3 会顶穿视口）。
+- 联机时右侧按键表锁 1P：`keysLocked = soloOnly || mode !== 'solo'` 一起管「不画 P1/P2 切换」+「取值锁 `bindings.p1`」；`KeyBindingsPanel` 可选 `online`。判据用派生的 `mode`，**不是 `netplayState.role`**。

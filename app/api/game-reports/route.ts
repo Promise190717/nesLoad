@@ -9,13 +9,13 @@
  *    这条是**只给后台看的问题单** —— 报的可能是「这一款一打开就黑屏」这种
  *    对玩家没意义、却能被拿来刷屏的内容。要读列表去 /api/admin/game-reports。
  *
- * 提交前**先确认这款游戏还在库里**（`getGame`）：
+ * 提交前**先确认这款游戏还在库里**（`getGameForWrite`，源站模式下认上游）：
  *   · 不在就直接 404 —— 免得把垃圾数据写进表；
  *   · 顺便把**游戏名**带下去当快照（数据层不再回查 games）。
  */
 
 import { NextResponse } from 'next/server';
-import { getGame, localizeTexts } from '@/lib/server/games';
+import { getGameForWrite, localizeTexts } from '@/lib/server/games';
 import { REPORT_MAX_LENGTH, insertReport } from '@/lib/server/reports';
 
 export const runtime = 'nodejs';
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const game = await getGame(gameId);
+    const game = await getGameForWrite(gameId);
     if (!game) return fail('not-found', '找不到这款游戏', 404);
 
     const item = await insertReport({ gameId, gameTitle: localizeTexts(game.texts, 'zh').title, content });

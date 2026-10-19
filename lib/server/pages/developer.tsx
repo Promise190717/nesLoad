@@ -16,7 +16,7 @@ import {
   type MessageKey,
 } from '@/lib/i18n';
 import { pageCountOf, pageHref, parsePageParam } from '@/lib/pager';
-import { getDeveloper, localizeDeveloper, type Developer, type LocalizedDeveloperText } from '@/lib/server/developers';
+import { getDeveloperPageData, localizeDeveloper, type Developer, type LocalizedDeveloperText } from '@/lib/server/developers';
 import { listGamesByDeveloperCached } from '@/lib/server/games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -41,7 +41,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 /** 每页几款游戏。和 `/games` 列表页一致（同一套 5 列网格）。 */
 const PAGE_SIZE = 15;
 
-const loadDeveloper = cached(async (id: string) => getDeveloper(id), ['static-getDeveloper'], { revalidate: 86400, tags: ['developers'] });
+const loadDeveloper = cached(async (id: string) => getDeveloperPageData(id), ['static-getDeveloper'], { revalidate: 86400, tags: ['developers'] });
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
