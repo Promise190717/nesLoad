@@ -69,7 +69,10 @@
   - ⚠️ 联机时右侧按键表一律锁 1P（`keysLocked = soloOnly || mode !== 'solo'` 一个判据管「不画 P1/P2 切换」+「取值锁 `bindings.p1`」；`KeyBindingsPanel` 可选 `online` 让进页面就锁页签）。判据用派生的 `mode`，**不是 `netplayState.role`**。
 - ⚠️ 缓存：唯一出口 `lib/server/cache.ts` 的 `cached()`（开发模式直接透传查库，线上才吃 `unstable_cache`）。**条目不随部署失效** ⇒ 改数据/查询形态必须键尾版本 +1；返回 `Record<ConsoleType, X>` 必须运行时补键。首页三区块 12 小时（`HOME_REVALIDATE_SECONDS`）与 `/games` 30 分钟分开；首页不该有 `export const revalidate`；缓存留在页-侧，不下沉数据层。⚠️ `games:row-by-id` 现 **v2**（代理目标 `source_url` 优先、回退 `rom_url`）。
 - `ConsoleScreen` 三个可选 prop（`frameClassName`/`hideHint`/`onTap`）默认值 = 原行为。
+- ⚠️ **「我是谁」唯一出口 = `lib/current-user.ts` 的 `fetchCurrentUser()`**（5 分钟缓存 + 并发合并 + 失败不缓存，`AuthUser` 类型也在这）。登录成功 / 退出必须调 `rememberCurrentUser()` / `forgetCurrentUser()`（现有三处：`AuthForm`、`UserPanel`、`AccountCenter`）。**别再自己 fetch `/api/user/login` 或 `/api/user/profile` 判登录态** —— 未登录的人每切一页就白打一次。
+- ⚠️ `/login`、`/account` 都是读 cookie 的动态页 ⇒ 指向它们的 `<Link>` 一律 `prefetch={false}`（预取只能拿回 ~400 字节空布局壳，且每次页面切换重发两条）。
 - 搜索 `?q=&page=`（翻页必带关键词 `gamesHref`；搜索页 noindex, follow；关键词上限 64 码点）；首屏 SSR 已定型，别加 loading/Suspense；`GamesShell` 的 `label` 必须全 ASCII（font-pixel 无 CJK）。
+- ⚠️⚠️ **目录页带查询参数的链接一律用 `components/CatalogLink.tsx`（普通 `<a>`、整页跳转），绝不能 `next/link`**：`middleware.ts` 的 `catalogRewrite()` 会把 `q|console|lang|page` 改写到 `/catalog/...`（换了一棵路由树），软导航拿回的 flight 载荷对不上当前树 ⇒ **只改地址栏、不换内容**（2026-10-19 线上事故：语种 tab / 翻页 / 机种筛选全哑，dev 看不出来）。`GamesSearchForm` 同理：提交走原生 GET 表单，不许 `router.push`。**别改成「页面直接读 searchParams」来绕** —— 那会把整页 ISR 缓存废掉。
 - 详情页正文只有一段；下载页只有一颗钮。左上「返回」：只有开发商列表页 + 两个 404 页是普通 `<Link>`；游戏列表/详情/下载/开发商详情四页都是浏览器回退（`BackLink`，`mode:'history'`），兜底 列表→`/play`、详情→`/games`、下载→`/games/<id>`。
 - 单条走 `getGame(id)`，只有首页深链走 HTTP；sitemap 从 `listGameStubs()` 现读。深链开窗判据 `deepLinkOpen`；`setDeepLinkOpen(true)` 必须包 `Promise.resolve().then()`。
 - 列表唯一入口 `listGamesPage(offset, limit, {keyword, consoleType, developerId, language})`，排序 `created_at DESC, id DESC`；搜索只匹配 title/developer/series（刻意不含 language/description），关键词是第 1 个绑定参数。后台走 `listAdminGamesPage`（游标式、无缓存、无 total），两套别搅一起。
@@ -89,6 +92,9 @@
 
 ## 部署 / 校验
 
+- ⚠️⚠️ **`/_next/static/*` 绝不能是 `immutable`**（2026-10-19 事故）：Turbopack 的 chunk 名**不随内容变**（线上跨版本一直是 `0fe0plnjka4ry.js` / `0y0l5iwj4xp9f.js`），`max-age=31536000, immutable` 会让老用户一直吃旧 JS，新页面调到旧 chunk 里不存在的导出 ⇒ `(0,h.v) is not a function` / `Right-hand side of 'instanceof' is not an object`。`next.config.js` 已改成 `max-age=0, must-revalidate`，**别改回 Next 默认**。
+- ⚠️⚠️ **纯客户端壳的静态页必须 `export const dynamic = 'force-dynamic'`**（现 `/play`、`/room`、`/privacy`、`/terms`）：不加就是 `s-maxage=31536000`，HTML 在 CDN 上钉一年，发版后旧 HTML 指向已替换的 chunk ⇒ Next 自动 `location.reload()` ⇒ **无限刷新**。新加这类页面照办；发版后记得 purge 一次 CF 缓存（边缘上还留着旧 HTML）。
+- ⚠️ **大 ROM 只有一条下载路 = `lib/http.ts` 的 `fetchRomWithProgress`**（`/play` 与 `/room` 都走它）：2 MiB 网格 + 自适应档位（8/4/2 MiB，一批切过就降档、干净 8 批才升回）+ 大段失败 1 次就切半 + 段级整批重试一次。`readBodyWithProgress` 只留给存档这类小文件。背景：`/api/games/[id]/rom` 一个请求搬不动 100 MB+（整包只回 1–3 MB，5 MB 直接 503 `1102`）。
 - 线上配 `SITE_URL`；不做 `output: 'export'`。⚠️ 别拿生产数据做删除类测试；R2 无版本控制，删 ROM 永久丢。
 - ⚠️⚠️ **展示用地址一律 `publicUrlOrNull()`，别用严格版 `publicUrl()`**（2026-10-19 事故：Worker 掉了 `R2_PUBLIC_BASE`，`toAppUser` 那一抛带崩 `assertUser` ⇒ 带头像账号的 `/api/user/*` 全 500）。该变量已写进 `wrangler.jsonc` 的 `vars`；严格版只留给「没它就没法工作」的路径（上传/ROM 代理/存档下载）。
 - ⚠️ R2 控制台 Storage 是日采样（`r2StorageAdaptiveGroups`）、账单按每日峰值均摊 ⇒ 删了对象数字只会慢慢衰减。核「删没删」直接 `ListObjectsV2` 跟 D1 对账。桶 `games` ~255 MiB，大头是封面 `images/`（1702 张 154 MiB）。

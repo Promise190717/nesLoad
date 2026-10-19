@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import AuthForm, { type AuthUser } from './AuthForm';
+import { forgetCurrentUser, type AuthUser } from '@/lib/current-user';
+import AuthForm from './AuthForm';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -53,6 +54,8 @@ export default function UserPanel({ user, loading, onAuthed, onSignedOut, onClos
     setError(null);
     try {
       await fetch('/api/user/login', { method: 'DELETE' });
+      /* 把「我是谁」的缓存也清掉（`lib/current-user.ts`）—— 否则切一次页面顶栏还是用户名 */
+      forgetCurrentUser();
       onSignedOut();
     } catch {
       setError(t('user.error.failed'));

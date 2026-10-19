@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useState, type FormEvent } from 'react';
+import { rememberCurrentUser, type AuthUser } from '@/lib/current-user';
 import { validateEmail } from '@/lib/email';
 import type { Locale } from '@/lib/i18n';
 import { useI18n } from './I18nProvider';
@@ -32,15 +33,12 @@ import TurnstileWidget from './TurnstileWidget';
  *    和 `/admin` 那套（`users` 表 + `nesload_admin`）完全隔离。界面文案里也不要暗示
  *    两者有关联（比如别写「同一个账号也能登后台」）。
  *
- * ⚠️ 表单里**不做跳转**：登录成功只回调 `onAuthed`。浮层那边要留在原地换成「已登录」
- *    那一屏，登录页那边要导航走 —— 两种收场差得远，交给调用方决定。
+ * 表单里**不做跳转**：登录成功只回调 `onAuthed`。浮层那边要留在原地换成「已登录」
+ * 那一屏，登录页那边要导航走 —— 两种收场差得远，交给调用方决定。
+ *
+ * ⚠️ **「我是谁」那套探测搬去了 `lib/current-user.ts`**（2026-10-19）：它现在带缓存，
+ *    不再是「谁想用谁自己 fetch 一次」的东西。`AuthUser` 类型也跟着搬过去了。
  */
-
-/** `/api/user/login` 和 `/api/user/register` 的返回。 */
-export interface AuthUser {
-  id: string;
-  username: string;
-}
 
 export interface AuthFormProps {
   /** 登录 / 注册成功。调用方据此刷新自己的 user 状态（浮层）或导航（登录页）。 */
@@ -210,6 +208,11 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
       }
       // 口令不要在内存里多留 —— 成功之后立刻清掉
       setPassword('');
+      /*
+       * 先把「我是谁」的缓存盖成这个人（`lib/current-user.ts`）——
+       * 否则接下来 5 分钟里，切一次页面顶栏还会画成「登录」。
+       */
+      rememberCurrentUser(data.user);
       onAuthed(data.user);
     } catch (error) {
       setNotice({
@@ -411,25 +414,4 @@ export default function AuthForm({ onAuthed, hideCloudLead = false }: AuthFormPr
       </p>
     </div>
   );
-}
-
-/**
- * 首屏问一次「我是谁」。
- *
- * 放在模块级而不是组件里：`ConsoleScene` 要用它（决定那颗账号钮亮不亮、以及
- * 游戏库面板里星标能不能点），内容页顶栏（`components/TopBar.tsx`）也要用它
- * （决定那颗「登录」是链接到登录页还是显示用户名）。
- *
- * 返回 null 表示未登录（**也包含请求失败**）—— 对调用方来说两者没有区别：
- * 都当未登录处理。真出错时用户点那颗钮还能手动登录一次。
- */
-export async function fetchCurrentUser(): Promise<AuthUser | null> {
-  try {
-    const res = await fetch('/api/user/login');
-    if (!res.ok) return null;
-    const data = (await res.json()) as { user?: AuthUser | null };
-    return data.user ?? null;
-  } catch {
-    return null;
-  }
 }

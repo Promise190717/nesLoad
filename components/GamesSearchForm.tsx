@@ -1,22 +1,26 @@
 'use client';
 
-import { useState, useTransition, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useState, type FormEvent } from 'react';
+import CatalogLink from '@/components/CatalogLink';
 import { localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import type { ConsoleType } from '@/lib/emulator';
 
 /**
- * `/games` 的搜索框（2026-10-13 加 loading）。
+ * `/games` 与机种专题页共用的搜索框。
  *
- * **为什么从页面里拆出来**：原来是服务端页面里一个原生 GET 表单，提交是一次
- * **整页文档导航** —— D1 查询那一两秒里页面毫无反馈，用户会以为点了没反应。
- * 拆成客户端组件后，提交改走 `router.push` + `useTransition`：旧页面原地不动，
- * 按钮变成「搜索中…」直到服务端渲染完新结果。
+ * **为什么是一个客户端组件**：要有「搜索中…」这个状态 —— D1 查询那一两秒里按钮得动一下，
+ * 不然用户会以为点了没反应（2026-10-13 加）。
  *
- * ⚠️ **`action` + `method="get"` 必须留着**：JS 不可用时回落成原生表单提交，
- * 搜索有真地址、零 JS 也成立的这条底线不变（见下面 form 上的注释）。
- * `onSubmit` 里的 `preventDefault` 只在 JS 可用时拦下这次导航。
+ * ⚠️ **提交走的是原生 GET 表单（整页跳转），不是 `router.push`**（2026-10-19 改）：
+ *    在上一版里提交走客户端路由，线上会**只改地址栏、不换内容** —— 搜索和「清除」全都
+ *    失灵。原因见 `components/CatalogLink.tsx` 那段：带查询参数的目录地址会被
+ *    `middleware.ts` 改写成一棵对不上的路由树，软导航拿回来的 RSC 载荷没法应用。
+ *    所以 `onSubmit` **只负责把按钮切成「搜索中…」，不再拦这次导航**。
+ *    `useState` 而不是 `useTransition`：整页跳转没有「过渡结束」这回事，
+ *    页面卸载时这个状态自然消失（bfcache 回来时按钮是灰的，刷一下即恢复，概率极低）。
+ *
+ * ⚠️ **`action` + `method="get"` 是这个组件的本体**，不是无 JS 的回退：现在它就是
+ *    唯一的提交路径 —— 「搜索有真地址、零 JS 也成立」这条底线反而成了默认行为。
  */
 export default function GamesSearchForm({
   locale,
@@ -43,14 +47,13 @@ export default function GamesSearchForm({
   languageParam?: string;
   actionPath?: string;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
 
   /*
-   * 受控输入，初值 = URL 里的关键词。**effect 只在 `keyword` prop 变化时回写**：
-   * 客户端导航（点机种筛选 / 清除搜索 / 提交）会让服务端重新渲染并把新 keyword
-   * 传下来 —— 那一刻输入框必须跟上 URL。用户正在打字时 prop 不变，effect 不跑，
-   * 打字不受干扰（和原来 uncontrolled `defaultValue` 的体感一致）。
+   * 受控输入，初值 = URL 里的关键词。`keyword` prop 变了就回写一次 ——
+   * 提交与「清除」现在都走整页跳转（见文件头），正常情况下用不上这条；
+   * 留着是为了「同一份组件实例上关键词被换掉」的任何情形（比如将来又改回软导航）。
+   * 用户正在打字时 prop 不变，那段分支不跑，打字不受干扰。
    */
   const [value, setValue] = useState(keyword);
   const [previousKeyword, setPreviousKeyword] = useState(keyword);
@@ -62,39 +65,33 @@ export default function GamesSearchForm({
   const t = (key: MessageKey) => translate(locale, key);
 
   /**
-   * 搜索之外还要原样带回去的筛选条件。**顺序就是规范顺序**（服务端按地址字符串
-   * 比对是否规范，顺序不对就等于多一跳 307）：`console` 在前、`lang` 在后 ——
+   * 搜索之外还要原样带回去的筛选条件（只给下面那条「清除」链接用 —— 表单提交时
+   * 顺带的条件由那几个 hidden input 自己带着走）。**顺序就是规范顺序**（服务端按地址
+   * 字符串比对是否规范，顺序不对就等于多一跳 307）：`console` 在前、`lang` 在后 ——
    * 和 `gamesHref` / 机种专题页那个 `consoleHref` 拼法一致（`q` 永远排头）。
    */
   const keepParams: [string, string][] = [];
   if (consoleType) keepParams.push(['console', consoleType]);
   if (languageParam) keepParams.push(['lang', languageParam]);
 
+  /**
+   * ⚠️ **这里刻意不 `preventDefault`**：整页提交是唯一的路径（理由见文件头）。
+   * 拦一下只是因为上一次提交还没走掉（连点两下），别让它把按钮状态来回切。
+   */
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (pending) return;
-
-    /*
-     * 落点与 `gamesHref` 同一条规范顺序：`q` → `console` → `lang`（`page` 永远从第 1 页
-     * 搜起，空的参数直接省略 —— 别拼出 `?q=` 这种会让服务端多走一跳 307 的形态）。
-     * `trim` 和服务端 `parseQuery` 的口径对齐：全是空格 = 没搜。
-     */
-    const trimmed = value.trim();
-    const params = new URLSearchParams();
-    if (trimmed) params.set('q', trimmed);
-    for (const [name, param] of keepParams) params.set(name, param);
-    const query = params.toString();
-
-    startTransition(() => {
-      router.push(localePath(locale, actionPath) + (query ? `?${query}` : ''));
-    });
+    if (pending) {
+      event.preventDefault();
+      return;
+    }
+    setPending(true);
   };
 
   return (
     <form
       /*
        * ⚠️ `action` 必须带语言前缀 —— 写死 `/games` 的话，中文用户在 `/zh/games`
-       * 搜一下就被送到英文列表页。JS 可用时它只是无 JS 回退的落点。
+       * 搜一下就被送到英文列表页。
+       * 这个表单**就是靠它提交的**（整页跳转，见文件头），所以 `method="get"` 不是装饰。
        */
       action={localePath(locale, actionPath)}
       method="get"
@@ -109,7 +106,8 @@ export default function GamesSearchForm({
       <input
         id="games-search"
         type="search"
-        name="q"
+        /* 空的搜索框不挂 `name` ⇒ 地址里不会出现 `?q=`（那一跳会被服务端 307 收敛，白跑一趟） */
+        name={value.trim() ? 'q' : undefined}
         value={value}
         onChange={(event) => setValue(event.target.value)}
         placeholder={t('gamesPage.searchPlaceholder')}
@@ -143,9 +141,11 @@ export default function GamesSearchForm({
         ⚠️ 落点用 `gamesHref(locale, 1, '', consoleType)` 而不是裸 `/games`：
         清掉的只是**关键词**，用户当前筛着的机种该留着（他在 NES 里搜了一轮，
         点「清除搜索」想看的是全部 NES，不是全库）。语种同理。
+        ⚠️ 它带查询参数（`console` / `lang`）⇒ 必须整页跳转，用 `CatalogLink`
+        而不是 `next/link`，理由同文件头。
       */}
       {keyword && (
-        <Link
+        <CatalogLink
           /* 只剥关键词、其余筛选保留；page=1 不写参数，与 gamesHref / consoleHref 的形态一致 */
           href={
             localePath(locale, actionPath) +
@@ -154,7 +154,7 @@ export default function GamesSearchForm({
           className="text-[12px] text-ink-400 transition-colors hover:text-accent"
         >
           {t('gamesPage.searchClear')}
-        </Link>
+        </CatalogLink>
       )}
     </form>
   );

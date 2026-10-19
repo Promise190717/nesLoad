@@ -44,6 +44,32 @@ const nextConfig = {
    */
   async headers() {
     return [
+      /*
+       * ⚠️ **Next 构建产物的默认 `immutable` 在这个站上不成立（2026-10-19 事故）**。
+       *
+       * Next 给 `/_next/static/*` 发的是 `public, max-age=31536000, immutable`，
+       * 前提是「文件名带内容 hash，内容一变 URL 就变」。但线上实测这个前提不成立：
+       * 4f8263a 那次发版加了 `localCoreWasmUrl`，chunk 名字没变（页面里引用的还是
+       * `0fe0plnjka4ry.js` / `0y0l5iwj4xp9f.js` 那一批），于是**缓存里躺着的旧 JS
+       * 被继续使用**，新页面调用旧 chunk 里不存在的导出，报
+       * `(0, h.v) is not a function` / `Right-hand side of 'instanceof' is not an object`；
+       * 再叠上被缓存一年的旧 HTML 指向已被替换的 chunk，客户端就陷进
+       * `加载失败 → 自动刷新 → 还是旧 HTML` 的死循环（街机 `/play` 上踩到的就是这个）。
+       *
+       * 修法：**浏览器和 CDN 都必须先问一句再决定用不用缓存**。
+       * `max-age=0, must-revalidate` 让每次都带 `If-None-Match` 回源，内容没变就是
+       * 一个 304（Workers Assets 直接服务，几乎零成本），变了立刻拿到新的。
+       * 代价是首屏多一个往返（十几个 chunk 是并行的，不是串行）。
+       *
+       * 真正的解法是把 chunk 名改成内容 hash（Turbopack 侧的事），在那之前这条不能删。
+       * 与之配套的另一半在 `app/[locale]/play/page.tsx`（HTML 不许长缓存）。
+       */
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
       {
         source: '/cores/:path*',
         headers: [

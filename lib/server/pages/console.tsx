@@ -1,9 +1,9 @@
 import { cached } from '@/lib/server/cache';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
 import { consoleLabel, isConsoleType } from '@/lib/consoles';
+import CatalogLink from '@/components/CatalogLink';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
 import GamesSearchForm from '@/components/GamesSearchForm';
@@ -453,7 +453,8 @@ export default async function ConsoleDetailPage({
             /* 0 款的不画；「全部」那颗（`code === null`）永远在 —— 它是默认那一份的入口 */
             if (code && count === 0 && !active) return null;
             return (
-              <Link
+              /* 带 `?lang=` ⇒ 被 catalogRewrite 改写，**不能走软导航**（见 CatalogLink 那段事故说明） */
+              <CatalogLink
                 key={code ?? FILTER_ALL}
                 /* 「全部」那颗给空串 ⇒ 指回裸地址（唯一的那一份，也是默认那份） */
                 href={consoleHref(locale, id, 1, keyword, languageParamOf(code))}
@@ -466,7 +467,7 @@ export default async function ConsoleDetailPage({
                 {code ? GAME_LANGUAGE_LABEL[code] : t('gamesPage.filterAll')}
                 {/* 条数：不写 `font-pixel`（那一列字形里没有 CJK），跟着标签同一套字体 */}
                 <span className="ml-1.5 opacity-70">{count}</span>
-              </Link>
+              </CatalogLink>
             );
           })}
         </nav>
@@ -502,13 +503,13 @@ export default async function ConsoleDetailPage({
               少了语种，筛着「日本語」翻一页就变回全部了 —— 用户会以为筛选坏了。
             */}
             {page > 1 ? (
-              <Link
+              <CatalogLink
                 href={consoleHref(locale, id, page - 1, keyword, lang.param)}
                 rel="prev"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.prev')}
-              </Link>
+              </CatalogLink>
             ) : (
               // 首页那个「上一页」整块不画而不是渲染成灰按钮：指向自己的死链比少一个链接更糟
               <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
@@ -519,13 +520,13 @@ export default async function ConsoleDetailPage({
             </span>
 
             {page < pageCount ? (
-              <Link
+              <CatalogLink
                 href={consoleHref(locale, id, page + 1, keyword, lang.param)}
                 rel="next"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.next')}
-              </Link>
+              </CatalogLink>
             ) : (
               <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
             )}

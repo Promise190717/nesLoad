@@ -222,6 +222,8 @@ pnpm dev
 - ⚠️ **`/room`、`/login`、`/account` 都没有顶栏**：房间自己那行 `.top-links` 就是它；`/login` 与 `/account` 本身就是账号相关的页面，铺一排入口是重复。
 - **语言切换是自绘下拉**（`components/LocaleSwitcher.tsx`），样式类（`.locale-menu` / `.locale-trigger` / `.locale-options`…）和房间那一个**共用同一份 CSS**，选项列表共用 `lib/i18n.ts` 的 **`LOCALE_OPTIONS`**（2026-10-13 从 ConsoleScene 上移，避免两处各写一份）。**代码是两份**（房间那个和「电视机大小」弹层共用一个「点外面收起」的 effect、还要参与小屏抽屉排序；这个自给自足），取舍写在 `LocaleSwitcher.tsx` 的文件头。
 - **账号那一格**：未登录 → 链接到 `/login?next=<当前页>`；已登录 → 显示用户名，点进 `/account`。⚠️ 首屏那一次「我是谁」还没回来时**整格不渲染**（连分隔线一起），否则已登录用户会看见「登录」被换成自己的名字、闪一下。
+- ⚠️ **「我是谁」只有一次探测**（`lib/current-user.ts`，2026-10-19）：顶栏、房间（`ConsoleScene`）、详情页的收藏钮（`FavoriteButton`，原先自己打 `/api/user/profile`）现在共用同一个带缓存的 `fetchCurrentUser()`（5 分钟、并发合并、失败不缓存）。原因是这排顶栏**每页各挂一次**，未登录的人每切一次页面就白打一次 `/api/user/login`。登录成功（`AuthForm`）、退出（`UserPanel` / `AccountCenter`）都会就地更新缓存 —— **再加登录 / 退出入口时记得接上**，否则最长 5 分钟内界面还按旧答案画。
+- ⚠️ **登录页 / 个人中心那两颗链接都关掉了预取**（`prefetch={false}`，2026-10-19）：这两页都读 cookie（动态渲染），预取只能拿回一份空的布局壳（实测 373 / 426 字节），而每次切页面都会重发两条（带 `?next=` 的一条 + 不带 query 的壳）。点下去的 RSC 往返本来躲不掉，所以关掉净省。
 - **游戏库那颗的文案借 `topLinks.games`**（房间那行、法务页页脚用的是同一个键）—— 同一个落点（`/games`）在站里只该有一个名字。
 
 **登录页**（`app/[locale]/login/page.tsx` + `components/LoginPanel.tsx`）：
@@ -676,7 +678,7 @@ components/
   GamesShell.tsx     游戏列表 / 详情 / 下载三页共用的外壳（顶栏 / 页头 / 返回 / 页脚互链）
   TopBar.tsx         内容页顶栏：语言切换 + 账号（未登录去 /login，已登录显示用户名）+ 游戏库
   LocaleSwitcher.tsx 顶栏那个语言下拉（自绘；和房间里那一个共用 .locale-* 样式与 LOCALE_OPTIONS）
-  AuthForm.tsx       前台登录 / 注册表单（屋里浮层与 /login 共用；也导出 fetchCurrentUser）
+  AuthForm.tsx       前台登录 / 注册表单（屋里浮层与 /login 共用）
   LoginPanel.tsx     /login 里表单的客户端壳：接住登录成功，按 ?next= 导航
   LoginBackdrop.tsx  /login 的背景装饰：canvas 画的像素小人（NES / SFC / 街机配色）+ 微光 + 闪烁像素
   UserPanel.tsx      屋里那个账号浮层（外壳 + 已登录那一屏；表单本体在 AuthForm）
@@ -705,6 +707,7 @@ lib/
   game-text.ts    游戏文案的多语言结构 + localizeTexts()（客户端组件也要用，所以独立成文件）
   ai-policy.ts    AI 面向的站点政策正文（/llms.txt 与 /ai.txt 共用这一份）
   chiptune.ts     现场合成的 8-bit 小段，MP4 放不出来时的兜底音源
+  current-user.ts 「我是谁」的唯一客户端出口：带缓存（5 分钟）/ 并发合并 / 登录退出时改写
 public/
   cores/          十四台机种的核心（fceumm / snes9x / fbneo / fbalpha2012_cps1 / mgba /
                   genesis_plus_gx / picodrive / mednafen_wswan / mednafen_ngp / melonds /

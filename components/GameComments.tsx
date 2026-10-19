@@ -448,7 +448,17 @@ export default function GameComments({
       ) : (
         <p className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-400">
           {t('comments.signInLead')}
-          <Link href={signInHref} className="text-accent transition-colors hover:underline">
+          {/*
+            ⚠️ **关掉预取**（2026-10-19，理由同 `components/TopBar.tsx` 那两颗）：
+            登录页读 cookie（动态渲染），预取只能拿回一份空的布局壳，而每个进详情页的人
+            都会白发两条（带 `?next=` 的一条 + 不带 query 的壳）。点下去多等的那一个往返
+            本来就躲不掉。
+          */}
+          <Link
+            href={signInHref}
+            prefetch={false}
+            className="text-accent transition-colors hover:underline"
+          >
             {t('comments.signIn')} →
           </Link>
         </p>

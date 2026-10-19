@@ -6,6 +6,7 @@ import { useTopLoader } from 'nextjs-toploader';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { cardDelayMs } from '@/lib/card-stagger';
 import type { AccountTab } from '@/lib/account-tabs';
+import { forgetCurrentUser } from '@/lib/current-user';
 import type { ConsoleType } from '@/lib/emulator';
 import { localizeTexts, type GameTexts } from '@/lib/game-text';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
@@ -229,6 +230,8 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
     try {
       const res = await fetch('/api/user/login', { method: 'DELETE' });
       if (!res.ok) throw new Error(String(res.status));
+      /* 「我是谁」的缓存也要清（`lib/current-user.ts`）—— 否则切一次页面顶栏还画着用户名 */
+      forgetCurrentUser();
       // 回**当前语言**的首页（`/zh/account` 上退出不该把人扔进英文首页）
       topLoader.start();
       router.push(localeHref('/'));

@@ -46,6 +46,14 @@ export async function generateMetadata({
   };
 }
 
+/*
+ * 文案虽然是死的，但**页面不能预渲染**：预渲染会输出 `s-maxage=31536000`，
+ * HTML 在 CDN 上钉一年，而它引用的 chunk 每次发版都会换 —— 发版后用户拿到旧 HTML
+ * 就会进「chunk 404 → 自动刷新 → 还是旧 HTML」的循环。
+ * 来龙去脉见 `app/[locale]/play/page.tsx` 上面那段。
+ */
+export const dynamic = 'force-dynamic';
+
 export default async function PrivacyPolicyPage({
   params,
 }: {

@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import { consoleLabel } from '@/lib/consoles';
+import CatalogLink from '@/components/CatalogLink';
 import GamesShell from '@/components/GamesShell';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesSearchForm from '@/components/GamesSearchForm';
@@ -34,8 +34,12 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 见 app/sitemap.ts）。
  *
  * 分页用**真的 URL**（`?page=2`）而不是「一次全列出来」：库会一直长，
- * 一页几百个封面既拖慢首屏又没人翻得到底。分页链接是普通的 `<Link>`，
+ * 一页几百个封面既拖慢首屏又没人翻得到底。分页链接是普通的 `<a>`（`CatalogLink`），
  * 爬虫顺着「下一页」能走到最后一页。
+ *
+ * ⚠️ 这些链接**必须是整页跳转**，不能用 `<Link>`：`?page=` / `?console=` 会被
+ *    `middleware.ts` 改写到 `/catalog/...`，软导航拿回来的 RSC 载荷对不上当前路由，
+ *    客户端只改地址栏、不换内容（2026-10-19 线上事故）。完整推理见 `components/CatalogLink.tsx`。
  *
  * ⚠️ `?page=1` / `?page=0` / `?page=abc` 这类**非规范写法一律 307 到规范地址**：
  * 同一个列表被 `?page=1` 和 `/games` 两份 URL 收录，是标准的重复内容。
@@ -403,7 +407,8 @@ export default async function GamesPage({
         {[null, ...CONSOLE_TYPES].map((type) => {
           const active = type === consoleType;
           return (
-            <Link
+            /* 带 `?console=` ⇒ 被 catalogRewrite 改写，**不能走软导航**（见 CatalogLink 那段事故说明） */
+            <CatalogLink
               key={type ?? 'all'}
               href={gamesHref(locale, 1, keyword, type)}
               aria-current={active ? 'true' : undefined}
@@ -412,7 +417,7 @@ export default async function GamesPage({
               }`}
             >
               {type ? consoleLabel(type, locale) : t('gamesPage.filterAll')}
-            </Link>
+            </CatalogLink>
           );
         })}
       </nav>
@@ -445,13 +450,13 @@ export default async function GamesPage({
             就掉回「全部游戏」了 —— 用户会以为搜索坏了。
           */}
           {page > 1 ? (
-            <Link
+            <CatalogLink
               href={gamesHref(locale, page - 1, keyword, consoleType)}
               rel="prev"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.prev')}
-            </Link>
+            </CatalogLink>
           ) : (
             // 首页那个「上一页」不渲染成灰按钮而是**整块不画**：爬虫顺着链接走，
             // 一个指向自己的死链比少一个链接更糟
@@ -466,13 +471,13 @@ export default async function GamesPage({
           </span>
 
           {page < pageCount ? (
-            <Link
+            <CatalogLink
               href={gamesHref(locale, page + 1, keyword, consoleType)}
               rel="next"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.next')}
-            </Link>
+            </CatalogLink>
           ) : (
             <span className="px-3 py-1.5 text-[12px] text-ink-700">
               {t('gamesPage.next')}

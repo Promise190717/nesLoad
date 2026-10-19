@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { fetchCurrentUser, type AuthUser } from '@/lib/current-user';
 import { splitLocalePath } from '@/lib/i18n';
 import { readTheme, saveTheme, type Theme } from '@/lib/theme';
-import { fetchCurrentUser, type AuthUser } from './AuthForm';
 import { GamepadIcon, MoonIcon, SunIcon } from './icons';
 import { useI18n } from './I18nProvider';
 import LocaleSwitcher from './LocaleSwitcher';
@@ -31,6 +31,10 @@ import LocaleSwitcher from './LocaleSwitcher';
  * ⚠️ **是客户端组件**：语言切换要 `useI18n()`（读当前语言、写 cookie、算另一种语言的
  *    地址），登录态要问一次 `/api/user/login`。内容页那几个壳（`GamesShell` /
  *    `LegalPage` / 首页）都是服务端组件，服务端渲染一个客户端子树没有任何问题。
+ *
+ * ⚠️ **登录态那次探测走 `lib/current-user.ts`（带缓存，2026-10-19）**：这一整排顶栏
+ *    是**每页各挂一次**的，`<Link>` 一点它就卸载重挂 —— 自己裸 fetch 的话，未登录的人
+ *    每切一次页面就白打一次 `/api/user/login`。缓存也在那里管登录 / 退出的失效。
  *
  * **登录按钮去 `/login`（2026-10-13 加的独立登录页），并把当前页塞进 `?next=`** ——
  * 登录成功之后能回到他刚才在看的那一页，而不是被扔回房间。`next` 传的是
@@ -175,8 +179,20 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
         <>
           <span aria-hidden className="h-[10px] w-px bg-ink-500" />
           {user ? (
+            /*
+             * ⚠️ **这两颗（个人中心 / 登录页）都关掉了预取**（`prefetch={false}`，2026-10-19）。
+             *
+             * 本站的 `/account` 与 `/login` 都读 cookie（动态渲染），预取拿不到页面数据 ——
+             * Next 只会去取一份「纯布局壳」（实测 373 / 426 字节，`__PAGE__` 里是空的），
+             * 而**每次页面切换**这排顶栏重新挂载时它都会再发一遍，一次两条（带 query 的
+             * 加上不带 query 的壳）。也就是说：未登录的人每翻一页，Worker 上就多两个
+             * 只能扔掉的请求，登录页打开速度却一点没快（那一次往返无论如何都要发生）。
+             * 省掉它的代价只是点下去之后多等一个 RSC 往返 —— 和点「游戏库」那种静态页
+             * 不一样，这两页本来就没有「秒开」可省。
+             */
             <Link
               href={localeHref('/account')}
+              prefetch={false}
               title={t('user.openSignedIn', { name: user.username })}
               className="max-w-[9rem] truncate text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
@@ -185,6 +201,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
           ) : (
             <Link
               href={signInHref}
+              prefetch={false}
               className="text-[12px] text-ink-300 transition-colors hover:text-accent"
             >
               {t('user.signIn')}

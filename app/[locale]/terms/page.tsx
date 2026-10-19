@@ -33,6 +33,14 @@ export async function generateMetadata({
   };
 }
 
+/*
+ * 与 `/privacy` 同理：文案是死的，但**页面不能预渲染** —— 预渲染的
+ * `s-maxage=31536000` 会让旧 HTML 在 CDN 上挂一年，发版后它引用的 chunk 已经换了，
+ * 用户就会陷进「加载失败 → 自动刷新」的循环。
+ * 来龙去脉见 `app/[locale]/play/page.tsx` 上面那段。
+ */
+export const dynamic = 'force-dynamic';
+
 export default async function TermsOfServicePage({
   params,
 }: {

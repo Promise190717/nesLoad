@@ -12,6 +12,14 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
     locale: ogLocale(locale), alternateLocale: otherLocales(locale).map(ogLocale),
   } };
 }
+/*
+ * 和 `/play` 同一条规矩：这一页是客户端壳，被 Next 当永久静态页输出
+ * `s-maxage=31536000`，等于把 HTML 在 CDN 上钉一年 —— 发版后旧 HTML 指向
+ * 已被替换掉的 chunk，客户端就进「加载失败 → 自动刷新 → 还是旧 HTML」的循环。
+ * 完整来龙去脉见 `app/[locale]/play/page.tsx` 上面那段。
+ */
+export const dynamic = 'force-dynamic';
+
 export default function Page() {
   return <Suspense fallback={null}><ConsoleScene /></Suspense>;
 }

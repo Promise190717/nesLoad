@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchCurrentUser } from '@/lib/current-user';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -19,9 +20,12 @@ import { useI18n } from './I18nProvider';
  *   · `null` —— 还没问出来 / 未登录。按钮显示「收藏」，**禁用**（不骗人）。
  *   · `false` / `true` —— 已知收藏与否，按钮可点。
  *
- * ⚠️ **首屏问两次**（`/api/user/profile` 判登录态，再 `?ids=1` 取收藏集合）。
- *    为什么不合成一次：收藏接口未登录直接 401，拿不到「我是谁」。所以先问 profile，
- *    401 就当未登录 —— 这也是**唯一的登录态判据**（同 ConsoleScene 的 fetchCurrentUser）。
+ * ⚠️ **首屏只问一次「我是谁」**（2026-10-19 改）。原先这里自己打 `/api/user/profile`
+ *    判登录态，而同一页的顶栏（`components/TopBar.tsx`）也在问 `/api/user/login` ——
+ *    未登录的人每进一次详情页就是两条白跑的请求。现在两边共用
+ *    `lib/current-user.ts` 那一次带缓存的探测（并发还会合并成一个）。
+ *    登着的话第二步照旧拉收藏集合；没登录这一步都省了。
+ *    登录态变了按下一次探测为准（缓存 5 分钟），和顶栏那颗钮同一套口径。
  *
  * 2026-10-13 用户要求「详情页显示游戏收藏数量」：这个数就挂在**这颗钮上**
  * （`★ 收藏 12`），而不是另起一行资料 ——
@@ -51,11 +55,10 @@ export default function FavoriteButton({ gameId, count }: { gameId: string; coun
      * 去拉收藏（打了也是 401）。setState 一律放 .then/.catch，不在 effect 体里同步写
      * （react-hooks/set-state-in-effect，同 AccountCenter 那几个 tab）。
      */
-    fetch('/api/user/profile')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { user?: { id: string } } | null) => {
+    fetchCurrentUser()
+      .then((me) => {
         if (cancelled) return;
-        if (!data?.user) return; // 未登录 —— 保持 null
+        if (!me) return; // 未登录 —— 保持 null
         setSignedIn(true);
         return fetch('/api/user/favorites?ids=1')
           .then((res) => (res.ok ? res.json() : null))
@@ -68,7 +71,7 @@ export default function FavoriteButton({ gameId, count }: { gameId: string; coun
           });
       })
       .catch(() => {
-        // profile 失败 = 当未登录处理，和 401 同路
+        // 探测失败 = 当未登录处理（fetchCurrentUser 自己就回 null，这条只是兜底）
       });
     return () => {
       cancelled = true;
