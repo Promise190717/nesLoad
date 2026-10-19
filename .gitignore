@@ -39,3 +39,6 @@ scripts/developer-logos/
 # 仓库里只存 fbneo_libretro.wasm.gz（启动时前端解开）。
 # 换核心时重新压完就把裸文件删掉，别让它再进来 —— 见 lib/emulator.ts 的 GZIP_CORES。
 public/cores/fbneo_libretro.wasm
+
+# Cloudflare Worker（workers/rom-proxy）的本地构建缓存
+.wrangler/

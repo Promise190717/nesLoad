@@ -58,6 +58,14 @@ CREATE INDEX IF NOT EXISTS idx_games_developer_id ON games (developer_id);
 -- 是同款聚合（`DELETE … WHERE NOT EXISTS`）与后台按款找记录走的路
 CREATE INDEX IF NOT EXISTS idx_games_group_key ON games (group_key);
 
+-- ⚠️ **表达式索引**（2026-10-16 加）—— 上面那条 `idx_games_group_key` 服务不了
+--    `COALESCE(group_key, id) = ?` 这种写法：`COALESCE` 包着**列**，普通列索引用不上，
+--    于是判重那条 JOIN 回表 games 时**每一行都要全表扫一遍**。实测 findGameDuplicate
+--    单次约 1640 行、占线上 D1 rows_read 的 39.86%，其中有一半就是这次回表。
+--    表达式索引要求查询里的表达式与这里**一致**（列名带不带表别名都行，SQLite 自己规范化）。
+--    ⚠️ 别把它「化简」成 `(group_key, id)` —— 那样 `COALESCE(...) = ?` 依旧用不上。
+CREATE INDEX IF NOT EXISTS idx_games_group_key_coalesce ON games (COALESCE(group_key, id));
+
 -- ⚠️ 上面那两列 `description`（2026-10-12）与 `source_url`（2026-10-16）都是后补的。
 --    **这个文件只对「还没建过表」的库有效**：
 --    `CREATE TABLE IF NOT EXISTS` 见表已存在就整句跳过，不会往老表里补列。
@@ -125,10 +133,30 @@ CREATE TABLE IF NOT EXISTS game_texts (
   PRIMARY KEY (group_key, locale)
 );
 
+-- 判重 / 归组那条查询走它（2026-10-16 加）。
+--
+-- ⚠️ **必须带 `COLLATE NOCASE`**：`lib/server/games.ts` 的 findGameDuplicate /
+--    findGameGroup 里写的是 `t.title COLLATE NOCASE = ?`，而默认索引是 BINARY 排序
+--    —— 不带 COLLATE 的索引**匹配不上**，SQLite 会照旧全表扫。这是这条索引唯一的坑。
+--
+-- 为什么需要它（不是「几百行无所谓」）：这两条查询原来都在全表扫（`title` 没索引，
+-- 而 `locale` 又不是主键 `(group_key, locale)` 的前缀）。实测单次约 1640 行，而
+-- 批量导入 / 抓取会**逐语言版本**各查一次 —— 2026-10-16 线上 D1 Insights 里，
+-- findGameDuplicate 一个人就吃掉 **39.86%** 的 rows_read（4.71M 行），
+-- findGameGroup 再吃 7.64%。
+--
+-- 列顺序 `(locale, title)`：判重固定只比中文那份（`locale = 'zh'`），两个都是等值条件，
+-- 一起放进索引让规划器一步定位到那 0~1 行。games 上那条 idx_games_group_key 服务的是
+-- 反方向（按 group 找记录，如 deleteGame 里的 `NOT EXISTS`）。
+--
+-- ⚠️ 老库要单独跑一次（`CREATE INDEX IF NOT EXISTS` 本身幂等，但本项目惯例是走脚本）：
+--      node --env-file=.env.local scripts/add-game-texts-title-index.mjs
+CREATE INDEX IF NOT EXISTS idx_game_texts_locale_title
+  ON game_texts (locale, title COLLATE NOCASE);
+
 -- 读取那条 JOIN 走 `ON t.group_key = COALESCE(g.group_key, g.id)`（见 lib/server/games.ts
 -- 的 loadGameTexts）—— `WHERE g.id IN (…)` 先筛出 games 行、再用本表主键前缀取文案，
--- 所以本表这边不需要额外索引。games 上那条 idx_games_group_key 服务的是反方向
--- （按 group 找记录，如 deleteGame 里的 `NOT EXISTS`）。
+-- 那个方向靠主键就够，不需要额外索引。
 --
 -- ⚠️ **没有外键约束**（D1 底下 SQLite 默认不开，同下面那几张表）：
 --    所以后台删游戏时数据层要**自己顺手清一遍**，而且必须**晚一步**清 ——

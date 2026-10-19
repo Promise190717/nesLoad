@@ -460,11 +460,21 @@ export async function listAdminGamesPage(
    * `group_key` 索引、每行一次主键级计数，代价远小于把整表 GROUP 一遍；而
    * `LIMIT` 与游标的形状原样保留（GROUP BY 会把「多取一条判 hasMore」搅乱）。
    * 口径与 `loadGameTexts` 的兜底一致：`COALESCE(group_key, id)` 相同即同款。
+   *
+   * ⚠️ **`COALESCE` 只能出现在「常量」那一侧**（2026-10-16 改，别再改回去）。
+   *    原来写的是 `COALESCE(g2.group_key, g2.id) = COALESCE(games.group_key, games.id)`
+   *    —— 左边那个 `COALESCE` 包着**列**，SQLite 就用不上 `idx_games_group_key` 了，
+   *    于是**每一行游戏都要全表扫一遍 games**（`LIMIT 15` × 1258 行 ≈ 19000 行/次，
+   *    线上实测正是这个数，占 D1 rows_read 的 8.09%）。
+   *    把 `COALESCE` 挪到右边（外层行的值，对子查询来说是个常量）之后
+   *    `g2.group_key = <常量>` 就能走索引。后面那个 OR 分支是给「迁移前 `group_key`
+   *    还是 NULL 的老行」兜底的 —— 少了它，那种行的 group_size 会算成 0 而不是 1。
    */
   const rows = await query<GameRow & { group_size: number }>(
     `SELECT *,
             (SELECT COUNT(*) FROM games g2
-              WHERE COALESCE(g2.group_key, g2.id) = COALESCE(games.group_key, games.id))
+              WHERE g2.group_key = COALESCE(games.group_key, games.id)
+                 OR (g2.group_key IS NULL AND g2.id = COALESCE(games.group_key, games.id)))
               AS group_size
        FROM games ${where}
       ORDER BY created_at DESC, id DESC LIMIT ?${params.length + 1}`,
@@ -973,7 +983,12 @@ export const getGameRowCached = cached(
  *    迁移之后每条游戏都有中文行（中文原文是必填的，见 scripts/add-game-texts.mjs），
  *    所以这条 JOIN 不会漏掉任何一条真实记录。
  *
- * ⚠️ 没建索引：这张表就几百上千行，全表扫一遍可以忽略；真要加也是后话。
+ * ⚠️ **2026-10-16 加了索引**（`idx_game_texts_locale_title`，见 db/schema.sql）。
+ *    在这之前这里是**全表扫**（单次实测约 1640 行），而批量导入 / 抓取会
+ *    **逐语言版本**各查一次（见 scrape-game 那段），于是这条查询一个人就吃掉
+ *    线上 D1 rows_read 的 **39.86%**（4.71M 行）—— 那条「几百上千行，全表扫一遍
+ *    可以忽略」的判断被数据推翻了，别照着它再删索引。
+ *    ⚠️ 索引**必须带 `COLLATE NOCASE`** —— 下面那句条件就是这么写的，普通索引匹配不上。
  */
 export async function findGameDuplicate(
   title: string,
@@ -1046,6 +1061,10 @@ export async function findGameDuplicate(
  *
  * ⚠️ 用 `JOIN`（不是 LEFT JOIN）：**没有中文行的游戏不参与**。中文原文必填，
  *    所以正常数据下每条都有 —— 同 findGameDuplicate 的理由。
+ *
+ * ⚠️ 走 `idx_game_texts_locale_title`（2026-10-16 加）—— 加之前这里是全表扫
+ *    （单次实测约 1044 行，占线上 D1 rows_read 的 7.64%）。同 findGameDuplicate，
+ *    那条索引的 `COLLATE NOCASE` 是必需的。
  */
 export async function findGameGroup(
   title: string,

@@ -1,0 +1,22 @@
+# ROM 回源代理 —— Cloudflare Worker 的部署配置
+#
+# ⚠️ `database_id` 必须和 Vercel 那边环境变量的 `D1_DATABASE_ID` 是**同一个库**，
+#    否则 Worker 查不到游戏行（会一律 404）。
+#    `database_name` 只是控制台显示用，按你实际的名字填即可。
+#
+# 部署：`cd workers/rom-proxy && npx wrangler deploy`
+# 路由：Cloudflare 控制台 → 你的域名 → Workers Routes → `<你的域名>/rom/*`
+#      （完整说明见 `src/index.ts` 顶部的注释）
+
+name = "nesload-rom-proxy"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nesload"
+database_id = "9ab0a67e-b4dc-4c7f-bdcb-8ee1ded8ffc4"
+
+[vars]
+# 与 Vercel 那边的 R2_PUBLIC_BASE 保持一致（Worker 走 R2 那条路时要用）
+R2_PUBLIC_BASE = "https://games.retrogamesonline.fun"
