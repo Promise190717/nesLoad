@@ -136,6 +136,15 @@ interface ConsoleScreenProps {
    * `/play` 那页的黑区有自己的一套（游戏信息 / 下载进度 / 取消），两套叠在一起会打架。
    */
   hideHint?: boolean;
+  /**
+   * 暂停那句副标题指向哪儿（2026-10-19 加）。
+   *
+   * `case`（默认）＝ 指机身上那颗暂停钮 —— 房间里暂停确实只有机身面板这一个入口。
+   * `panel` ＝ 指页面右侧那块面板上的「继续」—— `/play` 那页**没有机身**，
+   * 原来那句「按机身面板的继续键」在那儿是句鬼话（用户指出）。
+   * ⚠️ 只有「本机暂停」这一句分岔；「房主暂停，等他继续」两种壳共用一个说法。
+   */
+  resumeHint?: 'case' | 'panel';
 }
 
 export default function ConsoleScreen({
@@ -156,6 +165,7 @@ export default function ConsoleScreen({
   onExitFullscreen,
   frameClassName = 'h-[var(--tv-screen-h)] w-[var(--tv-screen-w)]',
   hideHint = false,
+  resumeHint = 'case',
 }: ConsoleScreenProps) {
   const { t } = useI18n();
   const { hasPicture, waitingForHost, showPaused } = deriveScreenState({
@@ -397,8 +407,10 @@ export default function ConsoleScreen({
         **冻住的最后一帧**，和「卡死了」长得一模一样，不写这一句，用户看到的就是
         一台「坏了」的电视。
 
-        键盘快捷键（P / R / F5 / F8）2026-10-10 全撤了，暂停只剩机身面板那颗钮
-        这一个入口，所以下面那句提示必须指到**面板上**，不能再写「按 P」。
+        键盘快捷键（P / R / F5 / F8）2026-10-10 全撤了，暂停只剩那颗钮这一个入口，
+        所以下面那句提示必须指清楚**去哪儿按回来**：房间里是机身面板上的那颗
+        （`resumeHint='case'`），`/play` 那页没有机身、按的是右侧面板的「继续」
+        （`resumeHint='panel'`，2026-10-19 加）。
 
         **联机时这一层对加入者同样要出**，只是话不一样：他屏幕上是房主推来的画面，
         房主一暂停那条 `<video>` 就冻在最后一帧，而他本机没有模拟器、也没有那颗暂停钮
@@ -409,13 +421,21 @@ export default function ConsoleScreen({
         pointer-events-none：它只是一句话，不该变成点击 / 拖拽的落点。
       */}
       {showPaused && (
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-[12px] bg-crt-950/60">
-          <span className="blink font-pixel text-[20px] text-crt-accent drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-[12px] bg-crt-950/80 backdrop-blur-[2px]">
+          {/*
+            ⚠️ 标题**不挂 `.blink`**（2026-10-19 拿掉）：那条是 1 ↔ 0.45 的「呼吸」，
+            压在冻结画面上时字一直在半透明，用户的原话是「文字不清楚」。
+            暂停这一层是**要读**的状态提示，不是光标。
+          */}
+          <span className="font-pixel text-[20px] text-crt-accent drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
             {t('screen.paused')}
           </span>
-          {/* 两句话分的是「谁按的」：本机暂停指到面板上，房主暂停只说明在等谁 */}
-          <span className="screen-hint-xs font-pixel text-[12px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
-            {paused ? t('screen.resumeOnPanel') : t('screen.waitHostResume')}
+          {/* 三句话分的是「谁按的、去哪儿按回来」：本机暂停（房间）指机身面板，
+              本机暂停（`/play`）指右侧面板那颗「继续」，房主暂停只说明在等谁 */}
+          <span className="screen-hint-xs font-pixel text-[13px] text-crt-ink-200 drop-shadow-[0_2px_0_rgba(0,0,0,0.9)]">
+            {paused
+              ? t(resumeHint === 'panel' ? 'screen.resumeInPanel' : 'screen.resumeOnPanel')
+              : t('screen.waitHostResume')}
           </span>
         </div>
       )}

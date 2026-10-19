@@ -153,6 +153,7 @@ export const ko: Record<MessageKey, string> = {
   'screen.waitingHost': '호스트 화면을 기다리는 중',
   'screen.paused': '일시 정지',
   'screen.resumeOnPanel': '본체 패널의 재개 버튼을 누르세요',
+  'screen.resumeInPanel': '오른쪽 패널의 "재개"를 누르세요',
   'screen.waitHostResume': '호스트의 재개를 기다리는 중',
 
   /* 机身面板那排钮 */
@@ -296,6 +297,8 @@ export const ko: Record<MessageKey, string> = {
   'play.fullscreen': '전체 화면',
   'play.volume': '볼륨',
   'play.edit': '편집',
+  'play.hideSidebar': '접기',
+  'play.showSidebar': '펼치기',
   'play.hint': 'Esc로 전체 화면을 나갑니다. 나머지 조작은 오른쪽에 있습니다.',
   'play.leaveTitle': '게임 진행 중',
   'play.leaveBody': '돌아가면 이번 플레이가 끝납니다 — 진행 상황은 자동 저장되지 않습니다.',

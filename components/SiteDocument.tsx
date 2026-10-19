@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import NextTopLoader from 'nextjs-toploader';
+import BootAttributes from '@/components/BootAttributes';
 import { I18nProvider } from '@/components/I18nProvider';
 import LocalePrompt from '@/components/LocalePrompt';
 import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
@@ -185,6 +186,10 @@ export const viewport: Viewport = {
  *     ⚠️ 代价：**不再跟随系统主题的实时变化**（用户在系统里切深色，本站不动）。
  *     这是刻意换来的 —— 要跟随就得两条路径都跟随，而软导航根本没有「重新算」
  *     的时机，只会把同一个不一致换个方向再演一遍。
+ *     ⚠️ **但落盘盖不住「软导航时属性被抹掉」这一种**：切语言走的是客户端导航，
+ *     这段脚本根本不重跑，`<html data-theme>` 却会随根布局重渲染一起没了 ——
+ *     用户 2026-10-19 报的「切语言变黑夜、刷新又恢复」就是它。那半边由
+ *     `components/BootAttributes.tsx` 补（导航后把缺的属性填回去），两处是一件事的两半。
  *   - 灯：默认跟主题（白天关、夜晚开），手动点灯**也记住**（写 localStorage）。
  *   - 季节：默认**按农历算**（见下），点窗户只是**当次会话的临时覆盖，不落盘** ——
  *     刷新就回到按农历算的那一季。所以下面这段**不读 localStorage**，
@@ -402,6 +407,14 @@ export default async function SiteDocument({ children, locale }: { children: Rea
           顺带保证**即使 I18nProvider 出问题，SW 也照样注册**。
         */}
         <ServiceWorkerRegistrar />
+        {/*
+          导航后把上面那六个属性补回来（2026-10-19 加，修「切语言变黑夜」）。
+
+          **必须在 `<body>` 里、和 BOOT_INIT 隔开**：那个内联脚本只在整页加载时跑，
+          客户端导航（切语言就是）不会重跑，属性却在根布局重渲染时没了 —— 详见组件自己的注释。
+          它不渲染任何东西，也不依赖 i18n 上下文。
+        */}
+        <BootAttributes />
       </body>
     </html>
   );

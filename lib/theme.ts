@@ -11,6 +11,8 @@ export function readTheme(): Theme {
  * ⚠️ **不是唯一的写入者**：`components/SiteDocument.tsx` 的 `BOOT_INIT` 在
  * 「localStorage 里还没有合法值」时也会写一次（把现算出来的结果落盘，2026-10-19）。
  * 那条路径不能在这里复用 —— 首屏脚本是内联的，没法 import。改键名要两处一起改。
+ * 另外 `components/BootAttributes.tsx` 会在**客户端导航之后**把「丢了的」属性补回来
+ * （只补缺的、不落盘，见它的头注释）—— 它的键名同样是抄的，也一起改。
  */
 export function saveTheme(theme: Theme): void {
   const root = document.documentElement;

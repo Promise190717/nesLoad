@@ -303,6 +303,15 @@ export default function PlayScene({
   const [screenSize, setScreenSize] = useState<TvSize>(
     PLAY_DEFAULT_SCREEN_SIZE
   );
+  /**
+   * 右栏（按键设置 / 房间卡 / 游戏控制）收起来没有（2026-10-19 加，用户要求）。
+   *
+   * **不落盘**：这是「这一会儿想不想看面板」，不是长期偏好 —— 而且初值只能是
+   * 「展开」（服务端没有 localStorage），存过值的话首屏必然先画开再收起，闪一下。
+   * 收起时右栏只剩一条 40px 的窄轨（那颗钮还在），屏幕能多吃 260px 的宽度
+   * （窗口又高又窄、屏幕被宽度卡住时才真的变大；其余情况屏幕尺寸是高度算死的）。
+   */
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   /**
    * 地址栏上写着的模式（`?room=` 优先当加入者，否则看 `?mode=`）。**只是初值**，
@@ -1202,6 +1211,7 @@ export default function PlayScene({
         ref={workspaceRef}
         className="play-workspace w-full"
         data-screen-size={screenSize}
+        data-sidebar={sidebarOpen ? 'open' : 'closed'}
       >
         {/*
           这一页没有可见的大标题（用户要的就是干净），但**不能没有 h1** ——
@@ -1252,6 +1262,8 @@ export default function PlayScene({
                     fileOver={false}
                     variant="desktop"
                     hideHint
+                    /* 这一页没有机身：暂停那句副标题指向右栏的「继续」（见 ConsoleScreen 的 prop 注释） */
+                    resumeHint="panel"
                     frameClassName="play-game-screen w-full"
                     onExitFullscreen={exitFullscreen}
                   />
@@ -1442,7 +1454,28 @@ export default function PlayScene({
           **只放该有的东西**（说明 + 控件，没有分组卡片、没有键帽、没有多余标题），
           不是把站上的视觉语言砍掉。
         */}
-        <aside className="play-sidebar">
+        <aside className="play-sidebar" data-collapsed={sidebarOpen ? undefined : 'true'}>
+          {/*
+            收起 / 展开的**窄轨那一颗**（2026-10-19）。
+
+            为什么有两颗同样的钮：展开时那颗按用户要求摆在「编辑」右边（见下面按键设置
+            标题行），可收起之后三块面板全被 `display: none` 藏起来，那颗也跟着没了 ——
+            这一颗是 `.play-sidebar` 的直接孩子，藏在面板外面，专门负责「把面板叫回来」。
+            两边靠 CSS 分工：窄轨这颗只在**收起时**（以及窄屏 / 触屏上）显示，另一颗反之。
+            ⚠️ 收起时靠 `[data-collapsed='true'] > :not(.play-sidebar-toggle)` 隐藏面板，
+               所以两颗钮都必须留着 `.play-sidebar-toggle` 这个类名。
+          */}
+          <button
+            type="button"
+            className="play-sidebar-toggle pixel-edge pxw-1 pxc-500 bg-ink-800"
+            aria-expanded={sidebarOpen}
+            title={t(sidebarOpen ? 'play.hideSidebar' : 'play.showSidebar')}
+            onClick={() => setSidebarOpen((open) => !open)}
+          >
+            <span aria-hidden="true">{sidebarOpen ? '»' : '«'}</span>
+            <span>{t(sidebarOpen ? 'play.hideSidebar' : 'play.showSidebar')}</span>
+          </button>
+
           {/*
         联机房间卡（2026-10-15：从按键下面挪上来 + 紧凑重排）。
         挪上来是因为：房主选完画质、房间建好，这张卡才冒出来 —— 原来压在
@@ -1566,7 +1599,7 @@ export default function PlayScene({
                   onClick={() => setKeybindOpen(true)}
                   title={t('keybind.open')}
                   aria-label={t('keybind.open')}
-                  className="play-edit pixel-edge pxw-2 pxc-500 bg-ink-800 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
+                  className="play-edit pixel-edge pxw-1 pxc-500 bg-ink-800 px-2 py-1 text-[11px] text-ink-200 transition-colors hover:text-accent"
                 >
                   {t('play.edit')}
                 </button>
@@ -1623,6 +1656,26 @@ export default function PlayScene({
                 </div>
               ))}
             </dl>
+
+            {/*
+              收起 / 展开：**卡在两块面板的分隔线上、贴着右沿**（2026-10-19 用户指定这个位置）。
+              它用绝对定位挂在按键设置这一块上（`bottom: 0` + `translateY(50%)`）——
+              于是正好骑在「按键设置 / 游戏控制」中间那道 12px 的缝上，**不占布局高度**，
+              两块面板的间距一点没变。
+
+              ⚠️ 它藏在面板**里面**，收起时会跟着面板一起消失 —— 右沿窄轨上那颗
+              （`aside` 的直接孩子）就是接班的那颗，窄屏 / 触屏也用它。
+            */}
+            <button
+              type="button"
+              className="play-sidebar-toggle play-sidebar-seam pixel-edge pxw-1 pxc-500 bg-ink-800"
+              aria-expanded={sidebarOpen}
+              aria-label={t('play.hideSidebar')}
+              title={t('play.hideSidebar')}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span aria-hidden="true">»</span>
+            </button>
           </section>
 
           <section className="play-control-panel pixel-edge pxw-2 pxc-700">

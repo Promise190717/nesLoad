@@ -40,15 +40,18 @@ import type { Locale } from './i18n';
  * 机种短标签 —— **丝印词，不进文案表**。
  *
  * 它同时出现在四个地方（首页卡片 18px、`/consoles` 卡片占位 16px、游戏卡片的机型行、
- * 后台表格），所以**长度必须控制在 3 个字符以内** —— 那些位置都不宽，
- * 「NGP」「SMS」已经是极限，再加一个字就截断成省略号。
+ * 后台表格），所以**长度必须控制在 4 个字符以内** —— 那些位置都不宽，
+ * 「SNES」已经是极限（`font-pixel` 每字约 1em，16px 的 72px 占位格刚好塞得下四个），
+ * 再加一个字就截断成省略号。
  *
  * ⚠️ 这张表是**英文站的叫法**，不是「所有语言的叫法」。本地叫法不一样的机种登记在
  *    下面的 `CONSOLE_LABEL_LOCAL`，前台取值一律走 `consoleLabel()`。
  */
 export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   nes: 'NES',
-  snes: 'SFC',
+  // 美版名。1991 年进北美的那台就叫 Super Nintendo，没人说 SFC ——
+  // 日版名 SFC 只留在中日韩站，见下面 `CONSOLE_LABEL_LOCAL`。
+  snes: 'SNES',
   gb: 'GB',
   gbc: 'GBC',
   gba: 'GBA',
@@ -59,31 +62,35 @@ export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   '32x': '32X',
   ws: 'WS',
   ngp: 'NGP',
-  // PS1 的丝印词。**用 `PS` 而不是 `PS1`**：三个字符是上限，而机身丝印本来就是 PS
+  // PS1 的丝印词。**用 `PS` 而不是 `PS1`**：机身丝印本来就是 PS。这是叫法取舍，
+  // 不是长度问题（`PS1` 四个字符，和 `SNES` 一样放得下）。
   ps1: 'PS',
   arcade: 'ARC',
 };
 
 /**
- * 本地叫法 —— **只登记「本地玩家嘴里说的」和上面那个丝印词对不上的机种**，其余回退。
+ * 本地叫法 —— **只登记「本地玩家嘴里说的」和上面那个英文标签对不上的机种**，其余回退。
  *
- * 目前只有一条：FC。原因是这台机器有两个名字，1983 年日版的 Famicom（FC）和
- * 1985 年美版的 Nintendo Entertainment System（NES）。中国流行的是 FC 兼容机
- * （小霸王那类），玩家嘴里一律是「FC」或「红白机」，没人说 NES；日韩同理
- * （ファミコン / 패미컴，缩写也都是 FC）。所以**中文 / 日文 / 韩文站显示 FC，
- * 只有英文站显示 NES** —— 和 `CONSOLE_LABEL.snes` 用日版名 SFC 是同一套逻辑的另一半：
- * 丝印词跟着「这台机器最通行的写法」走，而不是死认美版名。
+ * 目前是两对，都是「一台机器两个名字」：
+ *   · NES ↔ FC：1983 年日版 Famicom（FC）、1985 年美版 NES。中国大陆流行的是 FC 兼容机
+ *     （小霸王那类），玩家嘴里一律「FC」或「红白机」，没人说 NES；日韩同理
+ *     （ファミコン / 패미컴，缩写也都是 FC）⇒ 中日韩站显示 FC，只有英文站显示 NES。
+ *   · SNES ↔ SFC：1990 年日版 Super Famicom（SFC）、1991 年美版 Super Nintendo。
+ *     北美没人说 SFC ⇒ 只有英文站显示 SNES，中日韩站保持 SFC（中文玩家也说 SFC / 超任）。
  *
- * ⚠️ 值仍然受上面那条约束：**≤3 个字符 + 纯 ASCII**。这批标签都会落到 `font-pixel`
+ * 一句话：**英文站认美版名，中日韩站认日版名**。两对各自成立，别再拿「丝印词跟着最通行
+ * 的写法走」这套去推 —— 2026-10-19 用户就是因为这个把英文站的 SFC 纠正成 SNES 的。
+ *
+ * ⚠️ 值仍然受上面那条约束：**≤4 个字符 + 纯 ASCII**。这批标签都会落到 `font-pixel`
  *    （那个字体只有 ASCII 字形），写成「ファミコン」「패미컴」「红白机」会掉成方块。
- *    所以韩文站也是 FC —— 패미컴 只出现在文案句子里，不出现在标签位。
+ *    所以韩文站也是 FC / SFC —— 패미컴 只出现在文案句子里，不出现在标签位。
  *
- * ⚠️ 别把 `CONSOLE_LABEL` 本身改成 FC 了事：那是英文站的标签，改了英文站就反了。
+ * ⚠️ 别把 `CONSOLE_LABEL` 本身改成 FC / SFC 了事：那是英文站的标签，改了英文站就反了。
  */
 const CONSOLE_LABEL_LOCAL: Partial<Record<Locale, Partial<Record<ConsoleType, string>>>> = {
-  zh: { nes: 'FC' },
-  ja: { nes: 'FC' },
-  ko: { nes: 'FC' },
+  zh: { nes: 'FC', snes: 'SFC' },
+  ja: { nes: 'FC', snes: 'SFC' },
+  ko: { nes: 'FC', snes: 'SFC' },
 };
 
 /**

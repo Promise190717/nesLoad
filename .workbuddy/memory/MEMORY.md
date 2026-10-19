@@ -15,8 +15,8 @@
 ## 机种 / 核心
 
 - `ConsoleType` **14 台** = nes|snes|gb|gbc|gba|nds|md|gg|sms|32x|ws|ngp|**ps1**|arcade（`lib/emulator.ts`）。
-- ⭐ 机种清单唯一出口 = `lib/consoles.ts`（`CONSOLE_TYPES`/`CONSOLE_LABEL` ≤3 字/`CONSOLE_TINT`/`isConsoleType`），`CartridgeSprite.tsx` 只 re-export。**别再手抄数组**；放 lib 不放组件：服务端组件不能 import `lib/emulator.ts`（顶层跑 `installAudioTap()`）。
-- ⭐ 前台短标签一律 `consoleLabel(type, locale)`（`CONSOLE_LABEL` 只是英文档）：中日韩 `nes` 显示 `FC`、英文 `NES`。标签位 ≤3 字符 + 纯 ASCII（font-pixel 无 CJK）⇒ 韩文也是 FC，패미컴 只在文案句里。后台 Admin 与 admin API 仍读 `CONSOLE_LABEL`。URL/枚举仍是 `nes`，永远不改。
+- ⭐ 机种清单唯一出口 = `lib/consoles.ts`（`CONSOLE_TYPES`/`CONSOLE_LABEL` ≤4 字/`CONSOLE_TINT`/`isConsoleType`），`CartridgeSprite.tsx` 只 re-export。**别再手抄数组**；放 lib 不放组件：服务端组件不能 import `lib/emulator.ts`（顶层跑 `installAudioTap()`）。
+- ⭐ 前台短标签一律 `consoleLabel(type, locale)`（`CONSOLE_LABEL` 只是英文档）：**英文站认美版名、中日韩站认日版名** —— `nes` 英文 NES / 中日韩 FC；`snes` 英文 **SNES** / 中日韩 SFC（2026-10-19 用户纠正过，别再改回「英文站也 SFC」）。标签位 ≤4 字符 + 纯 ASCII（font-pixel 无 CJK，SNES 已是最长）⇒ 韩文也是 FC / SFC，패미컴 只在文案句里。后台 Admin 与 admin API 仍读 `CONSOLE_LABEL`。URL/枚举仍是 `nes`，永远不改。
 - `CORE_MAP`：**14 台全走本站 `public/cores/`**（2026-10-19 起 NES/SFC 也从 jsdelivr 搬来，无 CDN 分支、`LOCAL_CORE_CONSOLES` 已删）；arcade 按 romset 在 `fbneo`/`fbalpha2012_cps1` 里挑（`lib/arcade-core.ts`）；核名严格 `<core>_libretro.js|.wasm`，`fbneo` 只存 `.wasm.gz`（`GZIP_CORES`，启动解压）。
 - ⚠️⚠️ **NDS 的 melonds 是 EJS 核**，控制面 + 输入面都和其余核不是一套 —— 见 `DETAILS.md`。再引 EJS 核照那三条走，别只在 `CORE_MAP` 加名字。
 - 加机种：照 `lib/consoles.ts` 头部九处 + 两件数据逐项过（`EXTENSION_MAP` 不含 `.bin`；`detectConsole` 文件头优先、**SNES 压最后**；`toConsoleType()` 有词界/顺序坑）。
@@ -42,6 +42,7 @@
 - ⚠️ 2026-10-19 起 `BOOT_INIT` 在「没存过值」时把现算结果**落盘**到 `nesload:theme`（否则没点过钮的人整页加载会重按系统算，表现为「切路由突然变黑」）。**别改成跟随系统实时变化** —— 软导航没有重算时机。
 - ⚠️ `BOOT_INIT` **禁止外面包大 try**：旧 catch 硬编码 `data-theme='dark'`，一步抛错把已存 light 一起丢。读写走局部 `read()/write()`。
 - 主题钮三处：房间右沿（ConsoleScene，带 `.row-label`）、`/play` 右栏「显示」行、内容页 `TopBar` 最右那颗（`GamesShell` 的 `showTheme` 透传，**只有 `StaticPlay` 传 false**）。图标由 CSS 按 `data-theme` 挑，React 只管 title/aria。
+- ⚠️ 六个首屏属性（`data-theme/lamp/simple/tv/season/mobile`）只有 `BOOT_INIT` 写，而它只在整页加载跑 ⇒ **客户端导航（切语言）会把属性丢掉、页面退回深色**（用户 2026-10-19 报「切语言变黑夜、刷新恢复」）。由 `components/BootAttributes.tsx`（挂在 `SiteDocument` `<body>`）在导航后 + MutationObserver 里**只补缺的**，不落盘。改 BOOT_INIT 的键名/兜底要同步它。
 - `data-tv` 的 `/play` 判据是 `/\/play(?:\/|$)/`（**别写死语种**，旧版漏了 ja/ko）。
 
 ## 两台机器 / 尺寸链
@@ -62,6 +63,7 @@
   - ✅ **`?id=` 会自动载入开玩**（`StaticPlay` 传 `autoStart={Boolean(id) && !room && !host}` ⇒ `directSolo` ⇒ 自动 `start()`）。⚠️ `PlayScene` 头部注释仍写「不会自动载入」，那是旧行为、**以代码为准**。
   - ⚠️ 联机时右侧按键表一律锁 1P（`keysLocked = soloOnly || mode !== 'solo'` 一起管「不画 P1/P2 切换」+「取值锁 `bindings.p1`」；`KeyBindingsPanel` 可选 `online`）。判据用派生的 `mode`，**不是 `netplayState.role`**。
   - ⭐ 这一款的资料条（封面 + 名字 + 机种/年份/开发商）**在顶栏水平居中**（`StaticPlay` 的 `PlayGameInfo` → `GamesShell` 的 `navExtra`）；右栏从按键设置开始。数据在 `StaticPlay` 这一层取（`useEffect` 已从 `PlaySession` 挪上去），别再在 `PlaySession` 里取第二遍。
+  - ⭐ 右栏可**整栏收起**（`PlayScene` 的 `sidebarOpen`，不落盘）：收起 = 三块面板 `display:none` + 40px 窄轨，`[data-sidebar='closed']` 那条网格规则**只能写在 `@media(min-width:1024px)` 里**。钮有两颗（展开时那颗**骑在「按键设置 / 游戏控制」的分隔线上、贴右沿**＝`.play-sidebar-seam`，`absolute bottom:0 + translateY(50%)`，不占高度；收起后 `aside` 直接孩子那颗接班），靠 CSS 分工，两颗都得留 `.play-sidebar-toggle` 类名。⚠️ lg 档 `.play-display` 的 `max-width` 是 `min(100%, var(--play-stage-width))`，别改回 `none`（否则 4:3 会顶穿视口）。
 - ⚠️ 缓存：唯一出口 `lib/server/cache.ts` 的 `cached()`（开发模式透传查库，线上才 `unstable_cache`）。**条目不随部署失效** ⇒ 改数据/查询形态必须键尾版本 +1；返回 `Record<ConsoleType, X>` 必须运行时补键。首页三区块 12 小时（`HOME_REVALIDATE_SECONDS`）与 `/games` 30 分钟分开；首页不该有 `export const revalidate`；缓存留在页侧、不下沉数据层。⚠️ `games:row-by-id` 现 **v2**（代理目标 `source_url` 优先、回退 `rom_url`）。
 - `ConsoleScreen` 三个可选 prop（`frameClassName`/`hideHint`/`onTap`）默认值 = 原行为。
 - ⚠️ **「我是谁」唯一出口 = `lib/current-user.ts` 的 `fetchCurrentUser()`**（5 分钟缓存 + 并发合并 + 失败不缓存，`AuthUser` 也在这）。登录成功 / 退出必须调 `rememberCurrentUser()` / `forgetCurrentUser()`（三处：`AuthForm`、`UserPanel`、`AccountCenter`）。**别再自己 fetch `/api/user/login|profile` 判登录态**。

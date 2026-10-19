@@ -154,6 +154,7 @@ export const ja: Record<MessageKey, string> = {
   'screen.waitingHost': 'ホストの画面を待っています',
   'screen.paused': '一時停止中',
   'screen.resumeOnPanel': '本体パネルの再開ボタンを押してください',
+  'screen.resumeInPanel': '右パネルの「再開」を押してください',
   'screen.waitHostResume': 'ホストの再開を待っています',
 
   /* 机身面板那排钮 */
@@ -299,6 +300,8 @@ export const ja: Record<MessageKey, string> = {
   'play.fullscreen': '全画面',
   'play.volume': '音量',
   'play.edit': '編集',
+  'play.hideSidebar': '閉じる',
+  'play.showSidebar': '開く',
   'play.hint': 'Esc で全画面を終了します。ほかの操作は右側にあります。',
   'play.leaveTitle': 'ゲームプレイ中',
   'play.leaveBody': '戻るとこのプレイは終了します — 進行状況は自動保存されません。',

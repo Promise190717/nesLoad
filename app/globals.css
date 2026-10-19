@@ -26,9 +26,28 @@
   .play-workspace[data-screen-size='small'] { --play-size-scale: .75; }
   .play-workspace[data-screen-size='medium'] { --play-size-scale: .88; }
   .play-screen-area { height: auto; }
+  /*
+   * `max-width` 这几行**不是**冗余：右栏收起后第一列会比屏幕该有的宽度大（见下面
+   * `[data-sidebar='closed']`），屏幕本身仍要卡在 `--play-stage-width` 上 ——
+   * 那是「高度算出来的宽度 × 屏幕档位（大 / 中 / 小）」，放开它 4:3 会跟着列宽一起
+   * 长高、直接把视口顶穿，挑过「小屏」的人也会被硬拉回大屏。
+   * 展开时列宽 == 这个值，`min()` 取到的就是 100%，和原来的 `max-width: none` 等价。
+   */
   .play-display,
   .play-display[data-screen-size='small'],
-  .play-display[data-screen-size='medium'] { width: 100%; max-width: none; height: auto; aspect-ratio: 4 / 3; }
+  .play-display[data-screen-size='medium'] { width: 100%; max-width: min(100%, var(--play-stage-width, 100%)); height: auto; aspect-ratio: 4 / 3; }
+  /*
+   * 右栏收起：宽度照旧（`--play-stage-width + 300px`，顶栏那条线也跟着它），
+   * 第一列吃掉那挤出来的 260px、屏幕在其中居中，第二列只剩 40px 的窄轨。
+   */
+  .play-workspace[data-sidebar='closed'] { grid-template-columns: minmax(0, 1fr) 40px; }
+  .play-sidebar[data-collapsed='true'] .play-sidebar-toggle { display: inline-flex; align-self: start; justify-content: center; width: 40px; padding: 12px 6px; writing-mode: vertical-rl; text-align: center; }
+  /*
+   * 竖排（`writing-mode: vertical-rl`）会把字形顺时针转 90°，`«` 于是变成**朝上**。
+   * 箭头单独反向转回来，保持「朝左 = 展开」（2026-10-19 用户指出）。
+   * 得先 `inline-block`：`transform` 对非替换的行内元素不生效。
+   */
+  .play-sidebar[data-collapsed='true'] .play-sidebar-toggle [aria-hidden='true'] { display: inline-block; transform: rotate(-90deg); }
 }
 /*
 ⚠️ **这个页面的尺寸真源在 JS，不在 CSS**：`--play-display-max-width` 是 `PlayScene.tsx`
@@ -76,7 +95,38 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-option[aria-pressed='true'] { color: #161616; --px-c: var(--color-crt-accent); }
 .play-start { width: 100%; max-width: 320px; min-height: 44px; font-weight: 600; color: #161616; }
 .play-sidebar { display: flex; min-width: 0; width: 100%; flex-direction: column; gap: 12px; align-self: start; }
+/*
+ * 右栏的「收起 / 展开」（2026-10-19 加）。
+ *
+ * 收起时三块面板走 `display: none` 而**不是卸载** —— 键位编辑、联机面板、存档那些
+ * 组件里的 state 得留着，收起再展开不该把正在配的东西丢掉。
+ * 那颗钮刻意留在 `.play-sidebar-panels` 外面：面板都藏了，它是唯一能把它们叫回来的东西。
+ */
+.play-sidebar-toggle { display: inline-flex; align-self: flex-end; align-items: center; gap: 4px; min-height: 24px; padding: 3px 8px; font-size: 11px; color: var(--color-ink-200); transition: color .15s; }
+.play-sidebar-toggle:hover { color: var(--color-accent); --px-c: var(--color-accent); }
+.play-sidebar-toggle[aria-expanded='false'] { letter-spacing: .04em; }
+/*
+ * 这颗钮有两个位置，**同一份 DOM 放不了两处**，所以是两颗、靠 CSS 分工：
+ *   · `.play-sidebar-seam` = 展开时用的那颗，绝对定位骑在「按键设置 / 游戏控制」
+ *     两块面板的分隔线上、右半截探出面板右沿（见下一条，不占布局高度）；
+ *   · `.play-sidebar` 的直接孩子那颗 = 收起后在右沿窄轨上，窄屏 / 触屏上也用它
+ *     （那几个场景里按键设置那张表本身就可能被藏掉，骑缝那颗跟着看不见）。
+ */
+.play-sidebar > .play-sidebar-toggle { display: none; }
+/*
+ * 骑缝那颗：**28×28 的纯图标小方块**（2026-10-19 用户：带「收起」两个字太丑）。
+ *
+ * 位置算的是「两块面板之间那道 12px 缝的正中」：`bottom: 0` 贴的是上面那块的下边，
+ * 再往下半个自身（`50%`）+ 半个缝（`6px`）⇒ 上下各压进 8px，两边一样多。
+ * 只写 `50%` 的话它会整个被上面那块吃掉一半、下面一点不占，看着就是歪的。
+ * `right: -12px` = **故意探出面板右沿**（用户要求「右侧可以超过块的右侧」），
+ * 像个挂在边上的小拉手；`main` 左右各有 16px 内边距，探出去这 12px 不会撑出横向滚动。
+ */
+.play-sidebar-seam { position: absolute; right: -12px; bottom: 0; z-index: 2; width: 28px; min-height: 0; height: 28px; padding: 0; gap: 0; justify-content: center; font-size: 13px; line-height: 1; transform: translateY(calc(50% + 6px)); }
+.play-sidebar[data-collapsed='true'] > :not(.play-sidebar-toggle) { display: none; }
 /* 四块面板和全站一样走 pixel-edge 像素描边（描边在 TSX 上挂类），不再用普通 border */
+/* `.play-keys` 要当那颗骑缝钮的定位参照（见 `.play-sidebar-seam`） */
+.play-keys { position: relative; }
 .play-keys, .play-room, .play-control-panel { background: var(--color-ink-900); padding: 14px; }
 .play-room { padding: 10px 12px; }
 /* 房间卡刚出现时的提醒：描边闪主题色几下（steps 保像素感），几秒后停。
@@ -103,7 +153,9 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-controls > li button[title] { font-size: 12px; }
 .play-controls .play-icon-button { width: 26px; min-width: 26px; max-width: 26px; height: 26px; min-height: 26px; max-height: 26px; padding: 0; flex: 0 0 26px; box-sizing: border-box; }
 .play-controls > li span > span > button { min-width: 6px; min-height: 16px; height: 16px; padding: 0; }
-.play-edit { min-height: 26px; padding: 4px 10px; font-size: 11px; --px-w: 1px; }
+/* 按键设置标题行那颗「编辑」。2026-10-19 压到和右边那颗「收起」一般大 —— 两颗并排，
+   一个胖一个瘦看着像两套 UI（用户指出的） */
+.play-edit { min-height: 24px; padding: 3px 8px; font-size: 11px; --px-w: 1px; }
 .play-workspace button:focus-visible,
 .play-workspace input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 5px; }
 .play-overlay button:focus-visible,
@@ -118,6 +170,11 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-display .play-frame > div { height: auto; }
   .play-game-screen:not(:fullscreen) { height: auto; aspect-ratio: 4 / 3; }
   .play-sidebar { max-width: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  /* 这一档下右栏是两列网格：收起钮横跨整行并贴右，三块面板各自横跨整行 */
+  .play-sidebar-toggle { grid-column: 1 / -1; justify-self: end; }
+  /* 窄窗口统一用窄轨那颗（骑缝那颗在网格里会压到面板角上），触屏另见 :root[data-mobile] 那组 */
+  .play-sidebar > .play-sidebar-toggle { display: inline-flex; }
+  .play-sidebar-seam { display: none; }
   .play-keys { grid-column: 1 / -1; }
   .play-room { grid-column: 1 / -1; }
   .play-control-panel { grid-column: 1 / -1; }
@@ -156,6 +213,8 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-touch { display: none; }
 :root[data-mobile='on'] .play-controls { --play-control-size: 40px; }
 :root[data-mobile='on'] .play-keys { display: none; }
+/* 触屏上按键设置整块不画 ⇒ 骑缝那颗跟着没了，改用 `.play-sidebar` 直接孩子那颗 */
+:root[data-mobile='on'] .play-sidebar > .play-sidebar-toggle { display: inline-flex; }
 :root[data-mobile='on'] .play-touch {
   display: block;
   width: 100%;
@@ -184,7 +243,8 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-frame > div[data-playing='false'] { min-height: 0; }
   .play-overlay { padding: 20px 12px; }
   .play-sidebar { display: flex; flex-direction: column; min-width: 0; }
-  .play-sidebar > * { width: 100%; min-width: 0; }
+  /* 收起钮**除外**：它是 `inline-flex` 的小标签，拉满整行就没「按钮」的样子了 */
+  .play-sidebar > :not(.play-sidebar-toggle) { width: 100%; min-width: 0; }
   .play-controls { column-gap: 16px; }
 }
 @media (max-width: 359px) {

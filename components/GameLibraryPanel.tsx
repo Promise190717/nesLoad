@@ -1040,7 +1040,7 @@ export default function GameLibraryPanel({
                         />
                       </span>
                     )}
-                    {/* 机种标签全是 ASCII（FC / NES / SFC / ARC），走 font-pixel 不掉字形 */}
+                    {/* 机种标签全是 ASCII（FC / NES / SNES / ARC），走 font-pixel 不掉字形 */}
                     <span className="shrink-0 font-pixel text-[12px] text-ink-500">
                       {consoleLabel(cartridge.console, locale)}
                     </span>

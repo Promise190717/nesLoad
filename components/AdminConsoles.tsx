@@ -407,7 +407,7 @@ export default function AdminConsoles() {
                 <span className="text-[12px] text-ink-600">
                   {imageLabel
                     ? `当前：${imageLabel}。留空表示不换。`
-                    : '选填。没有图时前台用机种短标签（中文站 FC、英文站 NES，其余如 SFC / GBA / ARC）占位。'}
+                    : '选填。没有图时前台用机种短标签（中文站 FC / SFC、英文站 NES / SNES，其余如 GBA / ARC）占位。'}
                 </span>
               </label>
 

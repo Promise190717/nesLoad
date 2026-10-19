@@ -80,7 +80,7 @@ export default async function ConsolesPage({
    * ⚠️ **先摊成新数组再 `sort`**：`CONSOLE_TYPES` 是 readonly，原地排会污染其它页面
    *    （首页那一块、`/games` 的筛选条都读它）。
    * ⚠️ 数量并列时**不加 tie-break**：`Array#sort` 在 V8 上是稳定排序，并列的会保持
-   *    `lib/consoles.ts` 里那份固定次序 —— 那份次序本身有意义（NES → SFC → GB…），
+   *    `lib/consoles.ts` 里那份固定次序 —— 那份次序本身有意义（NES → SNES → GB…），
    *    再补一个二级比较键只会把两处口径写在两个地方。
    * ⚠️ 一款游戏都没有的机种排在最后，但**不过滤掉**：这一页是机种清单，「还没收录游戏」
    *    本身就是要展示的信息。首页那边取前 8、空机种自然排在后面，两者不冲突。

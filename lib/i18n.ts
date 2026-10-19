@@ -383,7 +383,7 @@ const en = {
   /*
    * 机种筛选（`/games?console=<机种>`，2026-10-13 加）。
    *
-   * `{console}` 是 `consoleLabel(type, locale)` 的短标签（英文站 NES / SFC / GBA…，
+   * `{console}` 是 `consoleLabel(type, locale)` 的短标签（英文站 NES / SNES / GBA…，
    * 中文与日韩站 FC / SFC / GBA…）—— 和首页「按机种浏览」那几张卡片用的是同一份，
    * 别在这里另写一套机种名（两套迟早对不上）。
    *
@@ -515,6 +515,8 @@ const en = {
   'screen.waitingHost': 'WAITING FOR HOST',
   'screen.paused': 'PAUSED',
   'screen.resumeOnPanel': 'PRESS RESUME ON THE PANEL',
+  /* `/play` 没有机身：那颗「继续」在页面右侧的面板上 */
+  'screen.resumeInPanel': 'PRESS RESUME IN THE RIGHT PANEL',
   'screen.waitHostResume': 'WAITING FOR HOST TO RESUME',
 
   'panel.resume': 'Resume',
@@ -786,6 +788,9 @@ const en = {
   'play.volume': 'Volume',
   /* 操作表底部那颗钮。**只写「编辑」**，具体编辑什么靠 tooltip（`keybind.open`）说 */
   'play.edit': 'Edit',
+  /* 右栏收起 / 展开那颗钮（2026-10-19 加）。**短** —— 收起后它只有 40px 宽、竖排 */
+  'play.hideSidebar': 'Hide panel',
+  'play.showSidebar': 'Show panel',
   'play.hint': 'Esc leaves fullscreen. Nothing else here uses the keyboard.',
   /* 左上角返回钮在游戏运行中拦截时弹的自绘确认框（见 PlayBackLink） */
   'play.leaveTitle': 'Game in progress',
@@ -1758,6 +1763,8 @@ const zh: Record<MessageKey, string> = {
   'screen.waitingHost': '等待房主画面',
   'screen.paused': '已暂停',
   'screen.resumeOnPanel': '按机身面板的继续键',
+  /* `/play` 没有机身：那颗「继续」在页面右侧的面板上 */
+  'screen.resumeInPanel': '点右侧面板的「继续」',
   'screen.waitHostResume': '等待房主继续',
 
   'panel.resume': '继续',
@@ -1916,6 +1923,9 @@ const zh: Record<MessageKey, string> = {
   'play.fullscreen': '全屏',
   'play.volume': '音量',
   'play.edit': '编辑',
+  /* 见英文表同一条：收起后只有 40px 宽、竖排，必须短 */
+  'play.hideSidebar': '收起',
+  'play.showSidebar': '展开',
   'play.hint': 'Esc 退出全屏，其余操作都在右侧。',
   'play.leaveTitle': '游戏正在进行中',
   'play.leaveBody': '返回会结束当前这一局，进度不会自动保存。',
