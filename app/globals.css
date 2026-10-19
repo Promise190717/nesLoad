@@ -77,7 +77,7 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-start { width: 100%; max-width: 320px; min-height: 44px; font-weight: 600; color: #161616; }
 .play-sidebar { display: flex; min-width: 0; width: 100%; flex-direction: column; gap: 12px; align-self: start; }
 /* 四块面板和全站一样走 pixel-edge 像素描边（描边在 TSX 上挂类），不再用普通 border */
-.play-game, .play-keys, .play-room, .play-control-panel { background: var(--color-ink-900); padding: 14px; }
+.play-keys, .play-room, .play-control-panel { background: var(--color-ink-900); padding: 14px; }
 .play-room { padding: 10px 12px; }
 /* 房间卡刚出现时的提醒：描边闪主题色几下（steps 保像素感），几秒后停。
    闪的是 --px-c（已 @property 注册成 <color>，可动画）——直接改 box-shadow
@@ -89,10 +89,6 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 @media (prefers-reduced-motion: reduce) {
   .play-room-flash { animation: none; --px-c: var(--color-accent); }
 }
-.play-game { align-items: center; gap: 12px; }
-.play-game > div:first-child { width: 64px; }
-.play-game > div:last-child { min-width: 0; }
-.play-game p:first-child { font-size: 15px; line-height: 1.5; font-weight: 600; }
 .play-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .play-panel-heading h2, .play-panel-title { font-size: 12px; font-weight: 600; color: var(--color-ink-200); }
 .play-panel-title { margin-bottom: 8px; }
@@ -122,7 +118,6 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-display .play-frame > div { height: auto; }
   .play-game-screen:not(:fullscreen) { height: auto; aspect-ratio: 4 / 3; }
   .play-sidebar { max-width: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  .play-game { grid-column: 1 / -1; }
   .play-keys { grid-column: 1 / -1; }
   .play-room { grid-column: 1 / -1; }
   .play-control-panel { grid-column: 1 / -1; }

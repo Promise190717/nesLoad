@@ -1431,45 +1431,18 @@ export default function PlayScene({
         </section>
 
         {/*
-          右栏：最上面是这一款的**资料块**（封面 + 名字 + 机种 / 年份 / 开发商），
-          下面一张平铺的「说明 + 控件」操作表，最底下一颗「编辑」开按键设置。
+          右栏：最上面是按键设置，中间是联机房间卡（进了房才出现），
+          最底下一张平铺的「说明 + 控件」操作表。
 
-          ⚠️ 资料块**照抄 `/consoles/<机种>` 那一页**（`pixel-edge` 描边块 + `object-cover`
-          的 3:4 封面）：用户点名要这一页的观感向那一页看齐。操作表也一样是站上那套描边
-          （`pixel-edge pxw-* pxc-*`）——「干净」指的是**只放该有的东西**（说明 + 控件，
-          没有分组卡片、没有键帽、没有多余标题），不是把站上的视觉语言砍掉。
+          ⚠️ 2026-10-19：这一款的**资料块**（封面 + 名字 + 机种 / 年份 / 开发商）已经
+          **不在这一列了** —— 用户要求挪到顶栏「返回」右边、尺寸压小一号
+          （`StaticPlay.tsx` 的 `PlayGameInfo`，走 `GamesShell` 的 `navExtra`）。
+          数据那一层也在那边取（`StaticPlay` 的 `useState`），这一列现在不用 `game.imageUrl`。
+          操作表仍是站上那套描边（`pixel-edge pxw-* pxc-*`）——「干净」指的是
+          **只放该有的东西**（说明 + 控件，没有分组卡片、没有键帽、没有多余标题），
+          不是把站上的视觉语言砍掉。
         */}
         <aside className="play-sidebar">
-          {game && (
-            <div className="play-game pixel-edge pxw-2 pxc-700 flex gap-3">
-              <div className="pixel-edge pxw-2 pxc-700 w-[92px] shrink-0 bg-ink-900">
-                {/*
-                  图不在链接里、是这一页自己的主图，所以配 alt
-                  —— 和游戏卡片里那个 `alt=""` 的规矩正好相反（那边紧挨着标题文字）。
-                */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={game.imageUrl}
-                  alt={title}
-                  className="block aspect-[3/4] w-full object-cover"
-                />
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] leading-snug text-ink-100">{title}</p>
-                <p className="mt-1 text-[12px] text-ink-500">
-                  {consoleLabel(game.consoleType, locale)}
-                  {game.year ? ` · ${game.year}` : ''}
-                </p>
-                {gameText?.developer && (
-                  <p className="mt-0.5 truncate text-[12px] text-ink-500">
-                    {gameText.developer}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
           {/*
         联机房间卡（2026-10-15：从按键下面挪上来 + 紧凑重排）。
         挪上来是因为：房主选完画质、房间建好，这张卡才冒出来 —— 原来压在

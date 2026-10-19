@@ -37,6 +37,7 @@ export default function GamesShell({
   showHomeLink = false,
   showTheme = true,
   backNode,
+  navExtra,
   children,
 }: {
   locale: Locale;
@@ -69,6 +70,17 @@ export default function GamesShell({
    * 调用方仍要按类型传全。
    */
   backNode?: ReactNode;
+  /**
+   * 塞在**返回右边、和返回同一行**的一小块（2026-10-19 加）。
+   *
+   * ⚠️ 目前**只有 `/play` 传**：那一页的「这一款是什么」原本是右栏最上面那张大卡片，
+   * 用户要求挪成顶栏里的一条小横条（封面 + 名字 + 机种 / 年份），右栏直接从按键设置开始。
+   * 传进来的是一个客户端组件元素（数据在 `StaticPlay` 里，见那边的 `PlayGameInfo`）。
+   *
+   * 位置：`lg` 以上**按整行水平居中**（脱离流，见下面那行 div 的类）；更窄的窗口里
+   * 它和返回挤在同一组、必要时换行。别的页面不传 ⇒ 版式一个字都不变。
+   */
+  navExtra?: ReactNode;
   /**
    * 「全部游戏」那颗**页脚**链接的落点，默认 `/games` 本体。
    * 只给页脚用 —— 左上角返回走的是 `back`，两者是两码事（见返回链接那段注释）。
@@ -146,6 +158,22 @@ export default function GamesShell({
   const home = localePath(locale, '/');
   const allGames = backToAllHref ?? localePath(locale, '/games');
 
+  /* 左上那颗「返回」：两种模式只差一个组件（回退 / 真链接），样式是同一套 */
+  const backClass = wide
+    ? 'pixel-edge pxw-1 pxc-600 inline-flex shrink-0 items-center gap-1.5 bg-ink-900 px-2.5 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent'
+    : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent';
+  const backLink = backNode ?? (back.mode === 'history' ? (
+    <BackLink href={back.href} className={backClass}>
+      <span aria-hidden="true">←</span>
+      <span>{t(back.label)}</span>
+    </BackLink>
+  ) : (
+    <Link href={back.href} className={backClass}>
+      <span aria-hidden="true">←</span>
+      <span>{t(back.label)}</span>
+    </Link>
+  ));
+
   return (
     <main className={wide ? 'play-page wall min-h-screen px-4 py-5' : 'wall min-h-screen px-6 py-6 sm:py-12'}>
       {/*
@@ -193,25 +221,25 @@ export default function GamesShell({
           左上角那一行：**返回**在左，可选的**首页**在右（`showHomeLink`，见 props 注释）。
           用 `justify-between` 而不是 `gap`：不传 `showHomeLink` 时只有一个孩子，
           它照样贴左 —— 别的内容页版式一个字都不变。
+
+          `navExtra`（`/play` 那条资料横条）在**窄屏**下和返回挤在同一组里（宽度不够时
+          这一行本来就要换行）；到 `lg` 以上它**脱离流、按整行水平居中**（用户要求
+          「顶部居中显示」）—— 用绝对定位而不是 `justify-between` 或三栏网格：
+          前者只有在左右两块一样宽时才看着居中，后者在窄窗口会把右上那排入口挤烂。
+          盖住的余地留了 `max-w-[42%]`，超长名字自己截断。
+          不传 `navExtra` 时仍然直接渲染返回本身，DOM 结构一层都不多。
         */}
-        <div className={wide ? 'play-navigation mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-ink-700 pb-4' : 'flex items-center justify-between gap-4'}>
-          {backNode ?? (back.mode === 'history' ? (
-            <BackLink
-              href={back.href}
-              className={wide ? 'pixel-edge pxw-1 pxc-600 inline-flex shrink-0 items-center gap-1.5 bg-ink-900 px-2.5 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
-            >
-              <span aria-hidden="true">←</span>
-              <span>{t(back.label)}</span>
-            </BackLink>
+        <div className={wide ? 'play-navigation relative mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-ink-700 pb-4' : 'flex items-center justify-between gap-4'}>
+          {navExtra ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              {backLink}
+              <div className="flex min-w-0 items-center lg:absolute lg:top-0 lg:bottom-4 lg:left-1/2 lg:w-fit lg:max-w-[42%] lg:-translate-x-1/2">
+                {navExtra}
+              </div>
+            </div>
           ) : (
-            <Link
-              href={back.href}
-              className={wide ? 'pixel-edge pxw-1 pxc-600 inline-flex shrink-0 items-center gap-1.5 bg-ink-900 px-2.5 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-accent' : 'inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent'}
-            >
-              <span aria-hidden="true">←</span>
-              <span>{t(back.label)}</span>
-            </Link>
-          ))}
+            backLink
+          )}
 
           {showHomeLink && (
             <Link href={home} className="text-[12px] text-ink-400 transition-colors hover:text-accent">

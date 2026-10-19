@@ -165,3 +165,34 @@
   - ⚠️ **删包前逐条复探已写入的 source_url**，探不通就跳过保留 R2；顺序**先删对象、后清列**。⚠️ R2 无版本控制，删了无法恢复 —— 以后写这类脚本照这个来。
   - 首次跑完：填 1238 · 删 1238（0 跳过）· 20 条找不到（文件名被改过的老上传 / 上游确实没收录）原样保留。
 - ⚠️ **重跑时不用再动缓存**：`games:row-by-id` 已经在这次升到 **`v2`**（理由见 `lib/server/games.ts` 那段注释 —— 缓存不随部署失效，不换键旧条目会回源已删对象）。以后再改这两列的语义，**继续升尾号**。
+
+## 实体多语言侧表与 `group_key`（2026-10-16，从 MEMORY.md 移入细节）
+
+- 三张侧表：`game_texts` / `console_texts` / `developer_texts`。
+- ⚠️⚠️ `game_texts` 挂 `group_key` 不挂 `game_id`：一行 `games` = 一盘 ROM，同款四版是四行、文案只有一份。
+  - 键由 `lib/server/games.ts` 的 `resolveGroupKey()` 独家决定：中文标题（COLLATE NOCASE）+ 机种 + 开发商反查，查不到才新开 `group_key`。
+  - **接口层 / 后台都不传 group_key**；判重与归组刻意用同一套维度、只差 `language`，**改一处必须改两处**。
+- 读取一律 `JOIN games g ON t.group_key = COALESCE(g.group_key, g.id)`；`loadGameTexts(ids)` 签名不变、字典仍按游戏 id 索引；搜索里的 `EXISTS` 同理。
+- 改文案 = 改整款（就是要的）；PATCH 不重算 `group_key`；`deleteGame` 清文案**必须晚一步**（先删游戏行再删文案，否则 join 找不到 group）。
+- 动过就升缓存键：`games:count|list|latest|by-developer|by-console`，现全 v2。
+- 迁移脚本自带 `run()` 直连 D1 REST、绝不 import `lib/server/*.ts`；`add-game-texts.mjs` 已作废。
+  - ✅ 线上 2026-10-16 跑完 `add-game-group-key.mjs`（1258 盘 → 1138 款），旧表留底 `game_texts_old`。
+- 后台接口：`texts` 必须摊成四语言扁平字段，唯一出处 `lib/entity-text.ts` 的 `flatEntityTexts()`（consoles / developers 两路由 extends 它）。**别直接回 `Developer` / `Console`**。例外：`/api/admin/games` 回 `texts`。
+- 前台取值走 `localizeGame` / `localizeConsole` / `localizeDeveloper`（逐字段回退中文）；数据层不按语言裁剪、写入不做回退。
+- 后台表单 `components/AdminGames.tsx` = 公共区 + `CONTENT_LOCALES.map` 四个语言块 + ROM；state 是 `texts: Record<ContentLocale, FormText>` ⇒ 加语言只改 `lib/game-text.ts`。
+  - `FORM_SUFFIX` / `PATCH_SUFFIX` 是接口契约；`insertGame` 多回 `group`、列表行多带 `groupSize`。
+
+## 机种资料（`/consoles` 与 `/consoles/[type]`）的来龙去脉
+
+- 表主键就是 `console_type`：它是**资料的扩展不是清单**。行被删 ⇒ 前台退回 `CONSOLE_LABEL` 默认渲染，**专题页永不 404**；后台**没有**「名下有游戏不许删」的拦截，DELETE 的语义就是「重置成默认资料」。
+- 首页「按机种浏览」只取**游戏数前 8**；`/consoles` 与 `/games` 的筛选条才是全量。
+- 单条 `getConsole` 不缓存、列表走 `listConsolesCached`；双语回退 `localizeConsole`；`lib/server/consoles.ts` **不许 import `./games.ts`**（会绕成循环依赖）。sitemap 只列有资料行的机种。
+- 脚本：`add-consoles.mjs`（建表 + 占位，幂等）；`seed-consoles.mjs` 是一次性快照、**跑过别再跑**；`fill-console-images.mjs` + 源图补图（只填 NULL，`--force` 才覆盖）。
+- 机种图 = R2 `images/consoles/<机种>-pixel.png`，写进 `consoles.image_url`；**正方形 PNG、必须透明底**。
+- ⚠️ 动资料就升缓存键版本尾：`consoles:list` 现 v7、`developers:list` / `developers:top` v4。
+
+## R2 存储的几个操作事实
+
+- 控制台 Storage 是**日采样**（`r2StorageAdaptiveGroups`）、账单按每日峰值均摊 ⇒ 删了对象数字只会慢慢衰减。核「删没删」直接 `ListObjectsV2` 跟 D1 对账。
+- 桶 `games` ~255 MiB，大头是封面 `images/`（1702 张 154 MiB）。
+- 无版本控制，删 ROM 永久丢 ⇒ 别拿生产数据做删除类测试。
