@@ -15,7 +15,7 @@ import {
   type KeyBindings,
   type PlayerBindings,
 } from './keybindings';
-import { unwrapRom } from './unwrap';
+import { unwrapRom, type UnwrappedRom } from './unwrap';
 
 /*
  * 音频旁路要赶在核心启动之前装好 —— 核心一启动就会建 AudioContext 并把音频节点
@@ -59,8 +59,9 @@ export type ConsoleType =
    *
    * 它和上面那十三台最大的不同不在核心，在**输入形态**：光盘机种的 ROM 天然是
    * 「一张盘」而不是「一盘卡带」，网上流通的形态有 `.pbp`（单文件）、`.iso`（单文件）、
-   * `.bin` + `.cue`（**两个文件**，2026-10-16 不支持，见 `EXTENSION_MAP` 那段）。
-   * 这个项目「拖一个文件进来」的入口决定了只能吃前两种。
+   * `.bin` + `.cue`（**两个文件**）。这个项目「拖一个文件进来」的入口决定了只能直接吃
+   * 前两种；第三种**只有装在压缩包里时才支持**（两个文件都拿到了，2026-10-19 起，
+   * 见 `lib/unwrap.ts` 的「光盘套装」那段）—— 单独拖一个 `.cue` 仍然不行。
    */
   | 'ps1'
   | 'arcade';
@@ -394,6 +395,11 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
    * ⚠️ **`.bin` 仍然不收**（这是从加机种之前就定下的规矩，见下面那段 ⚠️）——
    *    PS1 的裸轨道镜像也叫 `.bin`，但「裸的单个 `.bin`」既分不出是哪台机器、
    *    也分不出是哪条轨道，收进来只会把「机种不认识」换成「核心静默失败」。
+   *
+   * ℹ️ **2026-10-19 补**：`.cue` + `.bin` 现在**能从压缩包里跑**了 —— 但那条路不在
+   *    这张表里：`unwrapRom` 认出「一个包里同时有 cue 和 bin」之后直接把机种写成
+   *    `ps1`（见 `lib/unwrap.ts` 的「光盘套装」那段、`UnwrappedRom.console`）。
+   *    **直接拖一个 `.cue` 进来仍然不收**，理由没变：那个 `.bin` 根本不在手上。
    */
   pbp: 'ps1',
   iso: 'ps1',
@@ -1356,7 +1362,16 @@ export class EmulatorController {
     file: File,
     canvas: HTMLCanvasElement,
     onProgress?: (loaded: number, total: number) => void,
-    bios?: File | null
+    bios?: File | null,
+    /*
+     * 调用方**已经拆过的**包（见 `lib/unwrap.ts`）。`undefined` = 没拆过、这里自己拆；
+     * `null` = 拆过但没命中（照旧用原文件）。
+     *
+     * 为什么要这个参数：`/room` 的 `loadFile` 必须**先**知道机种（BIOS 和 PS1 那套
+     * 菱形键位都得在启动前定下来），而「知道机种」只能靠拆包 —— 不把结果传下来的话
+     * 252 MB 的光盘包会被解两遍（一遍判机种、一遍启动），内存峰值和等待时间都翻倍。
+     */
+    prepared?: UnwrappedRom | null
   ) {
     // 先退出正在运行的实例，避免多个核心叠加占用内存
     await this.exit();
@@ -1381,19 +1396,35 @@ export class EmulatorController {
      * 它的语义是 `(loaded, total)`，这里按 `(ratio, 1)` 喂 —— 调用方算的是
      * `loaded / total * 100`，正好落回 0–100。
      */
-    const unwrapped = await unwrapRom(
-      file,
-      onProgress ? (ratio) => onProgress(ratio, 1) : undefined
-    );
+    const unwrapped =
+      prepared === undefined
+        ? await unwrapRom(file, onProgress ? (ratio) => onProgress(ratio, 1) : undefined)
+        : prepared;
     const romFile = unwrapped?.file ?? file;
     if (unwrapped) {
+      /*
+       * 光盘套装（`.cue` + `.bin`）会带伴生文件 —— 日志里必须把它们列出来：
+       * 「载入失败」时唯一能确认「bin 到底有没有进虚拟文件系统」的就是这一行。
+       */
+      const extra = unwrapped.companions?.length
+        ? `，外加 ${unwrapped.companions.length} 个伴生文件（${unwrapped.companions
+            .map((companion) => `${companion.name} ${companion.size} 字节`)
+            .join(' / ')}）`
+        : '';
       console.info(
         `[nesload] 「${file.name}」是个 ${unwrapped.container}，` +
-          `已解出内层「${unwrapped.innerName}」（${romFile.size} 字节）`
+          `已解出内层「${unwrapped.innerName}」（${romFile.size} 字节）${extra}`
       );
     }
 
-    const consoleType = await detectConsole(romFile);
+    /*
+     * ⚠️ 光盘套装（`cue` + `bin`，2026-10-19）的机种**由拆包那一层直接给**。
+     *
+     * 主文件现在是 `.cue` —— 纯文本、没有魔数，而 `EXTENSION_MAP` 刻意不收 `cue`
+     * （直接拖一个 `.cue` 进来仍然该报「认不出」，见那张表的注释）。两条路必须分开，
+     * 所以「从压缩包里解出来的」这一条自己把机种带上（`UnwrappedRom.console`）。
+     */
+    const consoleType = unwrapped?.console ?? (await detectConsole(romFile));
     if (!consoleType) {
       throw new UnsupportedRomError();
     }
@@ -1476,6 +1507,25 @@ export class EmulatorController {
             '改名后大概率找不到 —— 把 zip 恢复成原始 romset 名（kof98.zip、dino.zip 这种）再试。'
         );
       }
+    }
+
+    /*
+     * 喂给 Nostalgist 的内容：**普通情况是一个文件，光盘套装是「cue + bin」一串**。
+     *
+     * `rom` 选项本来就收数组（Nostalgist 的 d.ts 里官方示例是
+     * `['game.m3u', 'game_cd1.chd', …]`），而且 `runMain()` 取的是
+     * `const [{ name }] = rom` —— **第一项才是核心加载的内容**，其余的一起写进
+     * 同一个内容目录。所以顺序必须是「描述文件在前、数据文件在后」。
+     *
+     * ⚠️ 只有 `unwrapRom` 认得的光盘套装（`.cue` + `.bin`）会有 `companions`；
+     *    街机 romset 走不到这里（`unwrapRom` 对它返回 `null`，见 `lib/unwrap.ts`），
+     *    其余机种也恒为空数组 —— 所以数组长度对它们是 1，行为和以前完全一致。
+     */
+    const romFiles: { fileName: string; fileContent: Blob }[] = [
+      { fileName: romFileName, fileContent: romContent },
+    ];
+    for (const companion of unwrapped?.companions ?? []) {
+      romFiles.push({ fileName: companion.name, fileContent: companion });
     }
 
     /*
@@ -1571,8 +1621,12 @@ export class EmulatorController {
          * 内容同理用 `romContent`：街机那盘可能是**重打包过**的（补了 zip 里的 rom 名），
          * 也可能取自整合包的内层 zip；NES / SFC 那条路则可能是 `unwrapRom()` 从压缩包里
          * 解出来的。只有「原样拖进来的普通 ROM」那一种情况它才等于 `file`。
+         *
+         * ⚠️ 光盘套装（`.cue` + `.bin`）给的是**数组**，见上面 `romFiles` 那段：
+         *    第一项是 `.cue`（核心按它找 bin），后面是数据文件。普通 ROM 长度恒为 1，
+         *    这里退回单个对象，和以前的调用形状一模一样。
          */
-        rom: { fileName: romFileName, fileContent: romContent },
+        rom: romFiles.length === 1 ? romFiles[0] : romFiles,
         ...coreSource,
         /*
          * BIOS 只能以 `{ fileName, fileContent }` 的形式给。

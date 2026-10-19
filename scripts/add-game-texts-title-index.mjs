@@ -31,6 +31,24 @@
  * ⚠️ 第二条是**表达式索引**（SQLite 3.9+），不是普通列索引 —— 别照着「普通索引」的
  *    直觉去改它（比如改成 `(group_key, id)`，那样 `COALESCE(...) = ?` 依旧用不上）。
  *
+ * ## ⚠️ 2026-10-19：索引建了，但一直没被用上
+ *
+ * 10-17 两条索引就建好了（回读 ✔ / ✔），可 10-19 再跑 EXPLAIN，计划仍是
+ * `SCAN g` + `SEARCH t USING INDEX sqlite_autoindex_game_texts_1` —— 和建之前逐字相同。
+ *
+ * 原因不在索引，在 SQL 形状：`JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id)`
+ * 让规划器选了「扫 games 全表 → 每行查 t 主键」的方向，`t.title` 那个选择性最高的条件
+ * 落在被驱动的一侧，`idx_game_texts_locale_title` 完全没机会上场。
+ *
+ * 修法在 `lib/server/games.ts`：把 `game_texts` 放到左边 + `CROSS JOIN`（SQLite 保证
+ * CROSS JOIN 不重排），外层用标题索引定位 0~1 行。
+ *
+ * ⚠️ 内层**不能**写 `COALESCE(g.group_key, g.id) = t.group_key` —— 实测那种形式吃不到
+ *    表达式索引（同一个表达式在单表等值查询里能用，挪进 JOIN 约束就不被采用），
+ *    games 照旧 `SCAN`。最终用列对列 `g.group_key = t.group_key`，走普通索引
+ *    `idx_games_group_key`；`group_key` 为 NULL 的老行 2026-10-19 实测 0 行，兜底可以不要。
+ * 本脚本的 EXPLAIN 探针已同步成新形状 —— 建索引本身不用重跑，要验证的是计划。
+ *
  * ## 幂等
  *
  * 两条都是 `CREATE INDEX IF NOT EXISTS`，重复跑无副作用。脚本末尾会把
@@ -99,9 +117,11 @@ const INDEXES = [
 const EXPLAIN_DEDUPE = `
 EXPLAIN QUERY PLAN
 SELECT g.id AS id, t.title AS title, g.language AS language
-  FROM games g
-  JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id) AND t.locale = 'zh'
- WHERE t.title COLLATE NOCASE = '__nesload_explain_probe__'
+  FROM game_texts t
+ CROSS JOIN games g
+ WHERE t.locale = 'zh'
+   AND t.title COLLATE NOCASE = '__nesload_explain_probe__'
+   AND g.group_key = t.group_key
    AND g.console_type = 'nes'
    AND g.language = 'zh'
  LIMIT 1`;
@@ -150,12 +170,12 @@ console.log(
   [
     '',
     '完成。核对上面两份 EXPLAIN：',
-    '  · 建之前应当是 SCAN（全表扫）—— 这就是 4.71M 行那个消耗的来源；',
-    '  · 建之后 game_texts 那一行应当出现 USING INDEX idx_game_texts_locale_title，',
-    '    games 那一行应当出现 USING INDEX idx_games_group_key_coalesce。',
-    '  ⚠️ 若建之后仍是 SCAN，把计划贴回来 —— 多半是索引没被规划器选中，要换写法。',
+    '  · 期望看到 `SEARCH t USING INDEX idx_game_texts_locale_title`',
+    '    与 `SEARCH g USING INDEX idx_games_group_key_coalesce`；',
+    '  · 若仍是 `SCAN g`，说明查询没按 2026-10-19 的写法走 ——',
+    '    索引本身没问题，是 SQL 形状让它用不上（见 lib/server/games.ts 的 findGameDuplicate）。',
     '',
-    '顺带确认：这个索引也让后台列表的 group_size 子查询变快（那条查询的 JOIN 用的是',
-    '同一个 COALESCE 表达式，见 lib/server/games.ts 的 listAdminGamesPage）。',
+    '⚠️ 索引建了不等于用上：这两条 2026-10-17 就建好了，但旧写法（games 驱动）下',
+    '   EXPLAIN 一直是 `SCAN g` —— 这次要验证的是「改写法之后」的计划。',
   ].join('\n')
 );

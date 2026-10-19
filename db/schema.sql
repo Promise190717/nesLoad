@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS game_texts (
 CREATE INDEX IF NOT EXISTS idx_game_texts_locale_title
   ON game_texts (locale, title COLLATE NOCASE);
 
+-- ⚠️ **2026-10-19：索引建好还不够，查询形状也得对。** 这两条索引 10-17 就建上了，
+--    但 10-19 再跑 EXPLAIN，计划仍是 `SCAN g` + `SEARCH t USING INDEX
+--    sqlite_autoindex_game_texts_1` —— 和建之前逐字相同。
+--    原因：`JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id)` 让规划器
+--    选了「扫 games 全表 → 每行查 t 主键」的方向，`t.title` 那个选择性最高的条件
+--    落在被驱动的一侧。现在 `findGameDuplicate` / `findGameGroup` 都改成
+--    `FROM game_texts t CROSS JOIN games g`（SQLite 保证 CROSS JOIN 不重排），
+--    外层走本索引定位 0~1 行；内层用列对列 `g.group_key = t.group_key` 走
+--    `idx_games_group_key`。
+--    ⚠️ 内层**不要**写 `COALESCE(g.group_key, g.id) = t.group_key` —— 实测那种形式
+--    吃不到 `idx_games_group_key_coalesce`（单表等值查询能吃，挪进 JOIN 约束就不行）。
+--    动这两条查询之前先看 `lib/server/games.ts` 里 findGameDuplicate 上面那段说明。
+
 -- 读取那条 JOIN 走 `ON t.group_key = COALESCE(g.group_key, g.id)`（见 lib/server/games.ts
 -- 的 loadGameTexts）—— `WHERE g.id IN (…)` 先筛出 games 行、再用本表主键前缀取文案，
 -- 那个方向靠主键就够，不需要额外索引。

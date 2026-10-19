@@ -21,6 +21,7 @@ import {
 } from '@/lib/emulator';
 import { readGamepads } from '@/lib/gamepad';
 import { isAbortError, readBodyWithProgress } from '@/lib/http';
+import { unwrapRom } from '@/lib/unwrap';
 import { setPlayActive } from '@/lib/play-leave-guard';
 import { localePath, type MessageKey } from '@/lib/i18n';
 import {
@@ -602,8 +603,23 @@ export default function PlayScene({
         }
 
         if (ac.signal.aborted || !activeRef.current) return;
-        setPhase('booting');
         lastRomRef.current = romFile;
+
+        /*
+         * **先拆包**（2026-10-19）：PS1 的盘常见「zip 里装 `.cue` + `.bin`」，
+         * 拆出来才知道这是 PS1（`.cue` 没有魔数，`EXTENSION_MAP` 也不收它）。
+         * 结果要传给 `loadRom`（第 5 个参数）—— 否则它内部会再拆一遍，
+         * 252 MB 的盘白解一次。
+         *
+         * ⚠️ 这一段的 phase **还是 `downloading`**（不是 `booting`）：7z 包要在
+         *    Worker 里解十几秒，进度得接在 ROM 那根条上，否则那十几秒是一块死屏。
+         */
+        const prepared = await unwrapRom(romFile, (ratio) => {
+          if (ac.signal.aborted || !activeRef.current) return;
+          setRomRatio(ratio);
+        });
+        if (ac.signal.aborted || !activeRef.current) return;
+        setPhase('booting');
 
         /*
          * 需要 BIOS 的机种（街机 / PS1，见 `lib/bios.ts` 的 `biosTypeFor`）要带上那一份 ——
@@ -613,7 +629,7 @@ export default function PlayScene({
          *    所以 `ensureBios('ps1')` 正常恒为 null —— 那是预期行为（核心回落 HLE，游戏照跑）。
          * 其余机种一律 null，`loadRom` 内部按机种自己判断要不要用。
          */
-        const targetConsole = game?.consoleType ?? null;
+        const targetConsole = prepared?.console ?? game?.consoleType ?? null;
         const wantedBios = biosTypeFor(targetConsole);
         const bios = wantedBios ? await ensureBios(wantedBios) : null;
         if (ac.signal.aborted || !activeRef.current) return;
@@ -651,7 +667,9 @@ export default function PlayScene({
             lastPct = pct;
             setCoreRatio(pct >= 100 ? null : loaded / total);
           },
-          bios
+          bios,
+          /* 上面已经拆过一次的包（含光盘套装的伴生 bin），别让 loadRom 再拆一遍 */
+          prepared
         );
 
         // 核心启动不可中断；离开时尚未完成的启动，在完成后立即退出。

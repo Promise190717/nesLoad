@@ -989,6 +989,27 @@ export const getGameRowCached = cached(
  *    线上 D1 rows_read 的 **39.86%**（4.71M 行）—— 那条「几百上千行，全表扫一遍
  *    可以忽略」的判断被数据推翻了，别照着它再删索引。
  *    ⚠️ 索引**必须带 `COLLATE NOCASE`** —— 下面那句条件就是这么写的，普通索引匹配不上。
+ *
+ * ⚠️⚠️ **光建索引不够，表顺序和 JOIN 条件都得改**（2026-10-19 实测）。
+ *
+ *    第一版只翻了表顺序、保留 `COALESCE`，实测计划是：
+ *      SEARCH t USING INDEX idx_game_texts_locale_title (locale=? AND title=?)
+ *      SCAN g
+ *    —— 外层 `t` 已经用上标题索引，但内层的 `COALESCE(g.group_key, g.id) = t.group_key`
+ *    **吃不到表达式索引**。同一个表达式在单表等值查询里是能用的（实测
+ *    `SEARCH games USING INDEX idx_games_group_key_coalesce (<expr>=?)`），一旦挪进
+ *    JOIN 约束就不被采用。所以 games 那一侧照旧全表扫。
+ *
+ *    最终写法：`game_texts` 放左边 + `CROSS JOIN`（SQLite 保证不重排，左表恒为外层循环），
+ *    JOIN 条件用**列对列** `g.group_key = t.group_key` —— 走普通索引 `idx_games_group_key`。
+ *    实测计划因此变成两条 `SEARCH … USING INDEX`。
+ *
+ *    ⚠️ 这意味着**放弃了 `COALESCE` 对「`group_key` 为 NULL 的老行」的兜底**。
+ *       2026-10-19 实测 `SELECT COUNT(*) FROM games WHERE group_key IS NULL` = **0**
+ *       （`add-game-group-key.mjs` 已把老行全部回填，`insertGame` 走 `resolveGroupKey`
+ *       也必然给出非空值），所以现在没有任何行依赖那条兜底。
+ *       将来若真出现 NULL 行，那些行的文案会 JOIN 不上（游戏还在、名字空了）——
+ *       发现这种情况先回填，别把 JOIN 改回 `COALESCE`（那样每次都要扫全表）。
  */
 export async function findGameDuplicate(
   title: string,
@@ -1028,10 +1049,17 @@ export async function findGameDuplicate(
   }
 
   const rows = await query<{ id: string; title: string; language: string | null }>(
+    /*
+     * ⚠️ 表顺序与 `CROSS JOIN` 是刻意的（见上面 2026-10-19 那段说明）：
+     *    `game_texts` 必须在左边，SQLite 才会拿它当外层循环、吃到标题索引。
+     *    别「化简」成 `FROM games g JOIN game_texts t ON …` —— 那就是 `SCAN g` 的老写法。
+     */
     `SELECT g.id AS id, t.title AS title, g.language AS language
-       FROM games g
-       JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id) AND t.locale = 'zh'
-      WHERE ${conditions.join(' AND ')}
+       FROM game_texts t
+      CROSS JOIN games g
+      WHERE t.locale = 'zh'
+        AND g.group_key = t.group_key
+        AND ${conditions.join(' AND ')}
       LIMIT 1`,
     params
   );
@@ -1065,6 +1093,8 @@ export async function findGameDuplicate(
  * ⚠️ 走 `idx_game_texts_locale_title`（2026-10-16 加）—— 加之前这里是全表扫
  *    （单次实测约 1044 行，占线上 D1 rows_read 的 7.64%）。同 findGameDuplicate，
  *    那条索引的 `COLLATE NOCASE` 是必需的。
+ *    ⚠️ **索引建了不等于用上**：2026-10-19 起这条也改成 `game_texts` 驱动 + `CROSS JOIN`，
+ *    JOIN 条件用列对列 `g.group_key = t.group_key`（理由与实测见 findGameDuplicate 那段）。
  */
 export async function findGameGroup(
   title: string,
@@ -1091,10 +1121,13 @@ export async function findGameGroup(
    * 取库里的那份是为了显示**已有的**写法（大小写照库里来）。
    */
   const rows = await query<{ group_key: string; title: string }>(
+    /* 表顺序 / `CROSS JOIN` 的理由同 findGameDuplicate（2026-10-19） */
     `SELECT COALESCE(g.group_key, g.id) AS group_key, t.title AS title
-       FROM games g
-       JOIN game_texts t ON t.group_key = COALESCE(g.group_key, g.id) AND t.locale = 'zh'
-      WHERE ${conditions.join(' AND ')}
+       FROM game_texts t
+      CROSS JOIN games g
+      WHERE t.locale = 'zh'
+        AND g.group_key = t.group_key
+        AND ${conditions.join(' AND ')}
       LIMIT 1`,
     params
   );

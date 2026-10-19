@@ -113,9 +113,67 @@ const ROM_EXTENSIONS = new Set([
  */
 const MAX_UNWRAP_BYTES = 256 * 1024 * 1024;
 
+/*
+ * ---------------------------------------------------------------- 光盘套装
+ *
+ * 2026-10-19 加：**PS1 的 `.bin` + `.cue` 双文件镜像**。
+ *
+ * 为什么原来不收、现在收：站点的入口是「一个文件」，而 `.cue` 只是**描述文件**，
+ * 它指向的 `.bin` 才是数据（见 `lib/emulator.ts` 的 `EXTENSION_MAP` 注释）。
+ * 单拖一个 `.cue` 进来永远跑不了，所以那张表刻意不收它。
+ *
+ * 但**压缩包里装着这两个文件**是另一回事 —— 这一次两个都拿到了，完全能跑：
+ * Nostalgist 的 `rom` 本来就支持数组（官方示例就是
+ * `['game.m3u', 'game_cd1.chd', …]`），数组第一项是核心加载的那一个，
+ * 其余的一起写进同一个内容目录。`pcsx_rearmed` 读 cue、按 cue 里的 `FILE "…bin"`
+ * 找同目录的 bin —— 只要两个文件都放进去、名字和 cue 里写的一致就行。
+ *
+ * 判据刻意**只认 `.cue` 配 `.bin` / `.img`**（不认 `.m3u` / `.ccd`）：
+ * `.m3u` 是多盘清单，里面还引用别的 `.cue`，要递归解一层；`.ccd` 还要配 `.sub`。
+ * 这两类这次没遇到，先不做 —— 认不出就照旧返回 `null`，行为和以前完全一样。
+ */
+const DISC_DESCRIPTOR_EXTENSIONS = new Set(['cue']);
+const DISC_DATA_EXTENSIONS = new Set(['bin', 'img']);
+
+/** 描述文件（`.cue`）正常就几百字节；给 1 MB 已经极宽松，超了多半是认错了。 */
+const MAX_DISC_DESCRIPTOR_BYTES = 1024 * 1024;
+
+/**
+ * 光盘数据文件（`.bin`）的上限。
+ *
+ * ⚠️ **这个数和 `MAX_UNWRAP_BYTES` 是两回事，别合并**：256 MB 那个是「普通 ROM 在
+ *    内存里放三份还撑得住」的门槛，而 PS1 一张盘光裸数据就是 **300–700 MB**
+ *    （MODE2/2352 的 74 分钟盘约 780 MB），按那个数卡会把绝大多数 PS1 游戏挡在外面
+ *    —— 2026-10-19 那盘《数码宝贝 格斗竞技场》的 bin 就是 **252 MiB**，再大一点就没了。
+ *
+ * 512 MB 是**内存现实**和「能覆盖多少盘」之间的折中：解压出来是一个 Blob（浏览器
+ * 多半落盘），但接下来 Nostalgist 要把它写进 Emscripten 的 MEMFS，那一步是**整份进
+ * 内存**，再加上核心自己的堆，峰值大约是这个数的 2–3 倍。再往上放只会把
+ * 「载入失败」换成「标签页被 OOM 杀掉」，后者更难查。
+ *
+ * 超限时**不静默**：`pickDiscSet` 会留一行日志，说明「有 cue 但 bin 太大」。
+ */
+const MAX_DISC_IMAGE_BYTES = 512 * 1024 * 1024;
+
 export interface UnwrappedRom {
   /** 解出来的 ROM。**文件名用内层条目的 basename** —— 那才是这盘 ROM 的真名 */
   file: File;
+  /**
+   * 要和主文件一起放进虚拟文件系统的**伴生文件**（现在只有光盘套装的 `.bin`）。
+   *
+   * 普通 ROM 是 `undefined`；`loadRom` 会把它们排进 Nostalgist 的 `rom` 数组
+   * （第一项仍然是 `file`）。名字必须保持内层 basename —— `.cue` 里的
+   * `FILE "xxx.bin"` 就是按这个名字找的。
+   */
+  companions?: File[];
+  /**
+   * 拆包之后就能确定的机种。**只有光盘套装会填 `'ps1'`**。
+   *
+   * 为什么不能交给 `detectConsole` 自己认：主文件现在是 `.cue`（纯文本、无魔数），
+   * 而 `EXTENSION_MAP` 刻意不收 `cue`（直接拖一个 `.cue` 进来仍然应该是「认不出」）。
+   * 两条路要区分开，所以「从包里解出来的」这一条自己把机种带上。
+   */
+  console?: 'ps1';
   /** 内层条目在压缩包里的完整名字（可能带 `dir/` 前缀），只用来打日志 */
   innerName: string;
   /** 外面那层壳是哪种 —— 只用来打日志（「是个 zip」/「是个 7z」，排查时一眼看出） */
@@ -289,6 +347,70 @@ function pickRomEntry<T extends { name: string; size: number }>(entries: readonl
 }
 
 /**
+ * 挑出「一张光盘镜像」的**描述文件 + 数据文件**，挑不出来返回 `null`。
+ *
+ * 只在**压缩包里同时有 `.cue` 和 `.bin` / `.img`** 时命中（见上面「光盘套装」那段）。
+ *
+ * 多盘游戏（包里好几个 `.cue`）**只取第一张**：这一档的目的是「让它能启动」，
+ * 换盘要另做一套 UI，不在这次范围里。挑法按文件名排序取第一个 —— 单盘包只有一个，
+ * 多盘包这样至少是确定的（不会随 zip 条目顺序漂）。
+ *
+ * 数据文件优先取**和 cue 同名**的那几个（cue 里的 `FILE "…bin"` 就是按名字找的）；
+ * 一个都对不上时才退到「包里所有 bin」—— 那种情况多半是名字被改过，交给核心试。
+ */
+function pickDiscSet<T extends { name: string; size: number }>(
+  entries: readonly T[]
+): { descriptor: T; data: T[] } | null {
+  const usable = entries.filter(
+    (entry) => !entry.name.endsWith('/') && !entry.name.startsWith('__MACOSX/')
+  );
+
+  const descriptors = usable.filter((entry) => {
+    const base = baseName(entry.name);
+    if (base.startsWith('.')) return false;
+    if (!DISC_DESCRIPTOR_EXTENSIONS.has(extensionOf(base))) return false;
+    return entry.size > 0 && entry.size <= MAX_DISC_DESCRIPTOR_BYTES;
+  });
+  if (descriptors.length === 0) return null;
+
+  const allData = usable.filter((entry) => {
+    const base = baseName(entry.name);
+    if (base.startsWith('.')) return false;
+    if (!DISC_DATA_EXTENSIONS.has(extensionOf(base))) return false;
+    return entry.size > 0;
+  });
+  if (allData.length === 0) return null;
+
+  descriptors.sort((a, b) => baseName(a.name).localeCompare(baseName(b.name)));
+  const descriptor = descriptors[0];
+  const stem = baseName(descriptor.name).replace(/\.[^.]+$/, '').toLowerCase();
+  const sameStem = allData.filter(
+    (entry) => baseName(entry.name).replace(/\.[^.]+$/, '').toLowerCase() === stem
+  );
+
+  /*
+   * **先定组、再看大小**（顺序反了会出问题：先按大小筛的话，一张盘若由
+   * `game.bin` + `track02.bin` 两条轨道组成、只有一条超限，剩下的会被当成
+   * 「整张盘」交给核心 —— 跑不起来，而且看起来像核心的问题）。
+   */
+  const picked = sameStem.length > 0 ? sameStem : allData;
+  const oversized = picked.find((entry) => entry.size > MAX_DISC_IMAGE_BYTES);
+  if (oversized) {
+    /*
+     * 有 cue、有 bin，但 bin 太大 —— 这是「能认出但吃不下」，必须留痕：
+     * 不吭声的话调用方会退回原文件，最后判成街机、静默失败。
+     */
+    console.warn(
+      `[nesload] 光盘镜像「${baseName(oversized.name)}」有 ${(oversized.size / 1024 / 1024).toFixed(0)} MB，` +
+        `超过单文件上限 ${MAX_DISC_IMAGE_BYTES / 1024 / 1024} MB，不拆包`
+    );
+    return null;
+  }
+
+  return { descriptor, data: picked };
+}
+
+/**
  * 如果是「装着单机 ROM 的压缩包」，把 ROM 解出来；否则返回 `null`。
  *
  * 认两种壳：**zip**（`PK\x03\x04`）和 **7z**（`37 7A BC AF 27 1C`）。
@@ -323,6 +445,23 @@ export async function unwrapRom(
       return null;
     }
 
+    /*
+     * 先试「光盘套装」（`.cue` + `.bin`）—— 7z 这条路一次全解出来了，字节现成，
+     * 不需要额外解压。见上面「光盘套装」那段。
+     */
+    const disc = pickDiscSet(entries);
+    if (disc) {
+      return {
+        file: new File([toBytes(disc.descriptor.data)], baseName(disc.descriptor.name)),
+        companions: disc.data.map(
+          (entry) => new File([toBytes(entry.data)], baseName(entry.name))
+        ),
+        console: 'ps1',
+        innerName: disc.descriptor.name,
+        container: '7z',
+      };
+    }
+
     const pick = pickRomEntry(entries);
     if (!pick) {
       console.warn(
@@ -344,6 +483,41 @@ export async function unwrapRom(
 
   const entries = await readZipEntries(file);
   if (!entries) return null;
+
+  /*
+   * 光盘套装（`.cue` + `.bin`）：**先于单文件 ROM 试**。
+   *
+   * 这两类不会打架 —— `.cue` / `.bin` 都不在 `ROM_EXTENSIONS` 里，单文件那条路
+   * 本来也挑不出它们。顺序写成「先套装」只是为了让意图清楚：一个包里同时有
+   * `.iso` 和 `cue+bin` 时，以套装为准（那是更完整的一份）。
+   */
+  const disc = pickDiscSet(entries);
+  if (disc) {
+    const descriptor = await inflateEntry(file, disc.descriptor);
+    if (descriptor) {
+      const companions: File[] = [];
+      for (const entry of disc.data) {
+        const blob = await inflateEntry(file, entry);
+        if (!blob) {
+          companions.length = 0;
+          break;
+        }
+        companions.push(new File([blob], baseName(entry.name)));
+      }
+      if (companions.length > 0) {
+        return {
+          file: new File([descriptor], baseName(disc.descriptor.name)),
+          companions,
+          console: 'ps1',
+          innerName: disc.descriptor.name,
+          container: 'zip',
+        };
+      }
+      console.warn(
+        `[nesload] 「${file.name}」里有 cue，但数据文件解不出来（压缩方式不支持或已损坏）`
+      );
+    }
+  }
 
   const pick = pickRomEntry(entries);
   if (!pick) return null;

@@ -553,7 +553,12 @@ export default function AdminGames() {
   const applyRomFile = async (file: File) => {
     setRom(file);
     const unwrapped = await unwrapRom(file);
-    const detected = await detectConsole(unwrapped?.file ?? file);
+    /*
+     * 光盘套装（`.cue` + `.bin`）的机种由拆包那一层直接给 —— 主文件是 `.cue`，
+     * 而 `EXTENSION_MAP` 刻意不收 `cue`（直接拖一个 cue 进来该报「认不出」）。
+     * 见 `lib/unwrap.ts` 的 `UnwrappedRom.console`。
+     */
+    const detected = unwrapped?.console ?? (await detectConsole(unwrapped?.file ?? file));
     if (detected) setConsoleType(detected);
   };
 

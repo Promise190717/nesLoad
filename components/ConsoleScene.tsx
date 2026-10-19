@@ -32,6 +32,7 @@ import {
   type ConsoleType,
   type LoadedRom,
 } from '@/lib/emulator';
+import { unwrapRom } from '@/lib/unwrap';
 import { LOCALE_OPTIONS, formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import {
   captureFpsFor,
@@ -1415,7 +1416,22 @@ export default function ConsoleScene({
       // 需要 BIOS 的机种要递给核心的那份。在上面那个 try 里备齐，loadRom 那一步只负责用。
       let biosFile: File | null = null;
       try {
-        consoleType = await detectConsole(file);
+        /*
+         * **先拆包再认机种**（2026-10-19）。
+         *
+         * 原来这里是 `detectConsole(file)` 直接看原始文件 —— 对一个「zip 里装
+         * `.cue` + `.bin`」的 PS1 盘，文件头是 `PK\x03\x04`，会被判成**街机**：
+         * BIOS 走街机那档（还会去认 Neo Geo）、键位落回街机那套六键布局，
+         * 而 `loadRom` 内部拆包后又按 PS1 起核心 —— 两边对不上。
+         *
+         * 拆出来的结果**必须传给 `loadRom`**（第 5 个参数）：否则它内部会再拆一遍，
+         * 252 MB 的光盘包要解两次。
+         *
+         * 进度照旧接给屏幕：7z 那条路要在 Worker 里解十几秒，不报进度就是一块死屏
+         * （zip 那条路不解 7z、一般很快，不触发回调）。
+         */
+        const prepared = await unwrapRom(file, (ratio) => setLoading({ ratio }));
+        consoleType = prepared?.console ?? (await detectConsole(prepared?.file ?? file));
 
         /*
          * 需要 BIOS 的机种（街机 / PS1，见 `lib/bios.ts` 的 `biosTypeFor`）：
@@ -1496,7 +1512,12 @@ export default function ConsoleScene({
            *
            * 其余机种恒为 null —— `loadRom` 内部按机种自己判断要不要用，传了也会被忽略。
            */
-          biosFile
+          biosFile,
+          /*
+           * 上面已经拆过一次的包（含光盘套装的伴生 bin）。不传的话 `loadRom`
+           * 会自己再拆一遍 —— 结果一样，但 252 MB 的盘要多解一次。
+           */
+          prepared
         );
         const loaded = controller.rom;
         setRom(loaded);

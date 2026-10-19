@@ -168,6 +168,33 @@ export async function fetchAsset(
 }
 
 /**
+ * 从用户粘的列表页地址里读出**起始页码**（2026-10-19 加）。
+ *
+ * 为什么客户端也要解析一遍：服务端的 `parseListTarget` 本来就认 `?page=`，但
+ * 「自动爬取」每一页都要把页码**明确递进去**（一页页往下走），那个递进去的值会
+ * 盖掉地址里的 —— 所以起始页必须先在这儿算出来，循环从它开始，而不是从 1 开始。
+ *
+ * 规则与服务端一致：缺失 / 认不出 / 0 / 负数一律当第 1 页。
+ * `#games-grid` 这类 hash 不影响解析（`URL` 把它放在 hash 里，不进 searchParams）。
+ *
+ * ⚠️ 不带协议也认（`retrogamesnexus.com/zh/...`），和服务端 `parseListTarget` 的兜底一致。
+ */
+export function pageFromListUrl(raw: string): number {
+  const text = raw.trim();
+  if (!text) return 1;
+
+  let url: URL;
+  try {
+    url = new URL(text.startsWith('http') ? text : `https://${text}`);
+  } catch {
+    return 1;
+  }
+
+  const page = Number.parseInt(url.searchParams.get('page') ?? '', 10);
+  return Number.isFinite(page) && page > 0 ? page : 1;
+}
+
+/**
  * 读一个列表页：只问「这一页有哪几个 slug」，每个游戏的详情稍后逐个抓。
  *
  * `page` 给了就**盖掉地址里那个 `page=`**（自动爬取翻页靠它，见那个路由的注释）。

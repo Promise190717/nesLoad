@@ -5,6 +5,7 @@ import {
   fetchDeveloperOptions,
   fetchList,
   importGame,
+  pageFromListUrl,
   variantTitle,
   type ImportStatus,
   type ListResult,
@@ -46,7 +47,12 @@ const TONE_CLASS: Record<LogTone, string> = {
 };
 
 /**
- * 后台 · 「自动爬取」—— 给一个**分类页**地址，从第一页爬到最后一页，全程不用管。
+ * 后台 · 「自动爬取」—— 给一个**分类页**地址，从它指向的那一页爬到最后一页，全程不用管。
+ *
+ * ⚠️ **起始页由地址里的 `?page=N` 决定**（2026-10-19 加）：粘
+ *    `…/zh/playstation-games?page=11#games-grid` 就从第 11 页开始，
+ *    不带 `page` 才从第 1 页开始。`#games-grid` 这类锚点会被忽略。
+ *    解析在 `lib/admin-import.ts` 的 `pageFromListUrl`（规则与服务端一致）。
  *
  * 与「从列表导入」（AdminBulkImport）的关系：**共用 `lib/admin-import.ts` 那条管道**，
  * 区别只在外层怎么调度 ——
@@ -196,6 +202,9 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
     const target = url.trim();
     if (!target || running) return;
 
+    /* 起始页：地址里带 `?page=N` 就从 N 开始（见文件头）。缺省 / 认不出 / 0 一律第 1 页 */
+    const startPage = pageFromListUrl(target);
+
     setRunning(true);
     stopRef.current = false;
     bufferRef.current = [];
@@ -219,13 +228,19 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
     let pages = 0;
     let games = 0;
 
+    /* 从中间页开始时先把进度摆出来，别让界面停在「还没开始」 */
+    if (startPage > 1) {
+      setPage(startPage);
+      pushLog(`从第 ${startPage} 页开始（地址里带了 ?page=${startPage}）。`, 'page');
+    }
+
     try {
-      for (let current = 1; ; current += 1) {
+      for (let current = startPage; ; current += 1) {
         if (stopRef.current) break;
 
         let list: ListResult;
         try {
-          // 页码由我们递进去（用户粘的分类页地址通常不带 `?page=`）
+          // 页码由我们递进去 —— 起始页已经从地址里算好了（见 pageFromListUrl）
           list = await fetchList(target, current);
         } catch (error) {
           pushLog(
@@ -347,7 +362,7 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
             <h2 className="mb-3 text-[12px] text-ink-200">{'自动爬取分类页'}</h2>
 
             <p className="mb-3 text-[12px] leading-[1.7] text-ink-500">
-              {'粘贴一个分类页地址 —— 它会一页页爬到最后一页（每页 5 款并发）。一款有几种语言版本就导几条（中 / 英 / 日 / 韩），下面的控制台每个语言版本打一行。'}
+              {'粘贴一个分类页地址 —— 它会一页页爬到最后一页（每页 5 款并发）。地址里带 ?page=N 就从第 N 页开始，不带就从头开始。一款有几种语言版本就导几条（中 / 英 / 日 / 韩），下面的控制台每个语言版本打一行。'}
             </p>
 
             {/* 输入框与按钮**不进 form** —— 在里头按回车不该顺手把别的提交了 */}
@@ -360,7 +375,7 @@ export default function AdminAutoCrawl({ onImported }: { onImported: () => void 
                   void start();
                 }
               }}
-              placeholder={'例如 https://retrogamesnexus.com/zh/nds-games'}
+              placeholder={'例如 https://retrogamesnexus.com/zh/nds-games?page=11'}
               disabled={running}
               className={`${FIELD_CLASS} w-full`}
             />
