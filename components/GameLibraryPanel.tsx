@@ -5,7 +5,6 @@ import { cardDelayMs } from '@/lib/card-stagger';
 import type { ConsoleType } from '@/lib/emulator';
 import { localizeTexts, type GameTexts, type LocalizedGameText } from '@/lib/game-text';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
-import { gameLanguageLabel } from '@/lib/rom-lang';
 import type { Cartridge } from '@/lib/library';
 import { CONSOLE_TYPES } from './CartridgeSprite';
 import { consoleLabel } from '@/lib/consoles';
@@ -72,14 +71,12 @@ export function localizeLibraryGame(game: LibraryGame, locale: Locale): Localize
 }
 
 /*
- * 封面右侧那个**语言角标**（排在机种角标下面）的文案统一走 `gameLanguageLabel`
- * （lib/rom-lang.ts）：**全称、不用缩写** —— `简体中文` / `English` / `日本語` / `한국어`。
- *
- * ⚠️ 2026-10-15 之前这里是自己 `toUpperCase()` 成 `ZH` / `EN` 的，已经撤掉：
- *    缩写角标和列表卡片（`GameCardGrid`）上的全称角标对不上 —— 同一款游戏在两处
- *    显示成两个名字，用户会以为是两款。
- * ⚠️ 一律**不用 `font-pixel`**：全称里既有小写字母（`English`）又有 CJK
- *    （`简体中文` / `日本語` / `한국어`），Press Start 2P 都没有对应字形。
+ * ⚠️ 封面上那个**语言角标已去掉**（2026-10-19，用户要求）—— 现在封面右上角只留
+ * 机种角标一个。语言信息仍由详情页资料表（`gameLanguageLabel`，lib/rom-lang.ts）
+ * 和 ROM 语言选择器交代。
+ * 想恢复的话：文案走 `gameLanguageLabel`（全称、不用缩写），底色实心
+ * `bg-accent` + `text-ink-950`，且**不用 `font-pixel`**（全称里既有小写又有 CJK，
+ * Press Start 2P 没有对应字形）。
  */
 
 /**
@@ -735,7 +732,6 @@ export default function GameLibraryPanel({
                     /* 卡片上的标题 / 元数据按当前界面语言取一份 —— 房间里的语言是运行时切的 */
                     const text = localizeLibraryGame(game, locale);
                     const meta = [game.year, text.developer].filter(Boolean).join(' · ');
-                    const languageLabel = gameLanguageLabel(game.language);
                     return (
                       /*
                        * 入场动效（`.card-in` + 错峰延迟）挂在 <li> 上。
@@ -787,23 +783,13 @@ export default function GameLibraryPanel({
                               className="h-full w-full object-cover"
                             />
                             {/*
-                              两个角标都贴**右侧**，竖排右对齐：机种在上、语言在下。
-                              语言没有数据时只留机种那一个 —— 不留空框。
+                              机种角标贴**右上角**。语言角标已去掉（2026-10-19，
+                              见文件上方那条 ⚠️），这里只剩这一个。
                             */}
                             <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
                               <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
                                 {consoleLabel(game.consoleType, locale)}
                               </span>
-                              {/*
-                                语言角标。底色是**实心** `bg-accent` + `text-ink-950`
-                                （全站实心按钮那套配色）—— 它压在封面上，既和上面那个
-                                半透明底的机种角标分得开，也让「这款是什么语言」一眼可见。
-                              */}
-                              {languageLabel && (
-                                <span className="bg-accent px-1.5 py-0.5 text-[12px] font-medium leading-none text-ink-950">
-                                  {languageLabel}
-                                </span>
-                              )}
                             </div>
                             {/*
                               下载进度**叠在封面里**（底部一条），不占独立的行 ——
@@ -920,7 +906,6 @@ export default function GameLibraryPanel({
                   const busy = loadingId === game.id;
                   /* 同在线库：按当前界面语言取一份标题 */
                   const text = localizeLibraryGame(game, locale);
-                  const languageLabel = gameLanguageLabel(game.language);
                   return (
                     <li
                       key={game.id}
@@ -947,20 +932,11 @@ export default function GameLibraryPanel({
                               loading="lazy"
                               className="h-full w-full object-cover"
                             />
+                            {/* 机种角标贴右上角；语言角标已去掉（2026-10-19） */}
                             <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
                               <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
                                 {consoleLabel(game.consoleType, locale)}
                               </span>
-                              {/*
-                                语言角标。底色是**实心** `bg-accent` + `text-ink-950`
-                                （全站实心按钮那套配色）—— 它压在封面上，既和上面那个
-                                半透明底的机种角标分得开，也让「这款是什么语言」一眼可见。
-                              */}
-                              {languageLabel && (
-                                <span className="bg-accent px-1.5 py-0.5 text-[12px] font-medium leading-none text-ink-950">
-                                  {languageLabel}
-                                </span>
-                              )}
                             </div>
                             {busy && (
                               <div className="absolute inset-x-0 bottom-0 h-[6px] overflow-hidden bg-ink-950/80">

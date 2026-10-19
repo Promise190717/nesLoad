@@ -5,8 +5,8 @@
  *   · 「从链接自动填充」（components/AdminGames）—— 拿上游 ROM 的语言去填表单那一栏；
  *   · 「从列表导入」（components/AdminBulkImport）—— 逐语言入库时用它筛 / 起标签；
  *   · /api/admin/scrape-game —— 给 `fileName` 里每一份语言版本标站内短码。
- *   · 前台显示（`gameLanguageLabel`）—— 列表卡片 / 房间弹窗卡片上的语言角标，
- *     以及游戏详情页资料表里「语言」那一行。
+ *   · 前台显示（`gameLanguageLabel`）—— 游戏详情页资料表里「语言」那一行
+ *     （列表 / 房间卡片封面上的语言角标已于 2026-10-19 去掉）。
  * 所以**语言清单与映射都只留这一份**，别在组件里再抄一张表。
  *
  * ⚠️ 上游 `fileName` 的 key 与站内字段**不同名**：中文上游写 `cn`（偶尔也写 `zh`），
