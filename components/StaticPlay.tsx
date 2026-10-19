@@ -1,6 +1,7 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import GamesShell from './GamesShell';
 import PlayBackLink from './PlayBackLink';
@@ -25,22 +26,33 @@ import type { Locale } from '@/lib/i18n';
  *
  * ⚠️ 封面 `alt=""`：名字就贴在右边，读屏会把同一件事念两遍（`PlayScene` 原来那张
  *    大卡片因为封面是主图才配了 alt，这里不是主图了）。
+ *
+ * ⚠️ 整条是 **`next/link` 到这一款的详情页**（2026-10-19 用户要求「点击可以进入游戏详情」）。
+ *    这里用 `Link` 而不是 `CatalogLink` —— 后者是给**带查询参数**的目录页用的
+ *    （`middleware` 会把它们改写到 `/catalog/...`，软导航的载荷对不上），
+ *    详情页没有查询参数，走正常软导航没问题。
+ *    悬停只加底色 + 名字变 accent（`group-hover`）：条子里的两行字各自锁了颜色，
+ *    在外层写 `hover:text-*` 是传不下去的。
  */
-function PlayGameInfo({ game, locale }: { game: LibraryGame; locale: Locale }) {
+function PlayGameInfo({ game, locale, to }: { game: LibraryGame; locale: Locale; to: string }) {
   const text = localizeLibraryGame(game, locale);
   const meta = [consoleLabel(game.consoleType, locale), game.year ? String(game.year) : '', text.developer ?? '']
     .filter(Boolean)
     .join(' · ');
 
   return (
-    <div className="play-game-info pixel-edge pxw-1 pxc-600 flex min-w-0 items-center gap-2 bg-ink-900 px-2 py-1">
+    <Link
+      href={to}
+      title={text.title}
+      className="play-game-info pixel-edge pxw-1 pxc-600 group flex min-w-0 items-center gap-2 bg-ink-900 px-2 py-1 transition-colors hover:bg-ink-800"
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={game.imageUrl} alt="" className="h-8 w-6 shrink-0 object-cover" />
       <div className="min-w-0">
-        <p className="truncate text-[12px] leading-tight text-ink-100">{text.title}</p>
+        <p className="truncate text-[12px] leading-tight text-ink-100 group-hover:text-accent">{text.title}</p>
         <p className="mt-0.5 truncate text-[11px] leading-tight text-ink-500">{meta}</p>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -69,7 +81,13 @@ export default function StaticPlay() {
   const id = single('id');
   const room = single('room');
   const host = single('mode') === 'host';
-  const back = id ? href(`/games/${encodeURIComponent(id)}`) : href('/games');
+  /*
+   * 「这一款在哪」的那条地址：有 `?id=` 就是详情页，没有（本机文件 / 直接开 `/play`）
+   * 退回列表页。两个出口共用它 —— 左上那颗「返回」的兜底，和顶栏信息条的点击目标
+   * （2026-10-19 用户要求信息条可点进详情）。两边必须是**同一个地址**，否则用户会
+   * 发现「返回」和信息条去的地方不一样。
+   */
+  const detailHref = id ? href(`/games/${encodeURIComponent(id)}`) : href('/games');
 
   /*
    * 取这一款的资料。**三态**和 `PlayScene` 的 `serverGame` 完全一致：
@@ -91,9 +109,9 @@ export default function StaticPlay() {
 
   return (
     <GamesShell locale={locale} label="PLAY" title={t('gamesPage.playOnline')}
-      back={{ href: back, label: 'common.back', mode: 'history' }}
-      backNode={<PlayBackLink href={back} />}
-      navExtra={game ? <PlayGameInfo game={game} locale={locale} /> : undefined}
+      back={{ href: detailHref, label: 'common.back', mode: 'history' }}
+      backNode={<PlayBackLink href={detailHref} />}
+      navExtra={game ? <PlayGameInfo game={game} locale={locale} to={detailHref} /> : undefined}
       showHeader={false} fill wide showTheme={false}>
       {id && game === undefined
         ? <p role="status" className="p-8 text-center text-[12px] text-ink-400">{t('games.loading')}</p>
