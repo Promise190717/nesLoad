@@ -833,10 +833,12 @@ export const listGamesByConsoleCached = cached(
  * 一个机种下**各语种各有几款** —— 给机种专题页那条语种筛选条上的数字用
  * （2026-10-16 加，用户要求「每个语种还是显示数量」）。
  *
- * 一条 `GROUP BY` 就够（行数 ≤ 语种数 + 脏数据那几种自由文本）。**筛的是机种、
- * 不筛关键词** —— 和那一页资料表里「共 N 款游戏」同一个口径（那个也是不筛关键词的），
- * 两处数字对得上比「跟着搜索框实时变」更重要；搜索时列表本身会另报一行
- * 「『xxx』共 N 个结果」，用户看得出那是另一回事。
+ * 一条 `GROUP BY` 就够（行数 ≤ 语种数 + 脏数据那几种自由文本）。
+ *
+ * ⚠️ **2026-10-19 起跟着关键词走**（`keyword` 非空就套 `SEARCH_CONDITION`）：
+ *    搜索框里打了字、标签上还是全机种的 162，用户第一反应就是「筛选坏了」——
+ *    那一页所有数字都得描述**当前这屏**。资料表里那个「共 N 款游戏」仍然是不带关键词的
+ *    机种总数（那是「这个机种有多少款」的说明，不是搜索结果的条数），两处刻意分开。
  *
  * ⚠️ **只返回已知的四个语种键**（`GAME_LANGUAGE_VALUES`，唯一出处）：
  *    `GROUP BY` 出来的键还可能是历史脏数据（`jp` / `Chinese` / 大写 `ZH`），
@@ -846,15 +848,21 @@ export const listGamesByConsoleCached = cached(
  * ⚠️ 和 `countGamesByConsoleCached` 一样**只给前台页面用**（后台要立刻看到刚传的
  *    游戏），所以缓存留在这一层、别下沉进这个函数体（那个函数体本身不缓存）。
  *
- * ⚠️ 缓存键带 `v1` 版本尾：加语种 / 改这条查询的形态时**记得 +1**（条目落在
- *    `.next/cache`，不随部署失效）。
+ * ⚠️ 缓存键带 `v2` 版本尾（v1 那条不筛关键词，形态变了必须 +1）：加语种 /
+ *    改这条查询的形态时**记得再 +1**（条目落在 `.next/cache`，不随部署失效）。
+ *    关键词是函数入参，天然进键（每个搜过的词各存一份，数量有界）。
  */
 const countConsoleGamesByLanguageRaw = cached(
-  async (consoleType: ConsoleType) => {
-    const rows = await query<{ language: string | null; total: number }>(
-      'SELECT language, COUNT(*) AS total FROM games WHERE console_type = ? GROUP BY language',
-      [consoleType]
-    );
+  async (consoleType: ConsoleType, keyword: string) => {
+    const rows = keyword
+      ? await query<{ language: string | null; total: number }>(
+          `SELECT language, COUNT(*) AS total FROM games WHERE ${SEARCH_CONDITION} AND console_type = ?2 GROUP BY language`,
+          [`%${keyword}%`, consoleType]
+        )
+      : await query<{ language: string | null; total: number }>(
+          'SELECT language, COUNT(*) AS total FROM games WHERE console_type = ? GROUP BY language',
+          [consoleType]
+        );
 
     const counts: Record<string, number> = {};
     for (const value of GAME_LANGUAGE_VALUES) counts[value] = 0;
@@ -864,14 +872,15 @@ const countConsoleGamesByLanguageRaw = cached(
     }
     return counts;
   },
-  ['games:lang-counts', 'v1'],
+  ['games:lang-counts', 'v2'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS }
 );
 
 export async function countConsoleGamesByLanguageCached(
-  consoleType: ConsoleType
+  consoleType: ConsoleType,
+  keyword = ''
 ): Promise<Record<string, number>> {
-  const raw = await countConsoleGamesByLanguageRaw(consoleType);
+  const raw = await countConsoleGamesByLanguageRaw(consoleType, keyword.trim());
   /* 老条目可能少键（见上），照样补齐一份完整记录再返回 */
   const counts: Record<string, number> = {};
   for (const value of GAME_LANGUAGE_VALUES) counts[value] = raw[value] ?? 0;

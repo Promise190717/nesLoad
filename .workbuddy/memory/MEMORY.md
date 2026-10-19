@@ -27,7 +27,8 @@
 
 - ⚠️ 表主键 = `console_type`，是**资料的扩展不是清单** ⇒ 行删了前台退回 `CONSOLE_LABEL`，**专题页永不 404**，DELETE = 重置资料。
 - ⚠️ 首页「按机种浏览」只取游戏数前 8（全量在 `/consoles` 与 `/games` 筛选条）；单条 `getConsole` 不缓存、列表走 `listConsolesCached`；`lib/server/consoles.ts` **不许 import `./games.ts`**。脚本与补图规矩见 `DETAILS.md`。
-- ⚠️ 动资料就升缓存键版本尾：`consoles:list` **v7**、`developers:list`/`developers:top` v4。
+- ⚠️ 动资料就升缓存键版本尾：`consoles:list` **v7**、`developers:list`/`developers:top` v4、`games:lang-counts` **v2**。
+- ⚠️ 语种标签的条数**跟着关键词走**（`countConsoleGamesByLanguageCached(id, keyword)`，2026-10-19）；资料表里「共 N 款游戏」仍是不带关键词的机种总数，两个数字刻意分开。
 
 ## 实体多语言侧表（⚠️ 动手前先读 `DETAILS.md`）
 

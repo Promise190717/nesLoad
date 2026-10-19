@@ -769,6 +769,8 @@ const en = {
   'play.localSaving': 'Saving…',
   'play.uploading': 'Uploading…',
   'play.cloudFailed': 'Cloud sync failed.',
+  /* 401 专用：本机那份是好的，登录之后云同步就正常 —— 别和「同步失败」混在一起 */
+  'play.saveNoLogin': 'Sign in to sync',
   /* 游戏里还没存过盘 —— 没有卡带记忆可拿。**不是错误**，别写成失败口吻 */
   /* 超过云端上限，压根没发出去（本机那份是好的） */
   'play.tooLarge': 'Save too large',
@@ -1906,6 +1908,8 @@ const zh: Record<MessageKey, string> = {
   'play.localSaving': '本地保存…',
   'play.uploading': '上传云端…',
   'play.cloudFailed': '云端同步失败',
+  /* 401 专用：本机那份是好的，登录之后云同步就正常 —— 别和「同步失败」混在一起 */
+  'play.saveNoLogin': '未登录，未上云',
   /* 游戏里还没存过盘 —— 没有卡带记忆可拿。**不是错误**，别写成失败口吻 */
   /* 超过云端上限，压根没发出去（本机那份是好的） */
   'play.tooLarge': '存档过大',

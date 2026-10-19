@@ -282,6 +282,7 @@ export const ko: Record<MessageKey, string> = {
   'play.localSaving': '저장 중…',
   'play.uploading': '클라우드로 업로드 중…',
   'play.cloudFailed': '클라우드 동기화에 실패했습니다.',
+  'play.saveNoLogin': '로그인 후 동기화',
   'play.tooLarge': '세이브가 너무 큽니다',
   'play.theme': '모드',
   'play.saveFailed': '저장하지 못했습니다. 다시 시도해 주세요.',

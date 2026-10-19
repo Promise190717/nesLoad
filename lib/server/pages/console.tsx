@@ -22,6 +22,7 @@ import { GAME_LANGUAGE_LABEL, GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
 import { getConsole, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
 import {
   countConsoleGamesByLanguageCached,
+  countGamesCached,
   listGamesByConsoleCached,
   listGamesPageCached,
 } from '@/lib/server/games';
@@ -319,23 +320,30 @@ export default async function ConsoleDetailPage({
     redirect(consoleHref(locale, id, page, keyword, lang.param));
   }
 
-  const [data, allGames, langCounts] = await Promise.all([
+  const [data, gameCount, matchCount, langCounts] = await Promise.all([
     loadGames(id, page, keyword, lang.language),
     /*
-     * `allGames` 一律**不筛语种**（最后那个 null）：它是「这个机种一共有几款游戏」，
-     * 资料表里那一行和筛选条上「全部」那颗数字都用它。⛔ 别看它筛掉语种就改成跟着
-     * `lang.language` 走 —— 那样「全部」那颗会显示成当前语种的条数，一页两个假数字。
+     * 机种总数：**不筛语种、也不筛关键词**（`countGamesCached` 的四个参数里那两个都是
+     * 空 / null）。资料表里「共 N 款游戏」说的是「这个机种有多少款」，不随搜索框变 ——
+     * 搜索结果的条数由列表自己报「『xxx』共 N 个结果」，两处刻意分开。
      */
-    loadGames(id, 1, '', null),
-    countConsoleGamesByLanguageCached(id),
+    countGamesCached('', id, null, null),
+    /*
+     * 筛选条上「全部」那颗的条数（2026-10-19）：有关键词时要跟着关键词走，没有就用上面
+     * 那个总数。⛔ 别改成「把四个语种加起来」—— 语种为空的脏数据不在那四个键里，
+     * 加出来会比真实条数少。
+     */
+    keyword ? countGamesCached(keyword, id, null, null) : Promise.resolve(null),
+    /* 各语种的条数：**跟着关键词走**（用户 2026-10-19 报「搜了词标签上的数没变」） */
+    countConsoleGamesByLanguageCached(id, keyword),
   ]);
   const pageCount = pageCountOf(data.total, PAGE_SIZE);
 
   // 越界（这个机种 / 这个语种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
   if (page > pageCount) redirect(consoleHref(locale, id, pageCount, keyword, lang.param));
 
-  // 游戏数：走列表那次查询的 total（countGamesCached，24 小时缓存），理由见 generateMetadata
-  const gameCount = allGames.total;
+  /* 「全部」那颗的条数：有关键词就是命中条数，没有就是机种总数 */
+  const allCount = matchCount ?? gameCount;
 
   const facts: { label: string; value: string }[] = [
     ...(consoleRow.releaseYear
@@ -435,9 +443,13 @@ export default async function ConsoleDetailPage({
           当前那颗 accent 高亮 + `aria-current`，「全部」那颗对应「不筛语种」。
 
           ⚠️ 每颗后面挂**这个机种下该语种的条数**（用户要求「每个语种还是显示数量」）：
-          数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，24 小时缓存、
-          **不跟关键词走**，和资料表里那个总数同口径）；「全部」那颗用 `gameCount`，
-          也就是这个机种的总数 —— 两者出自同一份数据，不会打架。
+          数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，24 小时缓存）。
+          2026-10-19 起它**跟着关键词走**（用户报「搜了词标签上的数没变」）——
+          搜「合金」时标签上就该是 12，不是全机种的 162。
+          「全部」那颗用 `allCount`（有关键词 = 命中条数，没有 = 机种总数），和列表上方
+          「『xxx』共 N 个结果」那句是同一个数。
+          ⚠️ 资料表里那个「共 N 款游戏」**仍然不跟关键词**（`gameCount`）：它说的是
+          「这个机种有多少款」，和「这次搜到几个」是两回事。
           ⚠️ **0 款的语种不画**（2026-10-19 用户要求：`/consoles/nds` 上没有的语种别占位置）。
           唯一例外是**当前正筛着的那一颗**：那份地址可能来自收藏 / 外链，标签一消失，
           页面上就只剩一句「没有这个语种的游戏」而看不出自己在筛什么，也回不去「全部」。
@@ -449,7 +461,7 @@ export default async function ConsoleDetailPage({
         >
           {[null, ...GAME_LANGUAGE_VALUES].map((code) => {
             const active = code === lang.language;
-            const count = code ? (langCounts[code] ?? 0) : gameCount;
+            const count = code ? (langCounts[code] ?? 0) : allCount;
             /* 0 款的不画；「全部」那颗（`code === null`）永远在 —— 它是默认那一份的入口 */
             if (code && count === 0 && !active) return null;
             return (

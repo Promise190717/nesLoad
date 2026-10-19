@@ -79,6 +79,7 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
    *   uploading   往云端传 —— 进行中
    *   saved       本机 + 云端都完成 —— 终态
    *   cloudFailed 本机存好了但云端没传上 —— 终态（warn 色，不算失败）
+   *   saveNoLogin 本机存好了但没登录 / 会话过期 —— 终态（warn 色，登录后就正常）
    *   tooLarge    存档超过云端上限，压根没发 —— 终态（warn 色，本机那份是好的）
    *   saveFailed  本机都没存上 —— 终态（danger）
    *   loadFailed  只在弹窗里说
@@ -89,6 +90,7 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
     | 'uploading'
     | 'saved'
     | 'cloudFailed'
+    | 'saveNoLogin'
     | 'tooLarge'
     | 'saveFailed'
     | 'loadFailed'
@@ -156,9 +158,24 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
           /*
            * ⚠️ **必须看 `res.ok`**（2026-10-15 修）：以前只 try/catch fetch 的 reject，
            * 而 4xx / 5xx **不是** reject ⇒ 413 也照样显示「保存成功」，云端其实空空如也。
+           *
+           * 2026-10-19 起按状态码分岔：401（没登录 / 会话过期）本来会被说成
+           * 「云端同步失败」，可登录之后它自己就好了 —— 那是两件事，别糊在一起。
+           * 其余失败把状态码和响应体前 200 字打到控制台，别再靠猜。
            */
-          setMessage(response.ok ? 'saved' : 'cloudFailed');
-          if (response.ok) setCloud((await fetchCloudSave(rom.name)).save);
+          if (!response.ok) {
+            const detail = await response.text().catch(() => '');
+            console.warn('[nesload] 云端存档上传失败', response.status, detail.slice(0, 200));
+            if (response.status === 401) {
+              setCloudAuthed(false);
+              setMessage('saveNoLogin');
+              return;
+            }
+            setMessage('cloudFailed');
+          } else {
+            setMessage('saved');
+            setCloud((await fetchCloudSave(rom.name)).save);
+          }
         } catch { setMessage('cloudFailed'); }
       } else {
         setMessage('saved');
@@ -234,7 +251,7 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
     inlineNotice === 'saved' ? 'text-ok'
       : inlineNotice === 'uploading' ? 'text-info'
         : inlineNotice === 'localSaving' ? 'text-ink-300'
-          : inlineNotice === 'cloudFailed' || inlineNotice === 'tooLarge'
+          : inlineNotice === 'cloudFailed' || inlineNotice === 'tooLarge' || inlineNotice === 'saveNoLogin'
             ? 'text-warn'
             : inlineNotice ? 'text-danger' : 'text-ink-300';
   return (

@@ -285,6 +285,7 @@ export const ja: Record<MessageKey, string> = {
   'play.localSaving': 'セーブ中…',
   'play.uploading': 'クラウドへアップロード中…',
   'play.cloudFailed': 'クラウド同期に失敗しました。',
+  'play.saveNoLogin': 'ログインで同期',
   'play.tooLarge': 'セーブが大きすぎます',
   'play.theme': 'モード',
   'play.saveFailed': 'セーブできませんでした。もう一度お試しください。',
