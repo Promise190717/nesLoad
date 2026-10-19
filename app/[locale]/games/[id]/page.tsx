@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
-import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 import FavoriteButton from '@/components/FavoriteButton';
 import GameComments from '@/components/GameComments';
 import GamesShell from '@/components/GamesShell';
@@ -80,11 +80,6 @@ function clamp(text: string): string {
   return trimmed.length > DESC_LIMIT ? `${trimmed.slice(0, DESC_LIMIT)}…` : trimmed;
 }
 
-/** 机种标签（NES / SFC / ARC）—— 丝印那三个英文词，不进文案表，见 README「多语言」那条。 */
-function consoleLabel(game: Game): string {
-  return CONSOLE_LABEL[game.consoleType];
-}
-
 /**
  * 拼这一页的 meta description。
  *
@@ -98,7 +93,7 @@ function consoleLabel(game: Game): string {
 function metaDescription(locale: Locale, game: Game, text: LocalizedGameText): string {
   const boilerplate = translate(locale, 'seo.game.description', {
     title: text.title,
-    console: consoleLabel(game),
+    console: consoleLabel(game.consoleType, locale),
   });
   const own = text.description?.trim();
   return own ? `${clamp(own)} · ${boilerplate}` : boilerplate;
@@ -123,7 +118,7 @@ export async function generateMetadata({
   const text = localizeGame(game, locale);
   const title = translate(locale, 'seo.game.title', {
     title: text.title,
-    console: consoleLabel(game),
+    console: consoleLabel(game.consoleType, locale),
   });
   const description = metaDescription(locale, game, text);
 
@@ -182,7 +177,7 @@ function buildJsonLd(
         url,
         description: metaDescription(locale, game, text),
         image: game.imageUrl,
-        gamePlatform: consoleLabel(game),
+        gamePlatform: consoleLabel(game.consoleType, locale),
         applicationCategory: 'Game',
         operatingSystem: 'Any (runs in a web browser)',
         isAccessibleForFree: true,
@@ -281,7 +276,7 @@ export default async function GameDetailPage({
    * 所以标题下面那句摘要不能再从 `facts` 里拼 —— 见 `introLine`。
    */
   const facts: { label: string; value: ReactNode }[] = [
-    { label: t('gamesPage.field.console'), value: consoleLabel(game) },
+    { label: t('gamesPage.field.console'), value: consoleLabel(game.consoleType, locale) },
     ...(game.year ? [{ label: t('gamesPage.field.year'), value: String(game.year) }] : []),
     ...(text.developer
       ? [
@@ -489,7 +484,7 @@ export default async function GameDetailPage({
             {text.description?.trim() ||
               t('gamesPage.fallbackDescription', {
                 title: text.title,
-                console: consoleLabel(game),
+                console: consoleLabel(game.consoleType, locale),
               })}
           </p>
 

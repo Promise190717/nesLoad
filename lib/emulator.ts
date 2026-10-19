@@ -102,8 +102,13 @@ export class IncompleteRomError extends Error {
 }
 
 /**
- * 机种 → libretro 核心名。核心由 Nostalgist 从它自己的 CDN 拉
- * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2`），拉过一次之后进 CacheStorage。
+ * 机种 → libretro 核心名。
+ *
+ * 2026-10-19 起**所有核心都从本站 `public/cores/` 加载**（见 `loadRom` 里的 `coreSource`）
+ * —— 「Nostalgist 自己去 jsdelivr 拉」那一支已经没有了。核心文件仍然取自
+ * `arianrhodsandlot/retroarch-emscripten-build@v1.22.2` 的
+ * `retroarch/<核心名>_libretro.zip`，解出来就是 `<核心名>_libretro.js` / `.wasm`，
+ * 所以**核心本身一个字节都没换，换掉的只是「运行时去哪儿拿」**。
  *
  * 街机实际用哪个核心**不在这里定** —— `loadRom` 会先跑 `resolveArcadeCore()`
  * （见 `lib/arcade-core.ts`），在 `fbneo` 和 `fbalpha2012_cps1` 之间按 romset 内容挑。
@@ -116,7 +121,7 @@ export class IncompleteRomError extends Error {
  * ⚠️ 两个核心的 romset 都是**版本锁死**的：zip 里的文件必须和核心期望的版本对得上，
  * 对不上就直接不加载（表现和「格式不支持」一样是静默的）。这不是这个项目能绕开的。
  *
- * GBA 用 `mgba`：和街机一样**走本站 `public/cores/`**（见 `coreSource`）。
+ * GB / GBC / GBA 三个机种共用 `mgba`，文件同样在 `public/cores/`。
  *
  * ⚠️ 更正（2026-10-13）：这里原先写的是「Nostalgist 自带的 CDN 清单里没有 mgba」——
  * **不成立**。Nostalgist 的核心解析根本没有清单，它只是把核心名拼进
@@ -247,17 +252,17 @@ const INITIAL_SIZE: Partial<Record<ConsoleType, { width: number; height: number 
 /**
  * 核心的**本站路径**（`public/cores/`）。
  *
- * 2026-10-14 之后：**除了 NES / SFC，全部机种的核心都走本地**。
- * NES / SFC 一直是从 jsdelivr 拉的、从来没出过问题，所以不动它们；
- * 其余十一个（gba / gb / gbc / nds / md / gg / sms / 32x / ws / ngp / arcade）都在这里，
- * 因为核心包是整个项目里**唯一在运行时才去下载的东西**，而 jsdelivr 在国内经常
- * 连不上或被限速 —— 拉不动就是「拖进去毫无反应」，用户看不出是网络问题。
- * 放进 `public/` 之后这一段就再没有网络变量了（代价是仓库多了几十 MB，
- * 见 `README.md` 的「已知限制」）。
+ * 2026-10-19 起：**十四台机种的核心全部走本地**，一个都不再从 jsdelivr 拉。
+ * NES / SFC（`fceumm` / `snes9x`）是最后一对搬过来的 —— 它们此前一直从 CDN 拉、
+ * 也确实「没出过问题」，但那条路是站点里**唯一还需要在运行时下载的东西**，
+ * 而 jsdelivr 在国内经常连不上或被限速：拉不动就是「拖进去毫无反应」，
+ * 用户看不出是网络问题，也和服务端日志对不上。搬进 `public/` 之后这一段
+ * 就再没有网络变量了（代价是仓库多了十几 MB，见 `README.md` 的「已知限制」）。
  *
  * 凭什么可以这么干：这些核心都取自 Nostalgist 用的**同一个构建**
  * （`arianrhodsandlot/retroarch-emscripten-build@v1.22.2` 的
  * `retroarch/<core>_libretro.zip`），所以核心本身没换，换掉的只是「运行时去哪儿拿」。
+ * ⚠️ 版本必须和那份构建对齐：换了版本等于换了核心，按键/存档兼容性都会跟着变。
  *
  * 文件名必须和核心名严格对上：`<core>_libretro.js` / `<core>_libretro.wasm`。
  * 以后再加核心，同样从上面那个仓库的 `retroarch/<core>_libretro.zip` 里解出来放这儿
@@ -268,27 +273,6 @@ const INITIAL_SIZE: Partial<Record<ConsoleType, { width: number; height: number 
  *    太大，仓库里**只存 `.wasm.gz`**，由启动代码自己解开 —— 因果见那一段的注释。
  */
 const LOCAL_CORE_DIR = '/cores';
-
-/**
- * 哪些机种的核心走本地（见上面 `LOCAL_CORE_DIR`）。只有 NES / SFC 例外 ——
- * 理由同样是「它们一直正常，不动」。
- */
-const LOCAL_CORE_CONSOLES = new Set<ConsoleType>([
-  'gba',
-  'gb',
-  'gbc',
-  // NDS 的 melonds **必须**走本站：上游那个构建里没有它，CDN 那条路是死的
-  'nds',
-  'md',
-  'gg',
-  'sms',
-  '32x',
-  'ws',
-  'ngp',
-  // PS1 的 pcsx_rearmed 上游构建里有，但和其余机种同一条理由：jsdelivr 在国内不可靠
-  'ps1',
-  'arcade',
-]);
 
 /**
  * 在 `public/cores/` 里**存成 `.wasm.gz`** 的核心（而不是裸 `.wasm`）。现在只有 `fbneo`。
@@ -329,6 +313,27 @@ const LOCAL_CORE_CONSOLES = new Set<ConsoleType>([
  *    最难查）。真超线了再把名字加进这个 Set —— 这条规则就是为它准备的。
  */
 const GZIP_CORES = new Set<string>(['fbneo']);
+
+/**
+ * 这台机种这次启动会去拉的**核心 wasm 地址**，给「提前预热」用（`lib/core-preload.ts`）。
+ *
+ * 为什么需要单独一个出口：`coreSource` 装在 `Nostalgist.launch` 的选项里，只有核心
+ * 真正开始启动时才会被调用 —— 而 ROM 下载可能几十秒（PS1 的盘），那段时间网络是空的。
+ * 让调用方在**开始下 ROM 时**就把这份 wasm 拉进 HTTP 缓存，核心启动那一步就只剩编译。
+ *
+ * 三种情况返回 null（调用方直接跳过预热）：
+ *   · `arcade`：这次到底用 `fbneo` 还是 `fbalpha2012_cps1` 要等 `resolveArcadeCore()`
+ *     读完 romset 才知道，猜错就是白拉几 MB；
+ *   · `GZIP_CORES` 里那几个：存的是 `.wasm.gz`，预热只能省下载、省不掉解压，
+ *     而 `fbneo` 那份 9.7 MB 抢带宽的代价比收益大；
+ *   · `consoleType` 还未知（地址上没 `?id=`）。
+ */
+export function localCoreWasmUrl(consoleType: ConsoleType | null): string | null {
+  if (!consoleType || consoleType === 'arcade') return null;
+  const core = CORE_MAP[consoleType];
+  if (GZIP_CORES.has(core)) return null;
+  return `${LOCAL_CORE_DIR}/${core}_libretro.wasm`;
+}
 
 /**
  * 取一个「压缩存储的核心」的字节并解成 Blob，交给 Nostalgist。
@@ -821,16 +826,17 @@ export async function unsupportedArchive(file: File): Promise<'7z' | 'rar' | 'di
 /**
  * 偷看核心包的下载进度。
  *
- * 核心是 Nostalgist 从 CDN 拉的（第一次几 MB，之后进 CacheStorage 就快了），
+ * 核心是 Nostalgist 自己 fetch 回来的（第一次几 MB，之后浏览器 HTTP 缓存命中就快了），
  * 而它**不给任何进度回调** —— 拖进一盘卡带后界面会静默好几秒，这就是「没反应」的来源。
  *
  * 拿进度的办法是 `Response.clone()` 的分流能力：克隆出来的那一份专门读字节数，
  * **原始那一份原封不动还回去**，所以 Nostalgist 走的那条路一个字节都没变 ——
  * 最坏情况（读失败、拿不到长度）也只是没有进度，不会影响载入本身。
  *
- * 只认 URL 里带 `_libretro.zip`（Nostalgist 从 CDN 拉的核心包）或 `_libretro.wasm`
- * （街机改走本地之后拉的是这个）的请求，其余请求原样放行。核心已经在 CacheStorage 里、
- * 或者走的是本地小文件时，回调可能一次都不触发，界面据此退回「不确定」进度。
+ * 只认 URL 里带 `_libretro.wasm` 的请求（2026-10-19 起全部核心都从本站
+ * `/cores/<核心>_libretro.wasm` 取；匹配里那条 `_libretro.zip` 是 CDN 时代留下的，
+ * 现在不会再命中，留着不影响行为），其余请求原样放行。核心已被 HTTP 缓存命中时
+ * 不会走 fetch 的 body，回调可能一次都不触发，界面据此退回「不确定」进度。
  *
  * ⚠️ 压缩存储的核心（`GZIP_CORES`）拉的是 `<核心>_libretro.wasm.gz` —— 它**仍然包含**
  *    上面那个子串，所以进度照样有；而且计数按**压缩后**的字节走，和 `content-length`
@@ -1497,7 +1503,7 @@ export class EmulatorController {
   /**
    * 插上卡带并启动。
    *
-   * `onProgress` 是可选的：核心第一次要从 CDN 下几 MB，界面靠它画进度条
+   * `onProgress` 是可选的：核心第一次要从本站下几 MB，界面靠它画进度条
    * （实现见 `watchCoreDownload`）。不传就完全按老样子走。
    *
    * `bios` 也是可选的。需要 BIOS 的机种有两台，性质不一样（见 `lib/bios.ts` 的文件头）：
@@ -1710,20 +1716,16 @@ export class EmulatorController {
     });
 
     /*
-     * 核心从哪儿来：**除了 NES / SFC，全部走本站静态文件**（`public/cores/`）。
+     * 核心从哪儿来：**一律本站静态文件**（`public/cores/`），没有 CDN 那一支了
+     * （2026-10-19 把最后剩下的 NES / SFC 也搬了过来，因果见上面 `LOCAL_CORE_DIR`）。
      *
-     * 为什么不统一：NES / SFC 一直从 jsdelivr 拉、从来没出过问题，动它只有风险没有收益；
-     * 而其余机种的核心一旦走 CDN，jsdelivr 在国内连不上或被限速时就表现成
-     * 「拖进去毫无反应」—— 用户看不出是网络问题。完整的因果见上面 `LOCAL_CORE_DIR`。
+     * 因为不再按机种分叉，这里**只看 `core` 的名字**决定取哪两个文件：
+     * GBA / GB / GBC 共用 `mgba`、街机那个 `core` 还是 `resolveArcadeCore()` 现挑的
+     * （`fbneo` / `fbalpha2012_cps1`），按核心名拼路径才对得上真实文件名。
      *
-     * ⚠️ 这里用的是 `consoleType` 而不是 `core` 来判断：GBA / GB / GBC 三个机种共用
-     * `mgba` 一个核心，街机那个 `core` 还是 `resolveArcadeCore()` 现挑出来的
-     * （`fbneo` / `fbalpha2012_cps1`），按机种判断才不会漏。
-     *
-     * ⚠️ 但**取哪个文件**是另一回事，得看 `core` 的名字：`GZIP_CORES` 里那几个
-     * （现在只有 `fbneo`）在 `public/cores/` 里只存 `.wasm.gz`，得自己解开再交给
-     * Nostalgist —— 所以 `resolveCoreWasm` 这一支是**异步的、而且可能返回 Blob 而不是
-     * URL 字符串**。Nostalgist 那边两条路都收（见 `fetchGzippedCore` 的注释）。
+     * ⚠️ `GZIP_CORES` 里那几个（现在只有 `fbneo`）在 `public/cores/` 里只存 `.wasm.gz`，
+     * 得自己解开再交给 Nostalgist —— 所以 `resolveCoreWasm` 这一支是**异步的、而且可能
+     * 返回 Blob 而不是 URL 字符串**。Nostalgist 那边两条路都收（见 `fetchGzippedCore`）。
      *
      * 参数类型写 `unknown` 是刻意的：Nostalgist 把这两个回调的参数声明成
      * `NostalgistCoreDict | string`（那个类型没导出，我们引不到），而它实际传进来的
@@ -1731,16 +1733,14 @@ export class EmulatorController {
      * 手写成 `string` 会踩逆变检查（`NostalgistCoreDict` 不能赋给 `string`）编译不过；
      * 改成让上下文推断，模板串里又会出现对象类型、同样报错。`unknown` 两头都绕开。
      */
-    const coreSource = LOCAL_CORE_CONSOLES.has(consoleType)
-      ? {
-          resolveCoreJs: (name: unknown) => `${LOCAL_CORE_DIR}/${String(name)}_libretro.js`,
-          resolveCoreWasm: (name: unknown) => {
-            const core = String(name);
-            const url = `${LOCAL_CORE_DIR}/${core}_libretro.wasm`;
-            return GZIP_CORES.has(core) ? fetchGzippedCore(`${url}.gz`) : url;
-          },
-        }
-      : {};
+    const coreSource = {
+      resolveCoreJs: (name: unknown) => `${LOCAL_CORE_DIR}/${String(name)}_libretro.js`,
+      resolveCoreWasm: (name: unknown) => {
+        const core = String(name);
+        const url = `${LOCAL_CORE_DIR}/${core}_libretro.wasm`;
+        return GZIP_CORES.has(core) ? fetchGzippedCore(`${url}.gz`) : url;
+      },
+    };
 
     /*
      * 只在下核心包那段时间挂上观测，launch 一结束就摘掉 ——

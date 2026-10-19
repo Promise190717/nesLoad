@@ -8,8 +8,8 @@ const nextConfig = {
   // 通过 fetch 拉取 RetroArch 的 WASM 核心与资源，不经过 Next 的图片管线，
   // 因此那条配置既无效也容易让人误以为 CDN 访问已受控。
   //
-  // 另外：街机（fbneo）的核心已改走本站 `public/cores/`，只有 NES / SFC 还从
-  // jsdelivr 拉。原因见 lib/emulator.ts 的 LOCAL_CORE_DIR 注释。
+  // 另外：所有机种的核心（含 NES / SFC）都已走本站 `public/cores/`，运行时不再
+  // 从 jsdelivr 拉任何东西。原因见 lib/emulator.ts 的 LOCAL_CORE_DIR 注释。
 
   /**
    * 大文件的缓存策略 —— 自托管的 WASM 核心（`/cores/`）和站点自带的街机 BIOS（`/bios/`）。
@@ -39,7 +39,8 @@ const nextConfig = {
    * 也就是说：**换核心/BIOS 文件后，最干净的做法是发版时顺手 purge 一次 CDN**；
    * 忘了也没事，最多一天后两层都自己过期。**浏览器那层永远不用指望用户手动清。**
    *
-   * ⚠️ NES / SFC 的核心来自 jsdelivr，不经过这份配置，那边有自己的缓存策略。
+   * ⚠️ 现在**所有核心都在这份配置的覆盖范围内**（2026-10-19 把 NES / SFC 的
+   *    fceumm / snes9x 也搬进了 `public/cores/`），换核心后记得 purge 一次 CDN。
    */
   async headers() {
     return [

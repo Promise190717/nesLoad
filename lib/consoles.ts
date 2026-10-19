@@ -15,8 +15,8 @@
  *
  * ⚠️ **加机种要动的地方**（`Record<ConsoleType, …>` 那几处会编译报错提醒，数组不会）：
  *   ① 这里（`CONSOLE_LABEL` / `CONSOLE_TYPES` / `CONSOLE_TINT`）；
- *   ② `lib/emulator.ts`（`ConsoleType` / `CORE_MAP` / `EXTENSION_MAP` / `detectConsole` /
- *      `LOCAL_CORE_CONSOLES`）+ 把核心两个文件放进 `public/cores/`；
+ *   ② `lib/emulator.ts`（`ConsoleType` / `CORE_MAP` / `EXTENSION_MAP` / `detectConsole`）
+ *      + 把核心两个文件放进 `public/cores/`；
  *   ③ `lib/server/games.ts` 的 `countGamesByConsole` 初始化对象；
  *   ④ `lib/unwrap.ts` 的内层扩展名表（zip / 7z 里装着这种 ROM 时要能拆）；
  *   ⑤ `components/HandheldConsole.tsx` 的 `FACE_ROWS`（掌机面键按机种长）；
@@ -34,13 +34,17 @@
  *     （1024² 透明底扁平像素画；规格与生成做法见 `.workbuddy-ai/memory/REFERENCE.md` 的 PS1 一节）。
  */
 import type { ConsoleType } from './emulator';
+import type { Locale } from './i18n';
 
 /**
- * 机种短标签 —— **丝印词，不进文案表**（中英文站都是这几个词）。
+ * 机种短标签 —— **丝印词，不进文案表**。
  *
  * 它同时出现在四个地方（首页卡片 18px、`/consoles` 卡片占位 16px、游戏卡片的机型行、
  * 后台表格），所以**长度必须控制在 3 个字符以内** —— 那些位置都不宽，
  * 「NGP」「SMS」已经是极限，再加一个字就截断成省略号。
+ *
+ * ⚠️ 这张表是**英文站的叫法**，不是「所有语言的叫法」。本地叫法不一样的机种登记在
+ *    下面的 `CONSOLE_LABEL_LOCAL`，前台取值一律走 `consoleLabel()`。
  */
 export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   nes: 'NES',
@@ -59,6 +63,39 @@ export const CONSOLE_LABEL: Record<ConsoleType, string> = {
   ps1: 'PS',
   arcade: 'ARC',
 };
+
+/**
+ * 本地叫法 —— **只登记「本地玩家嘴里说的」和上面那个丝印词对不上的机种**，其余回退。
+ *
+ * 目前只有一条：FC。原因是这台机器有两个名字，1983 年日版的 Famicom（FC）和
+ * 1985 年美版的 Nintendo Entertainment System（NES）。中国流行的是 FC 兼容机
+ * （小霸王那类），玩家嘴里一律是「FC」或「红白机」，没人说 NES；日韩同理
+ * （ファミコン / 패미컴，缩写也都是 FC）。所以**中文 / 日文 / 韩文站显示 FC，
+ * 只有英文站显示 NES** —— 和 `CONSOLE_LABEL.snes` 用日版名 SFC 是同一套逻辑的另一半：
+ * 丝印词跟着「这台机器最通行的写法」走，而不是死认美版名。
+ *
+ * ⚠️ 值仍然受上面那条约束：**≤3 个字符 + 纯 ASCII**。这批标签都会落到 `font-pixel`
+ *    （那个字体只有 ASCII 字形），写成「ファミコン」「패미컴」「红白机」会掉成方块。
+ *    所以韩文站也是 FC —— 패미컴 只出现在文案句子里，不出现在标签位。
+ *
+ * ⚠️ 别把 `CONSOLE_LABEL` 本身改成 FC 了事：那是英文站的标签，改了英文站就反了。
+ */
+const CONSOLE_LABEL_LOCAL: Partial<Record<Locale, Partial<Record<ConsoleType, string>>>> = {
+  zh: { nes: 'FC' },
+  ja: { nes: 'FC' },
+  ko: { nes: 'FC' },
+};
+
+/**
+ * 取机种短标签 —— **前台唯一入口**（后台表格那种管理语境直接用 `CONSOLE_LABEL` 也行，
+ * 那里看的是机种代码，不该跟着界面语言变）。
+ *
+ * 多收一个 `locale` 而不是把 `CONSOLE_LABEL` 改成函数：那张表还要给
+ * `isConsoleType` 之外的纯逻辑（`netplay` / 后台接口）用，函数签名会传染一整片。
+ */
+export function consoleLabel(type: ConsoleType, locale: Locale): string {
+  return CONSOLE_LABEL_LOCAL[locale]?.[type] ?? CONSOLE_LABEL[type];
+}
 
 /**
  * 全部机种，**按界面上的展示顺序**。

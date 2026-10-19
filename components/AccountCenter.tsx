@@ -11,7 +11,7 @@ import { localizeTexts, type GameTexts } from '@/lib/game-text';
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { MAX_CARTRIDGES } from '@/lib/library';
 import BackLink from './BackLink';
-import { CONSOLE_LABEL } from './CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -624,7 +624,7 @@ function FavoritesTab() {
                   className="h-full w-full object-cover"
                 />
                 <span className="absolute right-0 top-0 bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
-                  {CONSOLE_LABEL[item.consoleType]}
+                  {consoleLabel(item.consoleType, locale)}
                 </span>
               </div>
               <div className="flex flex-col gap-0.5 px-1.5 py-1.5">
@@ -826,7 +826,7 @@ function HistoryTab() {
               </Link>
 
               <span className="shrink-0 font-pixel text-[12px] text-ink-500">
-                {CONSOLE_LABEL[item.console]}
+                {consoleLabel(item.console, locale)}
               </span>
 
               <span className="min-w-0 flex-1">
@@ -1015,7 +1015,7 @@ function SavesTab() {
                   <img src={item.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
                 </span>
                 <span className="shrink-0 font-pixel text-[12px] text-ink-500">
-                  {CONSOLE_LABEL[item.consoleType]}
+                  {consoleLabel(item.consoleType, locale)}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12px] text-ink-100">{title}</span>

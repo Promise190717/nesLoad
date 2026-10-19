@@ -23,28 +23,28 @@
  *   · netplay → 通信対戦；save → セーブ；key bindings → キー設定
  *   · game library → ゲームライブラリ；guestbook → 伝言板
  *
- * ⚠️ 机种名用**日语里通行的写法**（SFC / ゲームボーイ / メガドライブ / アーケード），
- *    只有 NES / GBA / NDS 这类缩写保持原样 —— 和站内机种列表（`consoles` 表，
- *    目前只有中英两份，日语界面回退英文名）能对得上。
+ * ⚠️ 机种名用**日语里通行的写法**（FC / SFC / ゲームボーイ / メガドライブ / アーケード）。
+ *    这台机器在日本叫ファミコン（FC），NES 是美版名，2026-10-19 起日语站一律写 FC；
+ *    标签位上取的是 `lib/consoles.ts` 的 `consoleLabel(type, locale)`，和文案同源。
  */
 
 import type { MessageKey } from './i18n';
 
 export const ja: Record<MessageKey, string> = {
-  'meta.title': '{site} — ブラウザで遊ぶレトロゲーム：NES・SFC・GBA・アーケード',
+  'meta.title': '{site} — ブラウザで遊ぶレトロゲーム：FC・SFC・GBA・アーケード',
   'meta.description':
-    'NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなどのレトロゲームをブラウザでそのまま遊べます。オンラインライブラリから選ぶか、手持ちの ROM ファイルを読み込んでください。',
+    'FC（ファミコン）、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなどのレトロゲームをブラウザでそのまま遊べます。オンラインライブラリから選ぶか、手持ちの ROM ファイルを読み込んでください。',
   'meta.keywords':
-    'レトロゲーム, オンラインレトロゲームライブラリ, NES エミュレータ, ファミコン エミュレータ, SFC エミュレータ, スーパーファミコン エミュレータ, GBA エミュレータ, ゲームボーイアドバンス, ゲームボーイ エミュレータ, ゲームボーイカラー エミュレータ, NDS エミュレータ, ニンテンドーDS エミュレータ, メガドライブ エミュレータ, ジェネシス エミュレータ, ゲームギア エミュレータ, マスターシステム エミュレータ, 32X エミュレータ, ワンダースワン エミュレータ, ネオジオポケット エミュレータ, プレイステーション エミュレータ, PS1 エミュレータ, PSX エミュレータ, アーケード エミュレータ, ブラウザで遊ぶ, ブラウザ エミュレータ, RetroArch WASM, {site}',
+    'レトロゲーム, オンラインレトロゲームライブラリ, FC エミュレータ, NES エミュレータ, ファミコン エミュレータ, SFC エミュレータ, スーパーファミコン エミュレータ, GBA エミュレータ, ゲームボーイアドバンス, ゲームボーイ エミュレータ, ゲームボーイカラー エミュレータ, NDS エミュレータ, ニンテンドーDS エミュレータ, メガドライブ エミュレータ, ジェネシス エミュレータ, ゲームギア エミュレータ, マスターシステム エミュレータ, 32X エミュレータ, ワンダースワン エミュレータ, ネオジオポケット エミュレータ, プレイステーション エミュレータ, PS1 エミュレータ, PSX エミュレータ, アーケード エミュレータ, ブラウザで遊ぶ, ブラウザ エミュレータ, RetroArch WASM, {site}',
   'seo.room.title': 'ピクセルの部屋 — ブラウザで遊ぶレトロゲーム',
   'seo.room.description':
-    'ピクセルの部屋へようこそ。NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードのゲームがブラウン管で動きます。オンラインライブラリから選ぶか、手持ちの ROM ファイルを画面にドロップしてください。',
+    'ピクセルの部屋へようこそ。FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードのゲームがブラウン管で動きます。オンラインライブラリから選ぶか、手持ちの ROM ファイルを画面にドロップしてください。',
   'seo.login.title': 'ログイン',
   'seo.login.description':
     'ログインすると、セーブデータ・プレイ履歴・お気に入りが端末をまたいで同期されます。',
   'home.hero.title': 'ブラウザで遊ぶ名作レトロゲーム',
   'home.hero.lead':
-    '{site}では NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど十数機種のゲームをオンラインで遊べます。2人での通信対戦にも対応。',
+    '{site}では FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど十数機種のゲームをオンラインで遊べます。2人での通信対戦にも対応。',
   'home.hero.play': 'ローカルの ROM を読み込む',
   'home.hero.browse': 'すべてのゲームを見る',
   'home.join.title': '友だちと一緒に遊ぶ',
@@ -56,7 +56,7 @@ export const ja: Record<MessageKey, string> = {
   'home.search.submit': '検索',
   'home.consoles.title': '機種から探す',
   'home.consoles.lead':
-    'NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど十数機種 — 選ぶとその機種のゲームが並びます。',
+    'FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど十数機種 — 選ぶとその機種のゲームが並びます。',
   'home.consoles.count': '{count} 本のゲーム',
   'home.consoles.all': 'すべての機種',
   'home.latest.title': '新着ゲーム',
@@ -85,12 +85,12 @@ export const ja: Record<MessageKey, string> = {
     '対応しています。USB か Bluetooth のパッドを接続すると、ブラウザ経由でエミュレータがそのまま認識します。ボタンの割り当ては各コアの初期値に従います。スマホでは画面上のボタンを使います。',
   'seo.heading': 'ブラウザでレトロゲームを遊ぶ',
   'seo.intro':
-    '{site}はオンラインのレトロゲーム部屋です。NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなどのゲームがブラウザ上でそのまま動きます — 実行はあなたの端末で、コアは WebAssembly にコンパイルされた RetroArch です。',
+    '{site}はオンラインのレトロゲーム部屋です。FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなどのゲームがブラウザ上でそのまま動きます — 実行はあなたの端末で、コアは WebAssembly にコンパイルされた RetroArch です。',
   'seo.howTo':
     'オンラインライブラリから選ぶか、手持ちの ROM ファイルをテレビにドロップしてください。インストールは不要です。',
-  'seo.games.title': 'すべてのゲーム — NES・SFC・GBA・アーケードをオンラインで',
+  'seo.games.title': 'すべてのゲーム — FC・SFC・GBA・アーケードをオンラインで',
   'seo.games.description':
-    'オンラインライブラリには {count} 本のレトロゲームがあり、すべてブラウザで遊べます：NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど。タイトルを開けば詳細が見られ、すぐに遊べます。ROM ファイルのダウンロードもできます。',
+    'オンラインライブラリには {count} 本のレトロゲームがあり、すべてブラウザで遊べます：FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど。タイトルを開けば詳細が見られ、すぐに遊べます。ROM ファイルのダウンロードもできます。',
   'seo.games.search.title': '「{keyword}」の検索結果',
   'seo.games.search.description':
     'オンラインライブラリで「{keyword}」に一致するゲームは {count} 本です。ブラウザで遊ぶことも、ROM ファイルをダウンロードすることもできます。',
@@ -103,13 +103,13 @@ export const ja: Record<MessageKey, string> = {
   'seo.gameDownload.title': '『{title}』の ROM をダウンロード（{console}）',
   'seo.gameDownload.description':
     '『{title}』（{console}）の ROM ファイルをワンクリックでダウンロード。登録は不要です。ブラウザでそのまま遊ぶこともできます。',
-  'seo.developers.title': 'ゲーム開発元 — その NES・SFC・GBA・アーケード作品を遊ぶ',
+  'seo.developers.title': 'ゲーム開発元 — その FC・SFC・GBA・アーケード作品を遊ぶ',
   'seo.developers.description':
     'オンラインライブラリのゲームを手がけた {count} の開発元。開くとその会社の作品がすべて並びます。',
   'seo.developer.title': '{name} — この開発元のゲーム',
   'seo.developer.description':
     'オンラインライブラリにある {name} のゲーム全 {count} 本。ブラウザで遊ぶことも、ROM ファイルとしてダウンロードすることもできます。',
-  'seo.consoles.title': '機種から探す — NES・SFC・GBA・アーケードをオンラインで',
+  'seo.consoles.title': '機種から探す — FC・SFC・GBA・アーケードをオンラインで',
   'seo.consoles.description':
     'オンラインライブラリの全機種（合計 {count} 本）。機種を選ぶとそのゲームがすべて並び、ブラウザでそのまま遊べます。',
   'seo.console.title': '{name} のゲーム — オンラインで遊ぶ',
@@ -258,7 +258,7 @@ export const ja: Record<MessageKey, string> = {
 
   'seo.play.title': 'プレイルーム — ゲームを読み込んでオンラインで遊ぶ',
   'seo.play.description':
-    '1画面でゲームを始められます。ひとりでそのまま遊ぶか、1対1のルームを立ててコードを共有してください。NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードに対応。',
+    '1画面でゲームを始められます。ひとりでそのまま遊ぶか、1対1のルームを立ててコードを共有してください。FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードに対応。',
   'play.modeSolo': 'ひとりで',
   'play.start': 'スタート',
   'play.confirmStart': '確定してスタート',
@@ -570,7 +570,7 @@ export const ja: Record<MessageKey, string> = {
 
   'gamesPage.heading': 'すべてのゲーム',
   'gamesPage.intro':
-    'オンラインライブラリには {count} 本のゲームがあります — NES、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど。カバーをクリックすると詳細が見られ、そのまま遊ぶこともできます。',
+    'オンラインライブラリには {count} 本のゲームがあります — FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど。カバーをクリックすると詳細が見られ、そのまま遊ぶこともできます。',
   'gamesPage.empty': 'ライブラリはまだ空です。',
   'gamesPage.introConsole':
     'ライブラリには {count} 本の {console} ゲームがあります。カバーをクリックすると詳細が見られ、そのまま遊ぶこともできます。',

@@ -3,8 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
-import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
-import { isConsoleType } from '@/lib/consoles';
+import { consoleLabel, isConsoleType } from '@/lib/consoles';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
 import GamesSearchForm from '@/components/GamesSearchForm';
@@ -40,7 +39,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *    `notFound()`（404 由同目录的 not-found.tsx 出）。
  *
  * ⚠️ **机种没在后台填过资料时这一页照常渲染**：`getConsole` 返回 null 就用
- *    `CONSOLE_LABEL` 的默认名字（NES / SFC / GBA / ARC）顶上，资料段里只有
+ *    `consoleLabel()` 的默认名字（中文站 FC、英文站 NES，其余机种同丝印词）顶上，资料段里只有
  *    「游戏数」一项。首页与 `/consoles` 的卡片永远指得到这里 —— 绝不 404。
  *
  * ⚠️ 机种自己的资料**不缓存**（后台改完刷新就看到）；名下游戏列表走
@@ -180,12 +179,12 @@ export async function generateMetadata({
   const [row, games] = await Promise.all([loadConsole(id), loadGames(id, 1, '', lang.language)]);
 
   /*
-   * 没资料行就用默认名字（NES / SFC / GBA / ARC）—— 两种语言下它本来就不变，
+   * 没资料行就用默认名字（`consoleLabel`，中文站是 FC、英文站是 NES）——
    * 所以这里不经过 localizeConsole（那条路要一个完整的 Console 对象）。
    */
   const text: LocalizedConsoleText = row
     ? localizeConsole(row, locale)
-    : { name: CONSOLE_LABEL[id], summary: null, description: null };
+    : { name: consoleLabel(id, locale), summary: null, description: null };
   /*
    * 条数：**一律用游戏列表那次查询的 total**（`countGamesCached`，24 小时缓存）。
    * 2026-10-14 之前这里优先用资料行上「顺带」算出来的 gameCount —— 但那个子查询
@@ -294,8 +293,8 @@ export default async function ConsoleDetailPage({
   const consoleRow: Console = row ?? {
     type: id,
     texts: {
-      zh: { name: CONSOLE_LABEL[id], summary: null, description: null },
-      en: { name: CONSOLE_LABEL[id], summary: null, description: null },
+      zh: { name: consoleLabel(id, 'zh'), summary: null, description: null },
+      en: { name: consoleLabel(id, 'en'), summary: null, description: null },
     },
     imageUrl: null,
     releaseYear: null,
@@ -386,7 +385,7 @@ export default async function ConsoleDetailPage({
             aria-hidden="true"
             className="pixel-edge pxw-2 pxc-700 flex aspect-square w-[140px] shrink-0 items-center justify-center bg-ink-900 font-pixel text-[34px] text-ink-600 sm:w-[180px]"
           >
-            {CONSOLE_LABEL[id]}
+            {consoleLabel(id, locale)}
           </div>
         )}
 

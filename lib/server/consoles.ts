@@ -153,11 +153,12 @@ export const CONSOLES_PAGE_REVALIDATE_SECONDS = 86400;
  *
  * ⚠️ 改完机种资料要把键尾的版本号 +1：缓存条目不随部署失效，不换键前台要等一个 TTL
  *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2，2026-10-15 补 nds 图升到 v3，
- *    2026-10-16 加多语言侧表升到 v4，同日补日韩文案升到 v5，同日加 ps1 机种升到 v6）。
+ *    2026-10-16 加多语言侧表升到 v4，同日补日韩文案升到 v5，同日加 ps1 机种升到 v6，
+ *    2026-10-19 nes 中文名改「红白机（FC）」升到 v7）。
  */
 export const listConsolesCached = cached(
   async () => listConsoles(),
-  ['consoles:list', 'v6'],
+  ['consoles:list', 'v7'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
 

@@ -15,7 +15,7 @@
  * ⚠️ **加机种之后再跑一遍这个脚本**就是「数据库那边也补上」的全部动作 ——
  *    它只会给新机种插行，老机种那几行原样保留（`INSERT OR IGNORE`）。
  *
- * ⚠️ 预填的名字只是**占位默认值**（中文「红白机（NES）」这类），后台机种库里随时可改；
+ * ⚠️ 预填的名字只是**占位默认值**（中文「红白机（FC）」这类），后台机种库里随时可改；
  *    图片 / 详细介绍全部留空，等后台自己补。脚本重复跑多少遍都只会补缺的行、不动已有的列。
  *
  * ⚠️ `.env.local` 里连的是**真库**。先 `--dry-run` 看一眼它打算做什么。
@@ -103,7 +103,8 @@ console.log('① consoles 表：就绪（已存在则原样保留）。');
 
 /*
  * 默认资料。⚠️ 只是占位：后台机种库里随时能改。en 留空的机种英文站回退中文。
- * 展示名刻意写全称 + 括号简称 —— 和首页卡片上的丝印词（NES / SFC / GBA / ARC）是两码事。
+ * 展示名刻意写全称 + 括号简称 —— 和标签位上的短标签（中文站 FC / 英文站 NES，见
+ * `lib/consoles.ts` 的 `consoleLabel`）是两码事。
  *
  * 顺序跟着 `lib/consoles.ts` 的 `CONSOLE_TYPES`（展示顺序）。前四个 2026-10-14 之前
  * 就在库里了，`INSERT OR IGNORE` 会跳过它们；后八个是当天随新机种补的，
@@ -116,7 +117,7 @@ console.log('① consoles 表：就绪（已存在则原样保留）。');
 const DEFAULT_CONSOLES = [
   {
     type: 'nes',
-    name: '红白机（NES）',
+    name: '红白机（FC）',
     nameEn: 'NES (Famicom)',
     summary: '任天堂 1983 年推出的 8 位家用游戏机，本站库里的主力机种。',
     summaryEn: "Nintendo's 8-bit home console from 1983 — the backbone of this library.",

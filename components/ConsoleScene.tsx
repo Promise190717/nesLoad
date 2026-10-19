@@ -59,7 +59,7 @@ import {
   type KeyBindings,
 } from '@/lib/keybindings';
 import { readGamepads } from '@/lib/gamepad';
-import { IncompleteBodyError, isAbortError, readBodyWithProgress } from '@/lib/http';
+import { IncompleteBodyError, fetchRomWithProgress, isAbortError } from '@/lib/http';
 import {
   listCartridges,
   pruneCartridges,
@@ -74,7 +74,7 @@ import { isSeason, nextSeason } from '@/lib/season';
 import type { Game } from '@/lib/server/games';
 import { DEFAULT_TV_SIZE, isTvSize, TV_SIZES, type TvSize } from '@/lib/tv-size';
 import { fetchCurrentUser } from './AuthForm';
-import { CONSOLE_LABEL } from './CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 import FeedbackPanel from './FeedbackPanel';
 import GameLibraryPanel, { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import HandheldConsole from './HandheldConsole';
@@ -1708,17 +1708,23 @@ export default function ConsoleScene({
       setLibraryProgress(null);
 
       /*
-       * 一笔下载一个 controller。abort 它 = 同时掐掉请求和响应体流，
-       * `readBodyWithProgress` 里的 `reader.read()` 随即抛 AbortError ——
+       * 一笔下载一个 controller。abort 它 = 同时掐掉所有在飞的请求和响应体流，
+       * 分片下载里正在读的那几片随即抛 AbortError ——
        * 整条路径自然收场，不需要额外的「已取消」标志位。
        */
       const controller = new AbortController();
       romAbortRef.current = controller;
 
       try {
-        const res = await fetch(rom.romUrl, { signal: controller.signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await readBodyWithProgress(res, setLibraryProgress);
+        /*
+         * 分片下载（`lib/http.ts` 的 `fetchRomWithProgress`）：Worker 代理一个请求搬不动
+         * 几百 MB，PS1 的盘会被截断在几 MB 上。abort 依然有效 —— 每一片的 fetch 都挂同一个
+         * signal，取消时在飞的那几片立刻抛 AbortError，循环跟着收场。
+         */
+        const blob = await fetchRomWithProgress(rom.romUrl, {
+          signal: controller.signal,
+          onProgress: setLibraryProgress,
+        });
         // 整包到手 = 可取消的那一段结束了，后面交给 loadFile（窗口关闭、进度转到屏幕上）
         setRomDownload(null);
         const file = new File([blob], rom.romName, { type: 'application/octet-stream' });
@@ -4492,7 +4498,7 @@ export default function ConsoleScene({
                   <span className="block h-[15px] w-2/3 bg-ink-700" />
                 )}
                 <p className="mt-1 h-[10px] font-pixel text-[12px] text-ink-400">
-                  {deepLinkGame ? CONSOLE_LABEL[deepLinkGame.consoleType] : null}
+                  {deepLinkGame ? consoleLabel(deepLinkGame.consoleType, locale) : null}
                 </p>
 
                 {/*

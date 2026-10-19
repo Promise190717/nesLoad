@@ -146,7 +146,7 @@ function aboutZh(site: string, origin: string): string[] {
   return [
     `- 名称：${site}（英文名 ${SITE_NAME.en}）`,
     `- 地址：${origin}`,
-    '- 是什么：一个免费的在线复古游戏厅。NES、SFC（超级任天堂）、GBA 和街机游戏直接跑在浏览器里，',
+    '- 是什么：一个免费的在线复古游戏厅。FC（红白机）、SFC（超级任天堂）、GBA 和街机游戏直接跑在浏览器里，',
     '  内核是编译成 WebAssembly 的 RetroArch，**全部在本机运行**，不向服务器上传任何文件。',
     '- 怎么用：从站内「在线游戏库」挑一盘，或把自己的 ROM 文件拖到页面上的像素电视机上。',
     '- 收费：完全免费，无需注册、无需登录。',
@@ -178,7 +178,7 @@ export function buildLlmsTxt(origin: string): string {
 
   return `# ${site} / ${SITE_NAME.en}
 
-> 在浏览器里玩复古游戏：NES、SFC（超级任天堂）、GBA 和街机都能跑，本机模拟、打开即玩、免安装。
+> 在浏览器里玩复古游戏：FC（红白机）、SFC（超级任天堂）、GBA 和街机都能跑，本机模拟、打开即玩、免安装。
 > Play NES, SNES / SFC, GBA and arcade games in your browser — emulated locally, no install, no sign-up.
 
 本文件（/llms.txt）面向所有 AI 助手、AI 搜索与智能体，说明本站**欢迎什么**、**拒绝什么**。

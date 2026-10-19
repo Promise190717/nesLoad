@@ -175,7 +175,16 @@ export const viewport: Viewport = {
  * 代价是服务端 HTML 上没有这六个属性，因此 <html> 需要 suppressHydrationWarning。
  *
  * **默认值 + 手动覆盖**，但六个属性的落盘策略不同：
- *   - 主题：记住，写 localStorage（刷新后还在）。
+ *   - 主题：记住，写 localStorage（`nesload:theme`）。
+ *     ⚠️ **没存过值时，首屏会把现算出来的结果写回去**（2026-10-19 加）。
+ *     在这之前只有「手动点主题钮」才落盘，于是没点过钮的人，浅色只活在
+ *     **当前这份 DOM** 里（`<html data-theme>`）；而这脚本只在整页加载时跑，
+ *     软导航不跑 —— 两条路径一个「记住」一个「重新按系统算」，
+ *     系统是深色的用户就会「切个路由突然变黑」（用户 2026-10-19 报的现象）。
+ *     落盘之后两条路径读的是同一个值，结果稳定。
+ *     ⚠️ 代价：**不再跟随系统主题的实时变化**（用户在系统里切深色，本站不动）。
+ *     这是刻意换来的 —— 要跟随就得两条路径都跟随，而软导航根本没有「重新算」
+ *     的时机，只会把同一个不一致换个方向再演一遍。
  *   - 灯：默认跟主题（白天关、夜晚开），手动点灯**也记住**（写 localStorage）。
  *   - 季节：默认**按农历算**（见下），点窗户只是**当次会话的临时覆盖，不落盘** ——
  *     刷新就回到按农历算的那一季。所以下面这段**不读 localStorage**，
@@ -188,6 +197,8 @@ export const viewport: Viewport = {
  *     两页的档位映射的是**两套 CSS**（`--play-size-scale` vs `--tv-ratio`），
  *     同一档在两页量出来的大小本来就不一样，默认自然也不该一样。
  *     判据是**路径前缀**（下面那段用 `location.pathname` 现读），
+ *     写法是「以 `/play` 段收尾」而不是写死语种（`/^\/(zh\/)?play/` 那种）——
+ *     2026-10-19 之前的写法只认 `/zh`，`/ja/play` `/ko/play` 整页加载会掉回 small。
  *     ⚠️ **改这里必须同步 `PlayScene.tsx` 的 `PLAY_DEFAULT_SCREEN_SIZE`**。
  *     ⚠️ **`small` 必须出现在合法值列表里**：老写法只认 medium/large、把 small
  *     当「没存过」，在兜底恰好也是 small 的年代没暴露；现在 /play 兜底是 medium，
@@ -202,8 +213,45 @@ export const viewport: Viewport = {
  * 四月–六月夏、七月–九月秋、其余冬；拿不到农历就退回公历月。
  * 同理，`data-tv` 的合法值抄的是 `lib/tv-size.ts` 的 `TvSize`，那边加档位要同步这里；
  * `data-mobile` 的判定抄的是 `lib/device.ts` 的 `isMobileDevice()`，**改那边必须同步这里**。
+ *
+ * ⚠️ **每个键各自 try，禁止再在外面包一个大 try**（2026-10-19 改）：
+ * 以前整段一个 try/catch，catch 里硬编码 `data-theme='dark'` —— 只要任何一步抛错
+ * （最典型是 localStorage 在隐私模式 / 存储被限制时抛 SecurityError），
+ * 就会把用户已经存好的浅色一并丢掉、整站按深色重画，六个属性还会一起退回默认。
+ * 现在读写都走小函数，单条失败只影响那一条；主题读不到时退回当前算出来的，
+ * 而不是无条件 dark。
+ *
+ * ⚠️ **为什么 2026-10-19 之前「切路由会变黑」听起来变频繁了**：`a599d47 静态缓存`
+ * 把根文档从唯一的 `app/layout.tsx` 挪进了 `app/[locale]/layout.tsx`（带 `[locale]`
+ * 动态段的 root layout），另外还有 `app/admin/layout.tsx`、`app/global-not-found.tsx`
+ * 两个独立根。软导航不会重跑这段脚本，但**跨 root layout、切语言（动态段参数变了）、
+ * 进 404、联机退出时的 `window.location.assign`、middleware 的 307** 都是整页加载
+ * ⇒ 都会重跑。所以修法是「重跑也必须算出同一个结果」，不是「让它别重跑」。
  */
-const BOOT_INIT = `(function(){try{var t=localStorage.getItem('nesload:theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.dataset.theme=t;var l=localStorage.getItem('nesload:lamp');if(t==='light')l='off';document.documentElement.dataset.lamp=l==='off'?'off':'on';var sm=localStorage.getItem('nesload:simple');document.documentElement.dataset.simple=sm==='on'?'on':'off';var tv=localStorage.getItem('nesload:tv');document.documentElement.dataset.tv=tv==='medium'||tv==='large'||tv==='small'?tv:(/^\\/(zh\\/)?play(\\/|$)/.test(location.pathname)?'medium':'small');var ua=navigator.userAgent;var mob=!!(navigator.userAgentData&&navigator.userAgentData.mobile)||/Android|iPhone|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);document.documentElement.dataset.mobile=mob?'on':'off';var s;try{var p=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric'}).formatToParts(new Date());var v='';for(var i=0;i<p.length;i++){if(p[i].type==='month'){v=p[i].value;}}var m=parseInt(v,10);if(!(m>=1&&m<=12)){m=new Date().getMonth()+1;}s=m<=3?'spring':m<=6?'summer':m<=9?'autumn':'winter';}catch(err){s='winter';}document.documentElement.dataset.season=s;}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.dataset.lamp='on';document.documentElement.dataset.simple='off';document.documentElement.dataset.tv=/^\\/(zh\\/)?play(\\/|$)/.test(location.pathname)?'medium':'small';document.documentElement.dataset.mobile='off';document.documentElement.dataset.season='winter';}})();`;
+const BOOT_INIT = `(function(){
+var root=document.documentElement;
+function read(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+function write(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+var t=read('nesload:theme');
+if(t!=='light'&&t!=='dark'){
+t='dark';
+try{if(window.matchMedia('(prefers-color-scheme: light)').matches)t='light';}catch(e){}
+write('nesload:theme',t);
+}
+root.dataset.theme=t;
+var l=read('nesload:lamp');
+if(t==='light')l='off';
+root.dataset.lamp=l==='off'?'off':'on';
+root.dataset.simple=read('nesload:simple')==='on'?'on':'off';
+var tv=read('nesload:tv');
+root.dataset.tv=tv==='medium'||tv==='large'||tv==='small'?tv:(/\\/play(?:\\/|$)/.test(location.pathname)?'medium':'small');
+var ua=navigator.userAgent;
+var mob=!!(navigator.userAgentData&&navigator.userAgentData.mobile)||/Android|iPhone|iPod|webOS|BlackBerry|IEMobile|Opera Mini|Mobile/i.test(ua)||(/Macintosh/.test(ua)&&navigator.maxTouchPoints>1);
+root.dataset.mobile=mob?'on':'off';
+var s='winter';
+try{var p=new Intl.DateTimeFormat('en-u-ca-chinese',{month:'numeric'}).formatToParts(new Date());var v='';for(var i=0;i<p.length;i++){if(p[i].type==='month'){v=p[i].value;}}var m=parseInt(v,10);if(!(m>=1&&m<=12)){m=new Date().getMonth()+1;}s=m<=3?'spring':m<=6?'summer':m<=9?'autumn':'winter';}catch(err){}
+root.dataset.season=s;
+})();`;
 
 /**
  * 结构化数据（JSON-LD）。搜索引擎读不懂 canvas 里跑的东西 —— 页面本身几乎没有

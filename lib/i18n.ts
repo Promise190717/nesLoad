@@ -366,7 +366,7 @@ const en = {
    * 要能被直接搜到 —— 所以描述里都要带「能玩、能下载、免安装」这几个词。
    *
    * 详情页 / 下载页的两条带占位符：`{title}` 是游戏名、`{console}` 是机种
-   * （`CONSOLE_LABEL` 那十三个丝印词，不进文案表）。
+   * （`lib/consoles.ts` 的 `consoleLabel(type, locale)` —— 中文站是 FC、英文站是 NES）。
    * 列表页那条带 `{count}` —— 条数是现从库里读的，写死会在增减游戏后变成假话。
    */
   'seo.games.title': 'All games — Play NES, SNES, GBA & Arcade Online',
@@ -383,8 +383,9 @@ const en = {
   /*
    * 机种筛选（`/games?console=<机种>`，2026-10-13 加）。
    *
-   * `{console}` 是 `CONSOLE_LABEL` 那十三个丝印词（NES / SFC / GBA / NDS / ARC…）—— 和首页
-   * 「按机种浏览」那几张卡片用的是同一份，别在这里另写一套机种名（两套迟早对不上）。
+   * `{console}` 是 `consoleLabel(type, locale)` 的短标签（英文站 NES / SFC / GBA…，
+   * 中文与日韩站 FC / SFC / GBA…）—— 和首页「按机种浏览」那几张卡片用的是同一份，
+   * 别在这里另写一套机种名（两套迟早对不上）。
    *
    * 这一页**可以收录**（和 `?q=` 的搜索页不同，见上面那两条的注释）：机种是一份有限、
    * 封闭的清单，每个都是一份真实分类，而不是「同一份列表的无限多个子集」。
@@ -1140,8 +1141,8 @@ const en = {
 
   /*
    * 在线库列表上那排筛选：机种 + 搜索。两者都只在**已经拉回来的那份列表**上过滤
-   * （客户端过滤，不再打接口）。「全部」那一档和 NES / SFC / ARC 并排，
-   * 机种名是丝印（CONSOLE_LABEL），不走这张表。
+   * （客户端过滤，不再打接口）。「全部」那一档和 FC / SFC / ARC 并排，
+   * 机种名走 `consoleLabel()`，不进这张表。
    */
   'games.filterAll': 'All',
   'games.searchPlaceholder': 'Search title / developer / series',
@@ -1608,15 +1609,15 @@ const en = {
 export type MessageKey = keyof typeof en;
 
 const zh: Record<MessageKey, string> = {
-  'meta.title': '{site} — 在浏览器里在线玩复古游戏：NES / SFC / GBA / 街机',
+  'meta.title': '{site} — 在浏览器里在线玩复古游戏：FC / SFC / GBA / 街机',
   'meta.description':
-    '在浏览器里直接玩复古游戏：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
+    '在浏览器里直接玩复古游戏：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
   'meta.keywords':
-    '复古游戏, 在线游戏库, 在线玩 NES, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, NDS 模拟器, NDS 游戏, 任天堂 DS, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, PlayStation 模拟器, PS1 模拟器, PSX 模拟器, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
+    '复古游戏, 在线游戏库, 在线玩 FC, FC 模拟器, 红白机, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, NDS 模拟器, NDS 游戏, 任天堂 DS, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, PlayStation 模拟器, PS1 模拟器, PSX 模拟器, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
   /* 房间页（`/room`）自己的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
   'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
   'seo.room.description':
-    '走进像素小屋：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
+    '走进像素小屋：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
 
   /* 登录页（`/login`），见上面英文那份的注释 */
   'seo.login.title': '登录',
@@ -1631,7 +1632,7 @@ const zh: Record<MessageKey, string> = {
    *    `netplay.wanDev` 兜着（没配 TURN 时公网档进不去），落地页不背这个包袱。
    */
   'home.hero.lead':
-    '{site}上在线玩 NES、SFC（超级任天堂）、GBA、世嘉 MD、Game Boy 和街机等十余款机种的游戏，支持联机对战。',
+    '{site}上在线玩 FC（红白机）、SFC（超级任天堂）、GBA、世嘉 MD、Game Boy 和街机等十余款机种的游戏，支持联机对战。',
   /*
    * ⚠️ 2026-10-15：改成「加载本地 ROM」并挂回首屏右侧（原来叫「进入小屋」、已从首屏撤掉）。
    *    「加载」这个动词和房间里点进去第一句是同一个词（`screen.tapLoad`「点击从本地加载」），
@@ -1648,7 +1649,7 @@ const zh: Record<MessageKey, string> = {
   'home.search.submit': '搜索',
   'home.consoles.title': '按机种浏览',
   'home.consoles.lead':
-    'NES、SFC、GBA、世嘉 MD、Game Boy、街机等十余款机种 —— 点一个看它有哪些游戏。',
+    'FC、SFC、GBA、世嘉 MD、Game Boy、街机等十余款机种 —— 点一个看它有哪些游戏。',
   'home.consoles.count': '{count} 款游戏',
   /* 2026-10-14 改：原来写「查看全部游戏」（指向 /games），现在机种有了自己的专题页，这里指向 /consoles */
   'home.consoles.all': '全部机种',
@@ -1681,18 +1682,18 @@ const zh: Record<MessageKey, string> = {
 
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':
-    '{site}是一个在线复古游戏厅。NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机等十余款机种的游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
+    '{site}是一个在线复古游戏厅。FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机等十余款机种的游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
   'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
 
   /* 游戏列表 / 详情 / 下载三页的 SEO 文案，见上面英文那份的注释 */
-  'seo.games.title': '全部游戏 —— 在线玩 NES / SFC / GBA / 街机',
+  'seo.games.title': '全部游戏 —— 在线玩 FC / SFC / GBA / 街机',
   'seo.games.description':
-    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
+    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
   /* 搜索结果两条，见上面英文那份的注释（人不索引、只给人看） */
   'seo.games.search.title': '「{keyword}」的搜索结果',
   'seo.games.search.description':
     '在线游戏库里匹配「{keyword}」的游戏共 {count} 款。可以直接在浏览器里玩，也可以下载 ROM 文件。',
-  /* 机种筛选，见上面英文那份的注释（`{console}` 是 NES / SFC / GBA / ARC 等丝印词） */
+  /* 机种筛选，见上面英文那份的注释（`{console}` 是 FC / SFC / GBA / ARC 等短标签） */
   'seo.games.console.title': '{console} 游戏 —— 在线玩',
   'seo.games.console.description':
     '在线游戏库里的 {count} 款 {console} 游戏，全部可以直接在浏览器里玩，也可以下载 ROM 文件。',
@@ -1703,7 +1704,7 @@ const zh: Record<MessageKey, string> = {
   'seo.gameDownload.description':
     '一键下载《{title}》（{console}）的 ROM 文件，无需注册。也可以直接在浏览器里玩。',
   /* 开发商两页，见上面英文那份的注释 */
-  'seo.developers.title': '游戏开发商 —— 在线玩他们做的 NES / SFC / GBA / 街机游戏',
+  'seo.developers.title': '游戏开发商 —— 在线玩他们做的 FC / SFC / GBA / 街机游戏',
   'seo.developers.description':
     '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
   'seo.developer.title': '{name} —— 这家开发商的游戏',
@@ -1714,7 +1715,7 @@ const zh: Record<MessageKey, string> = {
    * 机种两页（2026-10-14 加的）。`consoles` 是列表页、`console` 是单页，
    * 和 developers / developer 同一套命名。`{count}` 同样是现读的条数。
    */
-  'seo.consoles.title': '按机种浏览 —— 在线玩 NES / SFC / GBA / 街机游戏',
+  'seo.consoles.title': '按机种浏览 —— 在线玩 FC / SFC / GBA / 街机游戏',
   'seo.consoles.description':
     '在线游戏库里的每个机种（共 {count} 款游戏）。挑一个机种，看它名下的全部游戏，直接在浏览器里开玩。',
   'seo.console.title': '{name} 游戏 —— 在线玩',
@@ -1875,7 +1876,7 @@ const zh: Record<MessageKey, string> = {
   // `/play`（联机游戏页）。和英文侧同一套说明：短，联机词汇一律复用上面的 netplay.*
   'seo.play.title': '开玩 —— 载入游戏、在线联机',
   'seo.play.description':
-    '一块屏幕开局：单人直接玩，也可以开一间 1v1 房间把房间码分享出去。支持 NES、SFC、GB、GBA、MD 与街机。',
+    '一块屏幕开局：单人直接玩，也可以开一间 1v1 房间把房间码分享出去。支持 FC、SFC、GB、GBA、MD 与街机。',
   'play.modeSolo': '单人',
   'play.start': '开始',
   'play.confirmStart': '确定并开始',
@@ -2223,7 +2224,7 @@ const zh: Record<MessageKey, string> = {
 
   'gamesPage.heading': '全部游戏',
   'gamesPage.intro':
-    '在线游戏库共 {count} 款：NES、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点封面看详情，也可以直接开玩。',
+    '在线游戏库共 {count} 款：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点封面看详情，也可以直接开玩。',
   'gamesPage.empty': '游戏库现在还是空的。',
   /* 机种筛选三条，见上面英文那份的注释 */
   'gamesPage.introConsole': '游戏库里共 {count} 款 {console} 游戏。点封面看详情，也可以直接开玩。',

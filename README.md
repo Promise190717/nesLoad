@@ -1,8 +1,8 @@
 # nesLoad
 
-在浏览器里运行的复古游戏机，目前有**十四个机种**：NES / SFC / GB / GBC / GBA / NDS / 世嘉 MD / Game Gear / Master System / 世嘉 32X / WonderSwan / Neo Geo Pocket / 索尼 PlayStation（PS1）/ 街机。界面是一台极简像素风的电视机：把 ROM 文件拖到机身上（或点机身下沿的插卡口），卡带就会插进去开始运行。
+在浏览器里运行的复古游戏机，目前有**十四个机种**：NES（中文站显示 FC，即红白机）/ SFC / GB / GBC / GBA / NDS / 世嘉 MD / Game Gear / Master System / 世嘉 32X / WonderSwan / Neo Geo Pocket / 索尼 PlayStation（PS1）/ 街机。界面是一台极简像素风的电视机：把 ROM 文件拖到机身上（或点机身下沿的插卡口），卡带就会插进去开始运行。
 
-模拟内核基于 [Nostalgist](https://nostalgist.js.org/)（封装 RetroArch 的 WASM 构建）。**只有 NES / SFC 的核心在运行时从 CDN 加载**；其余十二个机种（GBA / GB / GBC / NDS / MD / GG / SMS / 32X / WS / NGP / PS1 / 街机）的核心都随仓库放在 `public/cores/`，从本站加载、不走 CDN（一条理由：jsdelivr 在国内经常连不上或被限速，拉不动就表现成「拖进去毫无反应」；**不是因为 CDN 上没有这些包**，它们都在）。**仓库内不包含任何 ROM**——`public/cores/` 里是开源的 WASM 核心构建，不是 ROM。
+模拟内核基于 [Nostalgist](https://nostalgist.js.org/)（封装 RetroArch 的 WASM 构建）。**十四个机种的核心全部随仓库放在 `public/cores/`，运行时从本站加载、不依赖任何 CDN**（2026-10-19 起 NES / SFC 也从 CDN 搬了过来：jsdelivr 在国内经常连不上或被限速，拉不动就表现成「拖进去毫无反应」）。**仓库内不包含任何 ROM**——`public/cores/` 里是开源的 WASM 核心构建，不是 ROM。
 
 ## 技术栈
 
@@ -341,7 +341,7 @@ pnpm dev
 
 | 文件 | 是什么 |
 | --- | --- |
-| `lib/emulator.ts` | `EXTENSION_MAP`（扩展名回退）、`detectConsole`（文件头判据）、`LOCAL_CORE_CONSOLES`（核心走本地还是 CDN） |
+| `lib/emulator.ts` | `EXTENSION_MAP`（扩展名回退）、`detectConsole`（文件头判据）、`LOCAL_CORE_DIR`（核心一律从本站 `public/cores/` 取，2026-10-19 起没有 CDN 分支了） |
 | `lib/unwrap.ts` | `ROM_EXTENSIONS`（zip 里装着这种 ROM 时要能拆一层） |
 | `lib/bios.ts` | `BIOS_SPECS`（**只有需要 BIOS 的机种**：目前是街机 + PS1）、`biosTypeFor`（机种 → 要哪份 BIOS） |
 | `lib/keybindings.ts` | `CONSOLE_BUTTONS`（这个机种有哪几个钮）、`CONSOLE_BUTTON_LABELS`（机身丝印，**和街机那套 A B C X Y Z 不一样的机种才登记**）。两张都是 `Partial`，漏了不会报错、只是退回街机那套叫法 |
@@ -360,8 +360,7 @@ pnpm dev
 > 里解出来的（那是个 7z 壳，解开就是这两个文件，文件名和本站的命名规范一字不差）。
 > 代价是那份胶水是 `var EJS_Runtime = (function(...)…)` 的闭包形态，
 > `JSEvents` / `Browser` 在闭包内，需要照 **32X 那套 `globalThis.__NESL_*` 补丁**的形状重打。
-> ⚠️ 所以「NDS 走本站核心」这条**不是** `LOCAL_CORE_CONSOLES` 里唯一一个非
-> `retroarch-emscripten-build` 来源的例外 —— 换它的文件时**别再当成「从 jsdelivr 拿现成 zip」**。
+> ⚠️ 所以「NDS 走本站核心」这条**不是**唯一一个非 `retroarch-emscripten-build` 来源的例外 —— 换它的文件时**别再当成「从 jsdelivr 拿现成 zip」**。
 >
 > **能加但还没加**的：PC Engine（`mednafen_pce_fast`）、ColecoVision、Atari Lynx、Vectrex、
 > C64（`vice_x64` 一整套）、PC-88 / X1 等。**还有光盘机种**：Sega CD / PCE CD 的核心也在，
@@ -419,11 +418,11 @@ pnpm dev
 
 ⚠️ 三个刻意的取舍：**`.bin` 不收进扩展名表**（太泛，PS1 光盘镜像也叫 bin，猜成 MD 只会把「不认识」变成「静默失败」；真·MD 的 `.bin` 靠 `0x100` 的 `SEGA` 头认）；**PS1 的多文件形态（`.cue` / `.m3u` / `.toc` / `.ccd`）也不收**（一次只能拖一个文件，收下描述文件也找不到它指向的 `.bin`，失败还是静默的 —— 所以只认 `.pbp` / `.iso` / `.img` 三种单文件镜像；⚠️ 例外是**装在压缩包里的 `.cue` + `.bin`**，那两个文件都拿到了，由 `lib/unwrap.ts` 的「光盘套装」处理）；**WonderSwan 没有文件头判据**（它的 ROM 头就是跳转指令 + 校验和，没有版权串可认），所以只能带对 `.ws` / `.wsc` 扩展名。
 
-核心：**除了 NES / SFC（fceumm / snes9x）在运行时从 CDN 拉，其余十二个机种的核心都随仓库放在 `public/cores/`**，运行时从本站加载 —— 理由和街机**同一条**（jsdelivr 在国内不可靠），**不是**因为 CDN 上没有这些包。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`（**两个例外**：**NDS 的 melonds** 不在那个构建里，是从 EmulatorJS 的 `melonds-wasm.data` 里解出来的；**街机的 `fbneo`** 体积超了部署平台「单个静态文件 25 MiB」的上限，在仓库里**只存 `.wasm.gz`**，启动时由前端解开 —— 见下）。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
+核心：**十四个机种的核心全部随仓库放在 `public/cores/`**，运行时从本站加载、不碰 CDN（理由是同一条：jsdelivr 在国内不可靠，拉不动就表现成「拖进去毫无反应」；**不是因为 CDN 上没有这些包**，它们都在）。核心文件来自 [retroarch-emscripten-build](https://github.com/arianrhodsandlot/retroarch-emscripten-build)（`v1.22.2`）的 `retroarch/<核心名>_libretro.zip`，按 `<核心名>_libretro.js` / `.wasm` 的命名放进 `public/cores/`（**两个例外**：**NDS 的 melonds** 不在那个构建里，是从 EmulatorJS 的 `melonds-wasm.data` 里解出来的；**街机的 `fbneo`** 体积超了部署平台「单个静态文件 25 MiB」的上限，在仓库里**只存 `.wasm.gz`**，启动时由前端解开 —— 见下）。机种与核心的对应关系在 `lib/emulator.ts` 的 `CORE_MAP`：
 
 | 机种 | 核心 | 说明 |
 | --- | --- | --- |
-| NES / SNES | `fceumm` / `snes9x` | 走 CDN（一直正常，没动） |
+| NES / SNES | `fceumm` / `snes9x` | 本站加载（2026-10-19 从 jsdelivr 搬过来，体积 3.0 MB / 4.6 MB） |
 | GBA / GB / GBC | `mgba` | **一个核心三台机**——mGBA 本身就兼容 GB / GBC，所以加 GB / GBC 没添任何新文件 |
 | NDS | `melonds` | 上游构建里没有，核心从 EmulatorJS 解出来（见上） |
 | MD / GG / SMS | `genesis_plus_gx` | 同样一个核心三台机（还能吃 SG-1000） |
@@ -605,7 +604,9 @@ services:
 
 > 语言由 middleware 的请求头 + `[locale]` 段决定，所以整棵树都是动态渲染 —— 换来的是首屏文案直接就是对的，不会先渲染英文再翻成中文。代价是不能再用 `output: 'export'` 做纯静态托管。
 
-**机身上的丝印和纯 ASCII 读数刻意保持英文**：`PWR` / `VOL` / `BETA` / `EXIT FULLSCREEN`，以及 NES·SFC·GBA·ARC 机种标签、存档计数、房间码、进度条百分数。它们是刻在壳上、或由程序现算的东西，不跟语言走。（窄窗口那块 `DESKTOP ONLY` 提示的标题原本也在这条规矩里，2026-10-12 收进了文案表——它下面那句正文本来就是翻译过的，中英混着摆像漏翻。）
+**机身上的丝印和纯 ASCII 读数刻意保持英文**：`PWR` / `VOL` / `BETA` / `EXIT FULLSCREEN`，以及存档计数、房间码、进度条百分数。它们是刻在壳上、或由程序现算的东西，不跟语言走。
+
+**机种短标签是这条规矩唯一的例外**：词仍然只有 ASCII（`font-pixel` 没有中日韩字形），但 `FC` 与 `NES` 之间按界面语言挑一份 —— 那台机器在中文 / 日文 / 韩文里都叫 FC（红白机 / ファミコン / 패미컴），只有英文站写 NES（2026-10-19 改）。取法统一走 `lib/consoles.ts` 的 `consoleLabel(type, locale)`（`CONSOLE_LABEL` 只是它的英文档），**别再在页面里直接读那张表** —— 那会让中文站又冒出 NES。其余机种三语同词（SFC / GBA / ARC…），没有第二份。（窄窗口那块 `DESKTOP ONLY` 提示的标题原本也在这条规矩里，2026-10-12 收进了文案表——它下面那句正文本来就是翻译过的，中英混着摆像漏翻。）
 
 **屏幕里那几句提示 2026-10-12 起跟着语言走了**（`DRAG & DROP A ROM` / `RELEASE TO LOAD` / `WAITING FOR HOST` / `PAUSED` 这一组，文案键是 `screen.*`）。它们原先只有英文，理由是 `font-pixel`（Press Start 2P）没有中日韩字形；现在中文靠**字体回退**落到系统字体上（Windows 上通常是新宋体——小字号自带点阵，反而更像老电视），和机身前面板那排「暂停 / 存档 / 读档 / 重载 / 弹出」同一个路子。代价是汉字比像素字胖，10px 以下笔画会黏，所以**中文比英文各抬 1px、英文维持原设计尺寸**（`globals.css` 的 `.screen-hint-xs / .screen-hint-sm`，按 `<html data-locale>` 命中）。三行提示的字号是 11 / 10 / 10，颜色统一 `crt-ink-200`——**这是屏幕上文案的亮度下限**：屏幕底不是纯黑就是雪花，而雪花（灰度噪点铺纯黑）合成出来约 `#5c5c5c`，比它暗的灰压上去基本看不见（副提示原来用的 `crt-ink-400` 就是这么踩的坑）。
 
@@ -627,7 +628,7 @@ services:
 
 图标不是手画的 PNG，是 `scripts/generate-icons.mjs` 把 `app/icon.svg` 那张 16×16 像素画**整数倍放大**生成的（`node scripts/generate-icons.mjs`；用 Node 内置 zlib 手写 PNG，不引 sharp / resvg）。改图标要同时改 `app/icon.svg` 和脚本里那份 SHAPES，然后重跑。
 
-> **离线能做什么**：能打开上次访问过的页面（回退缓存），能玩你自己拖进来的 ROM —— 除 NES / SFC 之外十个机种的核心都在 `public/cores/`，只要 HTTP 缓存还有效就照跑。**不能**拉 NES / SFC 核心（在 jsdelivr 上），也不能从在线游戏库下游戏。所以离线是「应急」，不是「完整离线版」。
+> **离线能做什么**：能打开上次访问过的页面（回退缓存），能玩你自己拖进来的 ROM —— 十四个机种的核心都在 `public/cores/`，只要 HTTP 缓存还有效就照跑（2026-10-19 起 NES / SFC 也不再依赖 jsdelivr）。**不能**从在线游戏库下游戏。所以离线是「应急」，不是「完整离线版」。
 
 > **`sw.js` 里刻意不缓存的东西**：`/api/*`（游戏库、留言本、后台接口，缓存它们会制造「看到别人数据」这类事故）、`/cores/`（next.config 已经给了 7 天 HTTP 缓存，而核心是**同名覆盖**的，进 CacheStorage 就再也刷不新）、图标（文件名不带 hash，同理）。**改 `sw.js` 必须改文件顶部的 `VERSION`**，否则老用户跑的还是旧逻辑。
 
@@ -705,10 +706,11 @@ lib/
   ai-policy.ts    AI 面向的站点政策正文（/llms.txt 与 /ai.txt 共用这一份）
   chiptune.ts     现场合成的 8-bit 小段，MP4 放不出来时的兜底音源
 public/
-  cores/          十二个机种的核心（fbneo / fbalpha2012_cps1 / mgba / genesis_plus_gx / picodrive /
-                  mednafen_wswan / mednafen_ngp / melonds / pcsx_rearmed 的 .js + .wasm，
-                  约 40 MB）—— 从本站加载，不走 CDN。⚠️ fbneo 那份是 .wasm.gz（9.7 MB），
-                  原始 wasm 是 34 MB、超过部署平台单文件 25 MiB 的上限，所以不入库；
+  cores/          十四台机种的核心（fceumm / snes9x / fbneo / fbalpha2012_cps1 / mgba /
+                  genesis_plus_gx / picodrive / mednafen_wswan / mednafen_ngp / melonds /
+                  pcsx_rearmed 的 .js + .wasm，约 48 MB）—— 一律从本站加载，不走 CDN。
+                  ⚠️ fbneo 那份是 .wasm.gz（9.7 MB），原始 wasm 是 34 MB、超过部署平台
+                  单文件 25 MiB 的上限，所以不入库；
                   换核心时按 lib/emulator.ts 的 GZIP_CORES 注释重新压一遍
   bios/           街机 BIOS（Neo Geo 的 neogeo.zip，约 1.3 MB）—— 同 cores 一起钉了长缓存；
                   第一次跑街机游戏时自动装进浏览器，之后走本地那份（见 lib/bios.ts）。
@@ -720,7 +722,7 @@ public/
 
 ## 已知限制
 
-- **NES / SFC 首次运行需要联网**：核心由 Nostalgist 从 CDN 拉，首次启动要等十几秒（实测约 18 秒）。**其余十二个机种的核心是本站文件**（`public/cores/`，见「支持的格式」那张对照表），不依赖网络。插卡带的这段时间**屏幕里**会显示进度条：拿得到核心的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条（核心进过 CacheStorage 之后基本就是后者）。
+- ~~**NES / SFC 首次运行需要联网**~~：2026-10-19 起这两台的核心也进了 `public/cores/`，**十四个机种全部不依赖 CDN**（第一次仍要下载自己那份 3–5 MB 的核心，之后就吃 HTTP 缓存）。插卡带的这段时间**屏幕里**会显示进度条：拿得到核心的 `Content-Length` 就是百分比，拿不到就是一条来回滑动的「不确定」条。
 - 字体 Press Start 2P 通过 `<link>` 在运行时加载。这里刻意没用 `next/font`（它会在构建时下载字体，无网络环境下会让构建直接失败）；加载失败时优雅退化为等宽字体，不影响功能。
 - 存档和「历史」都放在 IndexedDB 里；拿不到 IndexedDB 时（隐私模式等）「历史」会空着、载入过的游戏也不留痕，此时点「存档」会自动降级为下载 `.state` 文件。历史只占几百字节一条（纯字符串），存档仍是 Blob。
 - ~~只支持桌面端~~：2026-10-13 起**取消了那个「请用桌面端」的提示**，窄窗口照画屋子 —— 尺寸链会自动收（屏幕取 `min(档位上限, 100vw − 360px)`，桌面 / 底座 / 吊灯线都跟着推出来），所以任何宽度下机身都不会再被 `main` 的 overflow 从两边切掉。窗口小于 900px 时那两处入口收进菜单抽屉，见上面「隐私政策与服务条款」。

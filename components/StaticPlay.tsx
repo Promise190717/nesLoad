@@ -43,7 +43,7 @@ export default function StaticPlay() {
   return (
     <GamesShell locale={locale} label="PLAY" title={t('gamesPage.playOnline')}
       back={{ href: back, label: 'common.back', mode: 'history' }}
-      backNode={<PlayBackLink href={back} />} showHeader={false} fill wide>
+      backNode={<PlayBackLink href={back} />} showHeader={false} fill wide showTheme={false}>
       <PlaySession key={`${id}:${room}:${host}`} id={id} room={room} host={host} />
     </GamesShell>
   );

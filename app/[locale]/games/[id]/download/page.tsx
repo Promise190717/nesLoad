@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
-import { CONSOLE_LABEL } from '@/components/CartridgeSprite';
+import { consoleLabel as consoleLabelOf } from '@/lib/consoles';
 import GamesShell from '@/components/GamesShell';
 import RomDownloadGate from '@/components/RomDownloadGate';
 import {
@@ -46,16 +46,17 @@ export async function generateMetadata({
   const [locale, game] = await Promise.all([readLocaleParam(params), loadGame(id)]);
   if (!game) notFound();
 
-  const consoleLabel = CONSOLE_LABEL[game.consoleType];
+  /* 机种标签按语言取（中文站 FC、英文站 NES），见 lib/consoles.ts 的 `consoleLabel` */
+  const tag = consoleLabelOf(game.consoleType, locale);
   /* 按语言选定的那一份文案（中英都从库里取出来了，这里挑一份）—— 见 lib/server/games.ts */
   const text = localizeGame(game, locale);
   const title = translate(locale, 'seo.gameDownload.title', {
     title: text.title,
-    console: consoleLabel,
+    console: tag,
   });
   const description = translate(locale, 'seo.gameDownload.description', {
     title: text.title,
-    console: consoleLabel,
+    console: tag,
   });
 
   return {
@@ -86,7 +87,7 @@ export default async function GameDownloadPage({
 
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>
     translate(locale, key, vars);
-  const consoleLabel = CONSOLE_LABEL[game.consoleType];
+  const tag = consoleLabelOf(game.consoleType, locale);
   /* 页面正文用同一份按语言选定的文案（和 generateMetadata 里那份同源） */
   const text = localizeGame(game, locale);
 
@@ -96,7 +97,7 @@ export default async function GameDownloadPage({
       label="DOWNLOAD"
       title={t('download.heading')}
       /* 副标题写清「下的是哪一款」—— 从搜索结果直接落到这一页的人得马上确认没走错 */
-      intro={`${text.title} · ${consoleLabel}`}
+      intro={`${text.title} · ${tag}`}
       back={{ href: localePath(locale, `/games/${id}`), label: 'common.back', mode: 'history' }}
       showAllGamesLink
     >

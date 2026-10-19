@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CONSOLE_LABEL } from '@/lib/consoles';
+import { consoleLabel } from '@/lib/consoles';
 import type { ConsoleType } from '@/lib/emulator';
 import { localePath, translate, type Locale } from '@/lib/i18n';
 import { localizeConsole, type Console } from '@/lib/server/consoles';
@@ -11,7 +11,7 @@ export default function ConsoleCard({ type, row, count, locale }: {
   locale: Locale;
 }) {
   const text = row ? localizeConsole(row, locale) : null;
-  const name = text?.name ?? CONSOLE_LABEL[type];
+  const name = text?.name ?? consoleLabel(type, locale);
 
   return (
     <Link
@@ -23,11 +23,11 @@ export default function ConsoleCard({ type, row, count, locale }: {
         <img src={row.imageUrl} alt="" loading="lazy" className="pixel-edge pxw-2 pxc-700 h-[72px] w-[72px] shrink-0 bg-ink-950 object-contain" />
       ) : (
         <span aria-hidden="true" className="pixel-edge pxw-2 pxc-700 flex h-[72px] w-[72px] shrink-0 items-center justify-center bg-ink-950 font-pixel text-[16px] text-ink-600">
-          {CONSOLE_LABEL[type]}
+          {consoleLabel(type, locale)}
         </span>
       )}
       <span className="w-full text-[12px] leading-5 text-ink-100">{name}</span>
-      <span className="font-pixel text-[12px] text-ink-400">{CONSOLE_LABEL[type]}</span>
+      <span className="font-pixel text-[12px] text-ink-400">{consoleLabel(type, locale)}</span>
       <span className="font-pixel text-[12px] text-accent">
         {translate(locale, 'consolesPage.gameCount', { count })}
       </span>

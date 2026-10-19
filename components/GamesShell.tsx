@@ -35,6 +35,7 @@ export default function GamesShell({
   showAllGamesLink = true,
   showTopBar = true,
   showHomeLink = false,
+  showTheme = true,
   backNode,
   children,
 }: {
@@ -114,6 +115,14 @@ export default function GamesShell({
    * 别的内容页**不要传**：它们的顶栏里已经有一颗「首页」了，再来一颗就是重复。
    */
   showHomeLink?: boolean;
+  /**
+   * 顶栏那颗**主题钮**出不出现，默认出（2026-10-19 加）。
+   *
+   * ⚠️ **只有 `/play` 传 `false`**（见 `StaticPlay`）：那一页右栏的「显示」那一行
+   * 已经有一颗同一功能的钮，顶栏再放一颗就是同一件事说两遍。房间 `/room` 不走这个
+   * 外壳，它自己右沿那一列本来就有。别顺手给别的页面关掉。
+   */
+  showTheme?: boolean;
   children: ReactNode;
 }) {
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>
@@ -156,7 +165,7 @@ export default function GamesShell({
         */}
         {showTopBar && !wide && (
           <div className="mb-6">
-            <TopBar />
+            <TopBar showTheme={showTheme} />
           </div>
         )}
 
@@ -209,7 +218,7 @@ export default function GamesShell({
               {t('common.home')}
             </Link>
           )}
-          {wide && showTopBar && <TopBar />}
+          {wide && showTopBar && <TopBar showTheme={showTheme} />}
         </div>
 
         {showHeader && (

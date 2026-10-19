@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { splitLocalePath } from '@/lib/i18n';
+import { readTheme, saveTheme, type Theme } from '@/lib/theme';
 import { fetchCurrentUser, type AuthUser } from './AuthForm';
-import { GamepadIcon } from './icons';
+import { GamepadIcon, MoonIcon, SunIcon } from './icons';
 import { useI18n } from './I18nProvider';
 import LocaleSwitcher from './LocaleSwitcher';
 
@@ -39,7 +40,7 @@ import LocaleSwitcher from './LocaleSwitcher';
  * 已登录时这一格变成**用户名**（点进 `/account`），和房间那颗钮同一套写法：
  * `max-w-[9rem] truncate` 截断，全名留在 `title` 里。
  */
-function TopBarContent() {
+function TopBarContent({ showTheme }: { showTheme: boolean }) {
   const { t, href: localeHref } = useI18n();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -57,6 +58,50 @@ function TopBarContent() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  /*
+   * 主题钮（2026-10-19 加）。
+   *
+   * **真身在 `<html data-theme>`**（首屏由 layout 的内联脚本写入），这份 state 只喂
+   * title / aria-label —— 和房间、`/play` 那一套完全一样：露哪颗图标由 CSS 按属性挑
+   * （globals.css 的 `.theme-toggle`），React 不参与。写成
+   * `theme === 'light' ? <Moon/> : <Sun/>` 会先按默认主题画一颗、挂载后再「啪」地换。
+   *
+   * 水合前服务端拿不到 localStorage，所以初值只能给 'dark'，挂载后再同步；
+   * 塞微任务是因为 effect 里同步 setState 会撞上 `react-hooks/set-state-in-effect`。
+   */
+  const [theme, setTheme] = useState<Theme>('dark');
+
+  useEffect(() => {
+    const stored = readTheme();
+    void Promise.resolve().then(() => setTheme(stored));
+  }, []);
+
+  /**
+   * 切换。读 DOM 属性取当前值再翻过来 —— 和 `ConsoleScene.toggleTheme` 同一个写法，
+   * 连点两下不会因为 state 批处理丢掉一次翻转。
+   *
+   * 切完 `saveTheme` 会同时写 `nesload:theme` 和 `data-lamp`（白天自动关灯）。
+   * 过渡优先走 View Transitions（和房间那层「光从左上角推开」同一套 CSS）；
+   * 不支持就挂 0.36s 的颜色过渡类 `theme-fading`（globals.css 里那组兜底）。
+   */
+  const toggleTheme = useCallback(() => {
+    const next = readTheme() === 'dark' ? 'light' : 'dark';
+    const root = document.documentElement;
+    const commit = () => {
+      saveTheme(next);
+      setTheme(next);
+    };
+    if (typeof document.startViewTransition === 'function') {
+      document.startViewTransition(commit);
+      return;
+    }
+    root.classList.add('theme-fading');
+    /* 强制算一次样式：少了它，浏览器会把「加类」和「改主题」并进同一次样式计算 */
+    void root.offsetHeight;
+    commit();
+    window.setTimeout(() => root.classList.remove('theme-fading'), 400);
   }, []);
 
   /*
@@ -147,8 +192,38 @@ function TopBarContent() {
           )}
         </>
       )}
+      {/*
+        主题（2026-10-19 加）。用户要求「首页及列表那些页面右上入口最后边也加白天 /
+        黑夜模式的切换钮」—— 所以排在**账号之后**，是这一排的最后一格。
+
+        `showTheme={false}` 目前只有 `/play` 传：那一页右栏的「显示」那一行已经有一颗
+        同一功能的钮（见 PlayScene），顶栏再放一颗就是同一件事说两遍。房间 `/room`
+        不渲染这个顶栏，它自己沿那一列本来就有。
+      */}
+      {showTheme && (
+        <>
+          <span aria-hidden className="h-[10px] w-px bg-ink-500" />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+            aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+            className="theme-toggle p-1 text-ink-300 transition-colors hover:text-accent"
+          >
+            {/* 图标画的是**切过去之后**的那一颗，和 title 同方向（房间那颗同理） */}
+            <span className="theme-icon-light">
+              <SunIcon size={16} />
+            </span>
+            <span className="theme-icon-dark">
+              <MoonIcon size={16} />
+            </span>
+          </button>
+        </>
+      )}
     </nav>
   );
 }
 
-export default function TopBar() { return <Suspense fallback={null}><TopBarContent /></Suspense>; }
+export default function TopBar({ showTheme = true }: { showTheme?: boolean }) {
+  return <Suspense fallback={null}><TopBarContent showTheme={showTheme} /></Suspense>;
+}

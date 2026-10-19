@@ -15,13 +15,15 @@ import { biosTypeFor, ensureBios } from '@/lib/bios';
 import {
   EmulatorController,
   IncompleteRomError,
+  localCoreWasmUrl,
   unsupportedArchive,
   UnsupportedRomError,
   VOLUME_MAX,
   type LoadedRom
 } from '@/lib/emulator';
+import { preloadCoreWasm, settlePreload } from '@/lib/core-preload';
 import { readGamepads } from '@/lib/gamepad';
-import { IncompleteBodyError, isAbortError, readBodyWithProgress } from '@/lib/http';
+import { IncompleteBodyError, fetchRomWithProgress, isAbortError } from '@/lib/http';
 import { unwrapRom } from '@/lib/unwrap';
 import { setPlayActive } from '@/lib/play-leave-guard';
 import { localePath, type MessageKey } from '@/lib/i18n';
@@ -47,7 +49,7 @@ import {
   type NetplayState,
   type StreamQuality
 } from '@/lib/netplay';
-import { CONSOLE_LABEL } from './CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 import ConsoleScreen from './ConsoleScreen';
 import { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import { useI18n } from './I18nProvider';
@@ -564,8 +566,8 @@ export default function PlayScene({
   /**
    * 下 ROM、启核心。
    *
-   * 和 room 的 `loadRemote` + `loadFile` 是一条路子，只是这里不写历史、不记云端 ——
-   * 这一页没有存档 / 历史的入口，那些记录也就没有用处（room 才是「玩过什么」的家）。
+   * 和 room 的 `loadRemote` + `loadFile` 是一条路子。和 room 的差别只有「入口」：
+   * 这一页没有拖本地文件，`file` 只从「重载 / 恢复电池存档」来。
    * 取消只覆盖**下载 ROM 那一段**：核心启动之后 Nostalgist 没有公开的中断接口
    * （和 room 里那条注释说的是同一件事），所以「取消」按钮在 booting 阶段是灰的。
    */
@@ -587,17 +589,33 @@ export default function PlayScene({
 
       // 重载那条路：文件已经在手上，不必再下一次
       let romFile = file ?? null;
+      /*
+       * 核心预热的句柄（见 `lib/core-preload.ts`）。只在下 ROM 那条路上开，
+       * 重载时核心必然已经在缓存里，再预热一遍是白活。
+       */
+      let coreWarm: Promise<void> | null = null;
       const ac = new AbortController();
       abortRef.current = ac;
 
       try {
         if (!romFile) {
           setPhase('downloading');
-          const res = await fetch(`/api/games/${game!.id}/rom`, {
-            signal: ac.signal
+          /*
+           * 边下 ROM 边把核心拉进缓存：这两段网络以前是**串行**的（PS1 那张 300 MB
+           * 的盘下完才轮到 2.9 MB 的核心），现在重叠起来，启动阶段只剩编译。
+           *
+           * 用 `game.consoleType` 就够：光盘套装的真机种要等 `unwrapRom` 才知道，
+           * 但那一路预热失败也只是「没提速」，核心自己还会照常去拉。
+           */
+          coreWarm = preloadCoreWasm(localCoreWasmUrl(game!.consoleType ?? null), ac.signal);
+          /*
+           * 走**分片**那条（见 `lib/http.ts` 的 `fetchRomWithProgress`）：
+           * 一个请求搬不动几百 MB，PS1 的盘动辄 300 MiB，整包 GET 会被截断在几 MB 上。
+           */
+          const blob = await fetchRomWithProgress(`/api/games/${game!.id}/rom`, {
+            signal: ac.signal,
+            onProgress: setRomRatio,
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const blob = await readBodyWithProgress(res, setRomRatio);
           romFile = new File([blob], game!.romName, {
             type: 'application/octet-stream'
           });
@@ -656,6 +674,13 @@ export default function PlayScene({
          * 核心包那段进度按 1% 节流（几百个 chunk 全 setState 会把整页重渲染几百次）；
          * 下完退回「不确定」—— 后面还有核心启动那一段，否则进度条会卡在 100% 不动。
          */
+        /*
+         * 冷启动时等预热落定（最多 20 秒）：不等的话 `Nostalgist.launch` 会对着
+         * 同一个 URL 再发一条，浏览器并不保证合并 —— 最坏白下两份核心。
+         * 正常情况下预热从「点开始」就跑，走到这里早就完成了。
+         */
+        if (coreWarm) await settlePreload(coreWarm);
+
         let lastPct = -1;
         await controller.loadRom(
           romFile,
@@ -1257,7 +1282,7 @@ export default function PlayScene({
                             )}
                             {game && (
                               <span className="text-[12px] text-crt-ink-500">
-                                {CONSOLE_LABEL[game.consoleType]}
+                                {consoleLabel(game.consoleType, locale)}
                               </span>
                             )}
                           </div>
@@ -1318,7 +1343,7 @@ export default function PlayScene({
                         <LoadingCard
                           image={game?.imageUrl ?? null}
                           title={gameText?.title ?? null}
-                          subtitle={game ? CONSOLE_LABEL[game.consoleType] : null}
+                          subtitle={game ? consoleLabel(game.consoleType, locale) : null}
                           phaseLabel={t(
                             phase === 'downloading'
                               ? 'play.downloading'
@@ -1337,7 +1362,7 @@ export default function PlayScene({
                             <LoadingCard
                               image={game?.imageUrl ?? null}
                               title={gameText?.title ?? null}
-                              subtitle={game ? CONSOLE_LABEL[game.consoleType] : null}
+                              subtitle={game ? consoleLabel(game.consoleType, locale) : null}
                               phaseLabel={t('play.downloading')}
                               ratio={null}
                             />
@@ -1433,7 +1458,7 @@ export default function PlayScene({
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] leading-snug text-ink-100">{title}</p>
                 <p className="mt-1 text-[12px] text-ink-500">
-                  {CONSOLE_LABEL[game.consoleType]}
+                  {consoleLabel(game.consoleType, locale)}
                   {game.year ? ` · ${game.year}` : ''}
                 </p>
                 {gameText?.developer && (

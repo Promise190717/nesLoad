@@ -23,27 +23,28 @@
  *   · netplay → 온라인 대전；save → 세이브；key bindings → 키 설정
  *   · game library → 게임 라이브러리；guestbook → 방명록
  *
- * ⚠️ 机种名保持站内写法（NES / SFC / GBA / 게임보이 / 메가드라이브 / 아케이드）——
- *    和站内机种列表（`consoles` 表，目前只有中英两份，韩语界面回退英文名）对得上。
+ * ⚠️ 机种名用**韩语里通行的写法**（FC / SFC / 게임보이 / 메가드라이브 / 아케이드）。
+ *    FC 那台在韩国叫 패미컴，但缩写同样是 FC，2026-10-19 起正文一律写 FC（首句注明 패미컴）；
+ *    标签位上取的是 `lib/consoles.ts` 的 `consoleLabel(type, locale)`，和文案同源。
  */
 
 import type { MessageKey } from './i18n';
 
 export const ko: Record<MessageKey, string> = {
-  'meta.title': '{site} — 브라우저에서 즐기는 레트로 게임: NES·SFC·GBA·아케이드',
+  'meta.title': '{site} — 브라우저에서 즐기는 레트로 게임: FC·SFC·GBA·아케이드',
   'meta.description':
-    'NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 같은 레트로 게임을 브라우저에서 바로 즐길 수 있습니다. 온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 불러오세요.',
+    'FC(패미컴), SFC, 게임보이, GBA, 메가드라이브, 아케이드 같은 레트로 게임을 브라우저에서 바로 즐길 수 있습니다. 온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 불러오세요.',
   'meta.keywords':
-    '레트로 게임, 온라인 레트로 게임 라이브러리, NES 에뮬레이터, 패미컴 에뮬레이터, SFC 에뮬레이터, 슈퍼패미컴 에뮬레이터, GBA 에뮬레이터, 게임보이 어드밴스, 게임보이 에뮬레이터, 게임보이 컬러 에뮬레이터, NDS 에뮬레이터, 닌텐도 DS 에뮬레이터, 메가드라이브 에뮬레이터, 제네시스 에뮬레이터, 게임기어 에뮬레이터, 마스터 시스템 에뮬레이터, 32X 에뮬레이터, 원더스완 에뮬레이터, 네오지오 포켓 에뮬레이터, 플레이스테이션 에뮬레이터, PS1 에뮬레이터, PSX 에뮬레이터, 아케이드 에뮬레이터, 브라우저 게임, 브라우저 에뮬레이터, RetroArch WASM, {site}',
+    '레트로 게임, 온라인 레트로 게임 라이브러리, FC 에뮬레이터, NES 에뮬레이터, 패미컴 에뮬레이터, SFC 에뮬레이터, 슈퍼패미컴 에뮬레이터, GBA 에뮬레이터, 게임보이 어드밴스, 게임보이 에뮬레이터, 게임보이 컬러 에뮬레이터, NDS 에뮬레이터, 닌텐도 DS 에뮬레이터, 메가드라이브 에뮬레이터, 제네시스 에뮬레이터, 게임기어 에뮬레이터, 마스터 시스템 에뮬레이터, 32X 에뮬레이터, 원더스완 에뮬레이터, 네오지오 포켓 에뮬레이터, 플레이스테이션 에뮬레이터, PS1 에뮬레이터, PSX 에뮬레이터, 아케이드 에뮬레이터, 브라우저 게임, 브라우저 에뮬레이터, RetroArch WASM, {site}',
   'seo.room.title': '픽셀 방 — 브라우저에서 즐기는 레트로 게임',
   'seo.room.description':
-    '픽셀 방에 들어와 보세요. NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 게임이 브라운관에서 돌아갑니다. 온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 화면에 끌어다 놓으세요.',
+    '픽셀 방에 들어와 보세요. FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 게임이 브라운관에서 돌아갑니다. 온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 화면에 끌어다 놓으세요.',
   'seo.login.title': '로그인',
   'seo.login.description':
     '로그인하면 세이브, 플레이 기록, 즐겨찾기가 여러 기기에서 동기화됩니다.',
   'home.hero.title': '브라우저에서 즐기는 명작 레트로 게임',
   'home.hero.lead':
-    '{site}에서는 NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종의 게임을 온라인으로 즐길 수 있습니다. 2인 온라인 대전도 지원합니다.',
+    '{site}에서는 FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종의 게임을 온라인으로 즐길 수 있습니다. 2인 온라인 대전도 지원합니다.',
   'home.hero.play': '내 ROM 불러오기',
   'home.hero.browse': '모든 게임 보기',
   'home.join.title': '친구와 함께 즐기기',
@@ -55,7 +56,7 @@ export const ko: Record<MessageKey, string> = {
   'home.search.submit': '검색',
   'home.consoles.title': '기종으로 찾기',
   'home.consoles.lead':
-    'NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종 — 하나를 고르면 그 기종의 게임이 나옵니다.',
+    'FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종 — 하나를 고르면 그 기종의 게임이 나옵니다.',
   'home.consoles.count': '게임 {count}개',
   'home.consoles.all': '모든 기종',
   'home.latest.title': '최신 등록',
@@ -84,12 +85,12 @@ export const ko: Record<MessageKey, string> = {
     '지원합니다. USB나 블루투스 패드를 연결하면 브라우저를 통해 에뮬레이터가 그대로 인식합니다. 버튼 배치는 각 코어의 기본값을 따릅니다. 휴대폰에서는 화면 버튼을 사용합니다.',
   'seo.heading': '브라우저에서 레트로 게임 즐기기',
   'seo.intro':
-    '{site}는 온라인 레트로 게임방입니다. NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등의 게임이 브라우저에서 바로 돌아갑니다 — 실행은 여러분의 기기에서, 코어는 WebAssembly로 컴파일된 RetroArch입니다.',
+    '{site}는 온라인 레트로 게임방입니다. FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등의 게임이 브라우저에서 바로 돌아갑니다 — 실행은 여러분의 기기에서, 코어는 WebAssembly로 컴파일된 RetroArch입니다.',
   'seo.howTo':
     '온라인 라이브러리에서 고르거나, 가지고 있는 ROM 파일을 TV에 끌어다 놓으세요. 설치할 것은 없습니다.',
-  'seo.games.title': '모든 게임 — NES·SFC·GBA·아케이드를 온라인으로',
+  'seo.games.title': '모든 게임 — FC·SFC·GBA·아케이드를 온라인으로',
   'seo.games.description':
-    '온라인 라이브러리에 레트로 게임 {count}개가 있으며 모두 브라우저에서 즐길 수 있습니다: NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등. 제목을 열면 상세 정보를 보고 바로 즐길 수 있으며, ROM 파일을 내려받을 수도 있습니다.',
+    '온라인 라이브러리에 레트로 게임 {count}개가 있으며 모두 브라우저에서 즐길 수 있습니다: FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등. 제목을 열면 상세 정보를 보고 바로 즐길 수 있으며, ROM 파일을 내려받을 수도 있습니다.',
   'seo.games.search.title': '“{keyword}” 검색 결과',
   'seo.games.search.description':
     '온라인 라이브러리에서 “{keyword}”와 일치하는 게임은 {count}개입니다. 브라우저에서 즐기거나 ROM 파일을 내려받을 수 있습니다.',
@@ -102,13 +103,13 @@ export const ko: Record<MessageKey, string> = {
   'seo.gameDownload.title': '《{title}》 ROM 내려받기 ({console})',
   'seo.gameDownload.description':
     '《{title}》({console})의 ROM 파일을 클릭 한 번으로 내려받으세요. 가입은 필요 없습니다. 브라우저에서 바로 즐길 수도 있습니다.',
-  'seo.developers.title': '게임 개발사 — 그들의 NES·SFC·GBA·아케이드 게임 즐기기',
+  'seo.developers.title': '게임 개발사 — 그들의 FC·SFC·GBA·아케이드 게임 즐기기',
   'seo.developers.description':
     '온라인 라이브러리 게임을 만든 {count}곳의 개발사. 하나를 열면 그 회사의 모든 작품이 나옵니다.',
   'seo.developer.title': '{name} — 이 개발사의 게임',
   'seo.developer.description':
     '온라인 라이브러리에 있는 {name}의 게임 전부({count}개). 브라우저에서 즐기거나 ROM 파일로 내려받을 수 있습니다.',
-  'seo.consoles.title': '기종으로 찾기 — NES·SFC·GBA·아케이드를 온라인으로',
+  'seo.consoles.title': '기종으로 찾기 — FC·SFC·GBA·아케이드를 온라인으로',
   'seo.consoles.description':
     '온라인 라이브러리의 모든 기종(총 {count}개 게임). 기종을 고르면 그 게임이 모두 나오고, 브라우저에서 바로 즐길 수 있습니다.',
   'seo.console.title': '{name} 게임 — 온라인으로 즐기기',
@@ -255,7 +256,7 @@ export const ko: Record<MessageKey, string> = {
 
   'seo.play.title': '플레이룸 — 게임을 불러와 온라인으로 즐기기',
   'seo.play.description':
-    '한 화면에서 게임을 시작합니다. 혼자 바로 즐기거나, 1대1 방을 열어 코드를 공유하세요. NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드를 지원합니다.',
+    '한 화면에서 게임을 시작합니다. 혼자 바로 즐기거나, 1대1 방을 열어 코드를 공유하세요. FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드를 지원합니다.',
   'play.modeSolo': '혼자',
   'play.start': '시작',
   'play.confirmStart': '확인하고 시작',
@@ -564,7 +565,7 @@ export const ko: Record<MessageKey, string> = {
 
   'gamesPage.heading': '모든 게임',
   'gamesPage.intro':
-    '온라인 라이브러리에 게임 {count}개가 있습니다 — NES, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등. 커버를 클릭하면 상세 정보를 보고 바로 즐길 수도 있습니다.',
+    '온라인 라이브러리에 게임 {count}개가 있습니다 — FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등. 커버를 클릭하면 상세 정보를 보고 바로 즐길 수도 있습니다.',
   'gamesPage.empty': '라이브러리가 아직 비어 있습니다.',
   'gamesPage.introConsole':
     '라이브러리에 {console} 게임 {count}개가 있습니다. 커버를 클릭하면 상세 정보를 보고 바로 즐길 수도 있습니다.',

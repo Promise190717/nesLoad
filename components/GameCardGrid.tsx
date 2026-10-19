@@ -3,7 +3,7 @@ import { cardDelayMs } from '@/lib/card-stagger';
 import { localePath, type Locale } from '@/lib/i18n';
 import { gameLanguageLabel } from '@/lib/rom-lang';
 import { localizeGame, type Game } from '@/lib/server/games';
-import { CONSOLE_LABEL } from './CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 
 /**
  * 游戏卡片的网格 —— `/games` 列表页和开发商页（`/developers/<id>` 里那段
@@ -61,7 +61,7 @@ export default function GameCardGrid({
         const meta = [
           game.year,
           showDeveloper ? text.developer : null,
-          CONSOLE_LABEL[game.consoleType],
+          consoleLabel(game.consoleType, locale),
         ]
           .filter(Boolean)
           .join(' · ');

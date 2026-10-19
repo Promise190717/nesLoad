@@ -23,7 +23,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ⚠️ **卡片是从代码里画出来的，不是从表里读出来的**：机种清单住在
  *    `components/CartridgeSprite.tsx` 的 `CONSOLE_TYPES`（加机种是改代码的事），
  *    `consoles` 表只提供**资料**（名字 / 图片 / 简介）。某个机种还没在后台填过资料时，
- *    卡片退回默认名字（`CONSOLE_LABEL`，NES / SFC / GBA / ARC）照常渲染 ——
+ *    卡片退回默认名字（`consoleLabel`，中文站 FC / 英文站 NES）照常渲染 ——
  *    绝不因为资料没填就让一个机种从这页上消失（首页的卡片也指着它呢）。
  *
  * 数据两份都走 24 小时缓存：`listConsolesCached`（资料）+ `countGamesByConsoleCached`

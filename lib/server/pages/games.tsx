@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
-import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/components/CartridgeSprite';
+import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 import GamesShell from '@/components/GamesShell';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesSearchForm from '@/components/GamesSearchForm';
@@ -274,7 +275,7 @@ export async function generateMetadata({
   const title = keyword
     ? translate(locale, 'seo.games.search.title', { keyword })
     : consoleType
-      ? translate(locale, 'seo.games.console.title', { console: CONSOLE_LABEL[consoleType] })
+      ? translate(locale, 'seo.games.console.title', { console: consoleLabel(consoleType, locale) })
       : translate(locale, 'seo.games.title');
   const description = keyword
     ? translate(locale, 'seo.games.search.description', {
@@ -283,7 +284,7 @@ export async function generateMetadata({
       })
     : consoleType
       ? translate(locale, 'seo.games.console.description', {
-          console: CONSOLE_LABEL[consoleType],
+          console: consoleLabel(consoleType, locale),
           count: total
         })
       : translate(locale, 'seo.games.description', { count: total });
@@ -351,7 +352,7 @@ export default async function GamesPage({
     ? t('gamesPage.searchResults', { keyword, count: data.total })
     : consoleType
       ? t('gamesPage.introConsole', {
-          console: CONSOLE_LABEL[consoleType],
+          console: consoleLabel(consoleType, locale),
           count: data.total
         })
       : t('gamesPage.intro', { count: data.total });
@@ -410,7 +411,7 @@ export default async function GamesPage({
                 active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
               }`}
             >
-              {type ? CONSOLE_LABEL[type] : t('gamesPage.filterAll')}
+              {type ? consoleLabel(type, locale) : t('gamesPage.filterAll')}
             </Link>
           );
         })}
@@ -426,7 +427,7 @@ export default async function GamesPage({
           {keyword
             ? t('gamesPage.searchEmpty', { keyword })
             : consoleType
-              ? t('gamesPage.consoleEmpty', { console: CONSOLE_LABEL[consoleType] })
+              ? t('gamesPage.consoleEmpty', { console: consoleLabel(consoleType, locale) })
               : t('gamesPage.empty')}
         </p>
       ) : (

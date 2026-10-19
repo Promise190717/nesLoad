@@ -533,7 +533,15 @@ function RemoteScreen({ stream, volume }: { stream: MediaStream; volume: number 
     });
     return () => {
       // 换流 / 卸载时断开，否则旧的 MediaStream 会被 video 一直攥着
-      if (video.srcObject === stream) video.srcObject = null;
+      if (video.srcObject === stream) {
+        /*
+         * 先 `pause()` 再摘 `srcObject`：摘掉引用之后浏览器要等下一次 GC 才回收
+         * 解码器，中途进度条/缓冲还在跑（后台放一局 60fps 的 H.264 不是零成本）。
+         * pause 是同步生效的，摘得干净一点。
+         */
+        video.pause();
+        video.srcObject = null;
+      }
     };
   }, [stream]);
 

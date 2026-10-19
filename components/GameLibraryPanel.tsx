@@ -7,7 +7,8 @@ import { localizeTexts, type GameTexts, type LocalizedGameText } from '@/lib/gam
 import { formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { gameLanguageLabel } from '@/lib/rom-lang';
 import type { Cartridge } from '@/lib/library';
-import { CONSOLE_LABEL, CONSOLE_TYPES } from './CartridgeSprite';
+import { CONSOLE_TYPES } from './CartridgeSprite';
+import { consoleLabel } from '@/lib/consoles';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -95,7 +96,7 @@ const TABS: { value: Tab; label: MessageKey }[] = [
 
 /**
  * 在线库列表的机种筛选。`'all'` 单独列一档而不是用 null —— 渲染时不用再绕一层判断。
- * 标签：`'all'` 走 i18n，其余用 `CONSOLE_LABEL`（NES / SFC / GBA / ARC，丝印，不进文案表）。
+ * 标签：`'all'` 走 i18n，其余用 `consoleLabel()`（中文站 FC、英文站 NES，其余同丝印词）。
  *
  * 2026-10-14 起**直接从登记表派生**（原本手抄一份四个）—— 那一份在加机种时不会报错，
  * 漏了的结果是「新机种的游戏在这个弹窗里筛不出来」。十来个丝印词在窄弹窗里会折行，
@@ -654,7 +655,7 @@ export default function GameLibraryPanel({
                       : 'bg-ink-700 text-ink-300 hover:bg-ink-600 hover:text-ink-100'
                   }`}
                 >
-                  {value === 'all' ? t('games.filterAll') : CONSOLE_LABEL[value]}
+                  {value === 'all' ? t('games.filterAll') : consoleLabel(value, locale)}
                 </button>
               ))}
             </div>
@@ -786,7 +787,7 @@ export default function GameLibraryPanel({
                             */}
                             <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
                               <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
-                                {CONSOLE_LABEL[game.consoleType]}
+                                {consoleLabel(game.consoleType, locale)}
                               </span>
                               {/*
                                 语言角标。底色是**实心** `bg-accent` + `text-ink-950`
@@ -943,7 +944,7 @@ export default function GameLibraryPanel({
                             />
                             <div className="absolute right-0 top-0 flex flex-col items-end gap-[2px]">
                               <span className="bg-ink-950/85 px-1 py-0.5 font-pixel text-[12px] text-accent">
-                                {CONSOLE_LABEL[game.consoleType]}
+                                {consoleLabel(game.consoleType, locale)}
                               </span>
                               {/*
                                 语言角标。底色是**实心** `bg-accent` + `text-ink-950`
@@ -1039,9 +1040,9 @@ export default function GameLibraryPanel({
                         />
                       </span>
                     )}
-                    {/* 机种标签全是 ASCII（NES / SFC / ARC），走 font-pixel 不掉字形 */}
+                    {/* 机种标签全是 ASCII（FC / NES / SFC / ARC），走 font-pixel 不掉字形 */}
                     <span className="shrink-0 font-pixel text-[12px] text-ink-500">
-                      {CONSOLE_LABEL[cartridge.console]}
+                      {consoleLabel(cartridge.console, locale)}
                     </span>
                     {/* 游戏标题可能很长（含中文），系统字体 + truncate */}
                     <span
