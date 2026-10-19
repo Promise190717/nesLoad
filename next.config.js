@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  experimental: { globalNotFound: true },
 
   // 说明：这里无需为 Nostalgist 配置 images.remotePatterns。
   // next.config 的 images 字段只作用于 next/image 组件，而 Nostalgist 是自行

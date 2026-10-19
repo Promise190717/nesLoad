@@ -16,7 +16,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * ⚠️ 和 app/robots.ts 同一个理由：不写这行，构建期会被预渲染成静态文本，
  * 域名落到兜底值，线上会吐出一份写着 http://localhost:3000 的 ai.txt。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = 86400;
 
 export async function GET() {
   const origin = await resolveSiteOrigin();

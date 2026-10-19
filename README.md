@@ -16,6 +16,8 @@
 
 ## 开始
 
+部署到 Cloudflare Workers 的构建命令、R2 页面缓存绑定和免费版限制，见 [部署说明](docs/cloudflare-deployment.md)。
+
 ```bash
 pnpm install
 pnpm dev

@@ -3,6 +3,9 @@ node_modules/
 
 # Next.js
 .next/
+.open-next/
+.wrangler/
+.dev.vars*
 out/
 next-env.d.ts
 

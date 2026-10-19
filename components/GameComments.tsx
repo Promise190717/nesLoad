@@ -13,19 +13,13 @@ import { useI18n } from './I18nProvider';
  *     写完就翻走了；这里新评论会**插到列表最前面**，框在最上面才看得见自己刚发的那条。
  *   · 也正因为这个方向，评论列表是「新的在前」（翻页游标也按这个序走）。
  *
- * **发评论必须先登录**（用户明确要求，也是这一块唯一有门槛的地方）。判据由**服务端**
- * 传进来（`signedIn`）—— 详情页会读一次 cookie 的签名（`verifyUserSession`，**不查库**，
- * 和登录页同一个取舍），所以首屏就是对的：已登录的人看到输入框，未登录的人看到
- * 「去登录」，**没有「先画输入框再啪地换成提示」那一跳**。
- * ⚠️ 代价是**在别的标签页登录之后，这一页不会自己变** —— 要刷新。可以接受
- * （真正的闸在 `POST /api/games/<id>/comments` 的 `assertUser` 上，不在这一层）。
+ * 登录态随私有评论 API 返回，不再由详情页读取 Cookie，公共 HTML 可以安全缓存。
+ * 真正的写入鉴权仍由 POST 接口的 assertUser 执行。
  *
  * 未登录那颗链接把 `?next=` 带上（`/games/<id>`，**不带语言前缀**，
  * 拼前缀是登录页的事，见 `components/LoginPanel.tsx`），登录完直接回这一页。
  *
- * ⚠️ **不做列表缓存**（留言本那份模块级缓存这里没有）：评论列表每次都要最新的一眼，
- *    而这一页每次访问本来就只发一次 GET —— 和详情页那个 `countGameFavorites`
- *    同一口径（「详情页每次渲染就查一遍，量小、值得」，见 lib/server/user-data.ts）。
+ * 评论列表每次从私有 API 获取最新结果。
  *    只留一层 **in-flight 去重**：StrictMode 会把 effect 跑两遍，没有它就白发一次请求。
  *
  * 删评论是**两步**（先「删除」再「确认」）：这是一条不可撤销的公开内容，
@@ -76,6 +70,7 @@ interface RatingSummary {
 }
 
 interface CommentPage {
+  signedIn: boolean;
   items: CommentItem[];
   nextCursor: string | null;
   summary: RatingSummary;
@@ -147,17 +142,16 @@ function loadPage(gameId: string, cursor: string | null): Promise<CommentPage> {
 
 export default function GameComments({
   gameId,
-  signedIn,
   signInHref,
 }: {
   gameId: string;
   /** 服务端读 cookie 判出来的登录态（只验签名，不查库） */
-  signedIn: boolean;
   /** 未登录时那颗「去登录」的落点，**已经带好 `?next=`**（由详情页拼） */
   signInHref: string;
 }) {
   const { t, locale } = useI18n();
 
+  const [signedIn, setSignedIn] = useState(false);
   const [items, setItems] = useState<CommentItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   /**
@@ -193,6 +187,7 @@ export default function GameComments({
     loadPage(gameId, null)
       .then((page) => {
         if (cancelled) return;
+        setSignedIn(page.signedIn);
         setItems(page.items);
         setNextCursor(page.nextCursor);
         setSummary(page.summary);

@@ -46,7 +46,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 配了 SITE_URL 之后其实可以改回静态（域名成了编译期常量）；但没必要：
  * 留着它，换域名才不用重新构建。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = 86400;
 
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const origin = await resolveSiteOrigin();

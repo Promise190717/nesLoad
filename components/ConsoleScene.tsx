@@ -22,6 +22,7 @@ import {
   type BiosType,
 } from '@/lib/bios';
 import { chiptuneUrl } from '@/lib/chiptune';
+import { saveTheme } from '@/lib/theme';
 import { readMobileFlag } from '@/lib/device';
 import {
   EmulatorController,
@@ -117,7 +118,6 @@ import {
   WarningIcon,
 } from './icons';
 
-const THEME_KEY = 'nesload:theme';
 
 /**
  * 主题切换时挂 `theme-fading` 的时长，**必须 ≥ globals.css 里那几条 transition 的时长**。
@@ -2450,7 +2450,7 @@ export default function ConsoleScene({
 
       /** 真正落主题。两条路径都走它 —— View Transition 那条要把它塞进回调里。 */
       const commit = () => {
-        root.dataset.theme = next;
+        saveTheme(next);
         setTheme(next);
         applyLamp(next === 'dark');
       };
@@ -2490,11 +2490,6 @@ export default function ConsoleScene({
         }, THEME_FADE_MS);
       }
 
-      try {
-        localStorage.setItem(THEME_KEY, next);
-      } catch {
-        // 隐私模式下写不进去，忽略即可
-      }
     },
     [applyLamp]
   );

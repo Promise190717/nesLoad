@@ -14,9 +14,9 @@ import {
   type Locale,
   type MessageKey,
 } from '@/lib/i18n';
-import { readLocale } from '@/lib/server/locale';
+import { Suspense } from 'react';
 import { resolveSiteOrigin } from '@/lib/site';
-import './globals.css';
+import '@/app/globals.css';
 
 /**
  * 全站 metadata（SEO）。
@@ -29,10 +29,7 @@ import './globals.css';
  *   两份内容同源却互不声明，会被当成重复内容（这跟 2026-10-13 之前「共用一个 URL、
  *   写了反而自我重复」的判断正好相反，别再照老注释改回去）。
  *
- *   ⚠️ 这一份是**首页**的 —— 根布局在 `[locale]` 段外面，拿不到路由参数，
- *      不知道当前是哪个页面。子页面各自在自己的 `generateMetadata` 里写。
- *      Next 的 `alternates` 是**整体覆盖**不是深合并，漏写一页，那页的 canonical
- *      就会顶着首页的地址。收口在 `lib/i18n.ts` 的 `alternatesFor()`。
+ *   本函数接收路径语言；子页面覆盖各自 canonical 与 hreflang。
  * - **`title.default` + `template` 都要**。default 是首页自己的标题（首页不该吃模板），
  *   template 给将来的子页面用（`/admin` 那几页会带上站名后缀）。
  * - **`robots` 显式写全**，包括 googleBot 的三个 max-*：不写的话图片预览会被压成缩略图，
@@ -40,11 +37,9 @@ import './globals.css';
  *   （那是爬虫文件层的事），另外后台自己还有一道 noindex，见 app/admin/layout.tsx ——
  *   robots.txt 只挡守规矩的爬虫，页面级的 noindex 才是真正的兜底。
  * - **keywords 是给非 Google 引擎的**，理由见 lib/i18n.ts 里那段注释。
- * - **OG 图不在这里写 `images`**：由 `app/opengraph-image.tsx` 用文件约定提供，
- *   Next 会自动补上 `og:image` 的绝对地址、尺寸与 alt。手写一份只会和它打架。
+ * - 独立根布局显式引用共享的 OG / Twitter 图端点。
  */
-export async function generateMetadata(): Promise<Metadata> {
-  const locale = await readLocale();
+export async function siteMetadata(locale: Locale): Promise<Metadata> {
   const site = SITE_NAME[locale];
   /* 站名走 {site} 占位而不是在文案里硬写 —— 改名只要动 lib/i18n.ts 的 SITE_NAME */
   const t = (key: MessageKey) => translate(locale, key, { site });
@@ -53,7 +48,7 @@ export async function generateMetadata(): Promise<Metadata> {
     /*
      * metadataBase 是所有**相对**地址（canonical、og:image…）的解析基准，
      * 少了它 Next 会在构建时警告、生产环境还可能吐出发往 localhost 的绝对地址。
-     * 取源规则见 lib/site.ts（环境变量 → 请求头 → 兜底）。
+     * 取源规则见 lib/site.ts（构建环境变量 → 正式域名）。
      */
     metadataBase: new URL(await resolveSiteOrigin()),
     title: {
@@ -95,6 +90,7 @@ export async function generateMetadata(): Promise<Metadata> {
       statusBarStyle: 'black',
     },
     openGraph: {
+      images: [{ url: '/opengraph-image', width: 1200, height: 630, alt: SITE_NAME.en }],
       type: 'website',
       /*
        * `url` 也按语言分路径 —— 中文首页的 og:url 该是 `/zh`，跟 canonical 一致。
@@ -122,6 +118,7 @@ export async function generateMetadata(): Promise<Metadata> {
      * 代价只是一个转发文件。
      */
     twitter: {
+      images: ['/twitter-image'],
       card: 'summary_large_image',
       title: t('meta.title'),
       description: t('meta.description'),
@@ -257,8 +254,7 @@ function buildJsonLd(origin: string, locale: Locale, name: string, description: 
   };
 }
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const locale = await readLocale();
+export default async function SiteDocument({ children, locale }: { children: React.ReactNode; locale: Locale }) {
   const origin = await resolveSiteOrigin();
   const jsonLd = buildJsonLd(
     origin,
@@ -269,6 +265,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang={htmlLang(locale)} data-locale={locale} suppressHydrationWarning>
+      {/* This shared component supplies the actual App Router root document. */}
+      {/* eslint-disable-next-line @next/next/no-head-element */}
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -348,7 +346,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             同样需要：从搜索点进来的人也可能是个中文用户。
             它自己不渲染任何东西，除非「没设置过语言 且 浏览器语言 ≠ 页面语言」。
           */}
-          <LocalePrompt />
+          <Suspense fallback={null}><LocalePrompt /></Suspense>
         </I18nProvider>
         {/*
           PWA 的 Service Worker 注册（清单在 app/manifest.ts，策略在 public/sw.js）。

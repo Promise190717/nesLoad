@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { splitLocalePath } from '@/lib/i18n';
 import { fetchCurrentUser, type AuthUser } from './AuthForm';
@@ -39,7 +39,7 @@ import LocaleSwitcher from './LocaleSwitcher';
  * 已登录时这一格变成**用户名**（点进 `/account`），和房间那颗钮同一套写法：
  * `max-w-[9rem] truncate` 截断，全名留在 `title` 里。
  */
-export default function TopBar() {
+function TopBarContent() {
   const { t, href: localeHref } = useI18n();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -150,3 +150,5 @@ export default function TopBar() {
     </nav>
   );
 }
+
+export default function TopBar() { return <Suspense fallback={null}><TopBarContent /></Suspense>; }

@@ -97,11 +97,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     ]);
 
     return NextResponse.json({
+      signedIn: viewerId !== null,
       items: page.items.map((comment) => publicItem(comment, viewerId)),
       nextCursor: page.nextCursor,
       /* 均分 / 评分数。跟着列表回来，首屏就不用为这一个数多发一次请求（翻页时它照给一遍，值不变）。 */
       summary,
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     console.error('[comments] 列表读取失败', error);
     return fail('list-failed', (error as Error).message, 500);

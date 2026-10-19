@@ -18,7 +18,8 @@
 
 import { getGameRowCached, type GameRow } from '@/lib/server/games';
 import { publicUrl } from '@/lib/server/r2';
-import { sourceFileUrl } from '@/lib/server/upstream';
+import { sourceFileUrl, UPSTREAM_SITE, UPSTREAM_USER_AGENT } from '@/lib/server/upstream';
+import { fetchRomUpstream, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,7 +58,7 @@ const UPSTREAM_TIMEOUT_MS = 25_000;
  * ⚠️ **回源上游这条路必须过这道闸**：上游前置了 Cloudflare，地址失效或触发风控时
  * 回的是一张 **HTML 挑战页（HTTP 200）**。不挡的话，前端会把这张网页当成 ROM 存下来
  * —— 体积不大、也不报错，一直到插卡带跑不起来才发现，那时候已经查不出是哪一步坏的。
- * 判据与 /api/admin/fetch-rom 完全一致（那边也有同一段，改一处记得改两处）。
+ * 后台的 /api/admin/fetch-rom 也保留相同的内容类型检查。
  *
  * ℹ️ 本站 R2 那条路不会命中它（上传时写死了 `application/octet-stream`），
  *    所以这段对老数据无害。
@@ -70,8 +71,12 @@ function contentDisposition(name: string): string {
   return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
+  const range = request.headers.get('range');
+  if (range && !isSingleByteRange(range)) {
+    return new Response('Only a single valid byte range is supported', { status: 416, headers: { 'Cache-Control': 'no-store' } });
+  }
 
   let row: GameRow | null;
   try {
@@ -90,7 +95,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
    * 回源目标：**有来源地址就优先走上游**，否则读本站 R2（见文件头那段）。
    * 两者都没有（不存 ROM 的行 `rom_url` 是空串、来源地址又认不出）→ 当作没有。
    */
-  const target = sourceFileUrl(row.source_url) ?? (row.rom_url ? publicUrl(row.rom_url) : null);
+  const source = sourceFileUrl(row.source_url);
+  const target = source ?? (row.rom_url ? publicUrl(row.rom_url) : null);
   if (!target) {
     console.error('[games] 这一行既没有可用的来源地址，也没有 R2 对象', id);
     return new Response('not found', { status: 404 });
@@ -98,12 +104,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
-      cache: 'no-store',
-      // 上游前置了 Cloudflare，给个明确 UA 比默认的 node UA 稳
-      headers: { accept: '*/*', 'user-agent': 'nesLoad/1.0' },
-      // 见 UPSTREAM_TIMEOUT_MS —— 没有它，上游一慢就把函数挂死到 Cloudflare 524
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    upstream = await fetchRomUpstream(target, request, {
+      timeoutMs: UPSTREAM_TIMEOUT_MS,
+      compatibility: source ? { userAgent: UPSTREAM_USER_AGENT, referer: `${UPSTREAM_SITE}/` } : undefined,
     });
   } catch (error) {
     /*
@@ -119,26 +122,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       { status: 504 }
     );
   }
+  if (range && upstream.status === 416) {
+    const contentRange = upstream.headers.get('content-range');
+    await upstream.body?.cancel();
+    return new Response(null, { status: 416, headers: {
+      'Cache-Control': 'no-store', ...(contentRange ? { 'Content-Range': contentRange } : {}),
+    } });
+  }
   if (!upstream.ok || !upstream.body) {
-    /*
-     * ⚠️ **这条日志是 2026-10-16 补的**：线上报 502 时，这一分支原本只回一句
-     *    'upstream error' 就完了，服务端日志干干净净 —— 分不出是「网络不通」
-     *    （上面那个 catch）还是「上游把请求拒了」（这里）。现在把上游的状态码和
-     *    几个判据一起打出来，一眼能看出是不是被 Cloudflare 限流。
-     *
-     * 📌 实测（2026-10-16）结论，别照着「加 Referer 就好了」的直觉改回去：
-     *    · 上游**不校验 Referer** —— 本机用 `nesLoad/1.0`、不带任何 Referer 直取，
-     *      两个 host 都回 `206`（`site:` 主站与 `files:` 子域各试一条）。
-     *    · 线上拿到的是 **Cloudflare 的限流页**（`content-type: text/html` +
-     *      `retry-after: 60` + `cf-ray`，即 Error 1015 那类速率限制）。
-     *    ⇒ 所以「模拟源站自己发起的请求」解决不了这个：它不是防盗链，是**限流**。
-     *      根因是**所有访客的开局请求都从本站这一个出口 IP 回源** —— 本地只有你一个人
-     *      访问，频率低，所以本地永远复现不出来。
-     *      真正的解法是让回源**只发生一次**（取回后落到自己的 R2），见文件头。
-     */
+    // Log the upstream response without assuming every 403 has the same cause.
     const upstreamType = upstream.headers.get('content-type') ?? '-';
     const retryAfter = upstream.headers.get('retry-after');
     const cfRay = upstream.headers.get('cf-ray') ?? '-';
+    const challenge = upstream.headers.get('cf-mitigated') === 'challenge';
     console.error(
       '[games] ROM 回源被上游拒绝',
       id,
@@ -146,6 +142,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       `type=${upstreamType}`,
       `retry-after=${retryAfter ?? '-'}`,
       `cf-ray=${cfRay}`,
+      `challenge=${challenge}`,
       target
     );
     /*
@@ -159,9 +156,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           retryAfter ? `, retry-after: ${retryAfter}s` : ''
         }`
       : `HTTP ${upstream.status}（响应没有 body）`;
-    return new Response(`upstream error: ${detail}`, {
+    await upstream.body?.cancel();
+    return new Response(`upstream error: ${detail}${challenge ? '（上游要求浏览器验证）' : ''}`, {
       status: 502,
-      headers: retryAfter ? { 'Retry-After': retryAfter } : undefined,
+      headers: { 'Cache-Control': 'no-store', ...(retryAfter ? { 'Retry-After': retryAfter } : {}) },
     });
   }
 
@@ -171,6 +169,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
    */
   const contentType = (upstream.headers.get('content-type') ?? '').split(';')[0].trim();
   if (HTML_LIKE.test(contentType)) {
+    await upstream.body?.cancel();
     /*
      * 上游回的是网页 —— 大概率是 Cloudflare 的挑战 / 限流页（HTTP 200 + text/html）。
      * 正文里带上它，用户直接在浏览器打开这个接口就能看出是哪一类。
@@ -188,13 +187,31 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     );
   }
 
+  // A compatibility bytes=0- request may return 206. It can become a normal
+  // download only if the range spans the entire file; never pass a truncated ROM.
+  if (upstream.status === 206 && (!parseContentRange(upstream.headers.get('content-range')) ||
+      (!range && !isCompleteByteRange(upstream.headers.get('content-range'))))) {
+    await upstream.body?.cancel();
+    return new Response('upstream error: 上游只返回了部分文件，已停止下载以避免损坏 ROM', {
+      status: 502, headers: { 'Cache-Control': 'no-store' },
+    });
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': contentDisposition(row.rom_name),
-    'Cache-Control': 'public, max-age=3600',
+    'Cache-Control': range ? 'private, no-store' : 'public, max-age=3600, s-maxage=2592000',
   };
+  for (const name of ['accept-ranges', 'etag', 'last-modified']) {
+    const value = upstream.headers.get(name);
+    if (value) headers[name] = value;
+  }
+  if (range && upstream.status === 206) {
+    const value = upstream.headers.get('content-range');
+    if (value) headers['Content-Range'] = value;
+  }
   const length = upstream.headers.get('content-length');
   if (length) headers['Content-Length'] = length;
 
-  return new Response(upstream.body, { headers });
+  return new Response(upstream.body, { status: range && upstream.status === 206 ? 206 : 200, headers });
 }
