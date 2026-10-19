@@ -495,8 +495,16 @@ export default async function GameDetailPage({
             ⚠️ 位置在**资料表之后**（2026-10-19 用户要求「放在类型 / 年份 / 开发商 / 系列 /
                语言这个下面」，第一版放在正文与资料表之间是错的）。用 `border-t` 与资料表
                隔开，和评论模块同一套「小节」口径（那条线属于这一块，不属于资料表）。
-            ⚠️ 键位**横排、不逐行**（用户明确「不要一个按键占一行」）：`flex-wrap` 让
-               「kbd + 动作」一项项挨着走，窄屏自动折行，不用固定列数。
+            ⚠️ 键位是**三列等宽网格**（2026-10-19 用户要求「一行最多三个、等宽、文字超出
+               就换行、不增加宽度」）。第一版是 `flex-wrap` 横排，动作文字长短不一时
+               每一行的列宽都在变，看着很乱。
+               · `grid-cols-3` = `repeat(3, minmax(0, 1fr))` —— **等宽**且不会被内容撑开；
+               · 每项 `min-w-0` + 动作 `break-words` —— 长文案在**格内折行**，不顶宽列；
+               · 窄屏降到 2 列 / 1 列（`sm` / 默认），手机上三列会把动作挤成一列字。
+            ⚠️ 格内是**上下两行**（`kbd` 在上、动作在下），不是左右并排（2026-10-19 第二版）：
+               左右并排时动作一折行，第二行会从**文字起点**开始缩进，跟上一行的按键错位，
+               整片看着像散落的方块；上下排之后每格都从**左边缘**起，三列自然对齐。
+               行距用 `gap-y-4`（比横排时的 `gap-y-2` 松），因为每格本身已经占两行。
             ⚠️ 键位用 `<kbd>`（和 PlayScene 那排按键提示同一套样式），
                是为了让「方向键」「A」这种**要按的东西**一眼和动作文字区分开。
           */}
@@ -507,14 +515,16 @@ export default async function GameDetailPage({
                 <p className="mt-2 text-[13px] leading-7 text-ink-300">{text.controls.description}</p>
               ) : null}
               {text.controls.keys.length > 0 ? (
-                <ul className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                <ul className="mt-4 grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                   {text.controls.keys.map((item, index) => (
                     /* 上游偶尔给出同名按键（不同动作），所以 key 里带上序号 */
-                    <li key={`${item.label}-${index}`} className="flex items-baseline gap-1.5">
-                      <kbd className="inline-block border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
+                    <li key={`${item.label}-${index}`} className="min-w-0">
+                      <kbd className="inline-block max-w-full border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
                         {item.label}
                       </kbd>
-                      <span className="text-[12px] leading-6 text-ink-300">{item.action}</span>
+                      <p className="mt-1.5 break-words text-[12px] leading-5 text-ink-300">
+                        {item.action}
+                      </p>
                     </li>
                   ))}
                 </ul>

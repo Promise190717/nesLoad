@@ -141,7 +141,13 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
   /* 中文站不回退（原文就是这一份）；其他语言回退到中文原文 */
   const fallback = locale === 'zh' ? null : (texts.zh ?? null);
 
-  const pick = (key: keyof GameText): string | null => wanted?.[key] || fallback?.[key] || null;
+  /*
+   * 只有**字符串**那几个字段走逐字段回退。
+   * ⚠️ 不能写成 `keyof GameText` —— 那会把 `controls`（对象）也算进来，
+   *    返回类型 `string | null` 当场报 TS2322（2026-10-19 加 controls 时踩过）。
+   */
+  const pick = (key: 'title' | 'series' | 'developer' | 'description'): string | null =>
+    wanted?.[key] || fallback?.[key] || null;
 
   return {
     title: pick('title') ?? anyTitle(texts) ?? '',
