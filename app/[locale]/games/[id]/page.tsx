@@ -481,6 +481,46 @@ export default async function GameDetailPage({
               </div>
             ))}
           </dl>
+
+          {/*
+            操作说明（2026-10-19 加，用户要求「把源站的游戏控制说明也放到详情页面」）。
+
+            数据来自**上游详情页的 `controls` 字段**（见 lib/server/upstream-catalog.ts 的
+            `controlsOf`），四个语言各一份真翻译 —— 所以这里读的是 `text.controls`
+            （已按界面语言挑好），不是 `game` 上某个扁平字段。
+
+            ⚠️ **没有就整块不画**：数据库那条路（`CATALOG_SOURCE=d1`）的 `game_texts`
+               没有这一列，`controls` 恒为 `null` —— 这块天然是源站专属内容，
+               不要给它编一段默认文案。
+            ⚠️ 位置在**资料表之后**（2026-10-19 用户要求「放在类型 / 年份 / 开发商 / 系列 /
+               语言这个下面」，第一版放在正文与资料表之间是错的）。用 `border-t` 与资料表
+               隔开，和评论模块同一套「小节」口径（那条线属于这一块，不属于资料表）。
+            ⚠️ 键位**横排、不逐行**（用户明确「不要一个按键占一行」）：`flex-wrap` 让
+               「kbd + 动作」一项项挨着走，窄屏自动折行，不用固定列数。
+            ⚠️ 键位用 `<kbd>`（和 PlayScene 那排按键提示同一套样式），
+               是为了让「方向键」「A」这种**要按的东西**一眼和动作文字区分开。
+          */}
+          {text.controls ? (
+            <section className="mt-6 border-t border-ink-800 pt-5">
+              <h2 className="text-[13px] font-semibold text-ink-200">{t('gamesPage.controls')}</h2>
+              {text.controls.description ? (
+                <p className="mt-2 text-[13px] leading-7 text-ink-300">{text.controls.description}</p>
+              ) : null}
+              {text.controls.keys.length > 0 ? (
+                <ul className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                  {text.controls.keys.map((item, index) => (
+                    /* 上游偶尔给出同名按键（不同动作），所以 key 里带上序号 */
+                    <li key={`${item.label}-${index}`} className="flex items-baseline gap-1.5">
+                      <kbd className="inline-block border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
+                        {item.label}
+                      </kbd>
+                      <span className="text-[12px] leading-6 text-ink-300">{item.action}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       </div>
 

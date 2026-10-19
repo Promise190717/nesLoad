@@ -644,6 +644,7 @@ export const ko: Record<MessageKey, string> = {
   'gamesPage.field.developer': '개발사',
   'gamesPage.field.series': '시리즈',
   'gamesPage.field.language': '언어',
+  'gamesPage.controls': '조작 방법',
   'gamesPage.selectLanguage': '언어 선택',
 
   'notFound.title': '페이지를 찾을 수 없습니다',

@@ -1525,6 +1525,12 @@ const en = {
   'gamesPage.field.developer': 'Developer',
   'gamesPage.field.series': 'Series',
   'gamesPage.field.language': 'Language',
+  /*
+   * 详情页「操作说明」那块的标题（2026-10-19 加）。
+   * ⚠️ 只有**源站模式**的数据带这一段（`GameText.controls`）—— 数据库没有这一列，
+   *    所以 D1 模式下这块整块不渲染，这条文案也就用不到。
+   */
+  'gamesPage.controls': 'Controls',
   /* 详情页点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */
   'gamesPage.selectLanguage': 'Choose language',
   /*
@@ -2324,6 +2330,8 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.field.developer': '开发商',
   'gamesPage.field.series': '系列',
   'gamesPage.field.language': '语言',
+  /* 详情页「操作说明」那块，见英文那份的注释 */
+  'gamesPage.controls': '操作说明',
   'gamesPage.selectLanguage': '选择语言',
   'notFound.title': '这个页面不存在',
   'notFound.description': '这个地址在 {site} 上不存在。检查一下链接，或者回房间里看看。',

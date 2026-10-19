@@ -46,7 +46,7 @@
  */
 
 import type { ConsoleType } from '@/lib/emulator';
-import type { GameTexts } from '@/lib/game-text';
+import type { GameControls, GameTexts } from '@/lib/game-text';
 import { CONTENT_LOCALES, type ContentLocale } from '@/lib/game-text';
 import { consoleLabel } from '@/lib/consoles';
 import { GAME_LANGUAGES, romLangToFormValue } from '@/lib/rom-lang';
@@ -210,6 +210,12 @@ interface UpstreamGameRaw {
   developer?: { name?: string };
   series?: { name?: string };
   fileName?: Record<string, string> | string;
+  /**
+   * 操作说明（2026-10-19 加）。上游详情页与列表页都带，四个语言各一份**真翻译**：
+   *   `{"description":"使用方向键移动，A键跳跃…","keys":{"方向键":"移动","A":"跳跃"}}`
+   * 解析方式与 `description` 那类字段一样，是同一个 game 对象里的键。
+   */
+  controls?: { description?: string; keys?: Record<string, string> } | null;
 }
 
 /**
@@ -339,6 +345,34 @@ function yearOf(releaseDate: string | undefined): number | null {
 }
 
 /**
+ * 上游 `controls` → 站内的 `GameControls`（2026-10-19 加）。
+ *
+ * 上游给的是 `{description, keys:{按键:动作}}`，这里做三件事：
+ *   ① 把 `keys` 转成**数组**并保住顺序（`Object.entries` 对字符串键保序）；
+ *   ② 丢掉空的键 / 值（上游偶尔给 `""`，画出来会是一行空白）；
+ *   ③ 描述和键位都空 → 整个 `null`，详情页据此整块不渲染。
+ *
+ * ⚠️ 不做翻译 / 不拼默认文案：四个语言的上游页面本来就各有一份，直接取。
+ */
+function controlsOf(game: UpstreamGameRaw): GameControls | null {
+  const raw = game.controls;
+  if (!raw || typeof raw !== 'object') return null;
+
+  const description = typeof raw.description === 'string' ? raw.description.trim() || null : null;
+
+  const keys: { label: string; action: string }[] = [];
+  if (raw.keys && typeof raw.keys === 'object') {
+    for (const [label, action] of Object.entries(raw.keys)) {
+      const key = label.trim();
+      const value = typeof action === 'string' ? action.trim() : '';
+      if (key && value) keys.push({ label: key, action: value });
+    }
+  }
+
+  return description || keys.length > 0 ? { description, keys } : null;
+}
+
+/**
  * 一份（某个语言的）上游对象 → 半个站内文案。
  *
  * 卡片的「开发商 / 系列」是对象（`{name}`），拿名字；没有就留空（读取时回退中文）。
@@ -349,6 +383,7 @@ function textOf(game: UpstreamGameRaw): GameTexts[ContentLocale] {
     series: game.series?.name?.trim() || null,
     developer: game.developer?.name?.trim() || null,
     description: game.description?.trim() || null,
+    controls: controlsOf(game),
   };
 }
 
@@ -514,7 +549,12 @@ export const getUpstreamGame = cached(
     if (!primary) return null;
     return toUpstreamGame(primary, byLocale);
   },
-  ['upstream:game', 'v1'],
+  /*
+   * ⚠️ 键尾的 `v2` 是 2026-10-19 加「操作说明」（`GameText.controls`）时升的：
+   *    旧条目里没有这个字段，而这份缓存跨部署、TTL 24 小时 —— 不换键的话
+   *    详情页会有一整天看不到新加的那块内容。
+   */
+  ['upstream:game', 'v2'],
   { revalidate: 86400 }
 );
 

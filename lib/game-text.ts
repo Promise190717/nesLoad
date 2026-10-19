@@ -21,7 +21,7 @@
  *    「往 `CONTENT_LOCALES` 加一个值 + 插数据」，**不动任何表结构**。
  *    界面语言要跟着加时，改的是 lib/i18n.ts 的 `LOCALES`，两件事分开。
  *
- * ⚠️ `LocalizedGameText` 是**取完之后**的形状：四个字段都变成单个值，
+ * ⚠️ `LocalizedGameText` 是**取完之后**的形状：各个字段都变成单个值，
  *    可以直接往页面上印。`title` 是 `string`（不是 `string | null`）——
  *    它是这张卡片的身份，页面上任何地方都不该出现空标题（见下面 `anyTitle` 的兜底）。
  */
@@ -32,12 +32,35 @@ export const CONTENT_LOCALES = ['zh', 'en', 'ja', 'ko'] as const;
 /** 内容语言的短码。比界面语言 `Locale`（zh | en）宽。 */
 export type ContentLocale = (typeof CONTENT_LOCALES)[number];
 
+/**
+ * 一款游戏的**操作说明**（2026-10-19 加）。
+ *
+ * 只有**源站数据**里有（上游详情页的 `controls` 字段，四语言各一份真翻译）；
+ * 数据库那张 `game_texts` 表没有这一列，所以 D1 模式下永远是 `null`，
+ * 详情页据此整块不渲染 —— 见 `app/[locale]/games/[id]/page.tsx`。
+ *
+ * ⚠️ 上游给的是 `keys` 对象（`{"方向键":"移动","A":"跳跃"}`），这里转成**数组**：
+ *    JS 对象保序，转数组后顺序与上游页面一致；`Record` 直接往下传会让渲染端
+ *    自己 `Object.entries` 一遍，还容易被误当成「需要排序的字典」。
+ */
+export interface GameControls {
+  /** 一句话说明（上游已按语言翻译，可能为空）。 */
+  description: string | null;
+  /** 按键 → 动作。顺序 = 上游给的顺序。 */
+  keys: { label: string; action: string }[];
+}
+
 /** 一款游戏在**某个语言**下的文案。四个字段都可空 —— 空 = 没翻，逐字段回退。 */
 export interface GameText {
   title: string | null;
   series: string | null;
   developer: string | null;
   description: string | null;
+  /**
+   * 操作说明。**可选** —— 后台表单 / `game_texts` 表都没有这一栏，
+   * 只有源站那条路（`lib/server/upstream-catalog.ts`）会填。
+   */
+  controls?: GameControls | null;
 }
 
 /**
@@ -55,6 +78,8 @@ export interface LocalizedGameText {
   series: string | null;
   developer: string | null;
   description: string | null;
+  /** 操作说明（见 `GameControls`）。没有就是 `null` —— 详情页整块不画。 */
+  controls: GameControls | null;
 }
 
 /**
@@ -66,11 +91,19 @@ export const EMPTY_GAME_TEXT: GameText = {
   series: null,
   developer: null,
   description: null,
+  controls: null,
 };
 
 /** 一份文案里**有没有任何内容** —— 全空的行不建、不写（见 `GameTexts` 那段）。 */
 export function isBlankGameText(text: GameText): boolean {
-  return !text.title && !text.series && !text.developer && !text.description;
+  return (
+    !text.title &&
+    !text.series &&
+    !text.developer &&
+    !text.description &&
+    !text.controls?.description &&
+    !(text.controls?.keys.length ?? 0)
+  );
 }
 
 /**
@@ -115,5 +148,11 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
     series: pick('series'),
     developer: pick('developer'),
     description: pick('description'),
+    /*
+     * 控制说明**整份回退**（不逐字段）：它是「一段话 + 一张键位表」的组合，
+     * 拿英文的描述配中文的键位比整份退回中文更糟。上游四语言都翻过，
+     * 真缺的时候退回中文原文即可。
+     */
+    controls: wanted?.controls ?? fallback?.controls ?? null,
   };
 }
