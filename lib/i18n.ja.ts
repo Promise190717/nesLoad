@@ -193,9 +193,9 @@ export const ja: Record<MessageKey, string> = {
   'play.needZip':
     '形式  この ROM は {ext} 形式のアーカイブで、展開できませんでした — .zip か非圧縮の ROM で試してください',
   'legend.needDisc':
-    '形式  ディスクイメージは複数ファイル（.cue + .bin）です。当サイトは単一ファイルのみ対応 — .pbp か .iso のものを用意してください',
+    '形式  ディスクイメージは複数ファイル（.cue + .bin）です。当サイトは単一ファイルのみ対応 — .pbp / .iso / .chd のものを用意してください',
   'play.needDisc':
-    '形式  これは複数ファイルのディスクイメージ（.cue + .bin）です。当サイトは単一ファイルのみ対応 — .pbp か .iso で試してください',
+    '形式  これは複数ファイルのディスクイメージ（.cue + .bin）です。当サイトは単一ファイルのみ対応 — .pbp / .iso / .chd で試してください',
   'legend.needBios':
     'BIOS  これは Neo Geo のゲーム（KOF、メタルスラッグ…）のようです。neogeo.zip が必要です — そのファイルをページにドロップすると入ります。CPS1 / CPS2 のゲームには不要です。',
   'legend.gamepad':

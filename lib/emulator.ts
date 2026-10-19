@@ -391,6 +391,13 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
    *     改过名也认得出。**这是最该走的那条路**。
    *   · `.iso` / `.img` —— 裸盘镜像，也是单文件，靠 ISO9660 魔数认（见 `looksLikeIso9660`）。
    *     比 `.pbp` 大（没压缩），但来源更广。
+   *   · `.chd` —— MAME 的压缩光盘格式（**2026-10-19 加**，起因是《激走！Tomarunner》
+   *     这盘 `gekisou-tomarunner-ja.chd` 报「载入失败」）。**已确认这个核心吃得下**：
+   *     `pcsx_rearmed_libretro.wasm` 里有 `HAVE_CHD` 分支的格式串（`chd: %s` /
+   *     `chd_open: %d`），而且 libchdr 的四个 CHD v5 编解码 tag `cdlz` / `cdzl` /
+   *     `cdfl` / `cdzs` 全都在 —— 之前 REFERENCE 里「大概率没编进去」那条**判断错了**，
+   *     错在拿 `MComprHD` 这个字符串去数（`memcmp` 8 字节会被编译成一条 64 位比较，
+   *     字面量根本不会留在 rodata 里）。魔数见 `looksLikeChd`。
    *
    * ⚠️ **`.bin` 仍然不收**（这是从加机种之前就定下的规矩，见下面那段 ⚠️）——
    *    PS1 的裸轨道镜像也叫 `.bin`，但「裸的单个 `.bin`」既分不出是哪台机器、
@@ -404,6 +411,7 @@ const EXTENSION_MAP: Record<string, ConsoleType> = {
   pbp: 'ps1',
   iso: 'ps1',
   img: 'ps1',
+  chd: 'ps1',
   zip: 'arcade',
 };
 
@@ -601,6 +609,22 @@ function looksLikePbp(bytes: Uint8Array): boolean {
 const PSX_EXE_SIGNATURE = 'PS-X EXE';
 
 /**
+ * CHD（MAME 的压缩光盘镜像）魔数：`MComprHD`，8 字节，v1–v5 都一样。
+ *
+ * 为什么值得单独认：`.chd` 在下载站上很常见（一个文件装整张盘，比 `.bin` 小得多），
+ * 而扩展名是可以被改掉的 —— 有魔数就能和 `.pbp` / ISO9660 一样「改名也认得出」。
+ *
+ * ⚠️ 和 `.pbp` 同一类误判面：CHD 本身**不区分机种**（Sega CD / PCE CD / PS1 都可能是
+ *    CHD）。本站的光盘机种只有 PS1，所以判成 `ps1` 是唯一有意义的答案；
+ *    将来真加了别的光盘机种，这条就得挪到「按扩展名 / 内容再分」那一档去。
+ */
+const CHD_SIGNATURE = 'MComprHD';
+
+function looksLikeChd(bytes: Uint8Array): boolean {
+  return ascii(bytes, 0, CHD_SIGNATURE.length) === CHD_SIGNATURE;
+}
+
+/**
  * ISO9660 的卷描述符标识 `CD001`，紧跟在第 16 个扇区（0x10）里那一个「类型字节」之后。
  *
  * 扇区大小不同，它落的位置就不同 —— 三个都认，因为 `.img` 这种裸镜像两种都有：
@@ -634,7 +658,8 @@ export function consoleFromExtension(fileName: string): ConsoleType | null {
  *
  *   1. iNES / NES 2.0 / FDS / UNIF —— 固定 magic；
  *   2. `PK\x03\x04` → 街机 romset（真 romset 就是 zip）；
- *   3. PS1 —— `.pbp` 的 `\0PBP`、PS-EXE 的 `PS-X EXE`、ISO9660 的 `CD001`（见下面 ⚠️）；
+ *   3. PS1 —— `.pbp` 的 `\0PBP`、CHD 的 `MComprHD`、PS-EXE 的 `PS-X EXE`、
+ *      ISO9660 的 `CD001`（见下面 ⚠️）；
  *   4. GB / GBC —— 任天堂 logo，**必须在 GBA 之前**（理由见 `looksLikeGb`）；
  *   5. GBA —— 0xB2 那个固定值；
  *   6. 世嘉 16 位（MD / 32X）—— 0x100 的主机名；
@@ -682,10 +707,11 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
   }
 
   /*
-   * PS1（2026-10-16 加）。三条判据都是固定串，位置和理由见上面那段 ⚠️。
-   * `.pbp` 和 `.iso` / `.img` 都是**单文件**形态，正是这个入口能吃的。
+   * PS1（2026-10-16 加，2026-10-19 补 CHD）。四条判据都是固定串，位置和理由见上面那段 ⚠️。
+   * `.pbp` / `.iso` / `.img` / `.chd` 都是**单文件**形态，正是这个入口能吃的。
    */
   if (looksLikePbp(head)) return 'ps1';
+  if (looksLikeChd(head)) return 'ps1';
   if (ascii(head, 0, PSX_EXE_SIGNATURE.length) === PSX_EXE_SIGNATURE) return 'ps1';
   if (looksLikeIso9660(head)) return 'ps1';
 
@@ -741,7 +767,8 @@ export async function detectConsole(file: File): Promise<ConsoleType | null> {
  *      `.cue` / `.m3u` / `.toc` / `.ccd` 只是**描述文件**，真正的数据在同目录的
  *      `.bin` 里。这个入口一次只能收一个文件，收下这张描述文件也没用
  *      （核心找不到它指向的 `.bin`，而且失败是静默的）。
- *      所以认出来就说清「要单文件」——`.pbp` / `.iso` 才是能直接跑的形态。
+ *      所以认出来就说清「要单文件」——`.pbp` / `.iso` / `.chd` 才是能直接跑的形态
+ *      （`.cue` + `.bin` 装在压缩包里时由 `lib/unwrap.ts` 处理，不走这条提示）。
  *
  * ⚠️ 判据刻意**只看扩展名**（不像 `7z` / `rar` 看魔数）：这几种描述文件都是纯文本，
  *    没有魔数可认，而扩展名是下载站一定会写对的那一项。

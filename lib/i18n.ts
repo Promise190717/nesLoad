@@ -599,14 +599,15 @@ const en = {
    * 为什么单独一条：PS1 的光盘镜像有一大半是 `.cue` + `.bin` 两个文件，而 `.cue` 只是
    * 一张**纯文本的目录**，真正的数据在同目录的 `.bin` 里。这个入口一次只收一个文件，
    * 收下那张目录也没用（核心找不到它指向的 `.bin`，而且失败是静默的）。
-   * 所以这条不说「哪种格式不吃」，而是说「**要单文件**」—— 用户该换的是 `.pbp` / `.iso`。
+   * 所以这条不说「哪种格式不吃」，而是说「**要单文件**」—— 用户该换的是
+   * `.pbp` / `.iso` / `.chd`（`.cue` + `.bin` 装在压缩包里也能跑，见 `lib/unwrap.ts`）。
    *
    * ⚠️ 它**不带 `{ext}` 参数**（和上面两条不同）：要说的不是「你给的是哪种格式」。
    */
   'legend.needDisc':
-    'Format  Disc images are usually multi-file (.cue + .bin). This site only takes single-file images — grab a .pbp or .iso build',
+    'Format  Disc images are usually multi-file (.cue + .bin). This site only takes single-file images — grab a .pbp, .iso or .chd build',
   'play.needDisc':
-    'Format  This is a multi-file disc image (.cue + .bin). Only single-file images work here — try a .pbp or .iso build',
+    'Format  This is a multi-file disc image (.cue + .bin). Only single-file images work here — try a .pbp, .iso or .chd build',
   /*
    * 这盘街机卡带**看着像** Neo Geo 游戏，而 BIOS 本地和站点两份都没拿到。
    * （正常情况下 `ensureBios()` 会自动装站点自带的那份，这条根本不出现 ——
@@ -1796,9 +1797,9 @@ const zh: Record<MessageKey, string> = {
   'play.needZip': '格式  这个 ROM 是 {ext} 压缩包，没能解开 —— 换成 .zip 或裸 ROM 再试',
   /* 多文件光盘镜像那条，来由和措辞的取舍见上面英文那份的注释（不带 {ext} 参数）。 */
   'legend.needDisc':
-    '格式  光盘镜像是多文件的（.cue + .bin），本站只吃单文件 —— 换 .pbp 或 .iso 的版本',
+    '格式  光盘镜像是多文件的（.cue + .bin），本站只吃单文件 —— 换 .pbp / .iso / .chd 的版本',
   'play.needDisc':
-    '格式  这是一张多文件光盘镜像（.cue + .bin），本站只吃单文件 —— 换成 .pbp 或 .iso 再试',
+    '格式  这是一张多文件光盘镜像（.cue + .bin），本站只吃单文件 —— 换成 .pbp / .iso / .chd 再试',
   /* Neo Geo 缺 BIOS 的提示，判据和措辞的来由见上面英文那份的注释。 */
   'legend.needBios':
     'BIOS  这盘看着像 Neo Geo 游戏（拳皇 / 合金弹头 / 侍魂…），需要 neogeo.zip —— 把它拖进页面就装上了。CPS1 / CPS2 那类不需要。',

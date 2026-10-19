@@ -18,7 +18,8 @@
  * ⚠️ NDS 2026-10-15 起**能跑了**（本站自带 melonds 核心），`nds-games` 现在会被放行。
  * ⚠️ PS1 2026-10-16 起**也能跑了**（`pcsx_rearmed`，见 `lib/emulator.ts` 的 `CORE_MAP`），
  *    `playstation-games` 同样放行 —— 但注意上游那批 PS1 游戏里
- *    **多文件镜像（`.cue` + `.bin`）本站吃不下**，只有 `.pbp` / `.iso` 能跑，
+ *    **多文件镜像（`.cue` + `.bin`）单拖进来吃不下**（装在 zip / 7z 里则支持），
+ *    单文件形态 `.pbp` / `.iso` / `.chd` 都能跑，
  *    逐条爬之前先看一眼 ROM 地址的扩展名。
  *
  * ⚠️ **页码可以由调用方递进来**（body 里带 `page`，盖掉地址里那个 `page=`）——

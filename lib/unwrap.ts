@@ -88,17 +88,19 @@ const ROM_EXTENSIONS = new Set([
   'wsc',
   'ngp',
   'ngc',
-  // PS1（2026-10-16 加）—— **只有单文件镜像**，理由见上面那段 ⚠️。
-  // 这条特别要紧：上游那批 PS1 的 7z 里装的就是 `.pbp` / `.iso`（实测
+  // PS1（2026-10-16 加，2026-10-19 补 `chd`）—— **只有单文件镜像**，理由见上面那段 ⚠️。
+  // 这条特别要紧：上游那批 PS1 的 7z 里装的就是 `.pbp` / `.iso` / `.chd`（实测
   // `files.retrogamesnexus.com/games/roms/*.7z`），不加这一组那些包会被判成
   // 「机种认不出」而报 `UnsupportedRomError`。
   'pbp',
   'iso',
   'img',
+  'chd',
 ]);
 
 /**
- * 解压后允许的最大体积。
+ * 解压后允许的最大体积（**卡带 ROM 那一档**；光盘镜像走下面的
+ * `MAX_DISC_IMAGE_BYTES`，由 `maxEntryBytes()` 按扩展名分派）。
  *
  * ⚠️ **2026-10-15 从 32 MB 抬到 256 MB**，理由是原来那个数会让 NDS 直接失效：
  * NDS 卡带**最大就是 256 MB**（`宝可梦 珍珠` 那个包解出来是 64 MB 的 `.nds`），
@@ -146,14 +148,35 @@ const MAX_DISC_DESCRIPTOR_BYTES = 1024 * 1024;
  *    （MODE2/2352 的 74 分钟盘约 780 MB），按那个数卡会把绝大多数 PS1 游戏挡在外面
  *    —— 2026-10-19 那盘《数码宝贝 格斗竞技场》的 bin 就是 **252 MiB**，再大一点就没了。
  *
- * 512 MB 是**内存现实**和「能覆盖多少盘」之间的折中：解压出来是一个 Blob（浏览器
- * 多半落盘），但接下来 Nostalgist 要把它写进 Emscripten 的 MEMFS，那一步是**整份进
- * 内存**，再加上核心自己的堆，峰值大约是这个数的 2–3 倍。再往上放只会把
- * 「载入失败」换成「标签页被 OOM 杀掉」，后者更难查。
+ * 800 MiB 是**内存现实**和「能覆盖多少盘」之间的折中（PS1 单盘上限也就 800 MB 上下）：
+ * 解压出来是一个 Blob（浏览器多半落盘），但接下来 Nostalgist 要把它写进 Emscripten 的
+ * MEMFS，那一步是**整份进内存**，再加上核心自己的堆，峰值大约是这个数的 2–3 倍。
+ * 再往上放只会把「载入失败」换成「标签页被 OOM 杀掉」，后者更难查。
  *
- * 超限时**不静默**：`pickDiscSet` 会留一行日志，说明「有 cue 但 bin 太大」。
+ * ⚠️ **2026-10-19 从 512 抬到 800 MiB**：当天把库里 231 个 PS1 的 zip 全扫了一遍
+ * （`pickDiscSet` 的判据 + 拉每个 zip 的中央目录），196 个带 bin 的包里 **85 个的 bin
+ * 超过 512 MiB**，最大的 790 MiB（`langrisser-i-ii-cn.zip`）。512 会把其中四成挡在门外，
+ * 而 PS1 的裸盘本来就是这个量级 —— 800 MiB 正好覆盖全部（CD 上限约 800 MB）。
+ * 代价是内存：790 MiB 的盘在桌面上大约要 1.5–2 GB 峰值，手机基本没戏。
+ *
+ * 超限时**不静默**：`discDataWithinLimit` 会留一行日志，说明「有 cue 但 bin 太大」。
  */
-const MAX_DISC_IMAGE_BYTES = 512 * 1024 * 1024;
+const MAX_DISC_IMAGE_BYTES = 800 * 1024 * 1024;
+
+/**
+ * 这几个扩展名是**光盘镜像**，单个条目的体积上限按 `MAX_DISC_IMAGE_BYTES` 走。
+ *
+ * ⚠️ 2026-10-19 补：`pbp` / `iso` / `img` 一开始也挤在 256 MB 那个门槛里，只是当时
+ * 遇到的盘都小；《激走！Tomarunner》的 `.chd` 是 **306 MB**，装进 zip 就会被静默滤掉
+ * （表现和「包坏了」一模一样）。光盘镜像天生几百 MB，必须和卡带 ROM 分开算。
+ */
+const DISC_SINGLE_FILE_EXTENSIONS = new Set(['pbp', 'iso', 'img', 'chd']);
+
+/** 单个条目解压后的体积上限：光盘镜像一档、其余一档。 */
+function maxEntryBytes(name: string): number {
+  const ext = extensionOf(baseName(name));
+  return DISC_SINGLE_FILE_EXTENSIONS.has(ext) ? MAX_DISC_IMAGE_BYTES : MAX_UNWRAP_BYTES;
+}
 
 export interface UnwrappedRom {
   /** 解出来的 ROM。**文件名用内层条目的 basename** —— 那才是这盘 ROM 的真名 */
@@ -206,8 +229,17 @@ function isSevenZipHead(head: Uint8Array): boolean {
  * 7z 解压 worker —— `public/compression/extract7z.js`。
  *
  * 这份是 **EmulatorJS 4.2.3 的产物**（`data/compression/extract7z.js`，
- * 280,155 B，sha1 `a336ae28f610defa758b1223bc65ae58eda534ef`），
+ * 280,155 B，原始 sha1 `a336ae28f610defa758b1223bc65ae58eda534ef`），
  * emscripten 编的 **asm.js** 版 7z。
+ *
+ * ⚠️ **2026-10-19 打过一次补丁**（现在 280,161 B / sha1
+ * `a024708cbf62cb24c96a4c6ca815a154879ac3dd`）：它原来每个条目都是
+ * `for (i=0;i<r;i++) n[i]=getValue(t+i)` 逐字节从堆里拷出来，再 `postMessage`
+ * **不带 transfer list**（结构化克隆再复制一整份）。PS1 的 bin 动辄几百 MB，
+ * 光那个逐字节循环就是几亿次调用。改成 `n.set(HEAPU8.subarray(t,t+r))` +
+ * `postMessage(..., [n.buffer])`：拷贝从「逐字节」变成一次 `memcpy`，
+ * 跨线程那一步变成**移交所有权**（worker 那边 `n` 随即失效，但它用完就丢，无所谓）。
+ * ⚠️ 换这个文件时要记住补丁会丢 —— 重新从 EJS 拿的话得再打一遍。
  *
  * 为什么从 EJS 拿而不是装 npm 包：`@emulatorjs/emulatorjs` 的 tgz 里**不含**这些产物
  * （和 NDS 核心那次一模一样的坑，见 `lib/emulator.ts` 的 NDS 注释），
@@ -323,7 +355,7 @@ function toBytes(data: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer> {
  */
 function isRomEntry(name: string, size: number): boolean {
   if (name.endsWith('/')) return false; // 目录条目
-  if (size === 0 || size > MAX_UNWRAP_BYTES) return false;
+  if (size === 0 || size > maxEntryBytes(name)) return false;
   if (name.startsWith('__MACOSX/')) return false; // macOS 打包垃圾
 
   const base = baseName(name);
@@ -355,8 +387,10 @@ function pickRomEntry<T extends { name: string; size: number }>(entries: readonl
  * 换盘要另做一套 UI，不在这次范围里。挑法按文件名排序取第一个 —— 单盘包只有一个，
  * 多盘包这样至少是确定的（不会随 zip 条目顺序漂）。
  *
- * 数据文件优先取**和 cue 同名**的那几个（cue 里的 `FILE "…bin"` 就是按名字找的）；
- * 一个都对不上时才退到「包里所有 bin」—— 那种情况多半是名字被改过，交给核心试。
+ * ⚠️ 这里**只负责认出「有没有 cue + 有没有数据文件」**，具体带哪几个 bin 交给
+ *    `discDataWithinLimit()` 按 cue 里 `FILE "…"` 那几行收窄（2026-10-19 改）。
+ *    原来是在这里按「和 cue 同名」猜，遇到 `(Track 1)` / `(Track 2)` 那种一条轨一个
+ *    bin 的包就猜不中，只能退回「全带上」—— 多盘包会把另一张盘也解出来。
  */
 function pickDiscSet<T extends { name: string; size: number }>(
   entries: readonly T[]
@@ -382,32 +416,117 @@ function pickDiscSet<T extends { name: string; size: number }>(
   if (allData.length === 0) return null;
 
   descriptors.sort((a, b) => baseName(a.name).localeCompare(baseName(b.name)));
-  const descriptor = descriptors[0];
-  const stem = baseName(descriptor.name).replace(/\.[^.]+$/, '').toLowerCase();
-  const sameStem = allData.filter(
-    (entry) => baseName(entry.name).replace(/\.[^.]+$/, '').toLowerCase() === stem
-  );
+  return { descriptor: descriptors[0], data: allData };
+}
 
-  /*
-   * **先定组、再看大小**（顺序反了会出问题：先按大小筛的话，一张盘若由
-   * `game.bin` + `track02.bin` 两条轨道组成、只有一条超限，剩下的会被当成
-   * 「整张盘」交给核心 —— 跑不起来，而且看起来像核心的问题）。
-   */
-  const picked = sameStem.length > 0 ? sameStem : allData;
-  const oversized = picked.find((entry) => entry.size > MAX_DISC_IMAGE_BYTES);
+/**
+ * 从 cue 文本里读出它引用的数据文件名。
+ *
+ * cue 的写法就两种：`FILE "xxx.bin" BINARY` 和 `FILE xxx.bin BINARY`（引号可有可无），
+ * 所以两种都收。取 **basename** —— 我们写进虚拟文件系统时是拍平的（不带目录），
+ * cue 里的路径前缀也就没意义了。
+ *
+ * 为什么值得解析：一个 zip 里可能装着**好几张盘**（`Disc 1/`、`Disc 2/` 各一个 cue），
+ * 也可能是**一条轨一个 bin**。不按 cue 收窄的话会把所有 bin 全解出来 —— 多盘包直接
+ * 翻倍占用内存，而且核心只读第一个 cue，剩下的纯属浪费。
+ */
+function cueFileNames(text: string): string[] {
+  const names: string[] = [];
+  const re = /^[ \t]*FILE[ \t]+(?:"([^"]+)"|(\S+))/gim;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const raw = match[1] ?? match[2] ?? '';
+    if (raw) names.push(baseName(raw));
+  }
+  return names;
+}
+
+/**
+ * 按 cue 引用的名字收窄数据文件，并**把名字改成 cue 里写的那个**。
+ *
+ * 为什么连名字一起改：虚拟文件系统（Emscripten 的 MEMFS）**区分大小写**。zip 里可能
+ * 是 `GAME.BIN`、cue 里写的是 `game.bin` —— 内容对得上、名字对不上，核心照样找不到。
+ * 既然 cue 才是「谁引用谁」的权威，就按它写的名字落盘。
+ *
+ * 解析不出、或者一个都对不上时**原样返回全部**（名字用各自的 basename）—— 那种情况
+ * 多半是名字被改过，交给核心自己按内容试，比我们瞎猜强。
+ */
+function narrowByCue<T extends { name: string }>(
+  data: readonly T[],
+  names: readonly string[]
+): { entry: T; name: string }[] {
+  const asIs = () => data.map((entry) => ({ entry, name: baseName(entry.name) }));
+  if (names.length === 0) return asIs();
+
+  const byName = new Map(data.map((entry) => [baseName(entry.name).toLowerCase(), entry]));
+  const hit: { entry: T; name: string }[] = [];
+  for (const name of names) {
+    const entry = byName.get(name.toLowerCase());
+    if (entry) hit.push({ entry, name });
+  }
+  return hit.length > 0 ? hit : asIs();
+}
+
+/**
+ * 收窄之后再过一道体积门槛。超限返回 `null`（**并留日志**）。
+ *
+ * ⚠️ 顺序很重要：**先按 cue 收窄、再看大小**。反过来的话，多盘包里只要第二张盘
+ * 超限，第一张也会被一起判死。
+ */
+function discDataWithinLimit<T extends { name: string; size: number }>(
+  data: readonly T[],
+  cueText: string
+): { entry: T; name: string }[] | null {
+  const picked = narrowByCue(data, cueFileNames(cueText));
+  const oversized = picked.find((item) => item.entry.size > MAX_DISC_IMAGE_BYTES);
   if (oversized) {
-    /*
-     * 有 cue、有 bin，但 bin 太大 —— 这是「能认出但吃不下」，必须留痕：
-     * 不吭声的话调用方会退回原文件，最后判成街机、静默失败。
-     */
     console.warn(
-      `[nesload] 光盘镜像「${baseName(oversized.name)}」有 ${(oversized.size / 1024 / 1024).toFixed(0)} MB，` +
+      `[nesload] 光盘镜像「${baseName(oversized.entry.name)}」有 ${(
+        oversized.entry.size /
+        1024 /
+        1024
+      ).toFixed(0)} MB，` +
         `超过单文件上限 ${MAX_DISC_IMAGE_BYTES / 1024 / 1024} MB，不拆包`
     );
     return null;
   }
+  return picked;
+}
 
-  return { descriptor, data: picked };
+/** 一张裸盘镜像（`.bin` / `.img`）至少要这么大才可能是光盘；再小的多半是别的东西。 */
+const MIN_BARE_IMAGE_BYTES = 32 * 1024 * 1024;
+
+/**
+ * 挑出「**没有 cue、只有一个大 bin**」的裸盘镜像（2026-10-19 加）。
+ *
+ * 库里确实有这种包：`silent-bomber-cn.zip` / `langrisser-iv-cn.zip` /
+ * `castlevania-symphony-of-the-night-cn.zip` 都是一个几百 MB 的 `.bin` 加几个说明文件，
+ * 没有 cue。`pcsx_rearmed` 本来就能直接读 `.bin`（它自己会按 `CD001` 找扇区大小），
+ * 所以这类包完全能跑，只是原来的白名单不认 `.bin` 而已。
+ *
+ * ⚠️ 判据必须**保守**，否则会把街机 romset 当成 PS1：romset 里 `.bin` 遍地都是。
+ *    所以要求「**恰好一个** ≥ 32 MiB 的镜像文件，且其余条目都 ≤ 1 MiB」（说明 / 封面 / 存档）。
+ *    街机 romset 要么没有这么大的单文件，要么还有一堆同量级的 rom。
+ */
+function pickBareDiscImage<T extends { name: string; size: number }>(
+  entries: readonly T[]
+): T | null {
+  const usable = entries.filter(
+    (entry) => !entry.name.endsWith('/') && !entry.name.startsWith('__MACOSX/')
+  );
+  const images = usable.filter((entry) => {
+    const base = baseName(entry.name);
+    if (base.startsWith('.')) return false;
+    if (!DISC_DATA_EXTENSIONS.has(extensionOf(base))) return false;
+    return entry.size >= MIN_BARE_IMAGE_BYTES && entry.size <= MAX_DISC_IMAGE_BYTES;
+  });
+  if (images.length !== 1) return null;
+
+  const image = images[0];
+  if (usable.some((entry) => entry !== image && entry.size > MAX_DISC_DESCRIPTOR_BYTES)) {
+    return null;
+  }
+  return image;
 }
 
 /**
@@ -451,13 +570,29 @@ export async function unwrapRom(
      */
     const disc = pickDiscSet(entries);
     if (disc) {
+      const data = discDataWithinLimit(
+        disc.data,
+        new TextDecoder().decode(toBytes(disc.descriptor.data))
+      );
+      if (data) {
+        return {
+          file: new File([toBytes(disc.descriptor.data)], baseName(disc.descriptor.name)),
+          companions: data.map((item) => new File([toBytes(item.entry.data)], item.name)),
+          console: 'ps1',
+          innerName: disc.descriptor.name,
+          container: '7z',
+        };
+      }
+    }
+
+    /*
+     * 没有 cue、只有一个大 bin 的裸盘镜像 —— 和 zip 那条一样，见 `pickBareDiscImage`。
+     */
+    const bare = pickBareDiscImage(entries);
+    if (bare) {
       return {
-        file: new File([toBytes(disc.descriptor.data)], baseName(disc.descriptor.name)),
-        companions: disc.data.map(
-          (entry) => new File([toBytes(entry.data)], baseName(entry.name))
-        ),
-        console: 'ps1',
-        innerName: disc.descriptor.name,
+        file: new File([toBytes(bare.data)], baseName(bare.name)),
+        innerName: bare.name,
         container: '7z',
       };
     }
@@ -466,7 +601,8 @@ export async function unwrapRom(
     if (!pick) {
       console.warn(
         `[nesload] 「${file.name}」是 7z，但里面没有认得出的 ROM 条目` +
-          `（认的是 ${[...ROM_EXTENSIONS].join(' / ')}；单条上限 ${MAX_UNWRAP_BYTES / 1024 / 1024} MB）`
+          `（认的是 ${[...ROM_EXTENSIONS].join(' / ')}；` +
+          `卡带上限 ${MAX_UNWRAP_BYTES / 1024 / 1024} MB、光盘镜像 ${MAX_DISC_IMAGE_BYTES / 1024 / 1024} MB）`
       );
       return null;
     }
@@ -495,27 +631,50 @@ export async function unwrapRom(
   if (disc) {
     const descriptor = await inflateEntry(file, disc.descriptor);
     if (descriptor) {
-      const companions: File[] = [];
-      for (const entry of disc.data) {
-        const blob = await inflateEntry(file, entry);
-        if (!blob) {
-          companions.length = 0;
-          break;
+      /*
+       * 按 cue 里 `FILE "…"` 那几行收窄，再查体积（见 `discDataWithinLimit`）。
+       * `text()` 只读那几百字节，不占内存。
+       */
+      const data = discDataWithinLimit(disc.data, await descriptor.text());
+      if (data) {
+        const companions: File[] = [];
+        for (const item of data) {
+          const blob = await inflateEntry(file, item.entry);
+          if (!blob) {
+            companions.length = 0;
+            break;
+          }
+          companions.push(new File([blob], item.name));
         }
-        companions.push(new File([blob], baseName(entry.name)));
+        if (companions.length > 0) {
+          return {
+            file: new File([descriptor], baseName(disc.descriptor.name)),
+            companions,
+            console: 'ps1',
+            innerName: disc.descriptor.name,
+            container: 'zip',
+          };
+        }
+        console.warn(
+          `[nesload] 「${file.name}」里有 cue，但数据文件解不出来（压缩方式不支持或已损坏）`
+        );
       }
-      if (companions.length > 0) {
-        return {
-          file: new File([descriptor], baseName(disc.descriptor.name)),
-          companions,
-          console: 'ps1',
-          innerName: disc.descriptor.name,
-          container: 'zip',
-        };
-      }
-      console.warn(
-        `[nesload] 「${file.name}」里有 cue，但数据文件解不出来（压缩方式不支持或已损坏）`
-      );
+    }
+  }
+
+  /*
+   * 没有 cue、只有一个大 bin 的裸盘镜像（见 `pickBareDiscImage`）。
+   * 不带 `console` —— 交给 `detectConsole` 按 `CD001` 认，认不出就照旧报「机种认不出」。
+   */
+  const bare = pickBareDiscImage(entries);
+  if (bare) {
+    const bareBlob = await inflateEntry(file, bare);
+    if (bareBlob) {
+      return {
+        file: new File([bareBlob], baseName(bare.name)),
+        innerName: bare.name,
+        container: 'zip',
+      };
     }
   }
 

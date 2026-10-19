@@ -190,9 +190,9 @@ export const ko: Record<MessageKey, string> = {
   'play.needZip':
     '형식  이 ROM은 {ext} 형식의 압축 파일이라 풀지 못했습니다 — .zip이나 압축하지 않은 ROM으로 시도하세요',
   'legend.needDisc':
-    '형식  디스크 이미지가 여러 파일(.cue + .bin)로 되어 있습니다. 이 사이트는 단일 파일만 지원합니다 — .pbp 또는 .iso 버전을 준비하세요',
+    '형식  디스크 이미지가 여러 파일(.cue + .bin)로 되어 있습니다. 이 사이트는 단일 파일만 지원합니다 — .pbp / .iso / .chd 버전을 준비하세요',
   'play.needDisc':
-    '형식  여러 파일로 된 디스크 이미지(.cue + .bin)입니다. 이 사이트는 단일 파일만 지원합니다 — .pbp 또는 .iso로 시도하세요',
+    '형식  여러 파일로 된 디스크 이미지(.cue + .bin)입니다. 이 사이트는 단일 파일만 지원합니다 — .pbp / .iso / .chd로 시도하세요',
   'legend.needBios':
     'BIOS  Neo Geo 게임(KOF, 메탈슬러그…)으로 보입니다. neogeo.zip이 필요합니다 — 그 파일을 페이지에 끌어다 놓으면 설치됩니다. CPS1 / CPS2 게임에는 필요 없습니다.',
   'legend.gamepad':

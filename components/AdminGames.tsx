@@ -16,6 +16,7 @@ import { detectConsole, type ConsoleType } from '@/lib/emulator';
 import { CONTENT_LOCALES, EMPTY_GAME_TEXT, type ContentLocale, type GameText, type GameTexts } from '@/lib/game-text';
 import { GAME_LANGUAGES, GAME_LANGUAGE_LABEL, romLangToFormValue } from '@/lib/rom-lang';
 import { unwrapRom } from '@/lib/unwrap';
+import AdminAddGame from './AdminAddGame';
 import AdminAutoCrawl from './AdminAutoCrawl';
 import AdminBulkImport from './AdminBulkImport';
 import AdminLoading from './AdminLoading';
@@ -486,6 +487,13 @@ export default function AdminGames() {
     if (romRef.current) romRef.current.value = '';
   };
 
+  /**
+   * 打开**手动填表**的弹窗（新增那一侧）。
+   *
+   * ⚠️ 2026-10-19 起它不再挂在列表上那颗「添加」按钮上 —— 那颗按钮改成了
+   *    「粘贴下载链接一步入库」（AdminAddGame），表单这条路由那个弹框底部的
+   *    「手动添加」进。编辑（`openEdit`）仍走同一个弹窗。
+   */
   const openAdd = () => {
     resetForm();
     setEditingId(null);
@@ -940,13 +948,12 @@ export default function AdminGames() {
               {'搜索'}
             </button>
           </form>
-          <button
-            type="button"
-            onClick={openAdd}
-            className="pixel-edge pxw-3 pxc-600 shrink-0 bg-accent px-4 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80"
-          >
-            {'添加'}
-          </button>
+          {/*
+            「添加」= **粘贴下载链接一步入库**（2026-10-19 改）—— 按钮与弹框都在
+            AdminAddGame 里；原来的手动填表退成那个弹框底部的「手动添加」入口
+            （`openAdd` 仍然只负责开表单，不再挂在这颗按钮上）。
+          */}
+          <AdminAddGame onImported={handleBulkImported} onManualAdd={openAdd} />
           {/* 「添加」旁边那两个批量入口 —— 按钮和弹框都在它们各自的组件里 */}
           <AdminBulkImport onImported={handleBulkImported} />
           {/* 「自动爬取」：给一个分类页，一页页爬到最后一页（2026-10-15 加） */}
@@ -1072,7 +1079,7 @@ export default function AdminGames() {
           */}
           <div className="bg-ink-800 pixel-edge pxw-3 pxc-600 max-h-[85vh] w-full max-w-[620px] overflow-y-auto p-4">
             <h2 className="mb-3 text-[12px] text-ink-200">
-              {isEditing ? '编辑游戏' : '添加游戏'}
+              {isEditing ? '编辑游戏' : '手动添加游戏'}
             </h2>
 
             {/*

@@ -1,6 +1,11 @@
 /*
- * 后台「把一款游戏导进库」的公共管道 —— 「从列表导入」（AdminBulkImport）与
- * 「自动爬取」（AdminAutoCrawl）共用这一份。
+ * 后台「把一款游戏导进库」的公共管道 —— 「添加」（AdminAddGame）、「从列表导入」
+ * （AdminBulkImport）与「自动爬取」（AdminAutoCrawl）三条入口共用这一份。
+ *
+ * 三条入口的差别只在**外层怎么拿 slug**：
+ *   · 添加：用户直接粘一个游戏页 / 下载页链接（或 slug）；
+ *   · 从列表导入：给一个列表页，逐个 slug 跑一遍；
+ *   · 自动爬取：给一个分类页，一页页往下翻。
  *
  * 一条的完整链路**和手动添加完全相同**（这里不重写解析，也不碰 R2 / D1）：
  *   POST /api/admin/scrape-game            → 元数据 + 封面 / ROM 的地址 + 每个语言版本
@@ -119,6 +124,14 @@ export interface ImportOptions {
    * ⚠️ **不传 = `true`**（保持「从列表导入」那条路的老行为，别改它的默认）。
    */
   saveRom?: boolean;
+  /**
+   * 只导这一种语言版本（站内短码 zh / en / ja / ko）。不传 = 上游挂了几种就导几种。
+   *
+   * 只有「添加」（AdminAddGame）用得上 —— 那个弹框里有个「只导中文版」的勾。
+   * 指定的语言上游没有时**不退回别的语言**，直接回一条 `failed`（否则用户以为
+   * 勾了中文却进了个英文版）。
+   */
+  onlyLanguage?: string | null;
   /** 每一条语言版本的开始 / 结束都会回调一次 */
   onEvent?: (event: ImportEvent) => void;
   /** 「停止」标志：每次真要下载前看一眼，返回 true 就不再往下做 */
@@ -240,7 +253,8 @@ export async function importGame(
   game: ListGame,
   options: ImportOptions
 ): Promise<ImportOutcome[]> {
-  const { fallbackConsole, developerIds, saveRom = true, onEvent, shouldStop } = options;
+  const { fallbackConsole, developerIds, saveRom = true, onlyLanguage, onEvent, shouldStop } =
+    options;
   const label = game.title ?? game.slug;
 
   try {
@@ -305,11 +319,33 @@ export async function importGame(
           },
         ];
 
+    /*
+     * 「只导中文版」（2026-10-19 加，见 ImportOptions.onlyLanguage）。
+     *
+     * ⚠️ 指定的语言上游没有时**不退回别的语言** —— 直接回一条 failed。退回的话
+     *    用户勾了「只导中文版」却进了个英文版，界面上还写着「已添加」，没人看得出来。
+     */
+    const narrowed = onlyLanguage
+      ? targets.filter((variant) => variant.language === onlyLanguage)
+      : targets;
+    if (onlyLanguage && narrowed.length === 0) {
+      const reason = `该页面没有${GAME_LANGUAGE_LABEL[onlyLanguage] ?? onlyLanguage}版本。`;
+      onEvent?.({ phase: 'done', title, language: onlyLanguage, status: 'failed', reason });
+      return [
+        {
+          title: variantTitle(title, onlyLanguage),
+          language: onlyLanguage,
+          status: 'failed',
+          reason,
+        },
+      ];
+    }
+
     const outcomes: ImportOutcome[] = [];
     /** 封面**一款只取一次**：几个语言版本只有 ROM 不同（第一次真要用到时才去取）。 */
     let cover: File | null = null;
 
-    for (const variant of targets) {
+    for (const variant of narrowed) {
       // 「停止」按了就收手 —— 款与款之间、一款的几种语言之间都看一眼
       if (shouldStop?.()) break;
 
