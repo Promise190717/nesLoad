@@ -22,6 +22,7 @@
 - `ConsoleType` 14 台 = nes|snes|gb|gbc|gba|nds|md|gg|sms|32x|ws|ngp|ps1|arcade。机种清单唯一出口 `lib/consoles.ts`（别手抄数组）；服务端组件不能 import `lib/emulator.ts`（顶层 installAudioTap）。
 - 14 台全走本站 `public/cores/`（部署必须一起传，否则 404）；arcade 按 romset 挑 `fbneo`/`fbalpha2012_cps1`，驱动纠正进 `lib/arcade-core.ts` 的 `EXTRA_DRIVERS`（别写 `arcade-romsets.json`，只盖 CPS1）。NDS 的 melonds 是 EJS 核，控制/输入面另套（见 DETAILS）。
 - CD 机种（PS1/Sega CD/PCE CD）架构未通。`SCREEN_WIDTH/HEIGHT=720×540` 只是启动基准（NDS 256×384），显示尺寸在 globals.css。
+- 压缩包里内层不是 `lib/unwrap.ts` 的 `ROM_EXTENSIONS` 白名单 ⇒ 包不被拆 ⇒ `detectConsole` 见 `PK` 判街机 ⇒ FBNeo 报错（7z 改名 `.zip`、世嘉裸卡带叫 `.bin` 都栽在这条）。世嘉 `.bin` 由 `pickSegaCartEntry` 按文件头（0x100 `SEGA` / 0x7FF0 `TMR SEGA`）单独兜；这两条指纹在 `unwrap.ts` 与 `emulator.ts` 里**手抄两份、改一处必须同步**（反向 import 成环）。
 
 ## 数据库 = Supabase（2026-10-20 切换，D1/双源逻辑废弃）
 

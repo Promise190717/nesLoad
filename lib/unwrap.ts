@@ -8,7 +8,8 @@
  *   1. **文件名是 `.zip`，里面装着一盘单机 ROM**（`super-mario.zip` 里是 `.nes`）；
  *   2. **文件名是 ROM 扩展名，内容其实是 zip**（`jojos-bizarre-adventure-snes.smc`
  *      前四字节是 `PK\x03\x04`，解出来才是一盘真 `.smc`）；
- *   3. **文件名是 `.zip`，内容其实是 7z**（2026-10-15 追加支持，见下）。
+ *   3. **文件名是 `.zip`，内容其实是 7z**（2026-10-15 追加支持，见下）；
+ *   4. **世嘉的裸卡带在包里只叫 `.bin`**（2026-10-20 追加，见 `pickSegaCartEntry`）。
  *
  * 第 2 种更阴 —— 拖进来看着像正常 ROM，实际 `detectConsole` 读文件头会把它判成**街机**
  * （任何 `PK\x03\x04` 都当 romset），然后交给 FBNeo 拿文件名当驱动名查表，查不到就
@@ -56,6 +57,9 @@ import { baseName, inflateEntry, readZipEntries } from './zip';
  * PS1 那一条（2026-10-16 加）同理**只收单文件镜像**，`.cue` / `.m3u` / `.toc` / `.ccd`
  * 这些**描述文件**不收 —— 它们是纯文本、指向同目录的 `.bin`，拆出来也没法跑
  * （见 `lib/emulator.ts` 的 `unsupportedArchive`）。
+ *
+ * 唯一需要 `.bin` 的那一家（世嘉的裸卡带，2026-10-20 加）走另一条路 —— 按**文件头**认，
+ * 见 `pickSegaCartEntry`。其余机种包里内层带的都是各自的扩展名。
  */
 const ROM_EXTENSIONS = new Set([
   // NES / Famicom
@@ -222,6 +226,42 @@ function isSevenZipHead(head: Uint8Array): boolean {
     head[3] === 0xaf &&
     head[4] === 0x27 &&
     head[5] === 0x1c
+  );
+}
+
+/**
+ * 世嘉卡带的文件头指纹 —— 和 `lib/emulator.ts` 的 `segaGen16` / `looksLikeSega8Bit`
+ * 是**同两条判据**：16 位（MD / 32X）在 0x100 写 `SEGA`，8 位（SMS / GG）在 0x7FF0 写
+ * `TMR SEGA`。`SEGA 32X` 也以 `SEGA` 开头，所以这一条同时收下 32X。
+ *
+ * ⚠️ **为什么不从 `lib/emulator.ts` import**：那边已经 `import { unwrapRom } from './unwrap'`，
+ *    反向引会成环 —— webpack 编得过，但模块初始化顺序不可控，踩了就是「有时好有时坏」。
+ *    两条字符串判据不值当为它拆一个共享模块，所以**手抄一份、改一处必须同步另一处**，
+ *    和 `components/BootAttributes.tsx` 里那份 `data-mobile` 内联脚本是同一个规矩。
+ *
+ * ⚠️ 这里只回答「像不像世嘉卡带」，**具体哪台机器不归它判** —— `SEGA 32X` / `SEGA GENESIS` /
+ *    `TMR SEGA` 的区分仍在 `detectConsole` 那张指纹表里，别在这儿再写一份。
+ */
+const SEGA16_HEAD_OFFSET = 0x100;
+const SEGA8_HEAD_OFFSET = 0x7ff0;
+const SEGA16_HEAD = 'SEGA';
+const SEGA8_HEAD = 'TMR SEGA';
+
+/** 读文件头要多少字节：`TMR SEGA` 落在 0x7FF0，得读到 0x7FF8。 */
+const SEGA_HEAD_BYTES = 0x8000;
+
+function asciiAt(bytes: Uint8Array, offset: number, text: string): boolean {
+  if (bytes.length < offset + text.length) return false;
+  for (let i = 0; i < text.length; i += 1) {
+    if (bytes[offset + i] !== text.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function looksLikeSegaCart(head: Uint8Array): boolean {
+  return (
+    asciiAt(head, SEGA16_HEAD_OFFSET, SEGA16_HEAD) ||
+    asciiAt(head, SEGA8_HEAD_OFFSET, SEGA8_HEAD)
   );
 }
 
@@ -530,6 +570,49 @@ function pickBareDiscImage<T extends { name: string; size: number }>(
 }
 
 /**
+ * 挑出「压缩包里那盘**裸世嘉卡带**」（2026-10-20 加）。
+ *
+ * ## 起因
+ *
+ * MD《吞食天地 III》打不开（`conquering-the-world-iii-cn.zip`）：包里只有一个
+ * `Tun Shi Tian Di III .bin`（2 MB，0x100 处是 `SEGA MEGA DRIVE`）。`.bin` 不在
+ * `ROM_EXTENSIONS` 里（白名单刻意不收它，理由见那张表），`pickBareDiscImage` 又要求
+ * ≥ 32 MiB —— 两条都不命中，`unwrapRom` 于是返回 `null`、原 zip 交给 `detectConsole`，
+ * 它看到 `PK\x03\x04` 就判成**街机**，最后是 FBNeo 画着「Romset is unknown.」
+ * （和上面第 3 种 7z 是同一个故障形态，只是入口不同）。
+ *
+ * ## 为什么只放宽世嘉这一家
+ *
+ * 库里 52 个 MD 包的中央目录逐个看过：内层是 `.md` / `.gen` / `.32x` 的本来就能拆
+ * （都在白名单里），**只有世嘉**会把裸卡带叫 `.bin` —— Genesis 的裸 dump 传统上就是
+ * `.bin`，汉化补丁改完导出来也还是 `.bin`。NES / SFC / GB / GBA / NDS 的包里内层一律
+ * 带各自的扩展名，为它们放宽 `.bin` 只会把「装着一堆 bin 的街机 romset」一起拖下水。
+ *
+ * ## 判据三条，缺一不可
+ *
+ *   1. 包里 `.bin` 条目**恰好一个**（街机 romset 里 `.bin` 遍地都是）；
+ *   2. 解出来 ≤ `SEGA_CART_MAX_BYTES`（世嘉 16 位卡带最大 8 MiB，给一倍余量）；
+ *   3. 文件头真是世嘉卡带（`looksLikeSegaCart`，由调用方在解出字节后核）。
+ *
+ * 第 3 条才是真正的闸门：romset 里那些 `.bin` 是零散的 rom 分片，头部不可能正好是
+ * 那两行固定串。所以**认错了也不会拆**，最坏结果和不加这档时一样。
+ */
+const SEGA_CART_MAX_BYTES = 16 * 1024 * 1024;
+
+function pickSegaCartEntry<T extends { name: string; size: number }>(
+  entries: readonly T[]
+): T | null {
+  const bins = entries.filter((entry) => {
+    if (entry.name.endsWith('/') || entry.name.startsWith('__MACOSX/')) return false;
+    const base = baseName(entry.name);
+    if (base.startsWith('.')) return false;
+    if (extensionOf(base) !== 'bin') return false;
+    return entry.size > 0 && entry.size <= SEGA_CART_MAX_BYTES;
+  });
+  return bins.length === 1 ? bins[0] : null;
+}
+
+/**
  * 如果是「装着单机 ROM 的压缩包」，把 ROM 解出来；否则返回 `null`。
  *
  * 认两种壳：**zip**（`PK\x03\x04`）和 **7z**（`37 7A BC AF 27 1C`）。
@@ -593,6 +676,19 @@ export async function unwrapRom(
       return {
         file: new File([toBytes(bare.data)], baseName(bare.name)),
         innerName: bare.name,
+        container: '7z',
+      };
+    }
+
+    /*
+     * 世嘉裸卡带（包里那个 `.bin`）—— 按文件头认，判据与理由见 `pickSegaCartEntry`。
+     * 排在裸盘镜像之后：≥ 32 MiB 的 `.bin` 先按 PS1 光盘试过一次，两边不重叠。
+     */
+    const cart = pickSegaCartEntry(entries);
+    if (cart && looksLikeSegaCart(toBytes(cart.data).subarray(0, SEGA_HEAD_BYTES))) {
+      return {
+        file: new File([toBytes(cart.data)], baseName(cart.name)),
+        innerName: cart.name,
         container: '7z',
       };
     }
@@ -675,6 +771,28 @@ export async function unwrapRom(
         innerName: bare.name,
         container: 'zip',
       };
+    }
+  }
+
+  /*
+   * 世嘉裸卡带（包里那个 `.bin`）—— 判据与理由见 `pickSegaCartEntry`。
+   *
+   * 解出来之后**必须核文件头**再返回：`.bin` 这个扩展名在街机 romset 里也常见，
+   * 只按「恰好一个 .bin」就拆会把某些单 rom 的 romset 拆坏（那份字节交给
+   * genesis_plus_gx 就是彻底跑不了，而留在原地至少 FBNeo 还认得）。
+   */
+  const cart = pickSegaCartEntry(entries);
+  if (cart) {
+    const cartBlob = await inflateEntry(file, cart);
+    if (cartBlob) {
+      const head = new Uint8Array(await cartBlob.slice(0, SEGA_HEAD_BYTES).arrayBuffer());
+      if (looksLikeSegaCart(head)) {
+        return {
+          file: new File([cartBlob], baseName(cart.name)),
+          innerName: cart.name,
+          container: 'zip',
+        };
+      }
     }
   }
 
