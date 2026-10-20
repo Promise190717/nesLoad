@@ -213,6 +213,11 @@ interface SpanResult {
  *
  * 服务器不认 `Range`（回 200 或者没有 `Content-Range`）时**原样退回**整包流式读法
  * —— 那条路对小文件本来是好的，别为了大文件把正常路径也改坏。
+ *
+ * ⚠️ 还有第三种情况会落进那条「整包」分支：**服务端把整份响应归一成了 200**。
+ *    `app/api/games/[id]/rom` 只在「body 就是整个文件」时才给可缓存头，并把状态从
+ *    206 改成 200（206 进不了 CDN 缓存）。所以小 ROM 现在走的就是这条：
+ *    一个带 Range 的请求 → 200 + 整份 body → `readBodyWithProgress`，进度照常。
  */
 export async function fetchRomWithProgress(
   url: string,

@@ -65,6 +65,20 @@ const UPSTREAM_TIMEOUT_MS = 25_000;
  */
 const HTML_LIKE = /^text\/|application\/xhtml|application\/json/i;
 
+/**
+ * 整份 ROM 的缓存时长（7 天，2026-10-20 加）。
+ *
+ * ⚠️ **只有「响应体就是整个文件」时才用它**（见下面的 `servesWholeFile`）。
+ *    真正的分片响应（206、只覆盖一段）仍然 `private, no-store` —— 半截字节一旦被
+ *    CDN 当成完整对象存下来，之后所有访客拿到的都是坏 ROM，而且 `Content-Length`
+ *    对得上、核心静默失败，线上根本查不出来。
+ *
+ * ⚠️ ROM 的 URL（`/api/games/<id>/rom?lang=xx`）**不带内容版本**：后台给同一个 slug
+ *    换了 ROM 之后，CDN 会继续发旧文件，最多 7 天。要立刻生效就在换盘后 purge 一次
+ *    CDN（浏览器那层 purge 不了，只能等它过期）。
+ */
+const ROM_CACHE_SECONDS = 7 * 24 * 60 * 60;
+
 /** 非 ASCII 文件名要用 RFC 5987 的 filename*，同时给一个 ASCII 回退。 */
 function contentDisposition(name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
@@ -225,21 +239,48 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     });
   }
 
+  /*
+   * 响应体到底是不是**整个文件** —— 只有整份才敢缓存。
+   *
+   * 两种情况都算：
+   *   · 上游忽略了 `Range`，直接回 200（完整表示）；
+   *   · 回了 206，但范围正好覆盖 `0..total-1` —— **小 ROM 的常态**：
+   *     前端探针片一开口就要 8 MiB（`lib/http.ts` 的 `ROM_MAX_RUN`），而文件只有
+   *     256 KB，上游于是回 `bytes 0-262143/262144`。
+   *
+   * ⚠️ 以前这里按「请求里有没有 Range」决定缓存，于是**所有 ROM 都变成
+   *    `private, no-store`**（探针片无条件带 Range），`s-maxage` 那一支是死代码 ——
+   *    几百 KB 的卡带拔了再插也得重下一遍。现在按**响应体**判断：
+   *    整份 ⇒ 200 + 可缓存；真分片 ⇒ 206 + no-store。
+   */
+  const upstreamRange = upstream.headers.get('content-range');
+  const servesWholeFile =
+    upstream.status === 200 || (upstream.status === 206 && isCompleteByteRange(upstreamRange));
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': contentDisposition(fileName),
-    'Cache-Control': range ? 'private, no-store' : 'public, max-age=3600, s-maxage=2592000',
+    'Cache-Control': servesWholeFile
+      ? `public, max-age=${ROM_CACHE_SECONDS}, s-maxage=${ROM_CACHE_SECONDS}`
+      : 'private, no-store',
   };
   for (const name of ['accept-ranges', 'etag', 'last-modified']) {
     const value = upstream.headers.get(name);
     if (value) headers[name] = value;
   }
-  if (range && upstream.status === 206) {
-    const value = upstream.headers.get('content-range');
-    if (value) headers['Content-Range'] = value;
-  }
+  /*
+   * `Content-Range` 只在**真分片**时带：`200` 配 `Content-Range` 是自相矛盾的响应，
+   * 有些代理会因此把整份当成部分对象处理（反过来又是一次「缓存了半截」）。
+   */
+  if (!servesWholeFile && upstreamRange) headers['Content-Range'] = upstreamRange;
   const length = upstream.headers.get('content-length');
   if (length) headers['Content-Length'] = length;
 
-  return new Response(upstream.body, { status: range && upstream.status === 206 ? 206 : 200, headers });
+  /*
+   * 整份一律回 **200**（哪怕上游是 206）：
+   *   · 206 在 Cloudflare 默认不进缓存，留着它等于没缓存；
+   *   · 前端收到 200 会退回 `readBodyWithProgress` 走整包流式读 —— 见 `lib/http.ts`
+   *     里 `first.status !== 206 || !probe` 那一支，进度条照常，行为正确。
+   */
+  return new Response(upstream.body, { status: servesWholeFile ? 200 : upstream.status, headers });
 }

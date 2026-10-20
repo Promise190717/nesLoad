@@ -54,5 +54,6 @@
 
 - ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /room /privacy /terms）；发版后 purge CF。
 - 大 ROM 唯一下载路 `lib/http.ts` 的 `fetchRomWithProgress`；`readBodyWithProgress` 只给存档类小文件。R2 无版本控制，删 ROM 永久丢。
+- **ROM 来源 2026-10-20 起分批搬自有 R2**：键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、默认排除 nds/ps1、写 `size_bytes`）。`route.ts` 取片改为**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
 - 展示地址一律 `publicUrlOrNull()`；严格版 `publicUrl()` 只给上传/ROM 代理/存档下载。
 - `pnpm dev` 别在 agent 沙箱起（NODE_OPTIONS 坑，报 Jest worker 2 exceptions）；typecheck 全量 `npx tsc --noEmit --incremental false` 才真；`pnpm build` 交给用户。
