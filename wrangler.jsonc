@@ -27,6 +27,13 @@
     // 免得再靠「记得在仪表盘配一下」。它不是机密（浏览器天天在下载这些地址），
     // 所以放 vars 而不是 secrets；必须和 R2 那边绑定的自定义域名一致。
     "R2_PUBLIC_BASE": "https://games.retrogamesonline.fun",
+    // Supabase 项目地址（库的所有查询都经它：HTTPS → PostgREST → exec_sql）。
+    // ⚠️ 只有 URL 能写在这里 —— 密钥 `SUPABASE_SECRET_KEY` 必须用
+    //    `wrangler secret put SUPABASE_SECRET_KEY`（仪表盘里同名 secret 也行），
+    //    绝不能进这个文件 / 进仓库。少了它，全站读库会 500。
+    // ⚠️ 2026-10-20 线上事故：数据层一度改成直连 pooler 的裸 TCP，Worker 里跑不通，
+    //    所有动态接口一起 500。别再改回 TCP，见 lib/server/pg.ts 的文件头。
+    "SUPABASE_URL": "https://olcnjvjyrrivikkrzatw.supabase.co",
     // 前台目录数据来源：upstream = 源站 retrogamesnexus.com（默认），d1 = 本站数据库。
     // 只影响首页 / 列表 / 详情 / 机种 / ROM；评论、收藏、后台、账号始终走 D1。
     // 想切回数据库改这里（或仪表盘里的同名变量）后重新发版即可，代码不用动。

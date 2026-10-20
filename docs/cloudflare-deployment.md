@@ -21,8 +21,13 @@ Cloudflare 的「设置 → 构建 → 构建变量和机密」只供构建使�
 | `CF_D1_API_TOKEN` | 必需，设为机密 | 必需，设为机密 |
 | `R2_PUBLIC_BASE` | 必需 | 必需 |
 | `SITE_URL` | 建议显式配置 | 已在 Wrangler 的 vars 中配置 |
+| `SUPABASE_URL` | 建议显式配置（预渲染会读库） | 已在 Wrangler 的 vars 中配置 |
+| `SUPABASE_SECRET_KEY` | 建议配置，设为机密（预渲染会读库；只在本地构建时可由 `.env.local` 顶上） | **必需，设为机密**；缺失时所有读库的接口和页面都会 500 |
 | `SESSION_SECRET` | 不需要 | 登录和账户功能必需，设为机密 |
 | `CATALOG_SOURCE` | 不需要 | 前台目录来源：`upstream`（默认，读源站）/ `d1`（读数据库），已在 Wrangler 的 vars 中配置 |
+| `SUPABASE_DB_URL` | 不需要 | 不需要（只有本地脚本直连 pooler 时用） |
+
+⚠️ 数据库只走 HTTPS（PostgREST + `public.exec_sql`，见 `lib/server/pg.ts`）。**不要**在 Worker 里配 pooler 直连 —— 2026-10-20 试过，Workers 的 TCP + TLS 撑不住，上线后所有动态接口一起 500。
 
 运行时的 R2 上传凭据、Turnstile 等其他配置也应保留原值，不要因补数据库变量而重置。保存控制台变量时点击「部署」使它们应用到正式 Worker。
 

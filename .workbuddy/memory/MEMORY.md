@@ -25,11 +25,14 @@
 
 ## 数据库 = Supabase（2026-10-20 切换，D1/双源逻辑废弃）
 
-- 全站读 **Supabase Postgres**：`lib/server/pg.ts`（query）+ `supabase.ts` + `sb-games.ts`；旧 `catalog-source.ts`/`upstream-catalog.ts` 的双源开关（`CATALOG_SOURCE`）已从代码里删掉（wrangler.jsonc 里那行是死配置）。游戏主键 = **上游 slug**（`games.slug`）。
+- 全站读 **Supabase Postgres**：`lib/server/pg.ts` 的 `query()` 是唯一出口，**走 HTTPS**（PostgREST → `public.exec_sql`，函数定义在 `db/schema.pg.sql` 末尾），占位符仍是 `?`、由 `bindParams()` 就地转成字面量。旧 `catalog-source.ts`/`upstream-catalog.ts` 的双源开关（`CATALOG_SOURCE`）已删（wrangler.jsonc 里那行是死配置）。游戏主键 = **上游 slug**（`games.slug`）。`supabase.ts` 无调用方，别拿它当入口。
+- 🔴 **绝不要在 Worker 里直连 Postgres**（`postgres`/`pg` + pooler）：2026-10-20 线上事故——本地 `next dev` 全通，发版后 `/api/games`、`/api/user/*` 和所有未缓存页面一起 500。Workers 的 `node:tls` 连上后写第一条 PG 报文就断（`Network connection lost.`），且 `rejectUnauthorized` 选项直接抛未实现。只有 `scripts/*.mjs` 可以直连（`SUPABASE_DB_URL`，用户只需在本地配）。
+- 新增 API/页面读库前：确认 `SUPABASE_URL`（wrangler vars）+ `SUPABASE_SECRET_KEY`（secret）都在，缺了就是全站 500；`exec_sql` 已 revoke anon/authenticated，只有 service_role 能调。
 - 文案侧表四张：`game_texts`/`developer_texts`/`series_texts`/`console_texts`，主键 (slug, locale)，`game_texts.controls` 是 jsonb；developer/series 名字**不在 game_texts 里**，读取时按 locale JOIN 现取（`sb-games.ts` 的 `loadGameTexts`）。
 - 全量爬取/回填模板 = `scripts/migrate-to-supabase.mjs`（上游**列表页** RSC 载荷一页 18 款带全部字段，比逐款抓详情页省 18 倍）；14 语种回填 = `scripts/fill-game-texts-locales.mjs`（postgres.js 连 `SUPABASE_DB_URL`，⚠️ 连接池跑完全程再 end、developer/series 行要按 slug:locale 去重，两个坑都踩过）。
 - `writeTexts`/`writeDeveloperTexts`（games-admin.ts / developers.ts）只动传进来的语言，别的行一概不碰——后台表单只带四种不会冲掉回填的 14 种。
-- 动过文案数据必须升缓存键版本（条目不随部署失效）：`sb:games:page|latest|by-console|by-developer|by-id` 现 **v2**、`sb:developers:list` **v3**、`sb:developers:top` **v2**、`consoles:list` **v8**。
+- 动过文案/图片数据必须升缓存键版本（条目不随部署失效）：`sb:games:page|latest|by-console|by-developer|by-id` 现 **v2**、`sb:developers:list` **v4**、`sb:developers:top` **v3**、`consoles:list` **v8**。
+- ⚠️ R2 公网域按 `max-age=2592000` 缓存 30 天，**换图不能覆盖同名键**（边缘仍发旧字节，且 token 没有 purge 权限）——新图传新键（`-v2`）再改库。开发商厂标只有 133/269 有，其余 136 家上游/维基都没有 logo，库里是 `NULL`，前台走名字首字占位。
 
 ## 主题 / 首屏属性 / 两台机器
 

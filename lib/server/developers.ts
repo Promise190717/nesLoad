@@ -256,11 +256,14 @@ export async function countDevelopersCached(keyword: string): Promise<number> {
   return countDevelopersCachedRaw(keyword);
 }
 
-/** 列表缓存键 v3：2026-10-20 起排序从「入库时间」改成「游戏数」，条目要整体失效重算。 */
+/**
+ * 列表缓存键 v4：2026-10-20 第二批厂标补完后，把 136 行死链换成本站路径 / 置空，
+ * 缓存里存的 `imageUrl` 得整体重算（v3 是排序口径那次）。
+ */
 const listDevelopersCachedRaw = cached(
   async (offset: number, limit: number, keyword: string) =>
     listDevelopers(offset, limit, { keyword }, await countDevelopers({ keyword })),
-  ['sb:developers:list', 'v3'],
+  ['sb:developers:list', 'v4'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
 
@@ -285,9 +288,10 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
   return rows.map((r) => toDeveloper(r, textsMap.get(r.id) ?? {}));
 }
 
+/** 同上，首页「游戏最多的前 N 家」也得跟着失效（厂标一起换了）。 */
 const listTopDevelopersCachedRaw = cached(
   async (limit: number) => listTopDevelopers(limit),
-  ['sb:developers:top', 'v2'],
+  ['sb:developers:top', 'v3'],
   { revalidate: TOP_DEVELOPERS_REVALIDATE_SECONDS }
 );
 

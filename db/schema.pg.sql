@@ -297,3 +297,62 @@ alter table user_favorites  enable row level security;
 alter table feedback        enable row level security;
 alter table game_reports    enable row level security;
 alter table game_comments   enable row level security;
+
+-- ============================================================================
+-- exec_sql：Worker 侧唯一的数据通道（2026-10-20 加）
+--
+-- 为什么需要它：线上是 Cloudflare Workers，**跑不了裸 TCP + TLS** ——
+-- `lib/server/pg.ts` 原来用 `postgres`（porsager）直连 pooler，本地一切正常、
+-- 上线后全站 500（写第一条 PG 报文就断，见该文件头注释）。改成走 Supabase 的
+-- HTTPS RPC 后，Worker 只需要 fetch，不再碰 socket。
+--
+-- 它做的事很简单：收一句 SQL，跑完，把结果行当 jsonb 数组回出去。全站 60 多处
+-- `query(sql, params)` 一行都不用改，JOIN / 聚合 / `RETURNING` 全都还在。
+--
+-- ⚠️ **这是一个「任意 SQL 执行器」**，等于数据库全权限。所以：
+--    · `security definer` + 固定 `search_path`，避免被调用方篡改解析路径；
+--    · `revoke … from public, anon, authenticated`，只 `grant` 给 service_role ——
+--      用浏览器端的 publishable key 调它会被直接拒绝；
+--    · 密钥只在服务端（`SUPABASE_SECRET_KEY`），绝不能加 `NEXT_PUBLIC_` 前缀。
+--
+-- ⚠️ 两个包法是有原因的，别「统一」成一个：
+--    · 有结果集的语句（SELECT / 带 RETURNING 的写）走 CTE 包一层再 `jsonb_agg`；
+--      `as materialized` 是**必须**的 —— 不加的话 PG 会把 CTE 内联掉，
+--      `order by … limit n` 的顺序就不保证了，历史 / 评论列表会乱序。
+--    · 不带 RETURNING 的写语句（`insert … values (…)`）不能被引用，
+--      引用会报 `WITH query does not have a RETURNING clause`，此时裸跑一遍即可。
+-- ============================================================================
+create or replace function public.exec_sql(stmt text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  result jsonb;
+begin
+  if stmt is null or btrim(stmt) = '' then
+    return '[]'::jsonb;
+  end if;
+
+  begin
+    execute format(
+      'with __r as materialized (%s)
+       select coalesce(jsonb_agg(to_jsonb(__r)), ''[]''::jsonb) from __r', stmt
+    ) into result;
+  exception
+    when others then
+      if sqlerrm like '%RETURNING clause%' then
+        execute stmt;
+        return '[]'::jsonb;
+      end if;
+      raise;
+  end;
+
+  return coalesce(result, '[]'::jsonb);
+end;
+$$;
+
+revoke all on function public.exec_sql(text) from public;
+revoke all on function public.exec_sql(text) from anon, authenticated;
+grant execute on function public.exec_sql(text) to service_role;

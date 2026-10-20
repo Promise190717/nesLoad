@@ -1,12 +1,19 @@
 /*
  * Supabase 的官方 Node 客户端（`@supabase/supabase-js`）—— 服务端专用入口。
  *
- * ⚠️ **当前没有调用方**（2026-10-20 全站迁完之后的状态）。
- *    数据层统一走 `./pg.ts`（原始 SQL + pooler 直连），因为全站 60 多处
- *    `query(sql, params)` 一行都搬不进链式构建器。这个文件保留下来是因为它是
- *    **唯一能在 Cloudflare Workers 上跑的路子** —— Workers 没有裸 TCP，
- *    `postgres`（porsager）那条路要么挂 Hyperdrive、要么走 `cloudflare:sockets`。
- *    真要上 Workers，就把这里补完再按模块切过去。
+ * ⚠️ **当前没有调用方，也别为了「用官方包」把数据层搬过来**（2026-10-20 之后的状态）。
+ *    全站 60 多处 `query(sql, params)` 是手写 SQL（JOIN / 聚合 / RETURNING），
+ *    一行都搬不进链式构建器。数据层的实际出入口是 `./pg.ts`：
+ *
+ *      HTTPS → PostgREST → `public.exec_sql`（函数定义见 `db/schema.pg.sql` 末尾）
+ *
+ *    也就是说 **HTTPS 这条路已经在走了**，只是走的是「一个通用执行器」而不是
+ *    supabase-js 的链式 API。这个文件留着是因为它的错误类型 / 密钥读取口径
+ *    （`SUPABASE_SECRET_KEY` → `SUPABASE_SERVICE_ROLE_KEY`）还被 `./pg.ts` 沿用；
+ *    哪天真要按表切到官方包，从这里补完即可。
+ *
+ * 为什么不能直连 Postgres：2026-10-20 试过 —— 本地 `next dev` 通，线上 Worker 全站 500。
+ * Cloudflare Workers 里裸 TCP + TLS 建不起可用通道，详见 `./pg.ts` 的文件头。
  *
  * 为什么当初选官方包：它底层就是 PostgREST 的 HTTPS 调用，和原来的 D1 REST 客户端
  * 是同一个形态 —— 不需要 TCP 驱动，本地 `next dev`、Cloudflare Workers 都能跑。

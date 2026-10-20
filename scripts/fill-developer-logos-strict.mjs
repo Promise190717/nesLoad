@@ -32,6 +32,7 @@ import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const NULL_DEAD = process.argv.includes('--null-dead');
+const FIX_SVG = process.argv.includes('--fix-svg');
 const NO_PROXY = process.argv.includes('--no-proxy');
 const limitArg = process.argv.find((arg) => arg.startsWith('--limit='));
 const LIMIT = limitArg ? Number(limitArg.slice('--limit='.length)) : Infinity;
@@ -224,6 +225,8 @@ const failures = [];
 const leftovers = [];
 
 async function main() {
+  if (FIX_SVG) return fixSvgs();
+
   const rows = await sql.unsafe(`
     SELECT d.slug,
            d.image_url,
@@ -239,7 +242,7 @@ async function main() {
     `待处理 ${rows.length} 行死链（${DRY_RUN ? 'dry-run' : '真跑'}，上限 ${Number.isFinite(LIMIT) ? LIMIT : '∞'}）`
   );
 
-  const slice = rows.slice(0, Number.isFinite(LIMIT) ? LIMIT : rows.length);
+  const slice = NULL_DEAD ? [] : rows.slice(0, Number.isFinite(LIMIT) ? LIMIT : rows.length);
 
   for (const row of slice) {
     stats.scanned += 1;
@@ -267,6 +270,47 @@ async function main() {
   );
   for (const failure of failures.slice(0, 30)) console.log(`  ✗ ${failure}`);
   if (failures.length > 30) console.log(`  …（还有 ${failures.length - 30} 条）`);
+  await sql.end();
+}
+
+/**
+ * `--fix-svg`：只修「已经在 R2 上、但浏览器渲染不出来」的 svg（DTD 实体那一类）。
+ * 从 R2 取回字节 → `normalizeSvg()` 展开实体 → 覆盖同一个键。库里的值不用动。
+ */
+async function fixSvgs() {
+  const base = process.env.R2_PUBLIC_BASE.replace(/\/+$/, '');
+  const rows = await sql.unsafe(
+    "SELECT slug, image_url FROM developers WHERE image_url LIKE '/%' AND image_url ILIKE '%.svg' ORDER BY slug"
+  );
+  let fixed = 0;
+  for (const row of rows) {
+    const res = await fetch(base + row.image_url, { signal: AbortSignal.timeout(25_000) });
+    if (!res.ok) {
+      console.log(`  ✗ ${row.slug} HTTP ${res.status}`);
+      continue;
+    }
+    const text = await res.text();
+    if (!/<!ENTITY/i.test(text)) continue;
+    const bytes = normalizeSvg(new TextEncoder().encode(text));
+    const key = row.image_url.replace(/^\/+/, '').split('/').map(decodeURIComponent).join('/');
+    if (DRY_RUN) {
+      console.log(`  [dry] ${row.slug} → 展开实体（${text.length}B → ${bytes.length}B）`);
+      fixed += 1;
+      continue;
+    }
+    await r2.send(
+      new PutObjectCommand({
+        Bucket,
+        Key: key,
+        Body: bytes,
+        ContentType: 'image/svg+xml',
+        CacheControl: 'public, max-age=2592000',
+      })
+    );
+    fixed += 1;
+    console.log(`  ✓ ${row.slug} 已就地修好（${text.length}B → ${bytes.length}B）`);
+  }
+  console.log(`\n检查 ${rows.length} 个 svg，修好 ${fixed} 个${DRY_RUN ? '（dry-run）' : ''}`);
   await sql.end();
 }
 
