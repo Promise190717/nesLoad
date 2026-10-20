@@ -40,8 +40,11 @@ import { resolveSiteOrigin } from '@/lib/site';
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** 每页几款游戏。和 `/games` 列表页一致（同一套 5 列网格）。 */
-const PAGE_SIZE = 15;
+/**
+ * 每页几款游戏。**2026-10-20 用户要求从 15 提到 20**（5 列网格正好四整行），
+ * 于是它和 `/games` 列表页（仍是 15）不再同数 —— 改这里别顺手去动别处。
+ */
+const PAGE_SIZE = 20;
 
 /*
  * ⚠️ 键尾**版本号**：条目落在 `.next/cache`，不随部署失效。
