@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare deploy",
+    "cf:deploy": "opennextjs-cloudflare deploy && node --env-file-if-exists=.env.local scripts/next-cache-purge.mjs --yes",
+    "cache:purge": "node --env-file-if-exists=.env.local scripts/next-cache-purge.mjs",
     "test:static": "node scripts/test-static-routing.mjs",
     "test:rom": "node scripts/test-rom-proxy.mjs"
   },

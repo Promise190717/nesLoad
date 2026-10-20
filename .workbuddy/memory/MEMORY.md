@@ -54,6 +54,8 @@
 
 - ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /room /privacy /terms）；发版后 purge CF。
 - 大 ROM 唯一下载路 `lib/http.ts` 的 `fetchRomWithProgress`；`readBodyWithProgress` 只给存档类小文件。R2 无版本控制，删 ROM 永久丢。
-- **ROM 来源 2026-10-20 起分批搬自有 R2**：键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、默认排除 nds/ps1、写 `size_bytes`）。`route.ts` 取片改为**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
+- **ROM 自持范围 = 只有 `arcade` / `nes` / `snes`**（2026-10-20 用户两次收窄后的最终态：893/901 行落 R2，约 3.9 GiB；其余机种 gba/gb/gbc/md/gg/sms/32x/ws/ngp/nds/ps1 一律回上游 `files:`/`site:`，不要再去搬）。键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、`--console=` 非空时完全取代默认排除表、写 `size_bytes`）。`route.ts` 取片**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
+- ⚠️ 上游两个 host **不可互换**：同一文件名常是一边 206 一边 404（如 `avsp.zip` 只在 files 子域）。搬不动时先换另一个 host 探一次，别急着判定「上游没有」。已知 8 个两边都 404：`arcade/sexy-parodius`、`snes/art-of-fighting-snes`、`contra-iii-the-alien-wars-snes`、`dragon-ball-z-super-butoden-3-snes`(fr/ja/ko)、`fushigi-no-dungeon-2-fuurai-no-shiren`(en/ja)。
 - 展示地址一律 `publicUrlOrNull()`；严格版 `publicUrl()` 只给上传/ROM 代理/存档下载。
+- 两个缓存桶脚本，**桶与 `incremental-cache/` 前缀都写死，不接受 `--bucket`/`--prefix` 覆盖**（2026-10-20 加固，此前 `r2-purge` 读 env 的 `R2_BUCKET`＝`games`、`next-cache-purge` 可 `--bucket=games`，裸跑 `--yes` 会连头像/存档/ROM 一起删）：`scripts/next-cache-purge.mjs` = **常规入口**（`pnpm cache:purge`，也是 `cf:deploy` 尾巴，只删旧 buildId 目录、当前那版永远保留，读 `.next/BUILD_ID` 取当前值，取不到就拒删）；`scripts/r2-purge.mjs` = 整桶清空（连当前 buildId 一起删，清完首次访问全现渲染）。改回「按参数选桶」前先想清楚这一点。
 - `pnpm dev` 别在 agent 沙箱起（NODE_OPTIONS 坑，报 Jest worker 2 exceptions）；typecheck 全量 `npx tsc --noEmit --incremental false` 才真；`pnpm build` 交给用户。
