@@ -125,17 +125,30 @@ function toDeveloper(row: DeveloperRow & { game_count?: number }, texts: EntityT
   };
 }
 
-/** 批量加载开发商文案（一次 IN，避免 N+1）。 */
-async function loadDeveloperTexts(slugs: string[]): Promise<Map<string, EntityTexts>> {
+/**
+ * 批量加载开发商文案（一次 IN，避免 N+1）。
+ *
+ * ⚠️ **`description`（多段长介绍）默认不查**（2026-10-20）。理由：前台这一侧已经不用它了
+ *    （详情页正文改成显示 `summary`），而它是**最重的一列** —— 269 家 × 18 语言，
+ *    Supabase 免费版有每月出站流量上限，白拉一遍就是白烧配额。
+ *    只有后台（`listAdminDevelopersPage`，编辑表单要回填四个语言的长介绍）传 `true`。
+ *
+ * ⚠️ 不查的列一律补 `null`，**不是省略 key** —— `EntityText` 三个字段都是必填，
+ *    省掉 key 会让 `localizeEntityTexts` 的逐字段回退在某处突然读到 `undefined`。
+ */
+async function loadDeveloperTexts(
+  slugs: string[],
+  withDescription = false
+): Promise<Map<string, EntityTexts>> {
   if (slugs.length === 0) return new Map();
   const rows = await query<{
     developer_slug: string;
     locale: string;
     name: string | null;
     summary: string | null;
-    description: string | null;
+    description?: string | null;
   }>(
-    `SELECT developer_slug, locale, name, summary, description
+    `SELECT developer_slug, locale, name, summary${withDescription ? ', description' : ''}
        FROM developer_texts WHERE developer_slug IN (${slugs.map(() => '?').join(',')})`,
     slugs
   );
@@ -146,7 +159,7 @@ async function loadDeveloperTexts(slugs: string[]): Promise<Map<string, EntityTe
     map.get(r.developer_slug)![r.locale as import('@/lib/game-text').ContentLocale] = {
       name: r.name,
       summary: r.summary,
-      description: r.description,
+      description: withDescription ? (r.description ?? null) : null,
     };
   }
   return map;
@@ -257,13 +270,13 @@ export async function countDevelopersCached(keyword: string): Promise<number> {
 }
 
 /**
- * 列表缓存键 v4：2026-10-20 第二批厂标补完后，把 136 行死链换成本站路径 / 置空，
- * 缓存里存的 `imageUrl` 得整体重算（v3 是排序口径那次）。
+ * 列表缓存键 v5：2026-10-20 起 `loadDeveloperTexts` 不再查 `description`，
+ * 条目里那层 `texts` 的形状变了（v4 是补厂标那次）。
  */
 const listDevelopersCachedRaw = cached(
   async (offset: number, limit: number, keyword: string) =>
     listDevelopers(offset, limit, { keyword }, await countDevelopers({ keyword })),
-  ['sb:developers:list', 'v4'],
+  ['sb:developers:list', 'v5'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
 
@@ -288,10 +301,10 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
   return rows.map((r) => toDeveloper(r, textsMap.get(r.id) ?? {}));
 }
 
-/** 同上，首页「游戏最多的前 N 家」也得跟着失效（厂标一起换了）。 */
+/** 同上，首页「游戏最多的前 N 家」也得跟着失效（v4 = 不再查 `description` 那次）。 */
 const listTopDevelopersCachedRaw = cached(
   async (limit: number) => listTopDevelopers(limit),
-  ['sb:developers:top', 'v3'],
+  ['sb:developers:top', 'v4'],
   { revalidate: TOP_DEVELOPERS_REVALIDATE_SECONDS }
 );
 
@@ -379,7 +392,7 @@ export async function listAdminDevelopersPage(
 
   const hasMore = rows.length > pageLimit;
   const slice = hasMore ? rows.slice(0, pageLimit) : rows;
-  const textsMap = await loadDeveloperTexts(slice.map((r) => r.id));
+  const textsMap = await loadDeveloperTexts(slice.map((r) => r.id), true);
   const developers = slice.map((r) => toDeveloper(r, textsMap.get(r.id) ?? {}));
 
   const last = developers[developers.length - 1];

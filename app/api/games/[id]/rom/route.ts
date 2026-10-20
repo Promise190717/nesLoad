@@ -117,6 +117,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     upstream = await fetchRomUpstream(target, request, {
       timeoutMs: UPSTREAM_TIMEOUT_MS,
+      /*
+       * 回源上游时带上访客那组「像浏览器」的头（白名单在 `rom-upstream.ts` 的
+       * `CLIENT_HINT_HEADERS`）—— 目的只是别让每片请求都顶着同一个 `nesLoad/1.0`。
+       *
+       * ⚠️ R2 那条**不带**：对象是我们自己的，不需要伪装；而 UA 一多样，
+       *    同一个 key 在边缘就会被缓存成好几份，命中率白掉。
+       */
+      clientHints: fromUpstream,
       compatibility: fromUpstream ? { userAgent: UPSTREAM_USER_AGENT, referer: `${UPSTREAM_SITE}/` } : undefined,
     });
   } catch (error) {

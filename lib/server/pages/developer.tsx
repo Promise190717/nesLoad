@@ -46,8 +46,10 @@ const PAGE_SIZE = 15;
 /*
  * ⚠️ 键尾**版本号**：条目落在 `.next/cache`，不随部署失效。
  *    2026-10-20 → v2：补了开发商介绍的多语言数据（igs 等），旧条目会继续吐中文正文。
+ *    2026-10-20 → v3：`getDeveloperPageData` 不再查 `description`（免费版出站流量有限），
+ *    条目里 `texts` 的形状变了，旧条目还带着那篇长文。
  */
-const loadDeveloper = cached(async (id: string) => getDeveloperPageData(id), ['static-getDeveloper', 'v2'], { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS, tags: ['developers'] });
+const loadDeveloper = cached(async (id: string) => getDeveloperPageData(id), ['static-getDeveloper', 'v3'], { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS, tags: ['developers'] });
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
@@ -136,9 +138,12 @@ function buildJsonLd(
         '@id': `${url}#organization`,
         name: text.name,
         url,
-        ...(text.description || text.summary
-          ? { description: text.description ?? text.summary ?? undefined }
-          : {}),
+        /*
+         * ⚠️ 2026-10-20 起页面正文只显示**简述**（长介绍 `description` 连查都不查了，
+         *    见 `lib/server/developers.ts` 的 `loadDeveloperTexts`），
+         *    所以结构化数据也只取简述 —— 结构化数据与可见内容不一致是要被判作弊的。
+         */
+        ...(text.summary ? { description: text.summary } : {}),
         ...(developer.imageUrl ? { logo: developer.imageUrl } : {}),
         ...(developer.website ? { sameAs: developer.website } : {}),
         ...(developer.foundedYear ? { foundingDate: String(developer.foundedYear) } : {}),
@@ -197,6 +202,14 @@ export default async function DeveloperDetailPage({
   // 越界（这家公司的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
   if (page > pageCount) redirect(developerHref(locale, id, pageCount));
 
+  /*
+   * 正文那一段话（2026-10-20 用户要求）：**只显示简述**。
+   * 后台那篇多段长介绍（`description`）现在**从数据层就不查了** —— 免费版 Supabase
+   * 有每月出站流量上限，269 家 × 18 语言的长文白拉一遍就是白烧配额。
+   * 所以这里没有「简述为空就退回长介绍」的兜底：那一列根本不在手里。
+   */
+  const blurb = text.summary ?? undefined;
+
   const facts: { label: string; value: string }[] = [
     ...(developer.foundedYear
       ? [{ label: t('developersPage.field.founded'), value: String(developer.foundedYear) }]
@@ -212,8 +225,11 @@ export default async function DeveloperDetailPage({
       locale={locale}
       label="DEVELOPER"
       title={text.name}
-      intro={text.summary ?? undefined}
       /*
+       * ⚠️ 2026-10-20：**不再往页头塞 `intro`**（用户要求「名字下面那条简述挪下去」）——
+       *    页头只留 label + 名字，那句简述挪到下面厂标右边（见 `blurb`），
+       *    同一段话在两处出现就是重复。
+       *
        * 左上那颗是「返回」而不是「全部开发商」：走**浏览器回退**（`mode: 'history'`）——
        * 用户可能是从 `/developers` 列表或某款游戏详情页点进来的，回上一页比写死回
        * `/developers` 准（和游戏详情页左上那条同一条规矩）。
@@ -257,17 +273,15 @@ export default async function DeveloperDetailPage({
 
         <div className="min-w-0 flex-1">
           {/*
-            正文就是后台填的「介绍」。没填就一个字都不画 ——
-            这一页不像游戏详情页有「《X》是一款 NES 游戏」那种能兜住的话，
-            与其编一句废话，不如让版式干净点（下面的资料表和游戏列表已经说明了一切）。
+            这一段现在放的是**简述**（`blurb` = `text.summary`），也就是原先页头
+            「名字下面那句话」（2026-10-20 用户要求挪到这里、同时取消原来那篇四段长介绍）。
 
-            ⚠️ 用 `Paragraphs` 而不是 `whitespace-pre-wrap` 的单个 `<p>`：库里的介绍是
-            多段、段间存 `\n\n`，pre-wrap 会把空行照样画出来（一段之间空 28px）。
-            见 components/Paragraphs.tsx 的注释。
+            ⚠️ 用 `Paragraphs` 而不是单个 `<p>`：简述虽然通常只有一行，但后台是自由文本框，
+            多段照样可能发生（段间存 `\n\n`）。见 components/Paragraphs.tsx 的注释。
           */}
-          {text.description && (
+          {blurb && (
             <Paragraphs
-              text={text.description}
+              text={blurb}
               className="text-[13px] leading-7 text-ink-300"
             />
           )}
