@@ -271,6 +271,38 @@ export default async function GameDetailPage({
   const jsonLd = buildJsonLd(origin, locale, game, text, t);
 
   /*
+   * 多语言 ROM（`Game.romLanguages`，见 lib/server/sb-games.ts）。
+   *
+   * 一款游戏在 `game_roms` 里可能有四行（中 / 英 / 日 / 韩），而 `game.language`
+   * 只是**默认那一份**（按 `GAME_LANGUAGES` 顺序取到的第一个）—— 所以页面上要列语言时
+   * 必须看 `romLanguages`，只看 `game.language` 会把多语言游戏显示成单一语言。
+   *
+   * `defaultRomLanguage` 只给**不弹框的两条路**用（下载钮 / 单语言直达）：界面语言那一份
+   * → 英文 → 第一份（和上游详情页的默认口径一致）。弹框里**刻意不预选**任何一项，
+   * 得先点一项、再点确认（见 GameLanguageActions 头部 2026-10-19 第三轮那段）。
+   */
+  const romLanguages = game.romLanguages ?? [];
+  const romLanguageCodes = romLanguages.map((item) => item.code);
+  /*
+   * ⚠️ 走 `romLanguageOptions` 而不是自己拼：它只认 `GAME_LANGUAGES` 那四个短码，
+   *    后台的 `und` 哨兵、上游的 `es` / `zh-tw` 这些都会被滤掉 ——
+   *    页面上不该冒出 `und` 这种不是给人看的东西。
+   */
+  const romLanguageOptions = romLanguageChoices(romLanguageCodes);
+  const defaultRomLanguage = defaultRomLanguageOf(romLanguageCodes, locale);
+
+  /*
+   * 语言那一格 / 标题摘要里那截 —— **有几份 ROM 就列几份**（`简体中文 / English / 日本語`）。
+   *
+   * ⚠️ 2026-10-20 修：以前这里读的是 `game.language`（= 默认那一份），
+   *    于是「四语言」的游戏在页面上只显示一个「简体中文」（用户反馈）。
+   *    一份都认不出来时（`romLanguages` 为空，或全是 `und` 之类）回落到 `game.language`，
+   *    老数据的行为不变。
+   */
+  const languageLabel =
+    romLanguageOptions.map((item) => item.label).join(' / ') || gameLanguageLabel(game.language);
+
+  /*
    * 资料那一行行。**空的不占位**（后台所有字段都是选填）——
    * 一排「系列：—」比少一行更难看，对爬虫也毫无信息。
    * 机种永远有（它是必填列），排在第一个。
@@ -307,12 +339,14 @@ export default async function GameDetailPage({
     /*
      * 「语言」那一行走**全称**（`简体中文` / `English` / `日本語` / `한국어`），
      * 和列表卡片上的角标共用同一份文案 —— 2026-10-15 之前这里显示的是 `ZH` / `EN` 短码。
+     * ⚠️ 值取 `languageLabel`（这一款**全部** ROM 语言，见上面那段注释），
+     *    不是 `game.language`（那只是默认那一份）。
      */
-    ...(game.language
+    ...(languageLabel
       ? [
           {
             label: t('gamesPage.field.language'),
-            value: gameLanguageLabel(game.language) ?? game.language,
+            value: languageLabel,
           },
         ]
       : []),
@@ -323,29 +357,10 @@ export default async function GameDetailPage({
    * 它要的是**纯文本** —— 不能拿上面那份 `facts` 去 join（值里有 `<Link>`，
    * join 出来会是 `[object Object]`），所以另拼一份。
    */
-  /* 语言那截同样走全称（见上面 facts 里那条注释）—— `null` 会被 filter 掉 */
-  const introLine = [game.year ? String(game.year) : null, text.developer, text.series, gameLanguageLabel(game.language)]
+  /* 语言那截同样走全称、且列全（见上面 `languageLabel`）—— `null` 会被 filter 掉 */
+  const introLine = [game.year ? String(game.year) : null, text.developer, text.series, languageLabel]
     .filter(Boolean)
     .join(' · ');
-
-  /*
-   * 多语言 ROM（`Game.romLanguages`，见 lib/server/games.ts）。
-   * 数据库那条路永远是空数组 ⇒ 语言只在真有多份时才参与（弹框见
-   * `components/GameLanguageActions.tsx`），视觉与以前一字不差。
-   *
-   * ⚠️ 2026-10-19 起**评论 / 收藏 / 举报在源站模式下照旧显示**（用户要求）：
-   *    这些数据始终写我们自己的 D1，`game_id` 就是上游 slug ——
-   *    写的时候由 `getGameForWrite()` 去上游认这一款，读的时候 `loadGameCards()`
-   *    也会去上游补资料（见 lib/server/user-data.ts），不依赖 `games` 表里有没有这一行。
-   *
-   * `defaultRomLanguage` 只给**不弹框的两条路**用（下载钮 / 单语言直达）：界面语言那一份
-   * → 英文 → 第一份（和上游详情页的默认口径一致）。弹框里**刻意不预选**任何一项，
-   * 得先点一项、再点确认（见 GameLanguageActions 头部 2026-10-19 第三轮那段）。
-   */
-  const romLanguages = game.romLanguages ?? [];
-  const romLanguageCodes = romLanguages.map((item) => item.code);
-  const romLanguageOptions = romLanguageChoices(romLanguageCodes);
-  const defaultRomLanguage = defaultRomLanguageOf(romLanguageCodes, locale);
 
   return (
     <GamesShell

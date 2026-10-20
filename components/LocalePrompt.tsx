@@ -20,8 +20,10 @@ import { useI18n } from './I18nProvider';
  * 它挂在根布局里（每个页面都在），因为内容页同样需要 —— 从搜索点进 `/games` 的人
  * 也可能是个中文用户。后台除外（不做语言前缀，也没有切换入口）。
  *
- * **它是非模态的**（底部一条，没有全屏背板、不锁焦点）：语言只是「要不要换个说法」，
- * 不该把整间屋子挡在下面 —— 用户完全可以先拖着 ROM 玩，回头再理它。
+ * **它是模态的**（全屏暗幕 + 居中，2026-10-20 用户改）：原来是底部一条、没有背板，
+ * 结果在房间场景里既不在视口正中、也没有遮罩，看着像个贴错位置的浮条。
+ * 现在和别的面板一样：整屏压暗、卡片居中，必须先答「切换 / 保持」才继续。
+ * 代价是它会挡住拖 ROM 的手，但正因为要用户当场决定，挡一下才对。
  *
  * ⚠️ 和操作指引（OnboardingTour）**排队**：指引是 z-[60] 的全屏暗幕，两者同时在场
  * 会把这条压暗、还点不动。靠 `TOUR_OPEN_EVENT` / `TOUR_DONE_EVENT` 让路，
@@ -107,10 +109,20 @@ export default function LocalePrompt() {
   /*
    * 计时器**只在卸载时收**。放进上面那个 effect 的清理里会坏掉：
    * 客户端导航会让依赖变化、跑一次清理，把还没到点的计时器清掉，之后再也不会重排。
+   *
+   * ⚠️ **清掉之后必须把 `timer.current` 置回 null**（2026-10-20 修）：
+   * `reactStrictMode` 在**开发环境**会把 effect 跑成 mount → unmount → mount。
+   * 第一轮 `schedule()` 设了计时器，unmount 时这里把它 clear 了，但句柄还留在
+   * ref 里；第二轮挂载 `schedule()` 第一句就是 `if (timer.current !== null) return`，
+   * 被这枚**已经失效的句柄**挡回去 —— 新的计时器永远不排，`open` 一直是 false。
+   * 现象就是「dev 下这个提示死活不出来，生产构建（不双挂载）却正常」。
    */
   useEffect(
     () => () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current);
+        timer.current = null;
+      }
     },
     []
   );
@@ -130,16 +142,19 @@ export default function LocalePrompt() {
   const targetLabel = LOCALE_OPTIONS.find((option) => option.value === target)?.label ?? target;
 
   return (
-    <div className="fixed inset-x-0 bottom-6 z-[55] flex justify-center px-6">
+    <div className="fixed inset-0 z-[55] flex items-center justify-center px-6">
       {/*
         z-[55]：夹在面板（z-50）和「邀请进房间」（z-[60]）之间。
         要在面板之上 —— 被面板背板压暗会像出了 bug；但别盖过那个真正需要用户
-        当场决定的邀请框。
+        当场决定的邀请框。遮罩同理，跟着外层这个层级走。
       */}
+      <div aria-hidden className="absolute inset-0 bg-ink-950/70" />
+
       <div
         role="dialog"
+        aria-modal="true"
         aria-label={t('localePrompt.title')}
-        className="pixel-edge pxw-4 pxc-600 w-[380px] max-w-full bg-ink-800"
+        className="relative pixel-edge pxw-4 pxc-600 w-[380px] max-w-full bg-ink-800"
       >
         <div className="flex items-center border-b-2 border-ink-900 bg-ink-850 px-4 py-2.5">
           <span className="text-[12px] text-ink-200">{t('localePrompt.title')}</span>

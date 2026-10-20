@@ -97,7 +97,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   if (roms.length === 0) return new Response('not found', { status: 404 });
 
-  const picked = (lang ? roms.find((rom) => rom.language === lang) : null) ?? roms[0];
+  /*
+   * 取哪一份（2026-10-20 起「自有 R2 优先」）：
+   *   ① `?lang=` 给了 → 先只看这个语言，其中优先 `r2:`，没有才回上游；
+   *   ② 没给 → 任意语言里优先 `r2:`，一份都没有才用第一份。
+   * 顺序不能反：先挑语言再挑来源，否则 `?lang=ja` 会被「别的语言的 r2」抢走。
+   * 自有对象不经过上游 WAF（没有 challenge、没有兼容重试），能挑就挑它。
+   */
+  const candidates = lang ? roms.filter((rom) => rom.language === lang) : roms;
+  const picked =
+    candidates.find((rom) => rom.sourceUrl?.startsWith('r2:')) ?? candidates[0] ?? roms[0];
   const fileName = picked.romName || 'rom';
   const selfHosted = picked.sourceUrl?.startsWith('r2:') ?? false;
   const target = selfHosted
