@@ -2,8 +2,15 @@
  * 后台上传 / 列表接口。
  *
  * POST：multipart/form-data 收「图片 + ROM + 元数据」，先把两个文件传到 R2，
- *       成功后再写 D1（顺序很重要：反过来会出现有记录却没文件的坏数据）。
+ *       成功后再写库（顺序很重要：反过来会出现有记录却没文件的坏数据）。
  * GET ：给后台管理页拉**一页**游戏列表，见下面 GET 的注释。
+ *
+ * ⚠️ 2026-10-20 起数据层换成 Supabase（`@/lib/server/games-admin`）。表结构变了，
+ *    POST 这条路上有两处跟着变：
+ *      · **不再有 `rom_url` 列** —— 本站自持的 ROM 用 `source_url` 的 `r2:` 前缀
+ *        （`r2:/roms/xxx.zip`），和上游那两种 `site:` / `files:` 走同一个字段；
+ *      · **主键是 slug** —— 上游导入那条路可以把 slug 一起传上来（`slug` 字段），
+ *        手动添加不传，由数据层按中文标题生成。
  *
  * 鉴权由本文件的 assertAdmin 自查（接口不挂 middleware，原因见 admin-guard.ts）。
  */
@@ -12,10 +19,17 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/lib/consoles';
-import { CONTENT_LOCALES, isBlankGameText, type GameText, type GameTexts } from '@/lib/game-text';
+import { ADMIN_FORM_LOCALES, CONTENT_LOCALES, isBlankGameText, type GameText, type GameTexts } from '@/lib/game-text';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { findGameDuplicate, insertGame, listAdminGamesPage, MAX_PAGE_SIZE } from '@/lib/server/games';
-import { publicUrl, uploadObject } from '@/lib/server/r2';
+import {
+  findGameDuplicate,
+  insertGame,
+  listAdminGamesPage,
+  MAX_PAGE_SIZE,
+  normalizeRomLanguage,
+} from '@/lib/server/games-admin';
+import { uploadObject } from '@/lib/server/r2';
+import { mediaPath } from '@/lib/server/media';
 import { sourceFileName, toStoredSource } from '@/lib/server/upstream';
 
 export const runtime = 'nodejs';
@@ -53,8 +67,8 @@ function asFile(value: FormDataEntryValue | null): File | null {
  * `{ "zh": { title, series, description }, "en": {…}, "ja": {…}, "ko": {…} }`。
  * 这里收敛成数据层要的 `GameTexts`：
  *   · 只认 `CONTENT_LOCALES` 里那几个 key，别的语言丢掉（上游可能加我们没登记的）；
- *   · **每份补 `developer: null`** —— 厂名不由调用方传，由 `insertGame` 按 `developerId`
- *     反查后写进每一份（见 lib/server/games.ts 的 withDeveloper）；
+ *   · **每份补 `developer: null`** —— 厂名不再是文案快照（`game_texts` 里没有这一列），
+ *     读的时候 JOIN `developer_texts` 现取，所以调用方传不传都没意义；
  *   · 一份里三个字段**全是空**就整份不要（写入时本来也不会建行，见 writeTexts）；
  *   · 空串 / 纯空白一律收敛成 `null`，别把 `" "` 当成「有内容」写进库。
  *
@@ -114,7 +128,12 @@ function parseTextsField(raw: FormDataEntryValue | null): GameTexts | null {
  */
 function flatTexts(form: FormData): GameTexts {
   const texts: GameTexts = {};
-  for (const locale of CONTENT_LOCALES) {
+  /*
+   * ⚠️ 走 `ADMIN_FORM_LOCALES`（表单只渲染这四种，见 components/AdminGames.tsx），
+   *    不是全量 `CONTENT_LOCALES` —— 表单上没有其余语言的栏，多循环只会拼出
+   *    一堆必然为空的栏位名。
+   */
+  for (const locale of ADMIN_FORM_LOCALES) {
     const suffix = locale === 'zh' ? '' : `_${locale}`;
     const text: GameText = {
       title: optionalText(form.get(`title${suffix}`)),
@@ -225,13 +244,19 @@ export async function POST(request: Request) {
   const parsedTexts = parseTextsField(form.get('texts'));
   const texts: GameTexts = parsedTexts?.zh?.title ? parsedTexts : flatTexts(form);
 
-  const id = randomUUID();
-  const imageKey = `images/${id}-${safeName(image.name || 'cover')}`;
   /*
-   * 不存 ROM 时 `rom_url` 写**空串** —— 那列是 NOT NULL，而这一行的 ROM 走 `source_url`。
-   * 两条来源**互斥**：给了源站地址就不再往 R2 传 ROM（见下面 uploadObject 那一段）。
+   * R2 对象 key 里那一段 uuid 以前就是 `games.id`（行主键）。现在主键换成了 slug，
+   * 而手动添加这条路要等数据层算完才知道 slug 是什么，所以 key 单独生成一个。
    */
-  const romKey = sourceUrl ? '' : `roms/${id}-${safeName(rom?.name || 'rom')}`;
+  const assetId = randomUUID();
+  const imageKey = `images/${assetId}-${safeName(image.name || 'cover')}`;
+  /*
+   * ROM 的两条来源**互斥**：给了源站地址就一个字节都不往 R2 传（这正是「不保存 ROM」
+   * 的意义）；没有才上传，并且用 `r2:` 前缀写进**同一个** `source_url` 字段
+   * —— 新表没有 `rom_url` 列（见文件头）。
+   */
+  const romKey = sourceUrl ? null : `roms/${assetId}-${safeName(rom?.name || 'rom')}`;
+  const storedSource = sourceUrl ?? (romKey ? `r2:${romKey}` : null);
   /*
    * 原始文件名（FBNeo 认它当驱动名，改不得）：不下载 ROM 时表单里那份是上游地址的尾部，
    * 优先用表单给的 `rom_name`，没有就从地址尾部推。
@@ -243,14 +268,15 @@ export async function POST(request: Request) {
   try {
     /*
      * 判重必须在**上传之前**：重复就直接拒，别白白把封面和 ROM 传上 R2 ——
-     * 传完再拒会留下一对没人认领的对象（D1 里没有任何一行指向它们）。
+     * 传完再拒会留下一对没人认领的对象（库里没有任何一行指向它们）。
      *
-     * 判据是**同名 + 同机种 + 同语言**（见 lib/server/games.ts 的 findGameDuplicate）：
+     * 判据是**同名 + 同机种 + 同语言**
+     * （见 lib/server/games-admin.ts 的 findGameDuplicate）：
      * 同一款游戏在 NES / SFC / GB 上各有一版是几条合法记录（那是几盘不同的 ROM），
      * 日版 / 美版 / 中文版同理，只按名字拦会全挡在门外。
      * 比较放在服务端做：列表是分页的，前端手里只有当前页，在浏览器里比名字一定会漏。
      */
-    const duplicate = await findGameDuplicate(title, language, consoleType);
+    const duplicate = await findGameDuplicate(title, normalizeRomLanguage(language), consoleType);
     if (duplicate) {
       // 顺带把命中那条的机种与语言说出来 —— 「同名但机种 / 语言不同」是放行的，
       // 用户得看得见差在哪
@@ -263,21 +289,25 @@ export async function POST(request: Request) {
 
     await uploadObject(imageKey, new Uint8Array(await image.arrayBuffer()), image.type || 'application/octet-stream');
     /*
-     * 有源站地址就**一个字节都不往 R2 存**（2026-10-16）—— 这正是「不保存 ROM」的意义所在。
+     * 有源站地址就**一个字节都不往 R2 存** —— 这正是「不保存 ROM」的意义所在。
      * 没有时照旧上传；ROM 一律按二进制流上传，别让 R2 自作主张改 Content-Type。
      */
-    if (!sourceUrl) {
+    if (romKey) {
       await uploadObject(romKey, new Uint8Array(await rom!.arrayBuffer()), 'application/octet-stream');
     }
 
     const { group, ...game } = await insertGame({
-      id,
-      // 上面那段算好的（`texts` 字段优先，退回中英扁平字段）—— 写入见 lib/server/games.ts
+      // 上游导入那条路知道 slug；手动添加传空，由数据层按中文标题生成
+      slug: optionalText(form.get('slug')),
+      // 上面那段算好的（`texts` 字段优先，退回扁平字段）—— 写入见 lib/server/games-admin.ts
       texts,
-      imageUrl: publicUrl(imageKey),
-      romKey,
-      // 源站地址（不存 ROM 时才有值）；null = 本站自持，前台读 R2
-      sourceUrl,
+      // 只存路径（`/images/<uuid>-<文件名>`），域名渲染时现拼 —— 见 lib/server/media.ts
+      imageUrl: mediaPath(imageKey),
+      /*
+       * 站内形态的来源地址：`site:/…` / `files:/…`（上游）或 `r2:/…`（本站自持）。
+       * 前台 ROM 代理按前缀分派（见 app/api/games/[id]/rom）。
+       */
+      sourceUrl: storedSource,
       // 存**原始文件名**：FBNeo 是拿 zip 文件名认驱动的，改名会让街机起不来
       romName,
       consoleType,
@@ -285,9 +315,9 @@ export async function POST(request: Request) {
       language,
       year,
       /*
-       * 开发商：表单里是一个下拉框，传上来的是 **developers.id**（不是名字）。
-       * 名字由 `insertGame` 反查后一起写进 `games.developer`（快照列）与 `game_texts`，
-       * 免得让「id 与名字」两处由调用方各自维护（见 lib/server/games.ts 的 resolveDeveloper）。
+       * 开发商：表单里是一个下拉框，传上来的是 **developers.slug**（就是它的 id）。
+       * 名字不再冗余进文案表 —— `game_texts` 里没有厂名列，读的时候 JOIN
+       * `developer_texts` 现取（见 lib/server/sb-games.ts 的 loadGameTexts）。
        */
       developerId: optionalText(form.get('developer_id')),
     });

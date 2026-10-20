@@ -11,7 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { assertUser } from '@/lib/server/app-guard';
-import { getGameForWrite, localizeTexts } from '@/lib/server/games';
+import { getGameForWrite, localizeTexts } from '@/lib/server/sb-games';
 import { clearUserHistory, listUserHistory, recordHistory } from '@/lib/server/user-data';
 
 export const runtime = 'nodejs';

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEve
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AdminLoading from './AdminLoading';
+import { entityInitial } from '@/lib/entity-text';
 
 /** `/api/admin/developers` 返回的条目。 */
 interface AdminDeveloper {
@@ -398,7 +399,7 @@ export default function AdminDevelopers() {
                   />
                 ) : (
                   <span className="pixel-edge pxw-2 pxc-700 flex h-[36px] w-[36px] shrink-0 items-center justify-center bg-ink-900 text-[13px] text-ink-500">
-                    {Array.from(developer.name)[0] ?? '?'}
+                    {entityInitial(developer.name)}
                   </span>
                 )}
 

@@ -16,28 +16,70 @@
  * 一行 `game_texts` = 「一款游戏在某个语言下的文案」。字段可空 ——
  * 空了**逐字段回退**（见 `localizeTexts`），所以「只翻了标题、说明还没翻」是合法状态。
  *
- * ⚠️ **`ContentLocale` 比界面语言宽**：界面现在只有中英（`Locale`，见 lib/i18n.ts），
- *    但日韩的内容可以先把数据录进来，等界面开了直接用。加语言的成本是
- *    「往 `CONTENT_LOCALES` 加一个值 + 插数据」，**不动任何表结构**。
- *    界面语言要跟着加时，改的是 lib/i18n.ts 的 `LOCALES`，两件事分开。
+ * ⚠️ **`ContentLocale` 与界面语言一一对应**（2026-10-20 起同为 18 种）：
+ *    界面 `Locale`（lib/i18n.ts）扩到 18 种时内容语言跟着补齐 —— 上游站的
+ *    语言切换器正好也是这 18 种，每款游戏在哪个语言下都有真翻译可抓。
+ *    加语言的成本是「往 `CONTENT_LOCALES` 加一个值 + 往库里插数据」，**不动任何表结构**。
  *
  * ⚠️ `LocalizedGameText` 是**取完之后**的形状：各个字段都变成单个值，
  *    可以直接往页面上印。`title` 是 `string`（不是 `string | null`）——
  *    它是这张卡片的身份，页面上任何地方都不该出现空标题（见下面 `anyTitle` 的兜底）。
  */
 
-/** 内容语言清单。**唯一出处** —— 加语言只改这里（表结构不动）。 */
-export const CONTENT_LOCALES = ['zh', 'en', 'ja', 'ko'] as const;
+/**
+ * 内容语言清单。**唯一出处** —— 加语言只改这里（表结构不动）。
+ *
+ * ⚠️ **2026-10-20 从 4 种扩到 18 种**，与界面 `LOCALES`（lib/i18n.ts）逐项对齐，
+ *    也与上游站的 hreflang 逐项对齐（实测 `https://retrogamesnexus.com/` 的
+ *    alternate 链接就是这 18 个前缀）。顺序：中文第一（原文必填、anyTitle 兜底
+ *    从它起），其余按界面语言的顺序排。每补一种语言 = 往库里插对应行，见
+ *    `scripts/fill-game-texts-locales.mjs`。
+ */
+export const CONTENT_LOCALES = [
+  'zh',
+  'en',
+  'ja',
+  'ko',
+  'zh-TW',
+  'es',
+  'hi',
+  'pt',
+  'fr',
+  'de',
+  'it',
+  'ru',
+  'fil',
+  'nl',
+  'vi',
+  'th',
+  'ms',
+  'id',
+] as const;
 
-/** 内容语言的短码。比界面语言 `Locale`（zh | en）宽。 */
 export type ContentLocale = (typeof CONTENT_LOCALES)[number];
+
+/**
+ * 后台**表单**编辑的语言子集（仍是中英日韩）。
+ *
+ * 为什么不是全量 18 种：后台那两个表单的文案块 / 字段后缀
+ * （`AdminGames.tsx` 的 `FORM_SUFFIX` / `PATCH_SUFFIX`、`[id]/route.ts` 的扁平字段）
+ * 是**接口契约**，18 块语言表单既没法用也改不起；其余 14 种的文案由
+ * 回填脚本（`fill-game-texts-locales.mjs`）与爬取写入，后台不提供编辑入口。
+ *
+ * ⚠️ 服务端的 `parseTextsField`（texts JSON）与 `writeTexts` 仍走全量
+ *    `CONTENT_LOCALES` —— `writeTexts` 只动传进来的语言，表单只带四种
+ *    不会碰掉其余 14 种的行（这正是它注释里预留的场景）。
+ */
+export const ADMIN_FORM_LOCALES = ['zh', 'en', 'ja', 'ko'] as const;
+
+export type AdminFormLocale = (typeof ADMIN_FORM_LOCALES)[number];
 
 /**
  * 一款游戏的**操作说明**（2026-10-19 加）。
  *
- * 只有**源站数据**里有（上游详情页的 `controls` 字段，四语言各一份真翻译）；
- * 数据库那张 `game_texts` 表没有这一列，所以 D1 模式下永远是 `null`，
- * 详情页据此整块不渲染 —— 见 `app/[locale]/games/[id]/page.tsx`。
+ * 源站数据与 `game_texts.controls`（jsonb）里都有 —— 上游详情页/列表载荷的
+ * `controls` 字段四语言（现在是 18 语言）各一份真翻译；
+ * 后台表单没有这一栏（见 `writeTexts` 的 `COALESCE`：表单没带不清库）。
  *
  * ⚠️ 上游给的是 `keys` 对象（`{"方向键":"移动","A":"跳跃"}`），这里转成**数组**：
  *    JS 对象保序，转数组后顺序与上游页面一致；`Record` 直接往下传会让渲染端
@@ -50,6 +92,64 @@ export interface GameControls {
   keys: { label: string; action: string }[];
 }
 
+/**
+ * 把**来路不明**的 `controls` 收敛成 `GameControls | null`（2026-10-20 加）。
+ *
+ * 为什么必须有这一道：`controls` 有三种来路，**每一种都没法保证 `keys` 是数组**——
+ *   · Supabase 里是 `jsonb`（`db/schema.pg.sql`），驱动解析出来是什么全看列的真实类型
+ *     （列建成了 `text` 就回来一个**字符串**）；
+ *   · 源站那条路是上游对象（`{keys: {"方向键":"移动"}}`，键位是**对象**不是数组）；
+ *   · 缓存（`unstable_cache`）里是 JSON 往返之后的值。
+ *
+ * 实测踩过：详情页 `text.controls.keys.length` 直接
+ * `TypeError: Cannot read properties of undefined (reading 'length')` —— 某行
+ * `controls` 是个只有 `description` 的对象（或整列回来是字符串），
+ * 类型上写着 `keys: [...]`，运行时根本没有。
+ *
+ * 认三种形态：标准 `{description, keys:[{label,action}]}`、上游对象形态、
+ * JSON 字符串；描述与键位**都空**时返回 `null`（详情页据此整块不渲染）。
+ * 键位里缺 label / action 的条目会被丢掉（画出来会是一行空白）。
+ */
+export function normalizeControls(raw: unknown): GameControls | null {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== 'object') return null;
+
+  const source = value as { description?: unknown; keys?: unknown };
+  const description =
+    typeof source.description === 'string' && source.description.trim()
+      ? source.description.trim()
+      : null;
+
+  const keys: { label: string; action: string }[] = [];
+  const push = (label: unknown, action: unknown) => {
+    const text = typeof label === 'string' ? label.trim() : '';
+    const meaning = typeof action === 'string' ? action.trim() : '';
+    if (text && meaning) keys.push({ label: text, action: meaning });
+  };
+
+  if (Array.isArray(source.keys)) {
+    for (const item of source.keys) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as { label?: unknown; action?: unknown };
+      push(entry.label, entry.action);
+    }
+  } else if (source.keys && typeof source.keys === 'object') {
+    /* 上游原始形态：`{"方向键":"移动"}` —— `Object.entries` 对字符串键保序 */
+    for (const [label, action] of Object.entries(source.keys as Record<string, unknown>)) {
+      push(label, action);
+    }
+  }
+
+  return description || keys.length > 0 ? { description, keys } : null;
+}
+
 /** 一款游戏在**某个语言**下的文案。四个字段都可空 —— 空 = 没翻，逐字段回退。 */
 export interface GameText {
   title: string | null;
@@ -57,8 +157,8 @@ export interface GameText {
   developer: string | null;
   description: string | null;
   /**
-   * 操作说明。**可选** —— 后台表单 / `game_texts` 表都没有这一栏，
-   * 只有源站那条路（`lib/server/upstream-catalog.ts`）会填。
+   * 操作说明。**可选** —— 后台表单没有这一栏，由爬取 / 回填脚本从上游写入
+   * （`game_texts.controls`，jsonb）。
    */
   controls?: GameControls | null;
 }
@@ -96,13 +196,16 @@ export const EMPTY_GAME_TEXT: GameText = {
 
 /** 一份文案里**有没有任何内容** —— 全空的行不建、不写（见 `GameTexts` 那段）。 */
 export function isBlankGameText(text: GameText): boolean {
+  /*
+   * `controls` 先过 `normalizeControls` 再判：直接读 `text.controls.keys.length`
+   * 会在「只有 description、没有 keys」的行上抛 TypeError（2026-10-20 踩过）。
+   */
   return (
     !text.title &&
     !text.series &&
     !text.developer &&
     !text.description &&
-    !text.controls?.description &&
-    !(text.controls?.keys.length ?? 0)
+    !normalizeControls(text.controls)
   );
 }
 
@@ -123,11 +226,28 @@ function anyTitle(texts: GameTexts): string | null {
 }
 
 /**
- * 按语言取一条游戏的文案。**目标语言缺哪个字段，就回退中文的那一个**（逐字段，不是整份）。
+ * 逐字段回退链（`localizeTexts` / `localizeEntityTexts` 共用，别再各抄一份）。
  *
- * 规则：
+ * 返回**除本语言以外**要依次尝试的语言清单：目标语言某字段空了，
+ * 按这个顺序找第一个非空的。规则见 localizeTexts 上方那段注释。
+ */
+export function entityFallbackChain(locale: string): string[] {
+  if (locale === 'zh') return [];
+  if (locale === 'zh-TW') return ['zh', 'en'];
+  if (locale === 'en') return ['zh'];
+  return ['en', 'zh'];
+}
+
+/**
+ * 按语言取一条游戏的文案。**目标语言缺哪个字段，就按回退链找第一个有的**（逐字段，不是整份）。
+ *
+ * 规则（2026-10-20 起**回退链**化）：
  *   · 中文站 —— 直接返回中文原文（**不做回退**，原文就是「这一份」）；
- *   · 其他语言 —— 优先该语言，空了回退中文，中文也空就是 `null`；
+ *   · zh-TW —— 该语言空了回退简体中文，再空回退英文（同文种最省力）；
+ *   · en —— 空了回退中文；
+ *   · 其余 16 种（ja/ko/14 新语言）—— 空了**先回退英文、再回退中文**：
+ *     这 16 种的内容行已基本齐全，回退只发生在长尾缺字段的时刻（开发商介绍、
+ *     后补段落），那一刻英文几乎总比中文合适；
  *   · `title` 再兜一层（见 `anyTitle`）—— 它必须是个字符串。
  *
  * 逐字段回退而不是整份回退，是为了让「后台只补了标题、说明还没翻」这种半成品
@@ -138,8 +258,13 @@ function anyTitle(texts: GameTexts): string | null {
  */
 export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameText {
   const wanted = texts[locale as ContentLocale] ?? null;
-  /* 中文站不回退（原文就是这一份）；其他语言回退到中文原文 */
-  const fallback = locale === 'zh' ? null : (texts.zh ?? null);
+  /*
+   * 逐字段回退链（2026-10-20 调整，规则见上面那条注释）：
+   * 缺哪个字段就**按链找第一个非空的**，而不是只看中文一份 ——
+   * 18 种语言里长尾总有个别字段缺失（开发商介绍、后补的段），那一刻
+   * 对绝大多数语言来说英文都比中文合适；只有中文系（zh-TW）优先简体中文。
+   */
+  const chain = entityFallbackChain(locale).map((l) => texts[l as ContentLocale] ?? null);
 
   /*
    * 只有**字符串**那几个字段走逐字段回退。
@@ -147,7 +272,7 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
    *    返回类型 `string | null` 当场报 TS2322（2026-10-19 加 controls 时踩过）。
    */
   const pick = (key: 'title' | 'series' | 'developer' | 'description'): string | null =>
-    wanted?.[key] || fallback?.[key] || null;
+    wanted?.[key] || chain.map((text) => text?.[key]).find(Boolean) || null;
 
   return {
     title: pick('title') ?? anyTitle(texts) ?? '',
@@ -156,9 +281,12 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
     description: pick('description'),
     /*
      * 控制说明**整份回退**（不逐字段）：它是「一段话 + 一张键位表」的组合，
-     * 拿英文的描述配中文的键位比整份退回中文更糟。上游四语言都翻过，
-     * 真缺的时候退回中文原文即可。
+     * 拿英文的描述配中文的键位比整份退回中文更糟。按上面的链整份找第一份有的。
+     *
+     * ⚠️ 出口**必须过 `normalizeControls`**：库里的 `jsonb`、上游的对象形态、
+     *    缓存里的字符串都可能在运行时缺 `keys`，详情页那行 `controls.keys.length`
+     *    不设防会直接 TypeError（2026-10-20 线上踩过）。这里是所有调用方的唯一出口。
      */
-    controls: wanted?.controls ?? fallback?.controls ?? null,
+    controls: normalizeControls(wanted?.controls ?? chain.map((text) => text?.controls).find(Boolean) ?? null),
   };
 }

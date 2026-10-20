@@ -3,9 +3,11 @@
  *
  * 语言是**路径说了算**：
  *   · 英文 —— 默认语言，**不占前缀**（`/`、`/games`、`/games/<id>`）；
- *   · 中文 —— 占 `/zh`（`/zh`、`/zh/games`、`/zh/games/<id>`）；
- *   · 日文 —— 占 `/ja`；韩文 —— 占 `/ko`（2026-10-16 加，规则与中文完全一样）。
- * 所以同一个页面有四个地址，各自一种语言，`hreflang` 互指。
+ *   · 中文 —— 占 `/zh`；繁体 —— `/zh-TW`；
+ *   · 日文 —— `/ja`；韩文 —— `/ko`（2026-10-16 加）；
+ *   · 其余 13 种 —— `/es` `/hi` `/pt` `/fr` `/de` `/it` `/ru` `/fil` `/nl` `/vi`
+ *     `/th` `/ms` `/id`（**2026-10-20 加**，口径与上游站点的语言切换器对齐）。
+ * 所以同一个页面有 **18 个地址**，各自一种语言，`hreflang` 互指。
  *
  * 前台页面都住在 `app/[locale]/` 下（语言是路由参数 `params.locale`），
  * 而**前缀的搬运全在 middleware**（见 middleware.ts）：无前缀会被内部 rewrite 成
@@ -23,14 +25,16 @@
  * 仍按 cookie → Accept-Language 兜底（只写请求头，不引起跳转）。
  *
  * ⚠️ **界面语言（这里）≠ 内容语言**（`lib/game-text.ts` 的 `CONTENT_LOCALES`）。
- * 两者 2026-10-16 起取值恰好都是 zh / en / ja / ko，但是**两套东西**：
+ * 界面 2026-10-20 起是 **18 种**，内容语言仍然只有 zh / en / ja / ko，**这是两套东西**：
  * 这里管的是「按钮上写什么」，那边管的是「库里这款游戏叫什么」。
- * 内容语言的日韩可以**先录数据、界面后开**（界面没开时也能往库里插日韩行）。
+ * 内容语言可以**先录数据、界面后开**，反之亦然（现在就是：18 种界面里，
+ * 只有 4 种能在库里找到对应语言的游戏文案，其余 14 种站看到的是中文原文兜底）。
  *
- * ⚠️ **四张文案表**：`en` / `zh` 在下面（`en` 是基准表，`MessageKey` 由它推导），
- * `ja` / `ko` 在**同目录的独立文件**里（`i18n.ja.ts` / `i18n.ko.ts`）——
- * 理由和 `lib/legal.ts` 当初分出去的一样：四份表全塞进这个文件会把它冲到七千行，
+ * ⚠️ **18 张文案表**：`en` / `zh` 在下面（`en` 是基准表，`MessageKey` 由它推导），
+ * 其余 16 张在**同目录的独立文件**里（`i18n.<code>.ts`）——
+ * 理由和 `lib/legal.ts` 当初分出去的一样：18 份表全塞进这个文件会把它冲到上万行，
  * 谁都翻不动。代价是「加语言」变成「加一个文件 + 改 `messages`」两步，不再是纯改一处。
+ * 每张表都是 `Record<MessageKey, string>`（558 个键），少一个 / 多一个都编译报错。
  *
  * 这里只放「常驻在界面上的文案」。屏幕里没有任何提示语，所以载入失败、存档结果
  * 这类一次性反馈没有对应条目 —— 它们的表现是画面本身（雪花 / 游戏画面）和
@@ -39,14 +43,79 @@
 
 import { ja } from './i18n.ja';
 import { ko } from './i18n.ko';
+import { es } from './i18n.es';
+import { hi } from './i18n.hi';
+import { pt } from './i18n.pt';
+import { fr } from './i18n.fr';
+import { de } from './i18n.de';
+import { it } from './i18n.it';
+import { ru } from './i18n.ru';
+import { fil } from './i18n.fil';
+import { nl } from './i18n.nl';
+import { vi } from './i18n.vi';
+import { th } from './i18n.th';
+import { ms } from './i18n.ms';
+import { id } from './i18n.id';
+import { zhTW } from './i18n.zh-TW';
 
-export type Locale = 'zh' | 'en' | 'ja' | 'ko';
+export type Locale =
+  | 'zh'
+  | 'zh-TW'
+  | 'en'
+  | 'ja'
+  | 'ko'
+  | 'es'
+  | 'hi'
+  | 'pt'
+  | 'fr'
+  | 'de'
+  | 'it'
+  | 'ru'
+  | 'fil'
+  | 'nl'
+  | 'vi'
+  | 'th'
+  | 'ms'
+  | 'id';
 
 /**
  * 全部受支持的语言。遍历前缀 / 生成 hreflang / sitemap 每条路径出几份都从这儿走。
  * **默认语言放第一个**（`x-default` 与无前缀那份都是它）。
+ *
+ * ⚠️ **2026-10-20 从 4 种扩到 18 种**，口径与上游站点（retrogamesnexus.com）的
+ *    语言切换器逐项对齐：`en / zh / zh-TW / ja / ko / es / hi / pt / fr / de / it /
+ *    ru / fil / nl / vi / th / ms / id`。顺序照上游的 `hrefLang` 顺序抄，别随手重排 ——
+ *    hreflang 那组标注只要顺序变了就整组重发一遍，收益为零。
+ *
+ * ⚠️ **加语言要动的清单**（漏一处就是「路由有了、界面还是英文」或者编译报错）：
+ *    ① 这里 + `Locale` 联合类型；
+ *    ② 新文件 `lib/i18n.<code>.ts`（558 个键，与 `en` 逐键对齐）+ 上面的 import + `messages`；
+ *    ③ `LOCALE_OPTIONS` / `LOCALE_SWITCH_LABEL` / `LOCALE_PREFIX` / `SITE_NAME`；
+ *    ④ `HTML_LANG` / `OG_LOCALE` / `DATE_LOCALE`；
+ *    ⑤ `resolveLocale`（浏览器语言标签 → 本站 locale）；
+ *    ⑥ `lib/legal.ts` 的两份法务文档（没翻的语言回退英文，见那边的注释）。
+ *    `middleware.ts` / `sitemap.ts` / `alternatesFor` / 语言下拉**都不用改** —— 它们遍历这份清单。
  */
-export const LOCALES: readonly Locale[] = ['en', 'zh', 'ja', 'ko'];
+export const LOCALES: readonly Locale[] = [
+  'en',
+  'zh',
+  'zh-TW',
+  'ja',
+  'ko',
+  'es',
+  'hi',
+  'pt',
+  'fr',
+  'de',
+  'it',
+  'ru',
+  'fil',
+  'nl',
+  'vi',
+  'th',
+  'ms',
+  'id',
+];
 
 
 /** 兜底语言：任何语言标签都匹配不上时用它。也是**唯一不占前缀**的那个。 */
@@ -55,15 +124,20 @@ export const DEFAULT_LOCALE: Locale = 'en';
 /**
  * 语言选择器的选项。
  *
- * **文字各用本语言写**（中文 / English / 日本語 / 한국어）—— 语言选择器的惯例：
+ * **文字各用本语言写**（简体中文 / English / 日本語 / Español …）—— 语言选择器的惯例：
  * 万一用户看不懂当前界面语言，也得能认出自己要选哪个。
  *
  * ⚠️ 和「切换钮」上那句话（`LOCALE_SWITCH_LABEL`）**刻意不同**：那颗钮是一个动词短语
- *    （「切换到中文」），下拉里的选项只是一个名字（「中文」）。
+ *    （「切换到简体中文」），下拉里的选项只是一个名字（「简体中文」）。
  *
  * ⚠️ **顺序刻意不是 `LOCALES` 的顺序**：`LOCALES` 把默认语言（英文）放第一个是为了
- *    hreflang / sitemap 的稳定顺序；这里排的是「中文 → 英文 → 日文 → 韩文」，
- *    2026-10-13 定下前两项之后 2026-10-16 往后接，别顺手改成 `LOCALES.map(…)`。
+ *    hreflang / sitemap 的稳定顺序；这里原排「中文（简 → 繁）→ 英文 → 日韩 →
+ *    其余按上游语言切换器的顺序」，别顺手改成 `LOCALES.map(…)`。
+ *    2026-10-13 定下「中文优先」，2026-10-16 接日韩，2026-10-20 接其余 14 种；
+ *    同日用户改主意：**英文提到第一位**，其余不变。
+ *
+ * ⚠️ **18 项**：下拉必须能滚（`.locale-options` 的 `max-height` + `overflow-y`，
+ *    见 `app/globals.css`）—— 不加限高会顶出屏幕、底部那几项点不到。
  *
  * 放在 `lib/i18n.ts` 而不是某个组件里：**三处**在用 —— 房间右上角那行
  * （`ConsoleScene`）、内容页顶栏（`components/LocaleSwitcher.tsx`）、
@@ -71,10 +145,24 @@ export const DEFAULT_LOCALE: Locale = 'en';
  * 各写一份的话，加语言时只会改到其中一处。
  */
 export const LOCALE_OPTIONS: readonly { value: Locale; label: string }[] = [
-  { value: 'zh', label: '中文' },
   { value: 'en', label: 'English' },
+  { value: 'zh', label: '简体中文' },
+  { value: 'zh-TW', label: '繁體中文' },
   { value: 'ja', label: '日本語' },
   { value: 'ko', label: '한국어' },
+  { value: 'es', label: 'Español' },
+  { value: 'hi', label: 'हिन्दी' },
+  { value: 'pt', label: 'Português' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'it', label: 'Italiano' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'fil', label: 'Filipino' },
+  { value: 'nl', label: 'Nederlands' },
+  { value: 'vi', label: 'Tiếng Việt' },
+  { value: 'th', label: 'ไทย' },
+  { value: 'ms', label: 'Bahasa Melayu' },
+  { value: 'id', label: 'Bahasa Indonesia' },
 ];
 
 /**
@@ -82,29 +170,61 @@ export const LOCALE_OPTIONS: readonly { value: Locale; label: string }[] = [
  *
  * 为什么不放进文案表（`locale.toZh` / `locale.toEn` 那两个键 2026-10-16 删了）：
  * 那颗钮的读者是**想要另一种语言的人**，所以字必须是他看得懂的那种语言，
- * 而**不是当前页面语言**。放进文案表就得按「目标语言 × 页面语言」开 16 个键，
- * 其中 12 个的取值还都一样 —— 那是把一张 4 行的表摊成矩阵。
+ * 而**不是当前页面语言**。放进文案表就得按「目标语言 × 页面语言」开 18×18 个键，
+ * 其中绝大多数取值还都一样 —— 那是把一张 18 行的表摊成矩阵。
  *
  * 于是规矩一句话：**页面语言决定弹窗正文（`localePrompt.*`），目标语言决定这颗钮。**
  * 前两种语言的写法沿用 2026-10-13 的老文案（中文那份本来就是中文写的，
  * 英文那份本来就是英文写的 —— 只是当年放在 `en` 表里看着像巧合）。
  */
 export const LOCALE_SWITCH_LABEL: Record<Locale, string> = {
-  zh: '切换到中文',
+  zh: '切换到简体中文',
+  'zh-TW': '切換到繁體中文',
   en: 'Switch to English',
   ja: '日本語に切り替える',
   ko: '한국어로 전환',
+  es: 'Cambiar a español',
+  hi: 'हिन्दी में बदलें',
+  pt: 'Mudar para português',
+  fr: 'Passer au français',
+  de: 'Auf Deutsch wechseln',
+  it: "Passa all'italiano",
+  ru: 'Переключить на русский',
+  fil: 'Lumipat sa Filipino',
+  nl: 'Overschakelen naar Nederlands',
+  vi: 'Chuyển sang tiếng Việt',
+  th: 'เปลี่ยนเป็นภาษาไทย',
+  ms: 'Tukar ke bahasa Melayu',
+  id: 'Ganti ke bahasa Indonesia',
 };
 
 /**
  * 各语言的 URL 前缀。**默认语言刻意是空串** —— 英文页不该多一层 `/en`，
  * 那样老地址（`/games`）会全部变成 301，分享出去的链接也跟着变。
+ *
+ * ⚠️ `zh-TW` 的前缀是 `/zh-TW`（**大小写照上游**，不是 `/zh-tw`）。
+ *    middleware 的匹配用的是 `pathname === prefix || pathname.startsWith(prefix + '/')`，
+ *    所以 `/zh` 不会把 `/zh-TW/…` 吃掉 —— 改这里时别把那个斜杠去掉。
  */
 export const LOCALE_PREFIX: Record<Locale, string> = {
   en: '',
   zh: '/zh',
+  'zh-TW': '/zh-TW',
   ja: '/ja',
   ko: '/ko',
+  es: '/es',
+  hi: '/hi',
+  pt: '/pt',
+  fr: '/fr',
+  de: '/de',
+  it: '/it',
+  ru: '/ru',
+  fil: '/fil',
+  nl: '/nl',
+  vi: '/vi',
+  th: '/th',
+  ms: '/ms',
+  id: '/id',
 };
 
 /**
@@ -158,12 +278,33 @@ export const LOCALE_COOKIE = 'nesload_locale';
  *    `ゲーム` 是日语里通用的外来语写法）；韩文取「게임 하우스」（韩文里
  *    `하우스` 作店名 / 品牌后缀比直译「오두막」自然得多）。
  *    改名仍然只动这一处。
+ *
+ * ⚠️ **2026-10-20 加其余 14 种时，口径反过来**：一律沿用英文品牌 `Game Hut`，
+ *    只有 `zh-TW` 跟简体那份走、写「遊戲小屋」（同一个中文品牌，只是字形不同）。
+ *    理由：拉丁字母品牌在 es / fr / de / it / pt / nl / vi / id / ms / fil 里
+ *    直接当专名用是常态，硬译成「Cabaña de Juegos」「Spielehütte」反而像另一个站；
+ *    而 hi / th / ru 里品牌名保留拉丁字母也比音译更好认。
+ *    以后真要本地化某一个，只改那一行即可，别顺手全改。
  */
 export const SITE_NAME: Record<Locale, string> = {
   zh: '游戏小屋',
+  'zh-TW': '遊戲小屋',
   en: 'Game Hut',
   ja: 'ゲーム小屋',
   ko: '게임 하우스',
+  es: 'Game Hut',
+  hi: 'Game Hut',
+  pt: 'Game Hut',
+  fr: 'Game Hut',
+  de: 'Game Hut',
+  it: 'Game Hut',
+  ru: 'Game Hut',
+  fil: 'Game Hut',
+  nl: 'Game Hut',
+  vi: 'Game Hut',
+  th: 'Game Hut',
+  ms: 'Game Hut',
+  id: 'Game Hut',
 };
 
 /** 英文是基准表，中文必须逐键对齐（漏键会在编译期报错）。 */
@@ -2390,7 +2531,31 @@ const zh: Record<MessageKey, string> = {
   'deepLink.hint': '下载完成后自动开始',
 };
 
-const messages: Record<Locale, Record<MessageKey, string>> = { en, zh, ja, ko };
+/*
+ * 语言 → 文案表。**这里的键必须与 `LOCALES` 一一对应**（`Record<Locale, …>` 会在
+ * 编译期盯着），每张表内部再被 `Record<MessageKey, string>` 盯着键是否齐全。
+ * 两张网叠起来 = 「加了语言忘了挂表」和「表里少写一个键」都跑不到运行时。
+ */
+const messages: Record<Locale, Record<MessageKey, string>> = {
+  en,
+  zh,
+  'zh-TW': zhTW,
+  ja,
+  ko,
+  es,
+  hi,
+  pt,
+  fr,
+  de,
+  it,
+  ru,
+  fil,
+  nl,
+  vi,
+  th,
+  ms,
+  id,
+};
 
 export type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
@@ -2480,15 +2645,34 @@ export function splitLocalePath(pathname: string): { locale: Locale; path: strin
  * ⚠️ 英文是**光秃秃的 `en`**（不是 `en-US`）：它同时是 `x-default` 指的那份，
  *    而且当年就是这么定的 —— 改成 `en-US` 会把已有的 hreflang 标注全部换一遍，
  *    收益只有「更精确」，不值得。日韩没有这个包袱，按惯例写全 `ja-JP` / `ko-KR`。
+ *
+ * ⚠️ **2026-10-20 扩到 18 种**：新加的 14 种一律写「语言-地区」全称
+ *    （`es-ES` / `fr-FR` / `pt-BR` …），`zh-TW` 写 `zh-TW`（**和上游的 hrefLang 逐字一致**，
+ *    上游用的是 `zh-TW` 而不是 `zh-Hant`）。`fil` 写 `fil-PH`（菲律宾语的标准标签）。
+ *    返回值类型因此从联合字面量放宽成 `string` —— 18 个标签没必要再列一遍。
  */
-const HTML_LANG: Record<Locale, 'en' | 'zh-CN' | 'ja-JP' | 'ko-KR'> = {
+const HTML_LANG: Record<Locale, string> = {
   en: 'en',
   zh: 'zh-CN',
+  'zh-TW': 'zh-TW',
   ja: 'ja-JP',
   ko: 'ko-KR',
+  es: 'es-ES',
+  hi: 'hi-IN',
+  pt: 'pt-BR',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  it: 'it-IT',
+  ru: 'ru-RU',
+  fil: 'fil-PH',
+  nl: 'nl-NL',
+  vi: 'vi-VN',
+  th: 'th-TH',
+  ms: 'ms-MY',
+  id: 'id-ID',
 };
 
-export function htmlLang(locale: Locale): 'en' | 'zh-CN' | 'ja-JP' | 'ko-KR' {
+export function htmlLang(locale: Locale): string {
   return HTML_LANG[locale];
 }
 
@@ -2497,14 +2681,28 @@ export function htmlLang(locale: Locale): 'en' | 'zh-CN' | 'ja-JP' | 'ko-KR' {
  * `zh_CN` 这种下划线写法，hreflang / `<html lang>` 用的是 `zh-CN` 连字符写法。
  * 看着像同一个东西，写混了爬虫不报错、只是那半边标注失效 —— 所以各留一个函数。
  */
-const OG_LOCALE: Record<Locale, 'en_US' | 'zh_CN' | 'ja_JP' | 'ko_KR'> = {
+const OG_LOCALE: Record<Locale, string> = {
   en: 'en_US',
   zh: 'zh_CN',
+  'zh-TW': 'zh_TW',
   ja: 'ja_JP',
   ko: 'ko_KR',
+  es: 'es_ES',
+  hi: 'hi_IN',
+  pt: 'pt_BR',
+  fr: 'fr_FR',
+  de: 'de_DE',
+  it: 'it_IT',
+  ru: 'ru_RU',
+  fil: 'fil_PH',
+  nl: 'nl_NL',
+  vi: 'vi_VN',
+  th: 'th_TH',
+  ms: 'ms_MY',
+  id: 'id_ID',
 };
 
-export function ogLocale(locale: Locale): 'en_US' | 'zh_CN' | 'ja_JP' | 'ko_KR' {
+export function ogLocale(locale: Locale): string {
   return OG_LOCALE[locale];
 }
 
@@ -2548,19 +2746,41 @@ export function alternatesFor(locale: Locale, path: string) {
 
 /**
  * 把一串语言标签收敛成受支持的 locale。
- * 顺序即优先级：zh-CN → zh，en-GB → en，ja-JP → ja，fr → 跳过继续看下一个。
+ * 顺序即优先级：`zh-CN` → zh，`en-GB` → en，`ja-JP` → ja，认不出的跳过看下一个。
  * 全部匹配不上时返回 DEFAULT_LOCALE（英文）。
  *
- * ⚠️ 只按**主语言子标签**判（`startsWith`），不区分 `zh-Hans` / `zh-Hant` ——
- *    两种都归中文，因为界面只有一份中文。日韩同理（`ko-KR` / `ko-KP` 都是 ko）。
+ * ⚠️ **2026-10-20 起不再只按主语言子标签判**：多了一份 `zh-TW`，必须先把繁体挑出来
+ *    （`zh-TW` / `zh-HK` / `zh-MO` / 任何带 `Hant` 的标签 → `zh-TW`），
+ *    剩下的 `zh-*` 才归简体。只写 `startsWith('zh')` 的话，繁体用户会被送到简体页。
+ *
+ * ⚠️ 认两处历史别名：`tl`（Tagalog 的旧标签）→ `fil`、`in`（印尼语的旧标签）→ `id`。
+ *    浏览器至今还会发这两个，尤其老安卓机。
+ *
+ * ⚠️ 剩下的按**主语言子标签**（`split('-')[0]`）精确匹配 `LOCALES`，不做前缀模糊 ——
+ *    `fr-CA` 归 fr（主标签相同），但 `fil` 不会被 `fi` 之类的标签误伤。
  */
 export function resolveLocale(tags: readonly string[]): Locale {
   for (const tag of tags) {
     const lower = tag.trim().toLowerCase();
-    if (lower.startsWith('zh')) return 'zh';
-    if (lower.startsWith('ja')) return 'ja';
-    if (lower.startsWith('ko')) return 'ko';
-    if (lower.startsWith('en')) return 'en';
+    if (!lower) continue;
+
+    if (lower.startsWith('zh')) {
+      if (
+        lower.includes('hant') ||
+        lower.startsWith('zh-tw') ||
+        lower.startsWith('zh-hk') ||
+        lower.startsWith('zh-mo')
+      ) {
+        return 'zh-TW';
+      }
+      return 'zh';
+    }
+
+    const base = lower.split('-')[0];
+    if (base === 'tl') return 'fil';
+    if (base === 'in') return 'id';
+    const hit = LOCALES.find((locale) => locale === base);
+    if (hit) return hit;
   }
   return DEFAULT_LOCALE;
 }
@@ -2591,8 +2811,22 @@ export function parseAcceptLanguage(header: string | null | undefined): string[]
 const DATE_LOCALE: Record<Locale, string> = {
   en: 'en-US',
   zh: 'zh-CN',
+  'zh-TW': 'zh-TW',
   ja: 'ja-JP',
   ko: 'ko-KR',
+  es: 'es-ES',
+  hi: 'hi-IN',
+  pt: 'pt-BR',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  it: 'it-IT',
+  ru: 'ru-RU',
+  fil: 'fil-PH',
+  nl: 'nl-NL',
+  vi: 'vi-VN',
+  th: 'th-TH',
+  ms: 'ms-MY',
+  id: 'id-ID',
 };
 
 /**

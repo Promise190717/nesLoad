@@ -3,8 +3,14 @@
  *
  * PATCH ：只改元数据（游戏名、类型、语言、系列、年份、开发者、说明）。封面与 ROM
  *         不在可改范围内 —— 换文件等于换一份内容，删了重加更干净。
- * DELETE：先删 D1 记录，再尽力清理 R2 上的封面与 ROM 对象。
+ * DELETE：先删库记录，再尽力清理 R2 上的封面与 ROM 对象。
  *         顺序不能反：万一 R2 删成功而 DB 失败，就会留下一条指向空文件的记录。
+ *
+ * ⚠️ 2026-10-20 起数据层换成 Supabase（`@/lib/server/games-admin`）。与 D1 那套的差别：
+ *    · **主键是 slug**（`<id>` 就是 slug），删一款是**一条** `DELETE`（文案 / ROM 走
+ *      `ON DELETE CASCADE`），不再需要「先读 group_key、删完再判断同款还剩不剩」；
+ *    · **没有 `rom_url` 列**：本站自持的 ROM 存在 `source_url` 的 `r2:` 前缀下，
+ *      清理时按前缀判断要不要删 R2 对象。
  *
  * 鉴权由本文件的 assertAdmin 自查（接口不挂 middleware，原因见 admin-guard.ts）。
  */
@@ -13,8 +19,16 @@ import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { deleteGame, findGameDuplicate, getGameRow, updateGame, type GamePatch } from '@/lib/server/games';
-import { deleteObject, keyFromPublicUrl } from '@/lib/server/r2';
+import {
+  deleteGame,
+  findGameDuplicate,
+  normalizeRomLanguage,
+  updateGame,
+  type GamePatch,
+} from '@/lib/server/games-admin';
+import { deleteObject } from '@/lib/server/r2';
+import { mediaKey } from '@/lib/server/media';
+import { getGameRow } from '@/lib/server/sb-games';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -121,7 +135,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
      * 第三个参数是机种（2026-10-15 加）—— **必须传这次要改成的那个机种**，
      * 不是旧的：改机种本身就该按新机种重新判一遍。
      */
-    const duplicate = await findGameDuplicate(title, language, consoleType, id);
+    const duplicate = await findGameDuplicate(
+      title,
+      normalizeRomLanguage(language),
+      consoleType,
+      id
+    );
     if (duplicate) {
       const langText = duplicate.language ? `语言：${duplicate.language}` : '语言未标注';
       return fail(
@@ -162,7 +181,13 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
 
   // 记录已经没了，附件清理属收尾工作，删不掉也不该让整个请求失败（残留对象
   // 只占点存储，不影响功能）。
-  const keys = [row.rom_url, keyFromPublicUrl(row.image_url)].filter(
+  /*
+   * 要清的对象：封面（从公网地址反推 key）+ 本站自持的那份 ROM（`r2:` 前缀）。
+   * 上游来源的 ROM（`site:` / `files:`）本来就不在 R2 上，跳过。
+   */
+  const romKey = row.source_url?.startsWith('r2:') ? row.source_url.slice(3) : null;
+  // 封面按路径反解 key（兼容库里还存着旧版绝对地址的行，见 lib/server/media.ts）
+  const keys = [mediaKey(row.image_url), romKey].filter(
     (key): key is string => Boolean(key)
   );
   await Promise.allSettled(keys.map((key) => deleteObject(key)));

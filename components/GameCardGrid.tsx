@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { cardDelayMs } from '@/lib/card-stagger';
 import { localePath, type Locale } from '@/lib/i18n';
-import { localizeGame, type Game } from '@/lib/server/games';
+import { localizeGame, type Game } from '@/lib/server/sb-games';
 import { consoleLabel } from '@/lib/consoles';
 
 /**

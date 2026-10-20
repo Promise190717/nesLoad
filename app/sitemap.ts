@@ -1,8 +1,8 @@
 import type { MetadataRoute } from 'next';
-import { DEFAULT_LOCALE, LOCALES, htmlLang, localePath } from '@/lib/i18n';
+import { DEFAULT_LOCALE, LOCALES, htmlLang, isLocale, localePath, type Locale } from '@/lib/i18n';
 import { listConsoleStubsCached } from '@/lib/server/consoles';
 import { listDeveloperStubsCached } from '@/lib/server/developers';
-import { listGameStubsCached } from '@/lib/server/games';
+import { listGameStubsCached } from '@/lib/server/sb-games';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
@@ -13,7 +13,8 @@ import { resolveSiteOrigin } from '@/lib/site';
  *   · 两页「应用」：房间（`/room`，2026-10-13 从 `/` 挪过来的）与简洁开局页
  *     （`/play`，2026-10-14 加）；
  *   · `/privacy` / `/terms` 两页法务文档；
- *   · `/games` 游戏列表（含 `?console=<机种>` 那四份机种筛选，2026-10-13 加）；
+ *   · `/games` 游戏列表（机种筛选 `/games/console/<机种>` 没列进来：它是同一份列表的子集，
+ *     只差一个筛选维度，全列等于把一个库拆成十几份近似重复的地址；分页同理只列第 1 页）；
  *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）；
  *   · `/developers` 开发商列表 + 每家的 `/developers/<id>`（2026-10-12 加，同样现取）；
  *   · `/consoles` 机种列表 + 每个机种的 `/consoles/<type>`（2026-10-14 加，同样现取）。
@@ -24,11 +25,14 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 而且**必须**能被收录 —— 隐私政策与条款要能直接被搜到、被第三方按固定地址检查，
  * 只挂在房间那颗钮的弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
  *
- * 2026-10-13 语言分路径之后，**每条地址都出四份**（英文无前缀、中文 `/zh`、
- * 日文 `/ja`、韩文 `/ko`，2026-10-16 从两份扩到四份），
- * 由下面的 `entries()` 统一生成 —— 它顺带把四条 `hreflang` 互相指好。
+ * 2026-10-13 语言分路径之后，**每条地址每种语言一份**（英文无前缀、中文 `/zh`、
+ * 日文 `/ja`、韩文 `/ko`，2026-10-16 从两份扩到四份，**2026-10-20 扩到 18 份**），
+ * 由下面的 `entry()` 统一生成 —— 它顺带把 18 条 `hreflang` 互相指好。
  * 别手写其中一份：漏了 alternates 的那份在 Google 眼里就是「重复内容」，
  * 这正是分语言路径最容易被忽略的代价。
+ *
+ * ⚠️ **18 种语言必须拆成 18 份 sitemap**（`generateSitemaps`）：2110 款游戏 ×
+ *    2 个地址 × 18 语言 ≈ 7.6 万条，单文件上限是 5 万，超了整份作废。
  *
  * ⚠️ **游戏 / 开发商那几条是「动态部分」**：逐个从 D1 现读
  * （`listGameStubs` / `listDeveloperStubs`）。这正是用户要的「函数形式，这样增减都会更新」——
@@ -59,36 +63,55 @@ export const revalidate = 86400;
 type ChangeFrequency = NonNullable<MetadataRoute.Sitemap[number]['changeFrequency']>;
 
 /**
- * 一条路径 → sitemap 里的**四条**（英文、中文、日文、韩文），四条互指同一组 hreflang。
+ * 一条路径 + 一种语言 → sitemap 里的**一条**，它自带全 18 种语言的 `alternates`。
  *
- *   · `en` / `x-default` → 无前缀那份（英文是默认语言，没表态的访客看它）；
- *   · `zh-CN` / `ja-JP` / `ko-KR` → 各自带前缀那份。
+ * ⚠️ **2026-10-20 从「一条路径出 N 条」改成「一条路径 × 一种语言出一条」**：
+ *    语言从 4 种扩到 18 种之后，游戏 2110 款 × 2 个地址 × 18 语言 ≈ 7.6 万条 URL，
+ *    直接超过 **sitemap 单文件 5 万条**的上限 —— 超了不是截断，是整份被判无效。
+ *    所以拆成**每语言一份 sitemap**（`generateSitemaps`，Next 会额外生成一份
+ *    `/sitemap.xml` 索引指过来），每份约 4 千多条，留足余量。
  *
- * ⚠️ **语言那份遍历 `LOCALES` 现拼**（2026-10-16 改）：写死 `en` / `zh` 两条时，
- *    加日韩只会在下面 `LOCALES.map` 那边多出两行 URL，而它们带的 `alternates`
- *    仍然只有中英 —— 那两份在 Google 眼里就是「没有 hreflang 标注的重复内容」，
- *    正是分语言路径最容易被忽略的代价。**别退回手写。**
+ * `alternates` 仍然把**全部 18 种语言**列出来（不管这份 sitemap 是哪种语言的）：
+ * hreflang 要求的是「这一组里每条都互相指全」，只列本语言那一条等于没标注。
  *
  * `x-default` 和 `en` 指向同一个地址是**对的**，不是笔误：`x-default` 说的是
  * 「不知道用户要哪种语言时给哪个」，而本站的答案就是英文那份。
  */
-function entries(
+function entry(
   origin: string,
+  locale: Locale,
   path: string,
   extra: { lastModified?: Date; changeFrequency?: ChangeFrequency; priority?: number } = {}
-): MetadataRoute.Sitemap {
+): MetadataRoute.Sitemap[number] {
   const languages: Record<string, string> = {};
-  for (const locale of LOCALES) languages[htmlLang(locale)] = `${origin}${localePath(locale, path)}`;
+  for (const item of LOCALES) languages[htmlLang(item)] = `${origin}${localePath(item, path)}`;
   languages['x-default'] = `${origin}${localePath(DEFAULT_LOCALE, path)}`;
 
-  return LOCALES.map((locale) => ({
+  return {
     url: `${origin}${localePath(locale, path)}`,
     ...extra,
     alternates: { languages },
-  }));
+  };
 }
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+/**
+ * 每语言一份 sitemap —— Next 会据此生成 `/sitemap/<locale>.xml` 和一份索引
+ * `/sitemap.xml`（`app/robots.ts` 里指的还是索引那个地址，不用改）。
+ *
+ * ⚠️ 别改回「一个文件装下所有语言」：那就是上面那段说过的 5 万条上限。
+ */
+export async function generateSitemaps() {
+  return LOCALES.map((locale) => ({ id: locale }));
+}
+
+/**
+ * 一份 sitemap = 一种语言的全部地址（`generateSitemaps` 传进来的 `id` 就是 locale）。
+ *
+ * ⚠️ `id` 是 `string`（Next 的约定），认不出就退回默认语言 —— 别直接断言成 `Locale`，
+ *    那样拼错一个地址就会在运行时拿到 `undefined` 前缀。
+ */
+export default async function sitemap({ id }: { id: string }): Promise<MetadataRoute.Sitemap> {
+  const locale: Locale = isLocale(id) ? id : DEFAULT_LOCALE;
   const origin = await resolveSiteOrigin();
 
   /*
@@ -125,33 +148,33 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }
 
   return [
-    ...entries(origin, '/', { changeFrequency: 'weekly', priority: 1 }),
+    entry(origin, locale, '/', { changeFrequency: 'weekly', priority: 1 }),
     /*
      * 房间页（`/room`，2026-10-13 从 `/` 挪过来的）给 0.8 —— 比首页（1.0）和游戏列表
      * （0.9）低一档：它是**真的开玩**那个入口，但对搜索引擎来说几乎没有可索引的正文
      * （满屏 CSS 场景 + canvas），价值在于「用户点进来能用」，不在于「被搜到」。
      */
-    ...entries(origin, '/room', { changeFrequency: 'weekly', priority: 0.8 }),
+    entry(origin, locale, '/room', { changeFrequency: 'weekly', priority: 0.8 }),
     /*
      * `/play`（2026-10-14 加）同属「应用页」，但比 `/room` 再低一档（0.6）：
      * 它是从详情页分出来的一条**次级入口**（联机开局的简洁版），正文比 `/room` 还少。
      * 收录它的理由是它的 canonical 指自己、分享链接又常常带 `?id=`，总得有个正式地址；
      * 但没必要和 `/room` 争同一个「在线玩」的意图。
      */
-    ...entries(origin, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
-    ...entries(origin, '/games', { changeFrequency: 'daily', priority: 0.9 }),
+    entry(origin, locale, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
+    entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*
      * 详情页给 0.8、下载页给 0.6：详情页是「内容」，下载页是「动作」。
      * 用户明确要求下载页也要能被收录，所以不能省 —— 但排序上让详情页在前。
      */
     ...stubs.flatMap((stub) => [
-      ...entries(origin, `/games/${stub.id}`, {
+      entry(origin, locale, `/games/${stub.id}`, {
         /* `createdAt === 0` = 不知道收录时间（源站模式下上游 sitemap 不给日期）*/
         lastModified: stub.createdAt ? new Date(stub.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.8,
       }),
-      ...entries(origin, `/games/${stub.id}/download`, {
+      entry(origin, locale, `/games/${stub.id}/download`, {
         lastModified: stub.createdAt ? new Date(stub.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.6,
@@ -163,10 +186,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
      * 因为它的价值在同一类：指向一款款具体游戏。
      */
     ...(developers.length > 0
-      ? entries(origin, '/developers', { changeFrequency: 'weekly', priority: 0.7 })
+      ? [entry(origin, locale, '/developers', { changeFrequency: 'weekly', priority: 0.7 })]
       : []),
-    ...developers.flatMap((developer) =>
-      entries(origin, `/developers/${developer.id}`, {
+    ...developers.map((developer) =>
+      entry(origin, locale, `/developers/${developer.id}`, {
         lastModified: new Date(developer.createdAt),
         changeFrequency: 'monthly',
         priority: 0.6,
@@ -179,17 +202,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
      * 填上（或迁移脚本预填之后）它们自然出现。
      */
     ...(consoles.length > 0
-      ? entries(origin, '/consoles', { changeFrequency: 'weekly', priority: 0.7 })
+      ? [entry(origin, locale, '/consoles', { changeFrequency: 'weekly', priority: 0.7 })]
       : []),
-    ...consoles.flatMap((console) =>
-      entries(origin, `/consoles/${console.type}`, {
+    ...consoles.map((console) =>
+      entry(origin, locale, `/consoles/${console.type}`, {
         /* 同上：0 = 不知道收录时间（源站模式下按机种枚举，不查库）*/
         lastModified: console.createdAt ? new Date(console.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.6,
       })
     ),
-    ...entries(origin, '/privacy', { changeFrequency: 'yearly', priority: 0.3 }),
-    ...entries(origin, '/terms', { changeFrequency: 'yearly', priority: 0.3 }),
+    entry(origin, locale, '/privacy', { changeFrequency: 'yearly', priority: 0.3 }),
+    entry(origin, locale, '/terms', { changeFrequency: 'yearly', priority: 0.3 }),
   ];
 }

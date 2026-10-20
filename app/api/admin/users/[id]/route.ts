@@ -16,7 +16,7 @@ import { NextResponse } from 'next/server';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { getAppUser, setAppUserBanned, setAppUserVip } from '@/lib/server/app-users';
 import { purgeUserData } from '@/lib/server/user-data';
-import { query } from '@/lib/server/d1';
+import { query } from '@/lib/server/pg';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

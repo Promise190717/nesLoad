@@ -7,7 +7,21 @@
  *   · 语言清单从 game-text.ts import，不另抄一份。
  */
 
-import { CONTENT_LOCALES, type ContentLocale } from './game-text';
+import { CONTENT_LOCALES, entityFallbackChain, type ContentLocale } from './game-text';
+
+/**
+ * ⚠️ **转出口，不是第二份清单**（2026-10-20 加）。
+ *
+ * `CONTENT_LOCALES` 的唯一出处仍然是 `./game-text`，这里只把它转出去。
+ * 起因：`lib/server/developers.ts` 把它并进了「从 `@/lib/entity-text` 拿实体结构」
+ * 那一块 import，而本文件此前只 import 不 export，构建直接报
+ * `Export CONTENT_LOCALES doesn't exist in target module`。
+ *
+ * 转出去而不是改回调用方，是因为「实体结构从 entity-text 拿、语言清单从 game-text 拿」
+ * 这条规矩记不住 —— 一旦有人在 import 块里合并，就又是一次同样的构建错误。
+ * **别在这里重写一份语言数组**，那就真成两份清单了（加语言时必然漏一处）。
+ */
+export { CONTENT_LOCALES };
 
 /** 一个实体在**某个语言**下的文案。三个字段都可空 —— 空 = 没翻，逐字段回退。 */
 export interface EntityText {
@@ -41,6 +55,26 @@ export const EMPTY_ENTITY_TEXT: EntityText = {
 /** 一份文案里**有没有任何内容**。 */
 export function isBlankEntityText(text: EntityText): boolean {
   return !text.name && !text.summary && !text.description;
+}
+
+/**
+ * 没图（厂标 / 机种图）时占位方块里那**一个字**。
+ *
+ * 四个地方用同一份：开发商详情页、`/developers` 列表卡、首页「游戏最多的前 N 家」、
+ * 后台开发商列表。散着写 `Array.from(name)[0]` 的后果是有人只改一处 —— 那时
+ * 后台是全大写、前台是小写，看着像两个站（2026-10-20 用户要求统一大写）。
+ *
+ * 为什么大写：厂名里小写开头的不少（`ape inc.`、`igs`），原样取首字会印出一个小写
+ * `a`，在 pixel 字体的大字号方块里比周围一圈字矮一截，看着像图裂了。
+ *
+ * ⚠️ 中日韩 / 天城文没有大小写，`toUpperCase()` 原样返回，不会把「鈊」变成别的字。
+ * ⚠️ 个别拉丁字母大写后会**变长**（德语 `ß` → `SS`），所以取完首个字素再取第一个字符 ——
+ *    否则占位方块里会挤进两个字。
+ */
+export function entityInitial(name: string): string {
+  const first = Array.from(name.trim())[0];
+  if (!first) return '?';
+  return Array.from(first.toUpperCase())[0] ?? '?';
 }
 
 /**
@@ -133,11 +167,14 @@ function anyName(texts: EntityTexts): string | null {
 }
 
 /**
- * 按语言取一个实体的文案。**目标语言缺哪个字段，就回退中文的那一个**（逐字段）。
+ * 按语言取一个实体的文案。**目标语言缺哪个字段，就按回退链找第一个有的**（逐字段）。
  *
- * 规则：
+ * 规则（链在 game-text.ts 的 `entityFallbackChain`，两边共用一条）：
  *   · 中文站 —— 直接返回中文原文（不做回退）；
- *   · 其他语言 —— 优先该语言，空了回退中文，中文也空就是 `null`；
+ *   · zh-TW —— 空了回退简体中文，再空回退英文；
+ *   · en —— 空了回退中文；
+ *   · 其余 16 种 —— 空了**先回退英文、再回退中文**（2026-10-20 起：
+ *     长尾缺字段的时刻英文几乎总比中文合适，见 localizeTexts 那段注释）；
  *   · `name` 再兜一层（见 `anyName`）—— 它必须是个字符串。
  */
 export function localizeEntityTexts(
@@ -145,10 +182,10 @@ export function localizeEntityTexts(
   locale: string
 ): LocalizedEntityText {
   const wanted = texts[locale as ContentLocale] ?? null;
-  const fallback = locale === 'zh' ? null : (texts.zh ?? null);
+  const chain = entityFallbackChain(locale).map((l) => texts[l as ContentLocale] ?? null);
 
   const pick = (key: keyof EntityText): string | null =>
-    wanted?.[key] || fallback?.[key] || null;
+    wanted?.[key] || chain.map((text) => text?.[key]).find(Boolean) || null;
 
   return {
     name: pick('name') ?? anyName(texts) ?? '',

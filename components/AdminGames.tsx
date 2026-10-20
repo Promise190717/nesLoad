@@ -13,7 +13,13 @@ import {
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { detectConsole, type ConsoleType } from '@/lib/emulator';
-import { CONTENT_LOCALES, EMPTY_GAME_TEXT, type ContentLocale, type GameText, type GameTexts } from '@/lib/game-text';
+import {
+  ADMIN_FORM_LOCALES,
+  EMPTY_GAME_TEXT,
+  type AdminFormLocale,
+  type GameText,
+  type GameTexts,
+} from '@/lib/game-text';
 import { GAME_LANGUAGES, GAME_LANGUAGE_LABEL, romLangToFormValue } from '@/lib/rom-lang';
 import { unwrapRom } from '@/lib/unwrap';
 import AdminAddGame from './AdminAddGame';
@@ -132,8 +138,12 @@ interface FormText {
   description: string;
 }
 
-/** 四个语言的表单值，按语言索引。 */
-type FormTexts = Record<ContentLocale, FormText>;
+/**
+ * 后台表单编辑的语言。⚠️ 是 `ADMIN_FORM_LOCALES`（四种）不是全量
+ * `CONTENT_LOCALES`（18 种）—— 其余语言的文案由回填脚本写入，表单不提供编辑入口
+ * （原因见 game-text.ts 那边的注释）。`PATCH` 接口的扁平字段也只认这四种。
+ */
+type FormTexts = Record<AdminFormLocale, FormText>;
 
 /**
  * 一份全新的空表单。
@@ -141,22 +151,21 @@ type FormTexts = Record<ContentLocale, FormText>;
  * ⚠️ 写成**工厂函数**而不是共享常量：`patchText` 是浅拷贝改写，共享一个对象的话
  *    「重置表单」拿到的是上一轮改过的那份，等于没重置。
  *
- * ⚠️ 循环 `CONTENT_LOCALES` 生成：加语言只改 `lib/game-text.ts` 一处 —— 这正是这次
- *    重构的目的（原来 12 个 `useState` + 12 段 JSX 都是四个语言各抄一遍）。
+ * ⚠️ 循环 `ADMIN_FORM_LOCALES` 生成：后台表单加语言只动 `game-text.ts` 的那张子清单。
  */
 function emptyFormTexts(): FormTexts {
   return Object.fromEntries(
-    CONTENT_LOCALES.map((locale) => [locale, { title: '', series: '', description: '' }])
+    ADMIN_FORM_LOCALES.map((locale) => [locale, { title: '', series: '', description: '' }])
   ) as FormTexts;
 }
 
-/** 语言块的标题。`satisfies` 保证「`CONTENT_LOCALES` 加了语言却漏了标签」编译期就报错。 */
+/** 语言块的标题。`satisfies` 保证「`ADMIN_FORM_LOCALES` 加了语言却漏了标签」编译期就报错。 */
 const CONTENT_LOCALE_LABEL = {
   zh: '中文',
   en: 'English (EN)',
   ja: '日本語 (JA)',
   ko: '한국어 (KO)',
-} satisfies Record<ContentLocale, string>;
+} satisfies Record<AdminFormLocale, string>;
 
 /**
  * 提交时文案字段的**键名后缀**。两条路的命名规则不一样，所以是两张表：
@@ -168,8 +177,8 @@ const CONTENT_LOCALE_LABEL = {
  *    刻意不写成「`_${locale}` / 首字母大写」那种推导：显式列出来，改动才看得见
  *    （同时 `satisfies` 保证加语言时这里漏了会编译报错）。
  */
-const FORM_SUFFIX = { zh: '', en: '_en', ja: '_ja', ko: '_ko' } satisfies Record<ContentLocale, string>;
-const PATCH_SUFFIX = { zh: '', en: 'En', ja: 'Ja', ko: 'Ko' } satisfies Record<ContentLocale, string>;
+const FORM_SUFFIX = { zh: '', en: '_en', ja: '_ja', ko: '_ko' } satisfies Record<AdminFormLocale, string>;
+const PATCH_SUFFIX = { zh: '', en: 'En', ja: 'Ja', ko: 'Ko' } satisfies Record<AdminFormLocale, string>;
 
 /**
  * 拉取**一页**列表。抽成模块级函数，便于 effect 与增删改后共用。
@@ -290,7 +299,7 @@ export default function AdminGames() {
    * 文案部分**按语言分组**存一份 `texts`（2026-10-16 重构）—— 顶替掉原来 12 个
    * `useState`（`title` / `titleEn` / `titleJa` / `titleKo`，系列与说明同理）。
    * 原来那套是**按字段**分组、四个语言各抄一遍，加语言要动十几处；现在循环
-   * `CONTENT_LOCALES` 生成，加语言只改 `lib/game-text.ts` 一处。
+   * `ADMIN_FORM_LOCALES` 生成，后台表单加语言只动 `game-text.ts` 的子清单。
    *
    * 中文那三个字段必填（`title` 是这一款的主名字，也是 `games.title` 那列的值，
    * 反查同款与判重都拿它当判据）；其余三个语言选填、留空**逐字段**回退中文。
@@ -469,7 +478,7 @@ export default function AdminGames() {
   };
 
   /** 改某个语言里的某个字段。整份换新对象 —— React 靠引用比，别就地改 `texts[locale]`。 */
-  const patchText = (locale: ContentLocale, key: keyof FormText, value: string) =>
+  const patchText = (locale: AdminFormLocale, key: keyof FormText, value: string) =>
     setTexts((prev) => ({ ...prev, [locale]: { ...prev[locale], [key]: value } }));
 
   const resetForm = () => {
@@ -508,13 +517,13 @@ export default function AdminGames() {
      * ⚠️ **缺的那几份要给空串**：只填了中文的游戏没有 `en` / `ja` / `ko` 行，读成空串
      *    提交回去正好等于「这几栏还是空的」，不会把已有文案弄丢
      *    （`writeTexts` 对「传进来的空的一份」是删行，不是写空行）。
-     * ⚠️ 语言清单走 `CONTENT_LOCALES`，别在这儿手抄四个 key。
+     * ⚠️ 语言清单走 `ADMIN_FORM_LOCALES`（后台表单只管四种，见 game-text.ts）。
      */
     const zh = game.texts.zh ?? EMPTY_GAME_TEXT;
     setEditingId(game.id);
     setTexts(
       Object.fromEntries(
-        CONTENT_LOCALES.map((locale) => {
+        ADMIN_FORM_LOCALES.map((locale) => {
           const text = game.texts[locale] ?? EMPTY_GAME_TEXT;
           return [
             locale,
@@ -778,8 +787,8 @@ export default function AdminGames() {
     if (busy) return;
 
     /*
-     * 中文名必填 —— 它既是这一款的**主名字**（也是 `games.title` 那列 NOT NULL 的值），
-     * 又是 `resolveGroupKey` 反查同款、`findGameDuplicate` 判重时用的那一份。
+     * 中文名必填 —— 它是这一款的**主名字**（`game_texts` 里 `locale='zh'` 那行的
+     * `title`），也是 `resolveGameSlug` 归款、`findGameDuplicate` 判重时用的那一份。
      * 所以校验的是 `texts.zh.title`，不是「四个语言里随便有一个」。
      */
     const trimmedTitle = texts.zh.title.trim();
@@ -817,7 +826,7 @@ export default function AdminGames() {
           // 下拉框给的是 developers.id；名字由服务端反查后写进 developer 那列
           developerId: developerId || null,
         };
-        for (const locale of CONTENT_LOCALES) {
+        for (const locale of ADMIN_FORM_LOCALES) {
           const text = texts[locale];
           const suffix = PATCH_SUFFIX[locale];
           // 中文名用 trim 过的那份（上面刚校验过非空）
@@ -847,7 +856,7 @@ export default function AdminGames() {
       } else {
         // 文案字段按 `FORM_SUFFIX` 拼（蛇形）—— 与接口的 `flatTexts()` 一一对应
         const form = new FormData();
-        for (const locale of CONTENT_LOCALES) {
+        for (const locale of ADMIN_FORM_LOCALES) {
           const text = texts[locale];
           const suffix = FORM_SUFFIX[locale];
           form.set(`title${suffix}`, locale === 'zh' ? trimmedTitle : text.title.trim());
@@ -1083,16 +1092,17 @@ export default function AdminGames() {
             </h2>
 
             {/*
-              编辑态的一句提醒：文案挂的是**同款**（`games.group_key`），不是这一盘 ROM
-              —— 所以改的是整款、同款那几个语言版本会一起变。盘数取自列表里现成的
-              `groupSize`（后台列表为此多带了一列），不必再请求一次。
+              编辑态的一句提醒：文案挂在**这一款**（`game_texts.game_slug`）上，
+              而不是某一盘 ROM 上 —— 同一款的几个语言版本读的都是这一份。
+              `groupSize` 现在是「这一款有几个语言版本的 ROM」（后台列表多带了一列），
+              不必再请求一次。
               只在编辑态出现：新增那条路本来就是新开一款，没有「改了会波及别人」这回事。
             */}
             {isEditing && (
               <p className="mb-3 text-[12px] text-ink-500">
                 {editingGroupSize > 1
-                  ? `下面写的文案是这一款共用的 —— 库里还有同款 ${editingGroupSize - 1} 盘 ROM，保存后它们的显示一起变。`
-                  : '下面写的文案是这一款共用的 —— 之后给这一款补其他语言版本时，它们读的也是这一份。'}
+                  ? `下面写的是这一款共用的文案 —— 库里这一款有 ${editingGroupSize} 个语言版本的 ROM，它们读的都是这一份。`
+                  : '下面写的是这一款共用的文案 —— 之后给这一款补其他语言版本时，它们读的也是这一份。'}
               </p>
             )}
 
@@ -1140,7 +1150,7 @@ export default function AdminGames() {
             <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
               {/*
                 公共区：与语言无关的那几栏（类型 / 年份 / 语言 / 开发商）。
-                文案**不在这儿** —— 它们按语言分块排在下面（见 `CONTENT_LOCALES.map`）。
+                文案**不在这儿** —— 它们按语言分块排在下面（见 `ADMIN_FORM_LOCALES.map`）。
 
                 ⚠️ 2026-10-16 重构前这里和下面是**按字段**分组的（四个「游戏名」挨在一起、
                 四个「说明」挨在一起），等于把「文案属于整款、四个语言各存一份」这件事
@@ -1262,13 +1272,13 @@ export default function AdminGames() {
 
               {/*
                 文案区：**按语言分块**（2026-10-16 重构）—— 和 `game_texts` 的结构对齐
-                （一行 = 这一款在某个语言下的文案）。四个块由 `CONTENT_LOCALES` 生成，
+                （一行 = 这一款在某个语言下的文案）。四个块由 `ADMIN_FORM_LOCALES` 生成，
                 加语言只改 `lib/game-text.ts` 一处。
 
-                中文那份**必填**：它是这一款的主名字，也是 `resolveGroupKey` 反查同款、
-                `findGameDuplicate` 判重时用的那一份。其余三份选填、留空**逐字段**回退中文。
+                中文那份**必填**：它是这一款的主名字，也是归款 / 判重时用的那一份。
+                其余三份选填、留空**逐字段**回退中文。
               */}
-              {CONTENT_LOCALES.map((locale) => {
+              {ADMIN_FORM_LOCALES.map((locale) => {
                 const isZh = locale === 'zh';
                 return (
                   <div

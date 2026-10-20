@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server';
 import { CONSOLE_LABEL, CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { listConsoles } from '@/lib/server/consoles';
-import { countGamesByConsole } from '@/lib/server/games';
+import { countGamesByConsole } from '@/lib/server/sb-games';
 import { EMPTY_FLAT_ENTITY_TEXT, flatEntityTexts, type FlatEntityText } from '@/lib/entity-text';
 
 export const runtime = 'nodejs';

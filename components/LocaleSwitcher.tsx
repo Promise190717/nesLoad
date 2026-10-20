@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LOCALE_OPTIONS } from '@/lib/i18n';
+import { FlagIcon } from './FlagIcon';
 import { useI18n } from './I18nProvider';
 
 /**
@@ -88,6 +89,8 @@ export default function LocaleSwitcher() {
         aria-expanded={open}
         className="locale-trigger"
       >
+        {/* 当前语言的国旗（简繁共用一面中国国旗，靠文字区分） */}
+        <FlagIcon locale={locale} />
         <span className="locale-current">{current}</span>
         {/* 下拉箭头。不留的话它看起来就是一段普通文字，没人知道能点开 */}
         <span className="locale-caret" aria-hidden="true" />
@@ -110,6 +113,7 @@ export default function LocaleSwitcher() {
                   router.push(hrefIn(option.value));
                 }}
               >
+                <FlagIcon locale={option.value} />
                 {option.label}
               </button>
             </li>

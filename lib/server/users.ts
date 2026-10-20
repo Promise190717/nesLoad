@@ -3,10 +3,14 @@
  *
  * 口令用 node:crypto 的 scrypt 加随机盐，存成 `salt:hash`。
  * 本文件依赖 node:crypto，只能在 Node runtime 的路由里用，不要在 middleware 里导入。
+ *
+ * ⚠️ 2026-10-20 起数据源是 Supabase（`./pg`）。这张表在 D1 与 Postgres 里**结构一样**
+ *    （id / username / password_hash / created_at），所以这里只换了 import ——
+ *    `created_at` 是 `timestamptz`，但本文件不读它，不用管换算。
  */
 
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { query } from './d1';
+import { query } from './pg';
 
 export interface UserRecord {
   id: string;

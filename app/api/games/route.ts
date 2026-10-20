@@ -12,24 +12,24 @@
  * 筛当页那几条 —— 翻页会换一批结果，等于没搜；分页也一样，本地 slice 的前提是
  * 手里有全量数据。所以关键词和机种都随查询一起下发。
  *
- * ⚠️ **2026-10-14 起走 `listGamesPageCached`（2026-10-16 起 24 小时缓存）** —— 用户拍板
- *    「前台的列表都加缓存」。代价是「后台刚传的游戏最多晚 24 小时才出现在这里」。在那之前这里是
- *    实时查库（每次翻页 / 改筛选 = 2 次 D1：COUNT + SELECT，见 lib/server/games.ts）。
- *    现在 COUNT 走独立缓存（键里没有 offset，翻多少页都只数一次），SELECT 按页缓存。
- *    **后台列表（`/api/admin/games`）不受影响，仍然实时 —— 2026-10-14 起还改成了
- *    游标翻页（`listAdminGamesPage`），每次只取一页、连 COUNT 都省了。**
+ * ⚠️ **本接口不吃缓存**（2026-10-20 用户要求「只要页面缓存，接口一律不缓存」）。
+ *    在 2026-10-14 到 10-20 之间它走的是 `listGamesPageCached`（TTL 最后是 30 天），
+ *    代价是「后台刚传的游戏最多晚一个月才出现在在线库弹窗里」。
+ *    现在每次请求都是实时查库（COUNT + SELECT），换来的是上传完刷新就能看到。
+ *    缓存只在**页面侧**：`/games` 列表页与机种/开发商专题页仍走 `listGamesPageCached`，
+ *    那是 `unstable_cache` 包在页面取数上，不经过这个接口。
+ *    **后台列表（`/api/admin/games`）同样实时**，它走 `listAdminGamesPage`（游标翻页，连 COUNT 都省了）。
  *
  * 前端因此刻意保留「搜索是提交式」的写法（点「搜索」或回车才发请求）——
- * 缓存键含关键词，打字过程中每敲一个字都会多产生一个缓存条目，没必要。
+ * 实时接口 + 每敲一个字发一次请求，等于把库当搜索框用。
  */
 
 import { NextResponse } from 'next/server';
 import { CONSOLE_TYPES } from '@/lib/consoles';
-import { listGamesPageCached, MAX_PAGE_SIZE } from '@/lib/server/games';
+import { listGamesPage, MAX_PAGE_SIZE } from '@/lib/server/sb-games';
 
 export const runtime = 'nodejs';
-// 数据虽然走了缓存，路由本身仍要按请求读 searchParams —— 别让构建期把它静态化了
-// （构建时并没有数据库凭据）。
+// 按请求读 searchParams，构建期不能把它静态化（构建时也没有数据库凭据）。
 export const dynamic = 'force-dynamic';
 
 /** 不传 limit 时的每页条数，和前台 GameLibraryPanel 的 `PAGE_SIZE` 对齐。 */
@@ -57,11 +57,11 @@ export async function GET(request: Request) {
   try {
     /*
      * 末尾那个 `null` 是**语种**那一维（2026-10-16 加的，机种专题页的 `?lang=` 在用）——
-     * 在线库弹窗没有语种筛选，永远传 null = 不限。签名里留着它是为了让两处共用同一份
-     * 缓存实现（键形状统一），见 lib/server/games.ts 的 listGamesPageCached。
+     * 在线库弹窗没有语种筛选，永远传 null = 不限。签名里留着它是为了让页面侧与这里
+     * 共用同一套查询实现（`listGamesPage`），见 lib/server/sb-games.ts。
      */
     return NextResponse.json(
-      await listGamesPageCached(offset, limit, keyword, consoleType, null)
+      await listGamesPage(offset, limit, { keyword, consoleType, language: null })
     );
   } catch (error) {
     console.error('[games] 列表读取失败', error);

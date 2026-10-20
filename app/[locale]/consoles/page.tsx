@@ -13,7 +13,7 @@ import {
   type MessageKey,
 } from '@/lib/i18n';
 import { listConsolesCached } from '@/lib/server/consoles';
-import { countGamesByConsoleCached } from '@/lib/server/games';
+import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -26,8 +26,8 @@ import { readLocaleParam } from '@/lib/server/locale';
  *    卡片退回默认名字（`consoleLabel`，中文站 FC / 英文站 NES）照常渲染 ——
  *    绝不因为资料没填就让一个机种从这页上消失（首页的卡片也指着它呢）。
  *
- * 数据两份都走 24 小时缓存：`listConsolesCached`（资料）+ `countGamesByConsoleCached`
- * （各机种游戏数，首页同一份）。后台改完资料，这一页最多晚 24 小时更新 —— 和
+ * 数据两份都走 30 天缓存：`listConsolesCached`（资料）+ `countGamesByConsoleCached`
+ * （各机种游戏数，首页同一份）。后台改完资料，这一页最多晚 30 天更新 —— 和
  * `/developers` 同一个取舍（机种专题页上机种自己的资料**不缓存**，那边改完是立刻的）。
  */
 export async function generateMetadata({
@@ -70,7 +70,7 @@ export default async function ConsolesPage({
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>
     translate(locale, key, vars);
 
-  // 两份数据互不依赖，并行取。理由见文件头：都带 24 小时缓存。
+  // 两份数据互不依赖，并行取。理由见文件头：都带 30 天缓存。
   const [rows, counts] = await Promise.all([listConsolesCached(), countGamesByConsoleCached()]);
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
 

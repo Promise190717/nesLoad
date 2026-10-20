@@ -196,7 +196,7 @@ pnpm dev
 - `/play` 的外壳是 `GamesShell`，为此给它加了两个可选 prop：`showHeader`（默认 `true`，`/play` 传 `false` —— 名字与资料在右列顶上，顶上再来个 `<h1>` 就重复了；h1 由 `PlayScene` 出一颗 sr-only 的）和 `fill`（默认 `false`，`/play` 传 `true` —— 内容 `flex-1` 吃满剩余高度，页脚因此压在视口最底）。**两个都只有 `/play` 在用**，别顺手给别的页打开。
 - ⚠️ **两页的 `?id=` 语义刻意不同**：`/room?id=` 进来自动下载并开玩；`/play?id=` **不自动载入** —— 用户要的是「先进房间设置，点开始才加载」，`?id=` 只把这一款摆在黑区里（游戏名 + 机种），等右侧按下「开始」才下 ROM。
 - **首页刻意不写 `generateMetadata`**：`/` 的标题 / 说明 / canonical 就是根布局那三样（`meta.title` / `meta.description` / `alternatesFor(locale, '/')`），首页的 `title.default` 本来就是给它准备的。子页面（`/room`、`/games`…）才各写各的。`/room` 有自己的一套（`seo.room.*` + `alternatesFor(locale, '/room')`），少了它就会被当成首页的重复内容。
-- 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 24 小时**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 24 小时**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 就一直同步（列表页原来是 30 分钟），2026-10-16 又一起提到 24 小时。⚠️ `countGamesByConsoleCached`（各机种游戏数）**同时服务首页和 `/consoles` 列表页**（同一份缓存条目），所以「列表页 24 小时、首页仍 12 小时」这种拆法做不到 —— 首页跟着一起变是必然的，不是漏改。
+- 首页三份数据全部走带缓存的函数（`listLatestGamesCached` / `countGamesByConsoleCached` / `listTopDevelopersCached`，**TTL 都是 30 天**，见 `lib/server/games.ts` 的 `HOME_REVALIDATE_SECONDS` 与 `lib/server/developers.ts`）。副作用：后台新传的游戏**最多晚 30 天**出现在首页。⚠️ 和列表页**不是同一份缓存**（键前缀 `games:latest` vs `games:list`），但 2026-10-14 起两边 TTL 就一直同步（列表页原来是 30 分钟），2026-10-16 一起提到 24 小时，2026-10-20 再一起提到 30 天。⚠️ `countGamesByConsoleCached`（各机种游戏数）**同时服务首页和 `/consoles` 列表页**（同一份缓存条目），所以「列表页 30 天、首页仍 1 天」这种拆法做不到 —— 首页跟着一起变是必然的，不是漏改。
 - ⚠️ **首页没有 `export const revalidate`，那不是漏写**：根布局（`app/layout.tsx`）要读 cookie / 请求头决定语言，整个应用因此走动态渲染 —— 页面级 `revalidate` 对路由缓存**不起作用**。首页真正在用的 Next 缓存是上面那三个 `unstable_cache`（数据层，「页-侧」缓存，不下沉到 `listGamesPage` / `countGamesByConsole`）。
 - 首页 Hero 里那个搜索框**宽度是 100%**（`w-full`，跟着外层 `max-w-5xl` 走）：它的左右边界和下面几个区块的网格对齐，不再是原来 `max-w-md` 居中窄条。
 - 首页 Hero 的入口（2026-10-15 定）：**「浏览全部游戏」**（`/games`，accent 实底的主按钮）＋**「加载本地 ROM」**（`/room`，描边次按钮）并排。右那颗是 2026-10-15 用户要求加的（键 `home.hero.play`，文案从「进入小屋」改过来），点进去就是屋里拖 / 选自己的 ROM —— 屋里那个**在线游戏库入口同日收掉了**（见 `components/ConsoleScene.tsx` 那颗钮的注释）。⚠️ 这颗钮的文案当天还改过一版：原先写的是「游玩本地 ROM」，动词换成「加载」是为了和屋里点进去第一眼看到的那句同一套说法（`screen.tapLoad` =「点击从本地加载」/ "CLICK TO LOAD A LOCAL ROM"）—— 按钮说什么，落点第一句就说什么。⚠️ 页脚里的「回到房间」全站已删（含首页这条），见下面页脚那一行。
@@ -230,7 +230,7 @@ pnpm dev
 
 - 为什么要有它：顶栏那颗「登录」需要一个**能落地的地址**（顶栏是普通页面，弹不了屋里的浮层）。
 - 表单本体是 **`components/AuthForm.tsx`**，**和屋里那个账号浮层（`UserPanel`）共用同一个** —— 两处各写一份表单，改一处（加条口令规则、多一个错误码）另一处就会不知不觉地不跟。
-- **`?next=` 是登录后的落点**，有就回那儿、没有就回 `/room`。顶栏会自动带上当前页（含 query），所以从 `/games?console=nes&page=2` 点登录，登完回得去。
+- **`?next=` 是登录后的落点**，有就回那儿、没有就回 `/room`。顶栏会自动带上当前页（含 query），所以从 `/games/console/nes/page/2` 点登录，登完回得去。
   ⚠️ **`next` 不带语言前缀**（`/account`，不是 `/zh/account`）—— 顶栏和 `/account` 的守卫都按这个约定生成，拼前缀是登录页自己的事（`LoginPanel` 里用 `useI18n().href()`）。
   ⚠️ **必须校验**（`parseNext`）：只收站内绝对路径（挡 `//evil.com` 与 `/\evil.com`），且不能指回 `/login` 自己 —— 这是页面唯一一处「用户可控的跳转目标」，不校验就是开放重定向。
 - **已登录的人访问 `/login` 会被服务端直接送走**（去 `next` 或 `/room`）：在服务端判，连「先画一帧表单再跳走」都不会有。只验签名、不查库复核封禁，取舍同 `/account` 的守卫。
@@ -256,24 +256,25 @@ pnpm dev
 
 | 路由 | 是什么 |
 | --- | --- |
-| `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`?page=N` 翻页（真 URL，爬虫顺得下去）。带搜索框（`?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **24 小时缓存**（见下）。 |
+| `/games` | 全部游戏，网格排封面，**一页 15 条**（一行 5 个 × 3 行），`/games/page/N` 翻页（真路由，爬虫顺得下去）。带搜索框（落到 `/games/search?q=<关键词>`）。副标题里的「共 N 款 / N 个结果」是现读的。数据带 **30 天缓存**（见下）。 |
 | `/games/[id]` | 单款游戏的资料页：封面、标题、机种 / 年份 / 开发者 / 系列 / 语言、说明，加**四颗**主按钮（2026-10-14 加的「联机游戏」见下）。带 `VideoGame` + `BreadcrumbList` 结构化数据。 |
 | `/games/[id]/download` | 下载页：点「开始下载」**等 6 秒**才真的开始下（用户要求）。**只有这一颗按钮**，没有别的下载入口。 |
 
 - 详情页动作区：第一层四颗实体钮 —— **开始游戏** → `/room?id=<id>`（回房间，唯一带强调色）、**联机游戏** → `/play?id=<id>`（2026-10-14 加，简洁开局页，见上）、**收藏**、**下载 ROM** → 下载页。第二层两枚无描边「图标 + 文字」链接：**分享游戏**（把这一页的地址复制进剪贴板，`components/ShareGameButton.tsx`）、**反馈问题**。除分享与反馈之外全是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走。
-- 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/games.ts` 的 `listGamesPageCached`），**TTL 24 小时**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压 D1 的 `rows_read` 额度拍板；2026-10-16 提到 24 小时）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **房间的在线库弹窗（`/api/games`）2026-10-14 起也走同一套缓存**（在那之前它实时查库）；**后台列表（`/api/admin/games`）仍然走不缓存的 `listGamesPage`**，那边必须立刻看到刚上传的游戏。副作用：**后台上传的新游戏最多晚 24 小时才出现在列表页和在线库弹窗上**（后台自己那张列表不受影响）。
+- 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/sb-games.ts` 的 `listGamesPageCached`），**TTL 30 天**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压 `rows_read` 额度拍板；2026-10-16 提到 24 小时、2026-10-20 再提到 30 天）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **2026-10-20 起所有接口都不吃缓存**：房间的在线库弹窗（`/api/games`）与单条接口（`/api/games/[id]`）都实时查库（在那之前它们走同一套 `unstable_cache`）；**后台列表（`/api/admin/games`）本来就走不缓存的 `listGamesPage`**。副作用：**后台上传的新游戏最多晚 30 天才出现在这一页**（弹窗与后台自己那张列表不受影响，它们实时）。
 - 详情页 / 下载页的 meta description 会**把后台填的那句「说明」放在最前面**（截到 100 字），后面接一句通用的「能玩、能下载」。没填说明就只用通用那句 —— **不编造**剧情 / 发行商那类信息。
 - 游戏不存在时两页都 `notFound()`，落到 `app/[locale]/games/[id]/not-found.tsx`（一页盖住两条路由），带 `noindex`。
 - 版式在 `components/GamesShell.tsx`（页头 + 返回 + 页脚互链，三页共用）；下载那颗按钮在 `components/RomDownloadGate.tsx`、分享那颗在 `components/ShareGameButton.tsx`（**这两个是这套页面里仅有的客户端组件**，其余整页留在服务端渲染）。
 - 单条数据走 `lib/server/games.ts` 的 **`getGame(id)`**（对外形状，不含 `rom_url`）；页面是服务端组件、直接查库，只有**房间那条深链**走 HTTP（`GET /api/games/[id]`）。
-- ⚠️ `/games` 会把 `?page=1` / `?page=0` / `?page=abc` / `?page=02`、`?q=`（空）/ `?q=%20%20`（只有空白）/ `?q=a&q=b`（重复参数）/ 前后带空格的 / 超长被截断的、`?console=xxx`（认不出的机种），以及**参数顺序不对**的（`?page=2&q=a`），统统 **307 到规范地址**：同一个列表被两份 URL 收录就是重复内容。规范拼法固定为 `?q=…&console=…&page=N`，第 1 页不写 `page`、没有关键词不写 `q`、没筛机种不写 `console`。**越界页码**（`?page=99`）另退到最后一页，退的时候**必须把关键词和机种都带上**，否则会被踢回「全部游戏」。
-- **机种筛选**（2026-10-13 加）：`?console=<nes|snes|gba|arcade>`，首页那个「按机种浏览」区块点进来的落点。页面里是一排链接（当前那颗高亮 + `aria-current`），搜索表单会用一个 hidden input 把机种一起提交（否则在 NES 里搜一下就掉回全库）。⚠️ **它和搜索的收录策略相反**：`?q=` 是 `noindex, follow`，而 `?console=` **照常收录**（机种只有四个、每个都是真实分类），canonical / hreflang 都指自己那一份。
+- ⚠️ **2026-10-20 起分页与机种筛选是路径段**（`/games/page/2`、`/games/console/nes`、`/games/console/nes/page/2`），不再是 `?page=` / `?console=`。原因：查询参数那一版会被 `middleware` 的 `catalogRewrite` 改写成 `/catalog/...` 影子路由，客户端软导航对不上，只能退回整页跳转（点一次分页 / tab 白闪一下）。路径段是真路由，链接用 `next/link`。推理见 `lib/catalog-route.ts` 文件头。
+- ⚠️ `/games` 会把 `/page/1` / `/page/0` / `/page/abc` / `/page/02`、认不出的机种段（`/games/console/xxx`）、以及搜索里 `?q=`（空）/ `?q=%20%20`（只有空白）/ `?q=a&q=b`（重复参数）/ 前后带空格的 / 超长被截断的、**参数顺序不对**的搜索地址，统统 **307 到规范地址**：同一个列表被两份 URL 收录就是重复内容。规范拼法：浏览态 `/games[/console/<机种>][/page/N]`（第 1 页不写 `page`、没筛机种不写 console），搜索态 `/games/search?q=…&console=…&page=…`。**越界页码**（`/page/99`）另退到最后一页，退的时候**必须把关键词和机种都带上**，否则会被踢回「全部游戏」。旧地址（`/games?page=2`）仍能打开，canonical 已指新地址。
+- **机种筛选**（2026-10-13 加，2026-10-20 从 `?console=` 搬进路径）：`/games/console/<nes|snes|gba|arcade>`。页面里是一排链接（当前那颗高亮 + `aria-current`，`prefetch={false}` —— 十几颗 tab 全预取等于每开一次列表页多渲染十几条路由），搜索表单会用一个 hidden input 把机种一起提交（否则在 NES 里搜一下就掉回全库）。⚠️ **它和搜索的收录策略相反**：搜索是 `noindex, follow`，而机种筛选 **照常收录**（每个都是真实分类），canonical / hreflang 都指自己那一份。
 
 **列表页的搜索**（2026-10-12 加）：
 
-- 搜索框是一个**真正的 GET 表单**（`<form action="/games" method="get">`），不是客户端 state —— 提交后浏览器自己跳到 `/games?q=…`。于是搜索有真地址（可分享、可收藏、爬虫走得通），**且完全不需要 JS**。
+- 搜索框是一个**真正的 GET 表单**（`<form action="/games/search" method="get">`），不是客户端 state —— 提交后浏览器自己跳到 `/games/search?q=…`。于是搜索有真地址（可分享、可收藏、爬虫走得通），**且完全不需要 JS**。这条路由是**动态**的（`force-dynamic`，按 query 渲染），所以搜完再翻页 / 换机种是软导航，不整页刷新。
 - 后端直接复用 `listGamesPage` 的 `keyword`，匹配 **title / developer / series**（不区分大小写）。⚠️ 刻意**不含 `language` 和 `description`**，理由见 `lib/server/games.ts` 的 `SEARCH_CONDITION` 注释。
-- ⚠️ 翻页链接**必须带上关键词**（走同一个 `gamesHref()`），否则搜完再翻页会掉回「全部游戏」。
+- ⚠️ 翻页链接**必须带上关键词**（走同一个 `gamesHref()`），否则搜完再翻页会掉回「全部游戏」。`gamesHref` 是唯一的地址构造器：有搜索词走 `/games/search?…`，没有搜索词走路径段那份。
 - ⚠️ **搜索结果页是 `noindex, follow`**：站内搜索会产出无限多的 `?q=…` 组合，每条都只是列表页的一个子集，全收进去就是重复内容、还会稀释详情页的权重。`follow` 必须留着，爬虫仍要顺着结果卡片走到详情页。想让某个词能被搜到，正确做法是给那个词做真实内容页，别指望搜索结果的 URL 被收录。
 - 关键词上限 **64 个码点**（按码点截，不按 UTF-16 —— 直接 `slice` 会把 emoji / 生僻字劈成半个代理对）。超长地址会被规范成截断后的那一份。
 - 三种「空」分开处理：库里真没游戏（`gamesPage.empty`）、这个词没搜到（`gamesPage.searchEmpty`，把搜的词原样写回去）、这个机种一款都没有（`gamesPage.consoleEmpty`）。搜索优先 —— 同时有词和机种时，说「没搜到这个词」比说「这个机种没游戏」准确。
@@ -301,7 +302,7 @@ pnpm dev
 - 详情页原来的 `developer` 文本列**保留**（老数据、以及列表页 meta 描述里那个「年份 · 开发商 · 机种」仍读它），迁移脚本 `scripts/add-developers.mjs` 把库里 20 个不同的 `developer` 取值写进 `developers` 表并回填 `games.developer_id`（幂等、只补空的、可重复跑）。⚠️ 有的老数据本身填反了（如「西游释厄传」「冒险岛」其实是游戏名），脚本原样照搬，没做清洗。
 - 后台 `app/admin/(panel)/developers` 新增一个 tab 管开发商（增删改、logo 上传走 R2、删除前检查是否被游戏占用）；游戏表单里「开发商」从文本输入改成了**下拉**（选项来自 `/api/admin/developers/options`）。
 - 开发商页面也进 `sitemap.xml`，详情页 `notFound()` 落到 `app/[locale]/developers/[id]/not-found.tsx`（带 noindex）。
-- 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 24 小时**（2026-10-16 从 12 小时提上来；代码里 `DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400`）。**「总数」另有一层独立缓存**（`countDevelopersCached`，键里没有 offset）：翻多少页都只数一次全表（2026-10-14 加，和 games 那边同一套做法）。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚 24 小时才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
+- 📌 **列表页有缓存**（2026-10-13 加）：`/developers` 的取数是 `unstable_cache` 包过的（`lib/server/developers.ts` 的 `listDevelopersCached`），**TTL 30 天**（2026-10-16 从 12 小时提到 24 小时，2026-10-20 再提到 30 天；代码里 `DEVELOPERS_PAGE_REVALIDATE_SECONDS = 2592000`）。**「总数」另有一层独立缓存**（`countDevelopersCached`，键里没有 offset）：翻多少页都只数一次全表（2026-10-14 加，和 games 那边同一套做法）。缓存**只给这一页**用：后台列表（`/api/admin/developers`）继续走不缓存的 `listDevelopers`，它必须立刻看到刚改完的名字。副作用：**后台改完名字 / 简介，这一页最多晚 30 天才更新**（开发商详情页上开发商自己的资料不缓存，那边是立刻的）。
 
 ### 机种（公开页面）
 
@@ -313,17 +314,17 @@ pnpm dev
 | 路由 | 是什么 |
 | --- | --- |
 | `/consoles` | 机种列表：**卡片是按代码里的机种清单画出来的**（不是从表里读的），资料行提供图 / 名字 / 简介，没填的用默认；**按游戏数从多到少排**（2026-10-15 加，和首页「按机种浏览」同一口径；数量并列时保持 `CONSOLE_TYPES` 的固定次序，空机种垫底但不过滤）。 |
-| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页，走 `listGamesByConsoleCached`，24 小时），带**语种筛选**（`?lang=`，见下）。 |
+| `/consoles/[type]` | 机种专题页：机图 + 简介 + 详细介绍 + 发售年份（有才显示），下面是**这个机种下全部游戏**（分页 `/consoles/<type>/page/N`，走 `listGamesByConsoleCached`，30 天），带**语种筛选**（`/consoles/<type>/lang/<code>`，见下）。 |
 
-- **语种筛选**（2026-10-16 加，`app/[locale]/consoles/[id]/page.tsx`）：`?lang=<zh|en|ja|ko|all>`，筛的是 `games.language`（**游戏自己的语种**，不是界面语言）。
-  - 位置在「{机种} 上的游戏」标题下面、搜索框下面那条筛选条 —— 一排链接（每个语种一颗 + 一颗「全部」），版式与行为照抄 `/games` 的机种筛选条（当前那颗 accent 高亮 + `aria-current`）；**每颗后面挂这个机种下该语种的条数**（`countConsoleGamesByLanguageCached`，一条 `GROUP BY`、24 小时缓存）。
+- **语种筛选**（2026-10-16 加，2026-10-20 从 `?lang=` 搬进路径，`app/[locale]/consoles/[id]/lang/[code]/page.tsx`）：`/consoles/nes/lang/<zh|en|ja|ko>`，筛的是 `games.language`（**游戏自己的语种**，不是界面语言）。
+  - 位置在「{机种} 上的游戏」标题下面、搜索框下面那条筛选条 —— 一排链接（每个语种一颗 + 一颗「全部」），版式与行为照抄 `/games` 的机种筛选条（当前那颗 accent 高亮 + `aria-current`）；**每颗后面挂这个机种下该语种的条数**（`countConsoleGamesByLanguageCached`，一条 `GROUP BY`、30 天缓存）。
   - ⚠️ **0 款的语种那颗不画**（2026-10-19 用户要求，起因 `/consoles/nds` 上四颗里三颗是 0）：只留「这个机种真有这个语种」的筛选项。例外是**当前正筛着的那一颗**（收藏 / 外链进来的 `?lang=`），否则标签消失后页面上看不出自己在筛什么、也没路走回「全部」。「全部」那颗永远在。
-  - ⚠️ **不写 `?lang=` 时默认 = 全部**（2026-10-16 从「按界面语言挑一份」改成「先给全部」：`/zh/consoles/nes` 先列出这个机种下所有语种的游戏）；所以「默认那一份」的地址就是**裸路径**，点「全部」那颗不会在地址里留下 `?lang=`（`?lang=all` 会被 307 收敛回裸地址）。对应地，「全部」那颗链接的 href 由 `languageParamOf` 拼（「全部」就给空串）。
-  - 两态写法：**「全部」⇒ 不写**、其余 ⇒ 短码本身。规范顺序 `?q=…&lang=…&page=N`；认不出的 `?lang=xxx`、重复参数、`?lang=`（空）、`?lang=all` 一律 307 到规范地址 —— 和 `/games` 的 `?console=xxx` / `?page=01` 同一条规矩。
+  - ⚠️ **不筛语种时默认 = 全部**（2026-10-16 从「按界面语言挑一份」改成「先给全部」：`/zh/consoles/nes` 先列出这个机种下所有语种的游戏）；所以「默认那一份」的地址就是**裸路径**，点「全部」那颗不会多一段（`/lang/all` 会被 307 收敛回裸地址）。对应地，「全部」那颗链接的 href 由 `languageParamOf` 拼（「全部」就给空串）。
+  - 两态写法：**「全部」⇒ 不写语种段**、其余 ⇒ 短码本身。浏览态规范形态 `/consoles/<机种>[/lang/<短码>][/page/N]`，搜索态 `/consoles/<机种>/search?q=…&lang=…&page=…`；认不出的语种段、`/lang/all` 一律 307 到规范地址 —— 和 `/games/console/xxx` / `/page/01` 同一条规矩。
   - ⚠️ **切换语种 / 搜索 / 翻页必须互相带上彼此**（都走 `consoleHref`，搜索表单靠 hidden `lang`）：少了任何一处，筛着「日本語」搜一下或翻一页就掉回全部。
-  - ⚠️ 收录策略与 `/games` 相反：**带 `?lang=` 的那几份 `noindex, follow`**（只是同一份列表的子集，四个语种全收就是四份重复内容）；**默认那一份（裸地址，现在就是「全部」）照常收录**，hreflang 也只指裸地址那一份。
+  - ⚠️ 收录策略与 `/games` 相反：**带语种段的那几份 `noindex, follow`**（只是同一份列表的子集，语种全收就是重复内容）；**默认那一份（裸地址，现在就是「全部」）照常收录**，hreflang 也只指裸地址那一份。
   - 资料表里的「N 款游戏」始终是**这个机种的总数**（不筛语种），和「全部」那颗一致 —— 别改成跟着语种走。
-- 首页「按机种浏览」的卡片指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 原来指的 `/games?console=` 机种筛选**保留没动**，两个入口并存。
+- 首页「按机种浏览」的卡片指向 `/consoles/<机种>`，区块右上那条「全部机种」（`home.consoles.all`）指向 `/consoles` —— 列表页的机种筛选（现在是 `/games/console/<机种>`）**保留没动**，两个入口并存。
 - 预填数据：`scripts/add-consoles.mjs`（**结构迁移 + 占位资料**：建表 + 给缺资料的机种补默认行，幂等、可反复跑；**加了新机种就跑它一遍**）+ `scripts/seed-consoles.mjs`（**一次性内容快照**：最早那四个机种的完整双语资料 + R2 机图，会**覆盖后台的人工编辑**，跑过就别再跑）。
 - 机图：放 `scripts/console-images/<机种>-pixel.png`，跑 `scripts/fill-console-images.mjs` 上传到 R2 `images/consoles/` 并回填 `image_url`（默认**只补 `image_url` 为空的行**，要覆盖加 `--force`）。规格 **1024×1024、透明底、扁平 2D 像素画、3/4 视角、内容约占 0.95 画布宽**（对齐 `snes` / `gba` / `nds` 那一支）。⚠️ **必须透明底**：机种卡片画在深色底上，不透明的图会显出一个方块 —— 库里 2026-10-14 那八张（gb / gbc / md / gg / sms / 32x / ws / ngp）就是浅灰底没抠的，属**既有欠账**。
 - 后台 `app/admin/(panel)/consoles` 一个 tab 管资料（**没有添加 / 搜索 / 翻页** —— 条目跟随代码里的机种清单，只有编辑与重置；接口 `PATCH /api/admin/consoles/[type]` 是 upsert，资料行不存在时顺带创建）。
@@ -602,7 +603,7 @@ services:
 
 **首次访问的语言提示**（`components/LocalePrompt.tsx`）：挂在根布局里，所以每个前台页面都有（后台除外）。只在「**没设置过语言 且 浏览器想要的语言 ≠ 当前页面语言**」时，于页面底部弹一条**非模态**提示 —— 两个选择：「切过去」（写 cookie 并导航到另一种语言的同一页）或「保持当前」（**同样写 cookie**，视为已主动设置，之后不再问）。它和首次访问的操作指引**排队**：指引那层是 z-[60] 的全屏暗幕，两者同时在场会把提示压暗、还点不动，靠 `TOUR_OPEN_EVENT` / `TOUR_DONE_EVENT` 让路。
 
-**SEO**：每个页面四条 `hreflang` 互指（`en` / `zh-CN` / `ja-JP` / `ko-KR`）+ `x-default` 指英文，收口在 `lib/i18n.ts` 的 `alternatesFor()`（它**遍历 `LOCALES` 现拼**，所以加语言时这里自动多一条）；sitemap 每条地址出四份，见 `app/sitemap.ts` 的 `entries()`。⚠️ Next 的 `alternates` 是**整体覆盖**不是深合并 —— 漏写一页，那页的 canonical 就会顶着首页的地址。
+**SEO**：每个页面 **18 条** `hreflang` 互指（`en` / `zh-CN` / `zh-TW` / `ja-JP` / `ko-KR` / `es-ES` / `hi-IN` / `pt-BR` / `fr-FR` / `de-DE` / `it-IT` / `ru-RU` / `fil-PH` / `nl-NL` / `vi-VN` / `th-TH` / `ms-MY` / `id-ID`）+ `x-default` 指英文，收口在 `lib/i18n.ts` 的 `alternatesFor()`（它**遍历 `LOCALES` 现拼**，所以加语言时这里自动多一条）；sitemap **每语言一份**（`generateSitemaps`，18 份 + 一份索引），见 `app/sitemap.ts` 的 `entry()`。⚠️ Next 的 `alternates` 是**整体覆盖**不是深合并 —— 漏写一页，那页的 canonical 就会顶着首页的地址。
 
 > 语言由 middleware 的请求头 + `[locale]` 段决定，所以整棵树都是动态渲染 —— 换来的是首屏文案直接就是对的，不会先渲染英文再翻成中文。代价是不能再用 `output: 'export'` 做纯静态托管。
 

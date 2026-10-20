@@ -4,7 +4,7 @@
  * 结构上照 lib/server/feedback.ts 的套路（DB 行 snake_case / 对外 camelCase
  * 两套类型 + `toReport()` 映射，列表一律「新的在前」），但有三处**刻意不同**：
  *
- * ① **不带列表缓存**。留言本那份缓存是为「所有访客共读、点开就打一次 D1」准备的；
+ * ① **不带列表缓存**。留言本那份缓存是为「所有访客共读、点开就查一次库」准备的；
  *    这张表**只有后台会读**（一个管理员偶尔点进来一次），加缓存没有收益，
  *    反而多一份「刚标记完会不会看到旧值」的心智负担。
  *
@@ -18,10 +18,14 @@
  * ⚠️ 翻页同样用**游标**而不是 offset，理由和留言本一样：列表是「新的在前」，
  *    offset 会让翻页期间的新数据把第二页顶出一份重复。游标要带上 id ——
  *    created_at 是毫秒时间戳，同一毫秒写入两条并不罕见（连点两次提交）。
+ *
+ * ⚠️ 2026-10-20 起数据源是 Supabase（`./pg`）。跟 D1 不一样的写法同 feedback.ts：
+ *    列名 `game_id` → `game_slug`、`resolved` 是原生 boolean、`created_at` 是
+ *    `timestamptz`（读时换算成毫秒、比较时 `to_timestamp`）。
  */
 
 import { randomUUID } from 'node:crypto';
-import { query } from './d1';
+import { query } from './pg';
 
 /** 一页多少条。 */
 export const REPORT_PAGE_SIZE = 12;
@@ -29,13 +33,14 @@ export const REPORT_PAGE_SIZE = 12;
 /** 正文长度上限。纯文本、没有富文本，卡个上限就够挡刷屏了。 */
 export const REPORT_MAX_LENGTH = 500;
 
-/** DB 行（snake_case）。 */
+/** DB 行（snake_case）。`created_at` 已在 SELECT 里换算成毫秒时间戳。 */
 export interface ReportRow {
   id: string;
-  game_id: string;
+  /** 游戏主键（= `games.slug`）。对外字段名仍是 `gameId`。 */
+  game_slug: string;
   game_title: string;
   content: string;
-  resolved: number;
+  resolved: boolean;
   created_at: number;
 }
 
@@ -59,10 +64,10 @@ export interface ReportPage {
 function toReport(row: ReportRow): GameReport {
   return {
     id: row.id,
-    gameId: row.game_id,
+    gameId: row.game_slug,
     gameTitle: row.game_title,
     content: row.content,
-    resolved: row.resolved !== 0,
+    resolved: row.resolved,
     createdAt: row.created_at,
   };
 }
@@ -88,6 +93,12 @@ function clampLimit(value: number | undefined): number {
   return Math.min(value, 50);
 }
 
+/* 两条查询共用的 SELECT（`SELECT *` 会把 created_at 给成 timestamptz，必须写死列） */
+const SELECT = `
+  SELECT id, game_slug, game_title, content, resolved,
+         (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
+    FROM game_reports`;
+
 export async function listReports(
   options: { cursor?: string | null; limit?: number } = {}
 ): Promise<ReportPage> {
@@ -100,14 +111,17 @@ export async function listReports(
    */
   const rows = cursor
     ? await query<ReportRow>(
-        `SELECT * FROM game_reports
-          WHERE (created_at < ?) OR (created_at = ? AND id < ?)
+        `${SELECT}
+          WHERE (created_at < to_timestamp(?::float8 / 1000))
+             OR (created_at = to_timestamp(?::float8 / 1000) AND id < ?)
           ORDER BY created_at DESC, id DESC
           LIMIT ?`,
         [cursor.createdAt, cursor.createdAt, cursor.id, limit + 1]
       )
     : await query<ReportRow>(
-        'SELECT * FROM game_reports ORDER BY created_at DESC, id DESC LIMIT ?',
+        `${SELECT}
+          ORDER BY created_at DESC, id DESC
+          LIMIT ?`,
         [limit + 1]
       );
 
@@ -132,7 +146,8 @@ export async function insertReport(input: {
   const id = randomUUID();
   const createdAt = Date.now();
   await query(
-    'INSERT INTO game_reports (id, game_id, game_title, content, resolved, created_at) VALUES (?, ?, ?, ?, 0, ?)',
+    `INSERT INTO game_reports (id, game_slug, game_title, content, resolved, created_at)
+     VALUES (?, ?, ?, ?, false, to_timestamp(?::float8 / 1000))`,
     [id, input.gameId, input.gameTitle, input.content, createdAt]
   );
   return {
@@ -153,7 +168,7 @@ export async function insertReport(input: {
 export async function setReportResolved(id: string, resolved: boolean): Promise<boolean> {
   const rows = await query<{ id: string }>(
     'UPDATE game_reports SET resolved = ? WHERE id = ? RETURNING id',
-    [resolved ? 1 : 0, id]
+    [resolved, id]
   );
   return rows.length > 0;
 }

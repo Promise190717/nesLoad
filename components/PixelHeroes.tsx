@@ -22,8 +22,15 @@ import type { Locale } from '@/lib/i18n';
  */
 
 type PixelSprite = {
-  /** 原生 `title` 用的名字（悬停可见；读屏拿不到，这排本来就是装饰） */
-  name: Record<Locale, string>;
+  /**
+   * 原生 `title` 用的名字（悬停可见；读屏拿不到，这排本来就是装饰）。
+   *
+   * ⚠️ **2026-10-20 从 `Record<Locale, string>` 改成 `Partial`**：语言从 4 种扩到 18 种，
+   *    但这九个角色的名字**只有中英日韩**四份 —— 再往下翻译（「Mario」在 14 种语言里
+   *    都叫 Mario）没有信息量，硬凑 126 条只会多一份要维护的表。
+   *    取值一律走下面的 `heroName()`，缺的那种语言回退英文，**别直接下标**。
+   */
+  name: Partial<Record<Locale, string>>;
   /** 色号表：一个字符 → 一个颜色（`.` 透明，不用写进来） */
   palette: Record<string, string>;
   /** 16 行 × 16 列，一个字符一个像素 */
@@ -304,6 +311,11 @@ function rowRects(row: string, y: number, palette: Record<string, string>) {
   return rects.map((r) => <rect key={`${y}-${r.x}`} x={r.x} y={y} width={r.width} height={1} fill={r.fill} />);
 }
 
+/** 角色名：有这一份就用，没有就回退英文（见 `PixelSprite.name` 的注释）。 */
+function heroName(sprite: PixelSprite, locale: Locale): string {
+  return sprite.name[locale] ?? sprite.name.en ?? '';
+}
+
 export default function PixelHeroes({ locale }: { locale: Locale }) {
   return (
     <div
@@ -313,7 +325,7 @@ export default function PixelHeroes({ locale }: { locale: Locale }) {
       {SPRITES.map((sprite, index) => (
         <span
           key={sprite.name.en}
-          title={sprite.name[locale]}
+          title={heroName(sprite, locale)}
           className="transition-transform duration-150 hover:-translate-y-1"
         >
           <svg

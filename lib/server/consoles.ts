@@ -20,11 +20,8 @@
  */
 
 import { cached } from './cache';
-import { usesUpstreamCatalog } from './catalog-source';
-import { query } from './d1';
-import { upstreamConsoles } from './upstream-catalog';
-import { CONSOLE_TYPES, consoleLabel } from '@/lib/consoles';
-import type { ConsoleType } from '@/lib/emulator';
+import { mediaUrl } from './media';
+import { query } from './pg';
 import {
   EMPTY_ENTITY_TEXT,
   isBlankEntityText,
@@ -73,7 +70,8 @@ function toConsole(row: ConsoleRow & { game_count?: number }, texts: EntityTexts
   return {
     type: row.console_type,
     texts,
-    imageUrl: row.image_url,
+    // 库里存路径，域名现拼（见 lib/server/media.ts）
+    imageUrl: mediaUrl(row.image_url),
     releaseYear: row.release_year,
     createdAt: row.created_at,
     gameCount: Number(row.game_count ?? 0),
@@ -110,19 +108,18 @@ async function loadConsoleTexts(types: string[]): Promise<Map<string, EntityText
 
 /** 写机种文案侧表。 */
 async function writeConsoleTexts(type: string, texts: EntityTexts): Promise<void> {
-  const now = Date.now();
   for (const locale of ['zh', 'en', 'ja', 'ko'] as const) {
     const t = texts[locale] ?? EMPTY_ENTITY_TEXT;
     if (isBlankEntityText(t) && locale !== 'zh') continue;
     await query(
       `INSERT INTO console_texts (console_type, locale, name, summary, description, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, now())
        ON CONFLICT(console_type, locale) DO UPDATE SET
          name = excluded.name,
          summary = excluded.summary,
          description = excluded.description,
-         updated_at = excluded.updated_at`,
-      [type, locale, t.name, t.summary, t.description, now]
+         updated_at = now()`,
+      [type, locale, t.name, t.summary, t.description]
     );
   }
 }
@@ -134,23 +131,26 @@ async function writeConsoleTexts(type: string, texts: EntityTexts): Promise<void
  */
 export async function listConsoles(): Promise<Console[]> {
   const rows = await query<ConsoleRow & { game_count: number }>(
-    `SELECT console_type, image_url, release_year, created_at, ${GAME_COUNT}
-     FROM consoles ORDER BY created_at ASC, console_type ASC`
+    `SELECT console_type, image_url, release_year,
+            (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at,
+            ${GAME_COUNT}
+       FROM consoles ORDER BY sort_order ASC, console_type ASC`
   );
   const textsMap = await loadConsoleTexts(rows.map((r) => r.console_type));
   return rows.map((r) => toConsole(r, textsMap.get(r.console_type) ?? {}));
 }
 
 /**
- * 机种列表页（`/consoles`）那份缓存的时长（秒）= 24 小时。
+ * 机种列表页（`/consoles`）那份缓存的时长（秒）= 30 天。
  *
- * ⚠️ 2026-10-16 从 12 小时提到 24 小时（用户要求「所有列表页统一 24 小时」）。
- *    代价：后台改完机种资料，这一页最多晚 24 小时才更新（机种专题页上机种自己的资料
+ * ⚠️ 2026-10-16 从 12 小时提到 24 小时（用户要求「所有列表页统一 24 小时」）；
+ *    2026-10-20 用户又要求首页 / 列表页 / 详情页统一 30 天，于是 24 小时 → 30 天。
+ *    代价：后台改完机种资料，这一页最多晚 30 天才更新（机种专题页上机种自己的资料
  *    **不缓存**，那边改完是立刻的）。
  *
  * 缓存键里没有语言（`Console` 的 `texts` 带了所有语言），用哪份由页面调 `localizeConsole` 决定。
  */
-export const CONSOLES_PAGE_REVALIDATE_SECONDS = 86400;
+export const CONSOLES_PAGE_REVALIDATE_SECONDS = 2592000;
 
 /**
  * `listConsoles` 的缓存版 —— **只给前台用**；后台必须走未缓存的那份。
@@ -162,41 +162,12 @@ export const CONSOLES_PAGE_REVALIDATE_SECONDS = 86400;
  */
 const listConsolesCachedRaw = cached(
   async () => listConsoles(),
-  ['consoles:list', 'v7'],
+  ['consoles:list', 'v8'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
 
-/**
- * 上游首页那张「机种条」→ 站内 `Console`（源站模式下用，2026-10-19）。
- *
- * 名字按语言各写一份：中文用上游那套（红白机FC / 超任SFC），英日韩用站内短标签
- * （NES / FC — 和 `consoleLabel` 的口径一致，英文站认美版名、中日韩认日版名）。
- * 没有任何简介 / 发行年份 —— 上游那张条子上没有，宁缺勿编。
- */
-async function listUpstreamConsoles(): Promise<Console[]> {
-  const rows = await upstreamConsoles();
-  return rows.map((row) => {
-    const type = row.type as ConsoleType;
-    const texts: EntityTexts = {
-      zh: { name: row.name, summary: null, description: null },
-      en: { name: consoleLabel(type, 'en'), summary: null, description: null },
-      ja: { name: consoleLabel(type, 'ja'), summary: null, description: null },
-      ko: { name: consoleLabel(type, 'ko'), summary: null, description: null },
-    };
-    return {
-      type: row.type,
-      texts,
-      imageUrl: row.imageUrl,
-      releaseYear: null,
-      createdAt: 0,
-      gameCount: row.gameCount,
-    };
-  });
-}
-
-/** 全部机种资料 —— 源站模式下改吃上游首页那张机种条（只有一个请求，见 upstream-catalog）。 */
+/** 全部机种资料 —— 直接读库（源站模式已随 2026-10-20 的迁移一起删掉）。 */
 export async function listConsolesCached(): Promise<Console[]> {
-  if (usesUpstreamCatalog()) return listUpstreamConsoles();
   return listConsolesCachedRaw();
 }
 
@@ -214,7 +185,9 @@ export async function listConsolesCached(): Promise<Console[]> {
  */
 export async function getConsole(type: string): Promise<Console | null> {
   const rows = await query<ConsoleRow>(
-    `SELECT console_type, image_url, release_year, created_at FROM consoles WHERE console_type = ?`,
+    `SELECT console_type, image_url, release_year,
+            (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
+       FROM consoles WHERE console_type = ?`,
     [type]
   );
   if (!rows[0]) return null;
@@ -232,10 +205,7 @@ export async function getConsole(type: string): Promise<Console | null> {
  *    那边也不能跟着切（见 `developers.ts` 的 `getDeveloper`）。
  */
 export async function getConsolePageData(type: string): Promise<Console | null> {
-  if (!usesUpstreamCatalog()) return getConsole(type);
-  /* 上游那张机种条本来就带全 14 台的资料，按机种挑一条即可（`upstreamConsoles` 自带 24 小时缓存） */
-  const rows = await listUpstreamConsoles();
-  return rows.find((row) => row.type === type) ?? null;
+  return getConsole(type);
 }
 
 export interface ConsoleInput {
@@ -254,35 +224,14 @@ export interface ConsoleInput {
  *   2. console_texts 侧表（真正被读取的来源）。
  */
 export async function upsertConsole(type: string, input: ConsoleInput): Promise<void> {
-  const zh = input.texts.zh ?? EMPTY_ENTITY_TEXT;
-  const en = input.texts.en ?? EMPTY_ENTITY_TEXT;
-
+  /* 新表没有 name / summary / description 那些列了 —— 文案一律进 console_texts */
   await query(
-    `INSERT INTO consoles
-       (console_type, name, name_en, image_url, summary, summary_en,
-        description, description_en, release_year, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(console_type) DO UPDATE SET
-       name = excluded.name,
-       name_en = excluded.name_en,
+    `INSERT INTO consoles (console_type, image_url, release_year)
+     VALUES (?, ?, ?)
+     ON CONFLICT (console_type) DO UPDATE SET
        image_url = excluded.image_url,
-       summary = excluded.summary,
-       summary_en = excluded.summary_en,
-       description = excluded.description,
-       description_en = excluded.description_en,
        release_year = excluded.release_year`,
-    [
-      type,
-      zh.name ?? '',
-      en.name,
-      input.imageUrl,
-      zh.summary,
-      en.summary,
-      zh.description,
-      en.description,
-      input.releaseYear,
-      Date.now(),
-    ]
+    [type, input.imageUrl, input.releaseYear]
   );
 
   await writeConsoleTexts(type, input.texts);
@@ -307,7 +256,8 @@ export async function deleteConsole(type: string): Promise<void> {
  */
 export async function listConsoleStubs(): Promise<{ type: string; createdAt: number }[]> {
   const rows = await query<{ console_type: string; created_at: number }>(
-    'SELECT console_type, created_at FROM consoles ORDER BY created_at DESC'
+    `SELECT console_type, (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
+       FROM consoles ORDER BY created_at DESC`
   );
   return rows.map((row) => ({ type: row.console_type, createdAt: row.created_at }));
 }
@@ -319,9 +269,6 @@ export async function listConsoleStubs(): Promise<{ type: string; createdAt: num
  *    见本文件头部），所以照 `CONSOLE_TYPES` 直接给全量、`createdAt` 记 0（= 不知道收录时间）。
  */
 export async function listConsoleStubsCached(): Promise<{ type: string; createdAt: number }[]> {
-  if (usesUpstreamCatalog()) {
-    return CONSOLE_TYPES.map((type) => ({ type, createdAt: 0 }));
-  }
   return listConsoleStubsRaw();
 }
 

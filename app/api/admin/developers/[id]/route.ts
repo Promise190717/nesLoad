@@ -18,7 +18,8 @@ import {
   normalizeWebsite,
   updateDeveloper,
 } from '@/lib/server/developers';
-import { deleteObject, keyFromPublicUrl, publicUrl, uploadObject } from '@/lib/server/r2';
+import { deleteObject, uploadObject } from '@/lib/server/r2';
+import { mediaKey, mediaPath, mediaUrl } from '@/lib/server/media';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,8 +84,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     /*
      * 没选新图就走原地址 —— **不要**在这里把它置空：那会让「只想改个简介」
      * 顺手把厂标清掉。要清图得另做一个「移除图片」的入口，不该由沉默的空 input 触发。
+     *
+     * ⚠️ `row.image_url` 是库里原值：可能是路径，也可能还是旧版的绝对地址 ——
+     *    回写前用 `mediaPath` 统一剥成路径（见 lib/server/media.ts）。
      */
-    let imageUrl = row.image_url;
+    let imageUrl = mediaPath(row.image_url);
     let uploadedKey: string | null = null;
 
     if (image) {
@@ -94,7 +98,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         new Uint8Array(await image.arrayBuffer()),
         image.type || 'application/octet-stream'
       );
-      imageUrl = publicUrl(uploadedKey);
+      imageUrl = mediaPath(uploadedKey);
     }
 
     await updateDeveloper(id, {
@@ -111,14 +115,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     // 换过图才清理旧对象。**放在写入之后**：反过来的话，DB 写失败就丢了一张还在用的图。
     // 删不掉只占点存储，不该让「保存成功」变成失败（和删游戏那套一致）。
-    const oldKey = row.image_url ? keyFromPublicUrl(row.image_url) : null;
+    const oldKey = row.image_url ? mediaKey(row.image_url) : null;
     if (uploadedKey && oldKey && oldKey !== uploadedKey) {
       await Promise.allSettled([deleteObject(oldKey)]);
     }
 
+    // 回给后台的是展示地址（路径 + 域名）
     return NextResponse.json({
       ok: true,
-      developer: { id, name, imageUrl },
+      developer: { id, name, imageUrl: mediaUrl(imageUrl) },
     });
   } catch (error) {
     console.error('[admin] 修改开发商失败', error);
@@ -164,7 +169,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   }
 
   // 记录已经没了，厂标属收尾工作，删不掉也不该让整个请求失败
-  const key = row.image_url ? keyFromPublicUrl(row.image_url) : null;
+  const key = row.image_url ? mediaKey(row.image_url) : null;
   if (key) await Promise.allSettled([deleteObject(key)]);
 
   return NextResponse.json({ ok: true });

@@ -8,19 +8,16 @@
  *   3. 顺便把 rom_name 放进 Content-Disposition，前端可据此还原成带原名的 File
  *      （街机 FBNeo 依赖这个文件名）。
  *
- * ⚠️ **来源由 `CATALOG_SOURCE` 决定**（2026-10-19 起，默认 `upstream`）：
- *   · 源站模式 → 按上游 slug（+ `?lang=` 选的语言版本）现解析地址；
- *   · 数据库模式 → `source_url` 有值就回源上游（后台爬取勾了「不保存 ROM」的那批），
- *     否则读本站 R2（`rom_url`）。
+ * ⚠️ **来源现在全在 `game_roms.source_url` 里**（2026-10-20 换 Supabase 之后）：
+ *   `site:/…` / `files:/…` → 上游源站（后台爬取勾了「不保存 ROM」的那批）；
+ *   `r2:/…`                → 本站 R2 桶（后台手动上传的那批）。
  *   两条都是**流式转发**：`upstream.body` 直接交给 `Response`，字节来一坨转一坨，
  *   不落盘、不攒整包 —— 服务端内存只占一个 chunk（不是整个 128 MiB）。
  *   ⚠️ 别在这条路上写 `await res.arrayBuffer()` / `.blob()`，那会把流式打回全量落地。
  */
 
-import { getGameRowCached, type GameRow } from '@/lib/server/games';
-import { usesUpstreamCatalog } from '@/lib/server/catalog-source';
+import { getGameRoms } from '@/lib/server/sb-games';
 import { publicUrl } from '@/lib/server/r2';
-import { upstreamRomTarget } from '@/lib/server/upstream-catalog';
 import { sourceFileUrl, UPSTREAM_SITE, UPSTREAM_USER_AGENT } from '@/lib/server/upstream';
 import { fetchRomUpstream, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
 
@@ -82,56 +79,39 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 
   /*
-   * `?lang=` 是「这一款用哪个语言版本的 ROM」（2026-10-19 加）。
-   *
-   * 数据库那条路不看它 —— 同款的不同语言版本在库里**各是一行**，id 已经决定了是哪一份。
-   * 它只给源站模式用：上游把四份 ROM 挂在同一个游戏对象的 `fileName` 里，
-   * 详情页 / 播放页选好的语言就靠这个参数带过来（见 upstream-catalog 的 upstreamRomTarget）。
+   * `?lang=` = 这一款要哪个语言版本的 ROM（2026-10-20 起由 `game_roms` 直接支持）。
+   * 不传就按站内语言顺序取默认那一份（`zh` → `en` → `ja` → `ko`）。
    */
   const lang = new URL(request.url).searchParams.get('lang')?.trim() || null;
 
   /*
-   * 回源目标：
-   *   · 源站模式（`CATALOG_SOURCE=upstream`，默认）—— 按上游 slug + 语言版本现解析；
-   *   · 数据库模式 —— **有来源地址就优先走上游**，否则读本站 R2（见文件头那段）。
-   *
-   * ⚠️ 走哪条**只看环境变量**，不按 D1 的报错自动切（理由见 lib/server/catalog-source.ts）。
+   * 回源目标：按 `source_url` 的前缀分派（见文件头）。
+   *   `r2:` 那批是本站自持的对象，地址由 `publicUrl()` 现拼（换域名不用改数据）。
    */
-  let target: string | null = null;
-  let fileName = 'rom';
-  let fromUpstream = true;
-
-  if (usesUpstreamCatalog()) {
-    const fallback = await upstreamRomTarget(id, lang);
-    if (!fallback) {
-      console.error('[games] 上游找不到这一款的 ROM', id, lang ?? '');
-      return new Response('not found', { status: 404 });
-    }
-    target = fallback.url;
-    fileName = fallback.name;
-  } else {
-    /*
-     * 缓存版（24 小时 / 后台写入失效 tag）：ROM 代理是全站请求量最大的单条查询，
-     * 每次开局都打一遍 D1 不值当。元数据在缓存窗口里不变（换 ROM 走删除重传，会失效 tag）。
-     */
-    let row: GameRow | null;
-    try {
-      row = await getGameRowCached(id);
-    } catch (error) {
-      console.error('[games] ROM 查询失败', error);
-      return new Response('lookup failed', { status: 500 });
-    }
-    if (!row) return new Response('not found', { status: 404 });
-
-    const source = sourceFileUrl(row.source_url);
-    target = source ?? (row.rom_url ? publicUrl(row.rom_url) : null);
-    fileName = row.rom_name;
-    fromUpstream = Boolean(source);
-    if (!target) {
-      console.error('[games] 这一行既没有可用的来源地址，也没有 R2 对象', id);
-      return new Response('not found', { status: 404 });
-    }
+  let roms: Awaited<ReturnType<typeof getGameRoms>>;
+  try {
+    roms = await getGameRoms(id);
+  } catch (error) {
+    console.error('[games] ROM 查询失败', error);
+    return new Response('lookup failed', { status: 500 });
   }
+  if (roms.length === 0) return new Response('not found', { status: 404 });
+
+  const picked = (lang ? roms.find((rom) => rom.language === lang) : null) ?? roms[0];
+  const fileName = picked.romName || 'rom';
+  const selfHosted = picked.sourceUrl?.startsWith('r2:') ?? false;
+  const target = selfHosted
+    ? publicUrl((picked.sourceUrl as string).slice(3))
+    : sourceFileUrl(picked.sourceUrl);
+  if (!target) {
+    console.error('[games] 这一份 ROM 没有可用的来源地址', id, picked.language);
+    return new Response('not found', { status: 404 });
+  }
+  /*
+   * 只有回源上游时才带那套 UA / Referer：本站 R2 对象不需要，带了反而会让 R2 的
+   * 缓存键分裂（同一个对象因请求头不同被缓存成多份）。
+   */
+  const fromUpstream = !selfHosted;
 
   let upstream: Response;
   try {

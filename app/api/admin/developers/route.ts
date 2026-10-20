@@ -21,7 +21,8 @@ import {
   type Developer,
 } from '@/lib/server/developers';
 import { flatEntityTexts, type FlatEntityText } from '@/lib/entity-text';
-import { publicUrl, uploadObject } from '@/lib/server/r2';
+import { uploadObject } from '@/lib/server/r2';
+import { mediaPath, mediaUrl } from '@/lib/server/media';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -150,7 +151,8 @@ export async function POST(request: Request) {
         new Uint8Array(await image.arrayBuffer()),
         image.type || 'application/octet-stream'
       );
-      imageUrl = publicUrl(key);
+      // 只存路径（见 lib/server/media.ts）；回给后台的展示地址在响应处再拼
+      imageUrl = mediaPath(key);
     }
 
     const developer = await insertDeveloper(id, {
@@ -165,7 +167,11 @@ export async function POST(request: Request) {
       website: normalizeWebsite(form.get('website')),
     });
 
-    return NextResponse.json({ ok: true, developer: flatten(developer) });
+    // `imageUrl` 入库前已是路径，回给后台的展示地址在这里现拼域名
+    return NextResponse.json({
+      ok: true,
+      developer: { ...flatten(developer), imageUrl: mediaUrl(imageUrl) },
+    });
   } catch (error) {
     console.error('[admin] 新建开发商失败', error);
     return fail('create-failed', friendly(error), 500);

@@ -26,8 +26,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { isD1Unavailable } from '@/lib/server/d1';
-import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/games';
+import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -50,7 +49,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * `/room?id=` —— 而**首页也认这两个参数**（`?id=` / `?room=` 一律 307 透传到 `/room`），
  * 所以老链接照样能用。见 `app/[locale]/page.tsx` 里那段重定向。
  *
- * 常用游戏构建期预生成，剩余详情按需生成；公共 HTML 缓存 24 小时。
+ * 常用游戏构建期预生成，剩余详情按需生成；公共 HTML 缓存 30 天。
  */
 const loadGame = cache(async (id: string) => getGameCached(id));
 
@@ -485,12 +484,13 @@ export default async function GameDetailPage({
           {/*
             操作说明（2026-10-19 加，用户要求「把源站的游戏控制说明也放到详情页面」）。
 
-            数据来自**上游详情页的 `controls` 字段**（见 lib/server/upstream-catalog.ts 的
-            `controlsOf`），四个语言各一份真翻译 —— 所以这里读的是 `text.controls`
-            （已按界面语言挑好），不是 `game` 上某个扁平字段。
+            数据来自**上游详情页的 `controls` 字段**（爬取时写进 `game_texts.controls`，
+            见 scripts/migrate-to-supabase.mjs 的 `controlsOf`），四个语言各一份真翻译
+            —— 所以这里读的是 `text.controls`（已按界面语言挑好），不是 `game` 上
+            某个扁平字段。
 
-            ⚠️ **没有就整块不画**：数据库那条路（`CATALOG_SOURCE=d1`）的 `game_texts`
-               没有这一列，`controls` 恒为 `null` —— 这块天然是源站专属内容，
+            ⚠️ **没有就整块不画**：后台手动添加的那几款没有这个字段（表单里没有这一栏），
+               `controls` 恒为 `null` —— 这块天然是「爬来的才有」的内容，
                不要给它编一段默认文案。
             ⚠️ 位置在**资料表之后**（2026-10-19 用户要求「放在类型 / 年份 / 开发商 / 系列 /
                语言这个下面」，第一版放在正文与资料表之间是错的）。用 `border-t` 与资料表
@@ -551,7 +551,7 @@ export default async function GameDetailPage({
   );
 }
 
-export const revalidate = 86400;
+export const revalidate = 2592000;
 
 /**
  * 收藏数（详情页那一颗钮的初值）。
@@ -566,13 +566,20 @@ const countFavorites = cached(
     try {
       return await countGameFavorites(id);
     } catch (error) {
-      if (!isD1Unavailable(error)) throw error;
-      console.warn('[catalog] D1 不可用，收藏数按 0 显示', id);
+      /*
+       * 收藏数只是个数字，**取不到不该把整页带走**（2026-10-20 改）：
+       * 以前这里只吞 `D1UnavailableError`（数据源自动回退那一套），换库之后
+       * 没有那个错误类了 —— 数据库抖一下就让详情页 500，代价远大于少显示一个 0。
+       */
+      console.warn('[games] 收藏数读取失败，按 0 显示', id, error);
       return 0;
     }
   },
   ['game-favorite-count'],
+  /*
+   * ⚠️ 这里**故意留在 24 小时**，不跟页面一起拉到 30 天（2026-10-20）：
+   *    它不是「页面缓存」而是用户行为的计数，一个月不动会让详情页上的数字明显失真；
+   *    页面本身 30 天、这个数字 1 天，代价只是多一次很轻的 COUNT 查询。
+   */
   { revalidate: 86400 }
 );
-
-export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';

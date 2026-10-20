@@ -7,9 +7,10 @@ import PixelHeroes from '@/components/PixelHeroes';
 import { PlayersIcon } from '@/components/icons';
 import TopBar from '@/components/TopBar';
 import { cardDelayMs } from '@/lib/card-stagger';
+import { entityInitial } from '@/lib/entity-text';
 import { SITE_NAME, localePath, translate, type MessageKey } from '@/lib/i18n';
 import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/developers';
-import { countGamesByConsoleCached } from '@/lib/server/games';
+import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { listConsolesCached } from '@/lib/server/consoles';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -33,12 +34,12 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   同一句话写两遍，而且两份迟早会漂。
  *
  * - **数据全部走带缓存的那几个函数**（`listConsolesCached` / `countGamesByConsoleCached`
- *   / `listTopDevelopersCached`，TTL 都是 24 小时）：这一页是给爬虫和过路访客看的，
+ *   / `listTopDevelopersCached`，TTL 都是 30 天）：这一页是给爬虫和过路访客看的，
  *   内容变得很慢（只有后台上传游戏时才变），每次渲染打三趟 D1 不划算。
- *   副作用和后台上传游戏那条一样：新传的游戏最多晚 24 小时出现在首页
- *   （`/games` 那边 2026-10-16 起也是 24 小时，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
+ *   副作用和后台上传游戏那条一样：新传的游戏最多晚 30 天出现在首页
+ *   （`/games` 那边 2026-10-20 起同样是 30 天，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
  *
- * - 公共 HTML 按 locale 预生成并缓存 24 小时；旧房间查询链接由 middleware 转发。
+ * - 公共 HTML 按 locale 预生成并缓存 30 天；旧房间查询链接由 middleware 转发。
  *
  * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），
  *   最后按开发商（八家）。参考站还有「类型 / 系列」两个维度，本站没有那两张表
@@ -116,7 +117,7 @@ function Section({
   );
 }
 
-export const revalidate = 86400;
+export const revalidate = 2592000;
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const locale = await readLocaleParam(params);
 
@@ -375,7 +376,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
                           aria-hidden="true"
                           className="pixel-edge pxw-2 pxc-700 flex h-[56px] w-[56px] shrink-0 items-center justify-center bg-ink-950 font-pixel text-[18px] text-ink-600"
                         >
-                          {Array.from(text.name)[0] ?? '?'}
+                          {entityInitial(text.name)}
                         </span>
                       )}
                       <span className="w-full truncate text-[12px] text-ink-100">{text.name}</span>

@@ -22,19 +22,27 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getGameCached } from '@/lib/server/games';
+import { getGame } from '@/lib/server/sb-games';
 
 export const runtime = 'nodejs';
-// Public game metadata is the same for every viewer, including static players.
-export const dynamic = 'force-static';
-export const revalidate = 86400;
-export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';
+/*
+ * ⚠️ **接口不吃缓存**（2026-10-20 用户要求「只要页面缓存，接口一律不缓存」）。
+ *
+ * 原来这里是 `force-static` + `revalidate = 86400`（后来一度改成 30 天）：构建期预生成
+ * 一批、其余按需生成并缓存。代价是「后台改了游戏资料，这个接口最长一天/一个月才变」，
+ * 而调用它的正是房间页 / 播放页的兜底路径 —— 用户看到的是和详情页不一致的数据。
+ *
+ * 现在一律实时读库。这也是为什么导出的 `generateStaticParams` 一并删了：
+ * `force-dynamic` 下预生成没有意义，留着只会让人以为这里还有静态副本。
+ * 想提速请从页面侧（`getGameCached`）或客户端缓存上想办法，别把缓存塞回接口。
+ */
+export const dynamic = 'force-dynamic';
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
 
   try {
-    const game = await getGameCached(id);
+    const game = await getGame(id);
     if (!game) return NextResponse.json({ error: 'not-found' }, { status: 404 });
     return NextResponse.json({ game });
   } catch (error) {

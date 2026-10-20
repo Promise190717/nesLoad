@@ -20,7 +20,7 @@
 
 import { NextResponse } from 'next/server';
 import { assertUser } from '@/lib/server/app-guard';
-import { getGameForWrite } from '@/lib/server/games';
+import { getGameForWrite } from '@/lib/server/sb-games';
 import {
   addUserFavorite,
   listUserFavoriteIds,

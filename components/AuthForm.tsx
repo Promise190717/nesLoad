@@ -90,15 +90,31 @@ const CAPTCHA_ENABLED = TURNSTILE_SITE_KEY !== '';
  * `lib/i18n.ts` 的 `dateLocale()` / `htmlLang()` —— 那两个是给 `Intl` / `hreflang` 用的，
  * 恰好这里三种都不同名（`zh-cn` vs `zh-CN`）。
  *
- * ⚠️ 2026-10-16 加日韩时补了后两项。**加语言时这里要跟着补** ——
- *    漏掉的话验证框会退回 Turnstile 的默认语言（英文），
+ * ⚠️ 2026-10-16 加日韩时补了后两项；**2026-10-20 扩到 18 种语言时补齐其余 14 项**
+ *    （`zh-TW` 对应 `zh-tw`，`fil` 对应 `fil`，其余按「语言-地区」写法）。
+ *    加语言时这里要跟着补 —— 漏掉的话验证框会退回 Turnstile 的默认语言（英文），
  *    中文用户当年就是这么发现的（见下面那段注释）。
+ *    查表：https://developers.cloudflare.com/turnstile/reference/supported-languages/
  */
 const TURNSTILE_LANG: Record<Locale, string> = {
   en: 'en',
   zh: 'zh-cn',
+  'zh-TW': 'zh-tw',
   ja: 'ja',
   ko: 'ko',
+  es: 'es-ES',
+  hi: 'hi',
+  pt: 'pt-BR',
+  fr: 'fr',
+  de: 'de',
+  it: 'it',
+  ru: 'ru',
+  fil: 'fil',
+  nl: 'nl',
+  vi: 'vi',
+  th: 'th',
+  ms: 'ms',
+  id: 'id',
 };
 
 type Mode = 'login' | 'register';

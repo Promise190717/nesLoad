@@ -10,12 +10,16 @@
  * 为什么游标要带上 id：created_at 是毫秒时间戳，同毫秒写入两条并不罕见
  * （比如连点两次提交）。只用 created_at 当游标，同毫秒的那几条会被整段跳过。
  *
- * **列表结果带一层进程内缓存**（见下面 CACHE 那一段）：D1 走 REST，每查一次就是一次
- * API 调用 + 配额消耗，而留言列表是「所有人共读、几乎不变」的数据。
+ * **列表结果带一层进程内缓存**（见下面 CACHE 那一段）：留言列表是
+ * 「所有人共读、几乎不变」的数据，十个访客打开留言本没必要各查一次库。
+ *
+ * ⚠️ 2026-10-20 起数据源是 Supabase（`./pg`）。两处跟 D1 不一样：
+ *    · `resolved` 是**原生 boolean**（不再是 SQLite 的 0/1），`toFeedback` 里不用再折；
+ *    · `created_at` 是 `timestamptz` ⇒ 读的时候换算成毫秒、比较的时候 `to_timestamp`。
  */
 
 import { randomUUID } from 'node:crypto';
-import { query } from './d1';
+import { query } from './pg';
 
 /** 一页多少条。前台翻页和后台列表共用。 */
 export const FEEDBACK_PAGE_SIZE = 12;
@@ -26,8 +30,9 @@ export const FEEDBACK_MAX_LENGTH = 500;
 /* ------------------------------------------------------------------ *
  * 列表缓存
  *
- * 为什么要有它：D1 的 REST 接口每查一次都是一次外部 API 调用（还带每日配额）。
- * 十个访客打开留言本、或者同一个人关掉再打开，没必要各打一次 D1。
+ * 为什么要有它：十个访客打开留言本、或者同一个人关掉再打开，没必要各查一次库。
+ * （D1 时代还有一层「每查一次就是一次外部 API 调用 + 每日配额」的理由，换库后没了，
+ *   但「共读的静态列表」本身仍然值得缓存。）
  *
  * 边界（都要记住，别当成强一致）：
  *   - **只在单个服务实例内有效**。多实例部署时各自一份，命中率打折但不会出错。
@@ -52,11 +57,11 @@ export function invalidateFeedbackCache(): void {
   listCache.clear();
 }
 
-/** DB 行（snake_case）。 */
+/** DB 行（snake_case）。`created_at` 已在 SELECT 里换算成毫秒时间戳。 */
 export interface FeedbackRow {
   id: string;
   content: string;
-  resolved: number;
+  resolved: boolean;
   created_at: number;
 }
 
@@ -78,7 +83,7 @@ function toFeedback(row: FeedbackRow): Feedback {
   return {
     id: row.id,
     content: row.content,
-    resolved: row.resolved !== 0,
+    resolved: row.resolved,
     createdAt: row.created_at,
   };
 }
@@ -104,6 +109,15 @@ function clampLimit(value: number | undefined): number {
   return Math.min(value, 50);
 }
 
+/*
+ * 两条查询共用的 SELECT。`SELECT *` 在 Postgres 里会把 `created_at` 原样给成
+ * `timestamptz`（Date 对象），而对外形状要的是**毫秒时间戳** —— 所以列清单必须写死。
+ */
+const SELECT = `
+  SELECT id, content, resolved,
+         (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
+    FROM feedback`;
+
 export async function listFeedback(
   options: { cursor?: string | null; limit?: number } = {}
 ): Promise<FeedbackPage> {
@@ -121,14 +135,17 @@ export async function listFeedback(
    */
   const rows = cursor
     ? await query<FeedbackRow>(
-        `SELECT * FROM feedback
-          WHERE (created_at < ?) OR (created_at = ? AND id < ?)
+        `${SELECT}
+          WHERE (created_at < to_timestamp(?::float8 / 1000))
+             OR (created_at = to_timestamp(?::float8 / 1000) AND id < ?)
           ORDER BY created_at DESC, id DESC
           LIMIT ?`,
         [cursor.createdAt, cursor.createdAt, cursor.id, limit + 1]
       )
     : await query<FeedbackRow>(
-        'SELECT * FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?',
+        `${SELECT}
+          ORDER BY created_at DESC, id DESC
+          LIMIT ?`,
         [limit + 1]
       );
 
@@ -145,15 +162,15 @@ export async function listFeedback(
   return page;
 }
 
-/** 提交一条。resolved 一律从 0 起 —— 新留言当然还没处理。 */
+/** 提交一条。resolved 一律从 false 起 —— 新留言当然还没处理。 */
 export async function insertFeedback(content: string): Promise<Feedback> {
   const id = randomUUID();
   const createdAt = Date.now();
-  await query('INSERT INTO feedback (id, content, resolved, created_at) VALUES (?, ?, 0, ?)', [
-    id,
-    content,
-    createdAt,
-  ]);
+  await query(
+    `INSERT INTO feedback (id, content, resolved, created_at)
+     VALUES (?, ?, false, to_timestamp(?::float8 / 1000))`,
+    [id, content, createdAt]
+  );
   // 新留言会挤进第一页 —— 缓存里那份立刻就是错的
   invalidateFeedbackCache();
   return { id, content, resolved: false, createdAt };
@@ -167,7 +184,7 @@ export async function insertFeedback(content: string): Promise<Feedback> {
 export async function setFeedbackResolved(id: string, resolved: boolean): Promise<boolean> {
   const rows = await query<{ id: string }>(
     'UPDATE feedback SET resolved = ? WHERE id = ? RETURNING id',
-    [resolved ? 1 : 0, id]
+    [resolved, id]
   );
   // 列表里每条都带 resolved 标记，改一条就可能让任何一页变旧
   invalidateFeedbackCache();

@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
-import CatalogLink from '@/components/CatalogLink';
 import GamesShell from '@/components/GamesShell';
 import { cardDelayMs } from '@/lib/card-stagger';
+import { entityInitial } from '@/lib/entity-text';
 import {
   SITE_NAME,
   alternatesFor,
@@ -28,17 +28,17 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * ⚠️ **不写 `export const dynamic`**：要读 D1 和语言（cookie），本来就是动态渲染。
  *
- * 数据走 `listDevelopersCached`（**24 小时** —— 2026-10-13 用户要求加缓存时是 12 小时，
- * 2026-10-16 提到 24 小时）。原来是不缓存的
+ * 数据走 `listDevelopersCached`（**30 天** —— 2026-10-13 用户要求加缓存时是 12 小时，
+ * 2026-10-16 提到 24 小时、2026-10-20 再提到 30 天）。原来是不缓存的
  * （理由：「几十条、一条 SELECT 带个 COUNT 子查询就完了，改完名字刷新就该看到」），
  * 但这一页每次渲染要打**两次 D1**（COUNT + SELECT，见 listDevelopers），所以改成缓存。
  *
  * ⚠️ 2026-10-14 起 COUNT 那半另有一层独立缓存（`countDevelopersCached`，键里没有 offset）——
  *    翻多少页都只数一次全表。
  *
- * ⚠️ 代价是**后台改完开发商的名字 / 简介，这一页最多要等 24 小时才更新**。和首页那几个区块
+ * ⚠️ 代价是**后台改完开发商的名字 / 简介，这一页最多要等 30 天才更新**。和首页那几个区块
  *    同一个取舍：这一页是给爬虫和过路访客的入口，内容变得慢，而每个访客都查两趟不划算。
- *    （开发商详情页上开发商自己的资料**不缓存**，那边改完是立刻的；名下游戏列表 24 小时。）
+ *    （开发商详情页上开发商自己的资料**不缓存**，那边改完是立刻的；名下游戏列表 30 天。）
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -163,7 +163,7 @@ export default async function DevelopersPage({
                     aria-hidden="true"
                     className="pixel-edge pxw-2 pxc-700 flex h-[72px] w-[72px] shrink-0 items-center justify-center bg-ink-950 font-pixel text-[22px] text-ink-600"
                   >
-                    {Array.from(text.name)[0] ?? '?'}
+                    {entityInitial(text.name)}
                   </span>
                 )}
 
@@ -188,13 +188,13 @@ export default async function DevelopersPage({
       {pageCount > 1 && (
         <nav className="mt-10 flex items-center justify-center gap-4">
           {page > 1 ? (
-            <CatalogLink
+            <Link
               href={developersHref(locale, page - 1)}
               rel="prev"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.prev')}
-            </CatalogLink>
+            </Link>
           ) : (
             // 首页那个「上一页」整块不画而不是渲染成灰按钮：指向自己的死链比少一个链接更糟
             <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
@@ -205,13 +205,13 @@ export default async function DevelopersPage({
           </span>
 
           {page < pageCount ? (
-            <CatalogLink
+            <Link
               href={developersHref(locale, page + 1)}
               rel="next"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.next')}
-            </CatalogLink>
+            </Link>
           ) : (
             <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
           )}

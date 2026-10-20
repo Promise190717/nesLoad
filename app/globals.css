@@ -1957,6 +1957,16 @@ body {
 }
 
 /*
+ * 国旗小旗（2026-10-20 加，`components/FlagIcon.tsx`）：内联 SVG，
+ * 旗身自带 1px 描边 —— 白底的旗（日 / 韩 / 俄 / 印尼…）不加描边会糊进深色屋子。
+ * trigger 和选项都是 flex，小旗作为一个普通 flex 项排进去，不用额外定位。
+ */
+.locale-flag {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-ink-600);
+}
+
+/*
  * 下拉箭头：两条边拼一个三角。
  * `margin-left: auto` 是给抽屉那行用的（把箭头顶到行的右端）—— 大屏这一行宽度是内容
  * 撑出来的，没有富余空间，等于不起作用。
@@ -1979,6 +1989,13 @@ body {
 /*
  * 选项列表。大屏是从 trigger 底下**浮出来**的一小块。
  * 底色 / 描边用 ink 系（和右边那列开关的弹层同一套），不用系统控件那套白底灰边。
+ *
+ * ⚠️ **2026-10-20 加限高 + 滚动**：语言从 4 种扩到 18 种之后，一条 18 行的竖排列表
+ *    在 720px 高的窗口里会直接顶出屏幕底部，最下面那几种（`ms` / `id`）点不到。
+ *    `max-height` 用 `min(60vh, 420px)`：窗口矮时按视口算，窗口高时封顶，
+ *    避免在 4K 屏上拉成一整条。`overscroll-behavior` 是防滚到底之后
+ *    **把整个页面一起滚走**（下拉浮在页面上，那一下很难受）。
+ *    `.entries` 那套（小屏抽屉里 `position: static`）同样吃这条，不用另写。
  */
 .locale-options {
   position: absolute;
@@ -1986,6 +2003,9 @@ body {
   left: 0;
   z-index: 50;
   min-width: 100%;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0;
   padding: 2px;
   list-style: none;
@@ -1994,7 +2014,10 @@ body {
 }
 
 .locale-option {
-  display: block;
+  /* 2026-10-20 从 block 改 flex：前面塞了国旗小旗，横排「旗 + 语言名」 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
   position: relative;
   width: 100%;
   padding: 6px 10px 6px 18px;

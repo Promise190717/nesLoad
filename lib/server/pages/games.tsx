@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { cache } from 'react';
 import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import { consoleLabel } from '@/lib/consoles';
-import CatalogLink from '@/components/CatalogLink';
 import GamesShell from '@/components/GamesShell';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesSearchForm from '@/components/GamesSearchForm';
@@ -19,7 +19,7 @@ import {
 } from '@/lib/i18n';
 import type { ConsoleType } from '@/lib/emulator';
 import { parsePageParam } from '@/lib/pager';
-import { listGamesPageCached } from '@/lib/server/games';
+import { listGamesPageCached } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -33,17 +33,17 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 于是「列表 → 详情 → 下载」这条链对爬虫是完整的（另外 sitemap 里也会全列一遍，
  * 见 app/sitemap.ts）。
  *
- * 分页用**真的 URL**（`?page=2`）而不是「一次全列出来」：库会一直长，
- * 一页几百个封面既拖慢首屏又没人翻得到底。分页链接是普通的 `<a>`（`CatalogLink`），
- * 爬虫顺着「下一页」能走到最后一页。
+ * 分页 / 机种筛选用**真的 URL**（`/games/page/2`、`/games/console/nes`）而不是
+ * 「一次全列出来」：库会一直长，一页几百个封面既拖慢首屏又没人翻得到底；
+ * 而且每个组合都是可分享、可中键新标签、爬虫能顺着走的真地址。
  *
- * ⚠️ 这些链接**必须是整页跳转**，不能用 `<Link>`：`?page=` / `?console=` 会被
- *    `middleware.ts` 改写到 `/catalog/...`，软导航拿回来的 RSC 载荷对不上当前路由，
- *    客户端只改地址栏、不换内容（2026-10-19 线上事故）。完整推理见 `components/CatalogLink.tsx`。
+ * ⚠️ **2026-10-20 起这些维度是路径段、真路由**，所以链接用 `next/link` 软导航
+ *    （在那之前它们是 `?page=` / `?console=`，会被 `middleware` 改写成 `/catalog/...`
+ *    影子路由，软导航的载荷对不上，只能退回整页刷新）。完整推理见 `lib/catalog-route.ts`。
  *
- * ⚠️ `?page=1` / `?page=0` / `?page=abc` 这类**非规范写法一律 307 到规范地址**：
- * 同一个列表被 `?page=1` 和 `/games` 两份 URL 收录，是标准的重复内容。
- * 越界（`?page=99`）也退到最后一页，理由同上。
+ * ⚠️ `/page/1` / `/page/0` / `/page/abc` 这类**非规范写法一律 307 到规范地址**：
+ * 同一个列表被 `/page/1` 和 `/games` 两份 URL 收录，是标准的重复内容。
+ * 越界（`/page/99`）也退到最后一页，理由同上。
  *
  * **不写 `export const dynamic`**：它要读 D1 和语言（cookie），本来就是动态渲染，
  * 再声明一次是多余的（和 app/privacy/page.tsx 同一个理由）。
@@ -53,8 +53,8 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * 这一页取数要打 D1（COUNT + SELECT），而它的内容变得很慢
  * （只有后台上传 / 编辑游戏时才变）。所以取数那一步套了 `unstable_cache`：
- * **24 小时内同一批数据只查一次数据库**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压
- * D1 的 `rows_read` 额度拍板；2026-10-16 又提到 24 小时），之后由 Next 的缓存直接返回，
+ * **30 天内同一批数据只查一次数据库**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压
+ * D1 的 `rows_read` 额度拍板；2026-10-16 提到 24 小时、2026-10-20 再提到 30 天），之后由 Next 的缓存直接返回，
  * 页面照旧按请求动态渲染（语言还是跟着 cookie 走，不受缓存影响）。
  *
  * ⚠️ **「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）——
@@ -62,10 +62,10 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * ⚠️ 缓存的作用范围**只是页面这一侧的取数**，不在 `listGamesPage` 里 ——
  * 后台列表（`/api/admin/games`）共用那个函数，必须立刻看到刚上传的游戏。
- * （房间的在线库弹窗 `/api/games` 2026-10-14 起也走同一套缓存了。）
+ * （房间的在线库弹窗 `/api/games` **2026-10-20 起改回实时查库**，接口不吃缓存。）
  * 细节与 TTL 常量见 lib/server/games.ts。
  *
- * ⚠️ 副作用：**后台新传 / 改过的游戏，最多要等 24 小时才出现在这一页**（后台自己那张
+ * ⚠️ 副作用：**后台新传 / 改过的游戏，最多要等 30 天才出现在这一页**（后台自己那张
  * 列表不受影响，它走 force-dynamic 的接口）。这是「不每次打数据库」必然的代价，
  * 想立刻生效就重启服务，或者把 TTL 调小（常量就一个）。
  *
@@ -90,19 +90,23 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 而不是指望搜索结果的 URL 被收录。
  *
  * ---------------------------------------------------------------------------
- * 机种筛选（2026-10-13 加）：`?console=<nes|snes|gba|arcade>`
+ * 机种筛选（2026-10-13 加）：`/games/console/<nes|snes|gba|arcade>`
  *
- * 首页那个「按机种浏览」区块点进来的落点。做成**这一页的一个参数**、而不是四个
- * `/nes-games` 之类的独立路由：机种只有四个、版式完全一样，四个路由就是四份同样的
- * 代码（参考站那种 `/nes-games` 是它的路由约定，不是这里的）。
+ * 首页那个「按机种浏览」区块点进来的落点。做成**这一页的一个路径段**、而不是四个
+ * `/nes-games` 之类的独立路由：机种只有十几个、版式完全一样，各开一条路由就是十几份
+ * 同样的代码（参考站那种 `/nes-games` 是它的路由约定，不是这里的）。
  *
- * ⚠️ **它和搜索的收录策略正好相反**：`?q=` 是 `noindex, follow`（无限多个组合），
- * 而 `?console=` **照常收录** —— 机种只有四个，每个都是一份真实分类，正是「用户搜
- * `nes games` 时该被搜到」的那类页面。所以 canonical 与 hreflang 都指**自己那一份**
- * （带 `?console=`），而不是指裸列表页。
+ * ⚠️ **2026-10-20 从 `?console=` 搬进路径**：查询参数那一版会被 `middleware` 改写成
+ *    `/catalog/...` 影子路由，客户端软导航对不上（点 tab 整页刷新）。路径段是真路由。
+ *    完整推理见 `lib/catalog-route.ts` 文件头。
  *
- * 认不出的 `?console=xxx` 与重复参数一律**当没给**（于是 307 收敛到不带该参数的地址）：
- * 否则 `?console=xxx` 会渲染出一整页「全部游戏」，同一份内容凭空多一个 URL。
+ * ⚠️ **它和搜索的收录策略正好相反**：搜索是 `noindex, follow`（无限多个组合），
+ * 而机种筛选 **照常收录** —— 每个机种都是一份真实分类，正是「用户搜 `nes games`
+ * 时该被搜到」的那类页面。所以 canonical 与 hreflang 都指**自己那一份**
+ * （`/games/console/nes`），而不是指裸列表页。
+ *
+ * 认不出的机种段与重复参数一律**当没给**（于是 307 收敛到不带该段的地址）：
+ * 否则 `/games/console/xxx` 会渲染出一整页「全部游戏」，同一份内容凭空多一个 URL。
  */
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -154,13 +158,19 @@ function parseConsole(value: string | string[] | undefined): ConsoleType | null 
 /**
  * 这一页的**规范地址**。搜索、机种筛选、分页共用同一套拼法，保证「同一份列表只有一个 URL」。
  *
- * 顺序固定成 `q` → `console` → `page`；第 1 页不写 `page`、没有关键词不写 `q`、
- * 没筛机种不写 `console`。于是 `?page=2&console=nes&q=a` 会被 307 到
- * `?q=a&console=nes&page=2` —— 参数顺序不同也是两个 URL，得收敛成一个。
+ * ⚠️ **2026-10-20 起分成两套形态**（起因：分页 / 机种 tab 点一下整页刷新）：
  *
+ *   · **有搜索词** → `/games/search?q=…&console=…&page=…`
+ *     关键词留在 query 里，不进路径段：它是任意用户输入（空格、斜杠、超长串），
+ *     塞进路径要么被 `%2F` 的编码规则咬到，要么得清洗字符集、把用户搜的东西改掉。
+ *     而 `/games/search` 是一条**动态**路由（它本来就按 query 渲染），同一路由上改 query
+ *     是软导航，不会整页刷新。
+ *   · **没搜索词**（纯浏览） → 全路径 `/games/console/nes/page/2`
+ *     路径段是**真路由**，`middleware` 不用再把它改写成 `/catalog/...` 那棵影子树，
+ *     客户端软导航拿到的 flight 才对得上 —— 这是这次改动的全部目的。
+ *
+ * 没有关键词、没筛机种、第 1 页 ⇒ 就是裸 `/games`（唯一的「全部游戏」那份）。
  * ⚠️ **语言前缀在这里加**（`localePath`），调用方拿到的就是可以直接用的地址。
- * 2026-10-13 前它返回的是无前缀的 `/games?...`，直接塞给 `<Link>` /
- * `<form action>` / `redirect()`；现在那三处都会把中文用户送进英文列表页。
  */
 function gamesHref(
   locale: Locale,
@@ -168,13 +178,18 @@ function gamesHref(
   keyword: string,
   consoleType: ConsoleType | null
 ): string {
-  const params = new URLSearchParams();
-  if (keyword) params.set('q', keyword);
-  if (consoleType) params.set('console', consoleType);
-  if (page > 1) params.set('page', String(page));
+  if (keyword) {
+    const params = new URLSearchParams({ q: keyword });
+    /* 顺序就是规范顺序：`q` → `console` → `page`（服务端按地址字符串比对，顺序不同也算两个 URL） */
+    if (consoleType) params.set('console', consoleType);
+    if (page > 1) params.set('page', String(page));
+    return localePath(locale, `/games/search?${params.toString()}`);
+  }
 
-  const query = params.toString();
-  return localePath(locale, query ? `/games?${query}` : '/games');
+  let path = '/games';
+  if (consoleType) path += `/console/${consoleType}`;
+  if (page > 1) path += `/page/${page}`;
+  return localePath(locale, path);
 }
 
 /** 从查询串里解析出「第几页、搜什么、筛哪个机种」，并判断这个地址本身是不是规范形式。 */
@@ -226,7 +241,7 @@ function parseQuery(raw: SearchParams): {
  * 本页要的数据。
  *
  * **两层缓存，各管一件事**：
- *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 24 小时）——
+ *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 30 天）——
  *      请求根本没打到 D1。它内部那个 `total` 还另有 `countGamesCached` 一层
  *      （键里没有 offset，所以翻多少页都只数一次全表）。TTL 与理由见
  *      lib/server/games.ts 那边。
@@ -238,7 +253,7 @@ function parseQuery(raw: SearchParams): {
  * ⚠️ 缓存键 = `['games:list', offset, limit, keyword, consoleType, language]`（`unstable_cache`
  * 自动把入参拼进键里）。所以**翻页 / 换关键词 / 换机种各是一份缓存**，不会串味；
  * 命中不了的键照常回源。关键词也进键意味着 `?q=xxx` 会被缓存 —— 那一份本来就被
- * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 24 小时 TTL、
+ * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 30 天 TTL、
  * 超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀。机种只有十二个取值 + null，
  * 基数更是定死的。
  *
@@ -303,11 +318,11 @@ export async function generateMetadata({
      * hreflang 只指「这一份列表的第一页」——分页与搜索参数不进（前者是同一份列表的不同页，
      * 后者是 `noindex` 的无限组合）。
      *
-     * ⚠️ **但机种那份要带着 `?console=`**（2026-10-13 加）：机种页是可收录的真实分类，
-     * 它的 hreflang 必须指向**另一种语言的同一个机种页**。指到裸列表页就成了
-     * 「两份不同内容互相声明是同一页」，Google 会直接判这一组标注无效。
+     * ⚠️ **但机种那份要带着机种段**（2026-10-13 加，2026-10-20 从 `?console=` 改成路径段）：
+     * 机种页是可收录的真实分类，它的 hreflang 必须指向**另一种语言的同一个机种页**。
+     * 指到裸列表页就成了「两份不同内容互相声明是同一页」，Google 会直接判这一组标注无效。
      */
-    alternates: alternatesFor(locale, consoleType ? `/games?console=${consoleType}` : '/games'),
+    alternates: alternatesFor(locale, consoleType ? `/games/console/${consoleType}` : '/games'),
     openGraph: {
       type: 'website',
       url: canonical,
@@ -345,9 +360,8 @@ export default async function GamesPage({
   /*
    * 总页数按**这次数据自己报的**每页条数算，不是写死 15。
    *
-   * 源站模式下列表来自上游（一页 18 款，见 upstream-catalog 的 UPSTREAM_PAGE_SIZE），
-   * 而页码 → 上游页码的映射仍用站内的 offset / limit（都是 15）。用 15 去算只会算出
-   * 141 页、最后 23 页全空；读 `data.limit` 两边就都是 118 页。
+   * 数据层回什么 `limit` 就按什么算：页大小在调用链上可能被夹过（`MAX_PAGE_SIZE`），
+   * 用写死的 15 去算会和实际返回的条数错位，末尾几页变空页。读 `data.limit` 永远对得上。
    */
   const pageSize = data.limit || PAGE_SIZE;
   const pageCount = Math.max(1, Math.ceil(data.total / pageSize));
@@ -393,20 +407,27 @@ export default async function GamesPage({
     >
       {/*
         搜索框（2026-10-13 加 loading 后拆成 `components/GamesSearchForm.tsx`）：
-        提交走客户端路由，pending 时按钮显示「搜索中…」；JS 不可用时回落成原生
-        GET 表单（`action` + `method` 在组件里留着），「搜索有真地址、零 JS 也成立」
-        的底线不变 —— 那边的注释写了完整的来龙去脉。
+        提交仍然走原生 GET 表单（一次文档请求，零 JS 也成立），落到 `/games/search`；
+        进了搜索页之后的翻页 / 换机种都是软导航（那条路由是动态的，不吃 catalogRewrite）。
+        「清除」的落点是**浏览态**的机种地址（`gamesHref(..., '')`），不是带 `?console=` 的旧形态。
       */}
-      <GamesSearchForm locale={locale} keyword={keyword} consoleType={consoleType} />
+      <GamesSearchForm
+        locale={locale}
+        keyword={keyword}
+        consoleType={consoleType}
+        clearHref={gamesHref(locale, 1, '', consoleType)}
+      />
 
       {/*
         机种筛选条（2026-10-13 加）。**一排链接**而不是 `<select>` 或按钮组：每个机种都是
-        一个真地址（`/games?console=nes`），能中键新标签打开、能被复制、能被爬虫顺着走 ——
+        一个真地址（`/games/console/nes`），能中键新标签打开、能被复制、能被爬虫顺着走 ——
         和上面那个搜索表单、下面那对翻页同一个道理。
 
         当前那一颗用 accent 高亮并带 `aria-current`；「全部」那颗对应「没筛机种」。
         ⚠️ 切机种时**把关键词带上**（`gamesHref` 一起拼），否则搜完再点机种就掉回全库了 ——
         用户会以为搜索坏了。页码则一律回到第 1 页：换了筛选条件，第 3 页毫无意义。
+        ⚠️ 2026-10-20 起这些地址是**真路径**（`/games/console/nes`），不再被
+            `catalogRewrite` 改写，所以可以（也应该）用 `next/link` 走软导航。
       */}
       <nav
         aria-label={t('gamesPage.filterLabel')}
@@ -415,17 +436,18 @@ export default async function GamesPage({
         {[null, ...CONSOLE_TYPES].map((type) => {
           const active = type === consoleType;
           return (
-            /* 带 `?console=` ⇒ 被 catalogRewrite 改写，**不能走软导航**（见 CatalogLink 那段事故说明） */
-            <CatalogLink
+            <Link
               key={type ?? 'all'}
               href={gamesHref(locale, 1, keyword, type)}
+              /* 十几颗 tab 全预取等于每开一次列表页就多渲染十几条路由，不值 */
+              prefetch={false}
               aria-current={active ? 'true' : undefined}
               className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[12px] transition-colors ${
                 active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
               }`}
             >
               {type ? consoleLabel(type, locale) : t('gamesPage.filterAll')}
-            </CatalogLink>
+            </Link>
           );
         })}
       </nav>
@@ -458,13 +480,13 @@ export default async function GamesPage({
             就掉回「全部游戏」了 —— 用户会以为搜索坏了。
           */}
           {page > 1 ? (
-            <CatalogLink
+            <Link
               href={gamesHref(locale, page - 1, keyword, consoleType)}
               rel="prev"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.prev')}
-            </CatalogLink>
+            </Link>
           ) : (
             // 首页那个「上一页」不渲染成灰按钮而是**整块不画**：爬虫顺着链接走，
             // 一个指向自己的死链比少一个链接更糟
@@ -479,13 +501,13 @@ export default async function GamesPage({
           </span>
 
           {page < pageCount ? (
-            <CatalogLink
+            <Link
               href={gamesHref(locale, page + 1, keyword, consoleType)}
               rel="next"
               className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
             >
               {t('gamesPage.next')}
-            </CatalogLink>
+            </Link>
           ) : (
             <span className="px-3 py-1.5 text-[12px] text-ink-700">
               {t('gamesPage.next')}

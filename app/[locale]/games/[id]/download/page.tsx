@@ -17,7 +17,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame } from '@/lib/server/games';
+import { getGameCached, localizeGame } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -143,5 +143,4 @@ export default async function GameDownloadPage({
   );
 }
 
-export { gameStaticParams as generateStaticParams } from '@/lib/server/static-params';
-export const revalidate = 86400;
+export const revalidate = 2592000;

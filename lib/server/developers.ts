@@ -1,37 +1,42 @@
 /*
- * 开发商库（developers 表 + developer_texts 侧表）的读写。
+ * 开发商库（developers 表 + developer_texts 侧表）的读写 —— Supabase（Postgres）版。
  *
- * ⚠️ **本文件不许 import `./games.ts`**（单向依赖：games → developers，和 consoles 同一条规矩）。
- * 「某个开发商有几款游戏」用一条相关子查询现算，别去 games.ts 里 import 一个计数函数 ——
- * 那会破坏依赖方向（games 已经依赖了 developers）。
+ * 对外 API 与旧实现完全一致（`Developer` / `listDevelopersCached` / `getDeveloper` …），
+ * 页面只是换了一行 import。
  *
- * ## 多语言侧表（2026-10-16 加）
+ * ## 与 D1 那份的三处差别（2026-10-20 迁移）
  *
- * 文案（name / summary / description）不再平铺在 developers 表里，而是搬到
- * `developer_texts` 侧表 —— 加语言 = 插数据，不动表结构。
- * `developers` 表里那 6 个旧列（name / name_en / summary / summary_en /
- * description / description_en）保留、但只写不读，作为回滚退路。
+ * ① **主键是上游 slug**（`developers.slug`，如 `nintendo`），不是 UUID ——
+ *    和 games 同一套口径，爬取天然幂等，`/developers/<slug>` 地址稳定。
+ *    `Developer.id` 仍然是它（对外名字不变）。
+ *
+ * ② **改名不再需要级联**。旧实现要在改名时把 `game_texts.developer` 和
+ *    `games.developer / developer_en` 全部刷一遍 —— 因为厂名是**冗余快照**。
+ *    新表里厂名只有 `developer_texts.name` 一份，游戏侧靠 JOIN 取，
+ *    改一次四语言、所有卡片一起变。**这是这次迁移白拿的好处，别再把它写回去。**
+ *
+ * ③ **搜索走侧表**（`developer_texts.name / summary`，四个语言都搜）。
+ *    旧实现搜的是 `developers` 宽表里的 `name / name_en / summary / summary_en` 四列。
  */
 
 import { cached } from './cache';
-import { usesUpstreamCatalog } from './catalog-source';
-import { query } from './d1';
-import { CONTENT_LOCALES } from '@/lib/game-text';
+import { mediaUrl } from './media';
+import { query } from './pg';
 import {
-  EMPTY_ENTITY_TEXT,
+  CONTENT_LOCALES,
   isBlankEntityText,
   localizeEntityTexts,
-  rawEntityName,
   type EntityTexts,
   type LocalizedEntityText,
 } from '@/lib/entity-text';
 
-/** DB 行（snake_case，只含 developers 表本身的列）。 */
+/** DB 行（snake_case）。`id` 是 `slug` 的别名，保持对外形状不变。 */
 export interface DeveloperRow {
   id: string;
   image_url: string | null;
   founded_year: number | null;
   website: string | null;
+  /** 兼容旧字段：新表里 slug 就是上游 slug，所以它恒等于 `id`。 */
   source_slug: string | null;
   created_at: number;
 }
@@ -39,15 +44,12 @@ export interface DeveloperRow {
 /** 对外结构（camelCase，供 API / 前端）。 */
 export interface Developer {
   id: string;
-  /** 多语言文案（从 developer_texts 侧表读取） */
   texts: EntityTexts;
   imageUrl: string | null;
   foundedYear: number | null;
   website: string | null;
-  /** 上游 slug（回填日韩用，后台表单不暴露） */
   sourceSlug: string | null;
   createdAt: number;
-  /** 名下游戏数（相关子查询）。只有 `listDevelopers` 会真算。 */
   gameCount: number;
 }
 
@@ -73,14 +75,48 @@ export function normalizeWebsite(raw: FormDataEntryValue | null): string | null 
   }
 }
 
-/** 「名下有几款游戏」那条相关子查询 —— 列表和单条都要它，别两处各写一份。 */
-const GAME_COUNT = '(SELECT COUNT(*) FROM games g WHERE g.developer_id = developers.id) AS game_count';
+export const MAX_PAGE_SIZE = 100;
+
+/** 列表筛选条件。 */
+export interface DeveloperPageQuery {
+  keyword?: string;
+}
+
+/* ── 公共片段 ──────────────────────────────────────────────────────────── */
+
+/** 名下游戏数。别名统一用 `d`（下面所有查询都写 `FROM developers d`）。 */
+const GAME_COUNT = '(SELECT COUNT(*)::int FROM games g WHERE g.developer_slug = d.slug) AS game_count';
+
+/** 时间列统一转成毫秒数（对外 `createdAt` 一直是这个形状）。 */
+const CREATED_MS = '(EXTRACT(EPOCH FROM d.created_at) * 1000)::float8 AS created_at';
+
+/** 列表 / 单条 / 后台共用的列清单。 */
+const COLUMNS = `d.slug AS id, d.image_url, d.founded_year, d.website,
+  d.slug AS source_slug, ${CREATED_MS}`;
+
+/**
+ * 关键词条件（四个语言的 name / summary 都搜）。
+ *
+ * ⚠️ 占位符写两个 `?` 而不是 SQLite 那种 `?1` 复用 —— `./pg.ts` 的转换是**位置式**的
+ *    （`?` → `$1`、`$2`…），`?1` 会被当成 `$1` 后面又跟个 `1`，直接语法错。
+ */
+function searchWhere(keyword: string): { sql: string; params: unknown[] } {
+  const needle = keyword.trim();
+  if (!needle) return { sql: '', params: [] };
+  return {
+    sql: `EXISTS (SELECT 1 FROM developer_texts dt
+                   WHERE dt.developer_slug = d.slug
+                     AND (dt.name ILIKE ? OR dt.summary ILIKE ?))`,
+    params: [`%${needle}%`, `%${needle}%`],
+  };
+}
 
 function toDeveloper(row: DeveloperRow & { game_count?: number }, texts: EntityTexts = {}): Developer {
   return {
     id: row.id,
     texts,
-    imageUrl: row.image_url,
+    // 库里存路径，域名现拼（见 lib/server/media.ts）
+    imageUrl: mediaUrl(row.image_url),
     foundedYear: row.founded_year,
     website: row.website,
     sourceSlug: row.source_slug,
@@ -89,26 +125,25 @@ function toDeveloper(row: DeveloperRow & { game_count?: number }, texts: EntityT
   };
 }
 
-/** 批量加载开发商文案。 */
-async function loadDeveloperTexts(ids: string[]): Promise<Map<string, EntityTexts>> {
-  if (ids.length === 0) return new Map();
-  const placeholders = ids.map(() => '?').join(',');
+/** 批量加载开发商文案（一次 IN，避免 N+1）。 */
+async function loadDeveloperTexts(slugs: string[]): Promise<Map<string, EntityTexts>> {
+  if (slugs.length === 0) return new Map();
   const rows = await query<{
-    developer_id: string;
+    developer_slug: string;
     locale: string;
     name: string | null;
     summary: string | null;
     description: string | null;
   }>(
-    `SELECT developer_id, locale, name, summary, description
-       FROM developer_texts WHERE developer_id IN (${placeholders})`,
-    ids
+    `SELECT developer_slug, locale, name, summary, description
+       FROM developer_texts WHERE developer_slug IN (${slugs.map(() => '?').join(',')})`,
+    slugs
   );
 
   const map = new Map<string, EntityTexts>();
   for (const r of rows) {
-    if (!map.has(r.developer_id)) map.set(r.developer_id, {});
-    map.get(r.developer_id)![r.locale as import('@/lib/game-text').ContentLocale] = {
+    if (!map.has(r.developer_slug)) map.set(r.developer_slug, {});
+    map.get(r.developer_slug)![r.locale as import('@/lib/game-text').ContentLocale] = {
       name: r.name,
       summary: r.summary,
       description: r.description,
@@ -118,97 +153,78 @@ async function loadDeveloperTexts(ids: string[]): Promise<Map<string, EntityText
 }
 
 /**
- * 写开发商文案侧表（upsert）。
+ * 写文案侧表（upsert）。
  *
- * ⚠️ **只碰调用方真带过来的那几个语言**，别的一行不动（同 games.ts 的 `writeTexts`）：
- *    传进来的那份里没这个 key（`undefined`）=「这次不管这个语言」，**不等于清空**。
- *    后台两个表单每次都带齐四个语言；将来的回填脚本可能只带日韩，不能顺手把英文抹了。
- *
- * ⚠️ **带过来但是全空的那一份整行删掉**（中文除外）—— 后台把英文那几栏清空之后，
- *    留一行全 NULL 的行会让 `texts.en` 变成一个空壳，前台「英文名空着」和
- *    「英文名填过又被清空」就分不出来了。（这一条原来漏了：全空直接 `continue`，
- *    于是后台清不掉英文名，页面上一直显示老名字。）
+ * ⚠️ **只碰调用方真带过来的那几个语言**：传进来的那份里没这个 key =「这次不管」，
+ *    不等于清空。带过来但全空的（中文除外）整行删掉 —— 否则「从没填过」和
+ *    「填过又清空」在读取时分不出来。
  */
-async function writeDeveloperTexts(developerId: string, texts: EntityTexts): Promise<void> {
-  const now = Date.now();
+async function writeDeveloperTexts(slug: string, texts: EntityTexts): Promise<void> {
   for (const locale of CONTENT_LOCALES) {
     const t = texts[locale];
     if (!t) continue;
 
     if (isBlankEntityText(t)) {
-      /* 中文那份永远不删：它是原文，也是 developers.name 的来源 */
       if (locale === 'zh') continue;
-      await query('DELETE FROM developer_texts WHERE developer_id = ? AND locale = ?', [
-        developerId,
+      await query('DELETE FROM developer_texts WHERE developer_slug = ? AND locale = ?', [
+        slug,
         locale,
       ]);
       continue;
     }
 
     await query(
-      `INSERT INTO developer_texts (developer_id, locale, name, summary, description, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(developer_id, locale) DO UPDATE SET
+      `INSERT INTO developer_texts (developer_slug, locale, name, summary, description, updated_at)
+       VALUES (?, ?, ?, ?, ?, now())
+       ON CONFLICT (developer_slug, locale) DO UPDATE SET
          name = excluded.name,
          summary = excluded.summary,
          description = excluded.description,
-         updated_at = excluded.updated_at`,
-      [developerId, locale, t.name, t.summary, t.description, now]
+         updated_at = now()`,
+      [slug, locale, t.name, t.summary, t.description]
     );
   }
 }
 
-/* ================================================================ */
-/* 列表（前台用）                                                    */
-/* ================================================================ */
+/* ── 前台列表 ──────────────────────────────────────────────────────────── */
 
-export const MAX_PAGE_SIZE = 100;
-
-/** 列表筛选条件。`keyword` 模糊匹配 name / summary（不区分大小写，`LIKE` 的默认行为）。 */
-export interface DeveloperPageQuery {
-  keyword?: string;
-}
-
-/**
- * 搜索条件。⚠️ 2026-10-13 起**中英两份都搜**（同 games 的 SEARCH_CONDITION 那条理由）。
- * 2026-10-16 侧表化之后，旧列（name / summary / name_en / summary_en）仍然同步写入，
- * 所以搜旧列仍然有效；日韩数据在侧表里，但搜索暂未扩展（当前需求只到展示层）。
- */
-const SEARCH_CONDITION = "(name LIKE ?1 ESCAPE '\\' OR summary LIKE ?1 ESCAPE '\\' OR name_en LIKE ?1 ESCAPE '\\' OR summary_en LIKE ?1 ESCAPE '\\')";
-
-/** 只数总数，不取数据。 */
 export async function countDevelopers({ keyword = '' }: DeveloperPageQuery = {}): Promise<number> {
-  const needle = keyword.trim();
-  const where = needle ? `WHERE ${SEARCH_CONDITION}` : '';
-  const params = needle ? [`%${needle}%`] : [];
+  const search = searchWhere(keyword);
   const rows = await query<{ total: number }>(
-    `SELECT COUNT(*) AS total FROM developers ${where}`,
-    params
+    `SELECT COUNT(*)::int AS total FROM developers d ${search.sql ? `WHERE ${search.sql}` : ''}`,
+    search.params
   );
   return Number(rows[0]?.total ?? 0);
 }
 
-/** 分页读取开发商列表，顺带给出每个名下的游戏数。 */
+/**
+ * 前台列表：**按名下游戏数倒序**（2026-10-20 用户要求，原来是按入库时间倒序）。
+ *
+ * 理由：这一页是「点开发商看他名下的游戏」的入口，访客想先看到的是任天堂、Capcom
+ * 这种真有一堆游戏的厂，而不是最后爬进来的某家一款都没有的小工作室。
+ *
+ * ⚠️ 排序**必须是全序**：`game_count` 有大量并列（几十家都是 0），只按它排时
+ *    Postgres 不保证同分行的相对顺序稳定，翻页会漏卡 / 重复。所以后面补
+ *    `created_at DESC, slug DESC` 两列兜底 —— 和 `listTopDevelopers` 同一套口径。
+ */
 export async function listDevelopers(
   offset: number,
   limit: number,
   filter: DeveloperPageQuery = {},
   total?: number
 ): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
-  const needle = filter.keyword?.trim() ?? '';
-  const where = needle ? `WHERE ${SEARCH_CONDITION}` : '';
-  const params = needle ? [`%${needle}%`] : [];
-
+  const search = searchWhere(filter.keyword ?? '');
   const resolvedTotal = total ?? (await countDevelopers(filter));
+
   const lastOffset = Math.max(0, Math.ceil(resolvedTotal / limit) - 1) * limit;
-  let safeOffset = Math.min(offset, lastOffset);
+  let safeOffset = Math.min(Math.max(0, offset), lastOffset);
 
   const select = (at: number) =>
     query<DeveloperRow & { game_count: number }>(
-      `SELECT id, image_url, founded_year, website, source_slug, created_at, ${GAME_COUNT}
-       FROM developers ${where}
-       ORDER BY created_at DESC, id DESC LIMIT ?${params.length + 1} OFFSET ?${params.length + 2}`,
-      [...params, limit, at]
+      `SELECT ${COLUMNS}, ${GAME_COUNT}
+         FROM developers d ${search.sql ? `WHERE ${search.sql}` : ''}
+        ORDER BY game_count DESC, d.created_at DESC, d.slug DESC LIMIT ? OFFSET ?`,
+      [...search.params, limit, at]
     );
 
   let rows = await select(safeOffset);
@@ -226,73 +242,43 @@ export async function listDevelopers(
   };
 }
 
-/**
- * 开发商列表页（`/developers`）那份缓存的时长（秒）= 24 小时。
- *
- * ⚠️ 2026-10-16 从 12 小时提到 24 小时（用户要求「所有列表页统一 24 小时」）。
- *    代价：后台改完开发商的名字 / 简介，这一页最多晚 24 小时才更新
- *    （开发商详情页上开发商自己的资料**不缓存**，那边改完是立刻的）。
- *
- * ⚠️ 数值与 `games.ts` 的 `GAMES_PAGE_REVALIDATE_SECONDS` 相同，但**手抄、不 import**
- *    （两个文件不许互相依赖）—— 改一边要记得改另一边。
- * ⚠️ 开发模式走 `lib/server/cache.ts` 的 `cached`，那边把 TTL 压到 5 分钟（见该文件）。
- */
-export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 86400;
+/** 列表页与首页「游戏最多的前 N 家」的 TTL（秒）= 30 天（2026-10-20 用户要求，原 24 小时）。 */
+export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 2592000;
+export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 2592000;
 
 const countDevelopersCachedRaw = cached(
   async (keyword: string) => countDevelopers({ keyword }),
-  ['developers:count'],
+  ['sb:developers:count', 'v1'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
 
-/*
- * ⚠️ 2026-10-19：开发商库**没有上游替代**（上游站点没有 /developers 页面）。
- *    源站模式（`CATALOG_SOURCE=upstream`）下一律回空 —— 列表页 / 首页区块显示
- *    「还没有内容」，而不是给一批指向不存在游戏的链接。
- *    这里只包了前台读的那几个（后台要真数据，见各接口自己的错误处理）。
- */
 export async function countDevelopersCached(keyword: string): Promise<number> {
-  if (usesUpstreamCatalog()) return 0;
   return countDevelopersCachedRaw(keyword);
 }
 
+/** 列表缓存键 v3：2026-10-20 起排序从「入库时间」改成「游戏数」，条目要整体失效重算。 */
 const listDevelopersCachedRaw = cached(
   async (offset: number, limit: number, keyword: string) =>
-    listDevelopers(offset, limit, { keyword }, await countDevelopersCached(keyword)),
-  // ⚠️ 键尾版本号改动原因见 consoles.ts 的 listConsolesCached —— 2026-10-16 补日韩文案升到 v4。
-  ['developers:list', 'v4'],
+    listDevelopers(offset, limit, { keyword }, await countDevelopers({ keyword })),
+  ['sb:developers:list', 'v3'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
 
-/** 开发商列表（源站模式回空列表，见上面那段说明）。 */
 export async function listDevelopersCached(
   offset: number,
   limit: number,
   keyword: string
 ): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
-  if (usesUpstreamCatalog()) return { developers: [], total: 0, offset, limit };
   return listDevelopersCachedRaw(offset, limit, keyword);
 }
 
-/**
- * 首页「按开发商浏览」区块那份缓存的时长（秒）= 24 小时。
- *
- * 和 `DEVELOPERS_PAGE_REVALIDATE_SECONDS` 数值相同，但**刻意各留一个常量**：
- * 服务的是两类页面（列表页 vs 落地页），将来谁想快一点不必牵动另一个。
- * ⚠️ 同样是手抄、不 import（理由见上）。
- */
-export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 86400;
-
-/**
- * 「游戏最多的前 N 家开发商」—— 首页那个开发商区块用。
- * 按 game_count 倒序，不是按 created_at。
- */
+/** 「游戏最多的前 N 家」—— 首页区块用，按 game_count 倒序。 */
 export async function listTopDevelopers(limit: number): Promise<Developer[]> {
   const rows = await query<DeveloperRow & { game_count: number }>(
-    `SELECT id, image_url, founded_year, website, source_slug, created_at, ${GAME_COUNT}
-     FROM developers
-     ORDER BY game_count DESC, created_at DESC
-     LIMIT ?`,
+    `SELECT ${COLUMNS}, ${GAME_COUNT}
+       FROM developers d
+      ORDER BY game_count DESC, d.created_at DESC
+      LIMIT ?`,
     [limit]
   );
   const textsMap = await loadDeveloperTexts(rows.map((r) => r.id));
@@ -301,33 +287,19 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
 
 const listTopDevelopersCachedRaw = cached(
   async (limit: number) => listTopDevelopers(limit),
-  // ⚠️ 同上，2026-10-16 补日韩文案升到 v4。
-  ['developers:top', 'v4'],
+  ['sb:developers:top', 'v2'],
   { revalidate: TOP_DEVELOPERS_REVALIDATE_SECONDS }
 );
 
-/**
- * 首页「按开发商浏览」那一块（源站模式回空数组）。
- *
- * 页面本来就写了 `developers.length > 0` 才画这一块，所以回空 = **整块不出现**，
- * 不会留一排空白卡片。上游没有可替代的开发商数据（见 countDevelopersCached 那段）。
- */
 export async function listTopDevelopersCached(limit: number): Promise<Developer[]> {
-  if (usesUpstreamCatalog()) return [];
   return listTopDevelopersCachedRaw(limit);
 }
 
-/* ================================================================ */
-/* 单条读取                                                          */
-/* ================================================================ */
+/* ── 单条 ──────────────────────────────────────────────────────────────── */
 
-/**
- * 按 ID 取一个开发商（前台详情页用）。
- * 不缓存 —— 后台改完资料刷新就该看到新内容。
- */
 export async function getDeveloper(id: string): Promise<Developer | null> {
   const rows = await query<DeveloperRow>(
-    `SELECT id, image_url, founded_year, website, source_slug, created_at FROM developers WHERE id = ?`,
+    `SELECT ${COLUMNS} FROM developers d WHERE d.slug = ?`,
     [id]
   );
   if (!rows[0]) return null;
@@ -335,30 +307,20 @@ export async function getDeveloper(id: string): Promise<Developer | null> {
   return toDeveloper(rows[0], texts);
 }
 
-/**
- * 前台开发商详情页用的单条资料 —— 源站模式下一律 null（页面走 404，同 `listDevelopersCached`）。
- *
- * ⚠️ **为什么不直接改 `getDeveloper`**：它在**写入路径**上也被用
- *    （`games.ts` 的 `resolveDeveloper`，插入 / 修改游戏时按外键反查厂名写进文案）。
- *    那个判断要是跟着数据源一起切，源站模式下后台存游戏会把开发商整个丢掉。
- */
+/** 前台详情页用 —— 与 `getDeveloper` 同一份（源站模式已删）。 */
 export async function getDeveloperPageData(id: string): Promise<Developer | null> {
-  if (usesUpstreamCatalog()) return null;
   return getDeveloper(id);
 }
 
-/** 后台编辑弹窗用：和 `getDeveloper` 同一条查询，但返回 snake_case 的原始行（含 image_url）。 */
 export async function getDeveloperRow(id: string): Promise<DeveloperRow | null> {
   const rows = await query<DeveloperRow>(
-    `SELECT id, image_url, founded_year, website, source_slug, created_at FROM developers WHERE id = ?`,
+    `SELECT ${COLUMNS} FROM developers d WHERE d.slug = ?`,
     [id]
   );
   return rows[0] ?? null;
 }
 
-/* ================================================================ */
-/* 后台分页列表（游标翻页）                                          */
-/* ================================================================ */
+/* ── 后台列表（游标翻页） ──────────────────────────────────────────────── */
 
 export interface AdminDeveloperPage {
   developers: Developer[];
@@ -367,16 +329,19 @@ export interface AdminDeveloperPage {
 }
 
 /**
- * 后台开发商列表（游标翻页）。
- * 游标 = 最后一条的 created_at + id，拼成 `${createdAt},${id}`。
+ * 后台列表：游标 = `${createdAt},${id}`。
+ *
+ * ⚠️ 游标比较用**毫秒数**（`EXTRACT(EPOCH…)`），不直接比 `created_at` ——
+ *    游标里存的是 number，拿它跟 `timestamptz` 比会被 Postgres 拒掉。
+ *    269 行的表，走不走索引无所谓；真长到几十万行再改成 `to_timestamp(?/1000)`。
  */
 export async function listAdminDevelopersPage(
   cursor: string | null,
   limit: number,
   { keyword = '' }: { keyword?: string } = {}
 ): Promise<AdminDeveloperPage> {
-  const hasKeyword = keyword.trim().length > 0;
   const pageLimit = Math.min(limit || 10, MAX_PAGE_SIZE);
+  const search = searchWhere(keyword);
 
   let cursorCreatedAt: number | null = null;
   let cursorId: string | null = null;
@@ -386,20 +351,26 @@ export async function listAdminDevelopersPage(
     cursorId = id ?? null;
   }
 
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (search.sql) {
+    conditions.push(search.sql);
+    params.push(...search.params);
+  }
+  if (cursorCreatedAt !== null) {
+    conditions.push(
+      `((EXTRACT(EPOCH FROM d.created_at) * 1000) < ? OR ((EXTRACT(EPOCH FROM d.created_at) * 1000) = ? AND d.slug > ?))`
+    );
+    params.push(cursorCreatedAt, cursorCreatedAt, cursorId);
+  }
+
   const rows = await query<DeveloperRow & { game_count: number }>(
-    `SELECT id, image_url, founded_year, website, source_slug, created_at, ${GAME_COUNT}
-     FROM developers
-     WHERE (${cursorCreatedAt === null ? '1=1' : '(created_at < ? OR (created_at = ? AND id > ?))'})
-       ${hasKeyword ? "AND (name LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR name_en LIKE ? ESCAPE '\\' OR summary_en LIKE ? ESCAPE '\\')" : ''}
-     ORDER BY created_at DESC, id ASC
-     LIMIT ?`,
-    cursorCreatedAt === null
-      ? hasKeyword
-        ? [`%${escapeLike(keyword)}%`, `%${escapeLike(keyword)}%`, `%${escapeLike(keyword)}%`, `%${escapeLike(keyword)}%`, pageLimit + 1]
-        : [pageLimit + 1]
-      : hasKeyword
-        ? [cursorCreatedAt, cursorCreatedAt, cursorId, `%${escapeLike(keyword)}%`, `%${escapeLike(keyword)}%`, `%${escapeLike(keyword)}%`, `%${escapeLike(keyword)}%`, pageLimit + 1]
-        : [cursorCreatedAt, cursorCreatedAt, cursorId, pageLimit + 1]
+    `SELECT ${COLUMNS}, ${GAME_COUNT}
+       FROM developers d
+       ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+      ORDER BY d.created_at DESC, d.slug ASC
+      LIMIT ?`,
+    [...params, pageLimit + 1]
   );
 
   const hasMore = rows.length > pageLimit;
@@ -413,9 +384,7 @@ export async function listAdminDevelopersPage(
   return { developers, nextCursor, hasMore };
 }
 
-/* ================================================================ */
-/* 写入 / 更新 / 删除                                                */
-/* ================================================================ */
+/* ── 写入 ──────────────────────────────────────────────────────────────── */
 
 export interface DeveloperInput {
   texts: EntityTexts;
@@ -425,35 +394,12 @@ export interface DeveloperInput {
   website: string | null;
 }
 
-/**
- * 新建开发商。`id` 由调用方生成（和 games / users 同一套 UUID）。
- */
-export async function insertDeveloper(
-  id: string,
-  input: DeveloperInput
-): Promise<Developer> {
-  const zh = input.texts.zh ?? EMPTY_ENTITY_TEXT;
-  const en = input.texts.en ?? EMPTY_ENTITY_TEXT;
-  const now = Date.now();
-
+/** 新建开发商。`id` 由调用方给（后台用 randomUUID，和 games / users 同一套）。 */
+export async function insertDeveloper(id: string, input: DeveloperInput): Promise<Developer> {
   await query(
-    `INSERT INTO developers
-       (id, name, name_en, image_url, summary, summary_en,
-        description, description_en, founded_year, website, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      id,
-      zh.name ?? '',
-      en.name,
-      input.imageUrl,
-      zh.summary,
-      en.summary,
-      zh.description,
-      en.description,
-      input.foundedYear,
-      input.website,
-      now,
-    ]
+    `INSERT INTO developers (slug, image_url, founded_year, website)
+     VALUES (?, ?, ?, ?)`,
+    [id, input.imageUrl, input.foundedYear, input.website]
   );
 
   await writeDeveloperTexts(id, input.texts);
@@ -464,8 +410,8 @@ export async function insertDeveloper(
     imageUrl: input.imageUrl,
     foundedYear: input.foundedYear,
     website: input.website,
-    sourceSlug: null,
-    createdAt: now,
+    sourceSlug: id,
+    createdAt: Date.now(),
     gameCount: 0,
   };
 }
@@ -473,92 +419,33 @@ export async function insertDeveloper(
 /**
  * 更新开发商资料。
  *
- * ⚠️ **改名要级联，而且是两处**：改了开发商名字，所有挂着它的游戏卡片上的厂名必须同步变
- *    （否则开发商页写着「卡普空」、游戏卡片上还是老名字）。
- *
- *    ① `game_texts.developer` —— **前台真正读的那一份**（`localizeTexts` 从侧表取，
- *       卡片 / 详情页资料表 / 个人中心都走它）。漏了这一步 = 改名后一张卡片都不变。
- *    ② `games.developer` / `games.developer_en` —— 只写不读的旧快照列（回滚退路）。
- *       2026-10-16 侧表化时**只改了 ②**，于是「改了名但页面上没变」—— 记在这儿别再犯。
- *
- * ⚠️ 每个语言写**它自己那份名字**（`rawEntityName`，不回退中文），和
- *    `games.ts` 的 `withDeveloper` 是同一条规则。两处不一致的话，改一次名两份数据就漂开。
- *    清空某个语言的名字（侧表那行刚被删掉）时这里会把它写成 `null`，读取时回退中文 —— 正确。
- *
- * ⚠️ 改名时**不改 URL**：开发商详情页地址是 `/developers/<id>`，id 不变、
- *    名字变了链接仍然可达。只有 slug（如果将来做了）才需要重定向。
+ * ⚠️ **不再需要级联**（见文件头 ②）：厂名只有 `developer_texts.name` 一份，
+ *    游戏的开发商名是 JOIN 出来的。旧实现那三段 UPDATE（game_texts / games.developer /
+ *    games.developer_en）**已经删掉**，别照着老代码补回来 —— 新表里没有那两列。
  */
 export async function updateDeveloper(id: string, input: DeveloperInput): Promise<void> {
-  const zh = input.texts.zh ?? EMPTY_ENTITY_TEXT;
-  const en = input.texts.en ?? EMPTY_ENTITY_TEXT;
-
   await query(
-    `UPDATE developers SET
-       name = ?,
-       name_en = ?,
-       image_url = ?,
-       summary = ?,
-       summary_en = ?,
-       description = ?,
-       description_en = ?,
-       founded_year = ?,
-       website = ?
-     WHERE id = ?`,
-    [
-      zh.name ?? '',
-      en.name,
-      input.imageUrl,
-      zh.summary,
-      en.summary,
-      zh.description,
-      en.description,
-      input.foundedYear,
-      input.website,
-      id,
-    ]
+    `UPDATE developers SET image_url = ?, founded_year = ?, website = ? WHERE slug = ?`,
+    [input.imageUrl, input.foundedYear, input.website, id]
   );
 
   await writeDeveloperTexts(id, input.texts);
-
-  /*
-   * ① 侧表里每一份文案的厂名（前台读的就是它）
-   *
-   * ⚠️ 文案挂的是 **`group_key`**（2026-10-16 起，同款的几个语言版本共用一份），
-   *    所以这里要先把「名下游戏的 group_key 有哪些」查出来 —— 直接按 game_id 找不到东西了。
-   *    `COALESCE(g.group_key, g.id)` 与 games.ts 里的兜底写法一致（迁移前的老行）。
-   */
-  for (const locale of CONTENT_LOCALES) {
-    await query(
-      `UPDATE game_texts SET developer = ?
-        WHERE locale = ?
-          AND group_key IN (
-            SELECT COALESCE(g.group_key, g.id) FROM games g WHERE g.developer_id = ?
-          )`,
-      [rawEntityName(input.texts, locale), locale, id]
-    );
-  }
-
-  /* ② 旧快照列（只写不读，留着是为了能回滚到「读宽表」那版代码） */
-  await query('UPDATE games SET developer = ? WHERE developer_id = ?', [zh.name ?? '', id]);
-  if (en.name) {
-    await query('UPDATE games SET developer_en = ? WHERE developer_id = ? AND developer_en IS NOT NULL', [en.name, id]);
-  }
 }
 
-/** 删开发商（后台用）。调用方已经确认「名下没游戏」。 */
+/** 删开发商（后台用）。文案行由外键 `on delete cascade` 一起清。 */
 export async function deleteDeveloper(id: string): Promise<void> {
-  await query('DELETE FROM developers WHERE id = ?', [id]);
-  await query('DELETE FROM developer_texts WHERE developer_id = ?', [id]);
+  await query('DELETE FROM developers WHERE slug = ?', [id]);
 }
 
-/* ================================================================ */
-/* 选项 / 计数（给 games 表单和删除校验用）                          */
-/* ================================================================ */
+/* ── 选项 / 计数 ───────────────────────────────────────────────────────── */
 
-/** 添加游戏时的「开发商下拉框」—— 只要 id + 名字，不要整段介绍。 */
+/** 添加游戏时的「开发商下拉框」—— 只要 id + 名字（中文那份，空了回退 slug）。 */
 export async function listDeveloperOptions(): Promise<{ id: string; name: string }[]> {
   const rows = await query<{ id: string; name: string }>(
-    'SELECT id, name FROM developers ORDER BY name ASC'
+    `SELECT d.slug AS id, COALESCE(t.name, d.slug) AS name
+       FROM developers d
+       LEFT JOIN developer_texts t ON t.developer_slug = d.slug AND t.locale = 'zh'
+      ORDER BY name ASC`
   );
   return rows;
 }
@@ -566,44 +453,28 @@ export async function listDeveloperOptions(): Promise<{ id: string; name: string
 /** 某开发商名下有几款游戏 —— 删除前校验用。 */
 export async function countGamesForDeveloper(developerId: string): Promise<number> {
   const rows = await query<{ c: number }>(
-    'SELECT COUNT(*) AS c FROM games WHERE developer_id = ?',
+    'SELECT COUNT(*)::int AS c FROM games WHERE developer_slug = ?',
     [developerId]
   );
-  return rows[0]?.c ?? 0;
+  return Number(rows[0]?.c ?? 0);
 }
 
-/* ================================================================ */
-/* sitemap stub                                                      */
-/* ================================================================ */
+/* ── sitemap stub ──────────────────────────────────────────────────────── */
 
 export async function listDeveloperStubs(): Promise<{ id: string; createdAt: number }[]> {
   const rows = await query<{ id: string; created_at: number }>(
-    'SELECT id, created_at FROM developers ORDER BY created_at DESC'
+    `SELECT slug AS id, (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
+       FROM developers ORDER BY created_at DESC`
   );
   return rows.map((row) => ({ id: row.id, createdAt: row.created_at }));
 }
 
-/**
- * sitemap 用的开发商 stub。
- *
- * ⚠️ 源站模式下给空数组：那几条详情页会 404（`getDeveloper` 同样回 null，
- *    见上面那段「开发商库没有上游替代」），列进 sitemap 等于交一批死链。
- */
 export async function listDeveloperStubsCached(): Promise<{ id: string; createdAt: number }[]> {
-  if (usesUpstreamCatalog()) return [];
   return listDeveloperStubsRaw();
 }
 
 const listDeveloperStubsRaw = cached(
   async () => listDeveloperStubs(),
-  ['developers:stubs'],
+  ['sb:developers:stubs', 'v1'],
   { revalidate: 86400 }
 );
-
-/* ================================================================ */
-/* 工具                                                              */
-/* ================================================================ */
-
-function escapeLike(raw: string): string {
-  return raw.replace(/[\\%_]/g, '\\$&');
-}

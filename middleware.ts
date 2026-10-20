@@ -118,6 +118,15 @@ function publicRoute(request: NextRequest, locale: Locale, path: string): NextRe
       return NextResponse.redirect(url, 307);
     }
   }
+  /*
+   * 旧目录地址的兼容改写（`/games?page=2`、`/consoles/nds?lang=zh` 这类）。
+   *
+   * ⚠️ **2026-10-20 起这些维度已经是路径段**（`/games/page/2`、`/consoles/nds/lang/zh`），
+   *    新地址只有 1~2 段以外的形态，`catalogRewrite` 的正则天然不命中 —— 也就是说
+   *    这里现在只剩「老外链还能打开」这一个作用，别把它当成新维度的入口。
+   *    为什么新维度不能用改写：查询参数被改写成影子路由后，客户端软导航拿回的 flight
+   *    对不上当前路由树，点一下就是整页刷新。完整推理见 `lib/catalog-route.ts` 文件头。
+   */
   let variant: string | null;
   try {
     variant = catalogRewrite(path, url.searchParams);

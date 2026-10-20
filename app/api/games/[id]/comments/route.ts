@@ -40,7 +40,7 @@ import {
   listGameComments,
   type Comment,
 } from '@/lib/server/comments';
-import { getGameForWrite } from '@/lib/server/games';
+import { getGameForWrite } from '@/lib/server/sb-games';
 
 export const runtime = 'nodejs';
 // 实时读 D1，别让构建期把它静态化了（构建时并没有数据库凭据）

@@ -35,6 +35,7 @@ import {
 } from '@/lib/emulator';
 import { unwrapRom } from '@/lib/unwrap';
 import { LOCALE_OPTIONS, formatTime, type Locale, type MessageKey } from '@/lib/i18n';
+import { FlagIcon } from './FlagIcon';
 import {
   captureFpsFor,
   CODE_LENGTH,
@@ -71,7 +72,7 @@ import {
 import { readSave, writeSave, type SaveInfo } from '@/lib/saves';
 import { MAX_SAVE_BYTES } from '@/lib/save-limit';
 import { isSeason, nextSeason } from '@/lib/season';
-import type { Game } from '@/lib/server/games';
+import type { Game } from '@/lib/server/sb-games';
 import { DEFAULT_TV_SIZE, isTvSize, TV_SIZES, type TvSize } from '@/lib/tv-size';
 import { consoleLabel } from '@/lib/consoles';
 import { fetchCurrentUser } from '@/lib/current-user';
@@ -3386,6 +3387,8 @@ export default function ConsoleScene({
             <span className="row-icon">
               <GlobeIcon size={16} />
             </span>
+            {/* 当前语言的国旗（简繁共用一面中国国旗，靠文字区分） */}
+            <FlagIcon locale={locale} />
             <span className="locale-current">
               {LOCALE_OPTIONS.find((option) => option.value === locale)?.label ?? locale}
             </span>
@@ -3412,6 +3415,7 @@ export default function ConsoleScene({
                       router.push(hrefIn(option.value));
                     }}
                   >
+                    <FlagIcon locale={option.value} />
                     {option.label}
                   </button>
                 </li>

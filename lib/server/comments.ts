@@ -11,7 +11,7 @@
  *      · 用户名同理以库里的为准，`c.username` 那个快照只在**账号被删之后**兜底
  *        （没有 JOIN 到就退回快照 —— 不能因为作者销号就把他说过的话变成无名氏）。
  *
- * ② **`game_id` 一律现传现用，不做 JOIN games**。评论不显示游戏名（就在这一页上），
+ * ② **`game_slug` 一律现传现用，不做 JOIN games**。评论不显示游戏名（就在这一页上），
  *    也不需要「当时是哪款」的快照 —— 游戏下架时这一页本身就 404 了，评论跟着一起不可见，
  *    这是对的行为（孤儿行留着，用户换不来任何东西）。
  *
@@ -25,10 +25,16 @@
  *
  * ⚠️ 翻页的游标是 `(created_at, id)` 两级、编码成 `created_at:id`：created_at 是毫秒
  *    时间戳，同一毫秒发两条并不罕见（连点两次「发表」），只用 created_at 会整段跳过。
+ *
+ * ⚠️ 2026-10-20 起数据源是 Supabase（`./pg`）。三处跟 D1 不一样：
+ *    · 列名 `game_id` → **`game_slug`**（游戏主键换成上游 slug 了，见 db/schema.pg.sql）；
+ *    · `created_at` 是 `timestamptz` ⇒ 读的时候换算成毫秒、比较的时候 `to_timestamp`；
+ *    · `AVG(rating)` 在 Postgres 里回 **numeric（驱动给字符串）**，必须显式 `::float8`，
+ *      否则均分会变成 `"4.3333…"` 这种字符串，前端 `toFixed` 直接炸。
  */
 
 import { randomUUID } from 'node:crypto';
-import { query } from './d1';
+import { query } from './pg';
 import { publicUrlOrNull } from './r2';
 
 /** 一页多少条。评论比留言本密（一款热门的下面可能攒几十条），一次多给几条。 */
@@ -41,7 +47,7 @@ export const COMMENT_MAX_LENGTH = 500;
  * 星级的合法区间（2026-10-13 用户要求「评论有星星 1-5」）。
  *
  * 这里是**唯一定义**，接口拿它校验、前端那份是手抄的（客户端不能 import 这个模块，
- * 里面引了 node:crypto 和 D1 客户端 —— 同 COMMENT_PAGE_SIZE / COMMENT_MAX_LENGTH）。
+ * 里面引了 node:crypto 和数据库客户端 —— 同 COMMENT_PAGE_SIZE / COMMENT_MAX_LENGTH）。
  * 组件里改区间时**两处一起改**。
  */
 export const RATING_MIN = 1;
@@ -50,11 +56,13 @@ export const RATING_MAX = 5;
 /** DB 行（snake_case）。多出来的两列来自 LEFT JOIN app_users。 */
 interface CommentRow {
   id: string;
-  game_id: string;
+  /** 游戏主键（= `games.slug`）。对外字段名仍是 `gameId`，形状不变。 */
+  game_slug: string;
   user_id: string;
   username: string;
   content: string;
   rating: number;
+  /** 毫秒时间戳（库里是 timestamptz，SELECT 里换算好了）。 */
   created_at: number;
   /** JOIN 到的现名；账号已删则为 null */
   live_username: string | null;
@@ -96,7 +104,7 @@ export interface CommentPage {
 function toComment(row: CommentRow): Comment {
   return {
     id: row.id,
-    gameId: row.game_id,
+    gameId: row.game_slug,
     userId: row.user_id,
     username: row.live_username ?? row.username,
     // 头像同样是**展示用**字段，用软版拼（缺 R2_PUBLIC_BASE 时回 null，不把整页评论带走）
@@ -136,7 +144,8 @@ function clampLimit(value: number | undefined): number {
  */
 const SELECT = `
   SELECT
-    c.id, c.game_id, c.user_id, c.username, c.content, c.rating, c.created_at,
+    c.id, c.game_slug, c.user_id, c.username, c.content, c.rating,
+    (EXTRACT(EPOCH FROM c.created_at) * 1000)::float8 AS created_at,
     a.username   AS live_username,
     a.avatar_key AS avatar_key
   FROM game_comments c
@@ -157,15 +166,16 @@ export async function listGameComments(
   const rows = cursor
     ? await query<CommentRow>(
         `${SELECT}
-          WHERE c.game_id = ?
-            AND ((c.created_at < ?) OR (c.created_at = ? AND c.id < ?))
+          WHERE c.game_slug = ?
+            AND ((c.created_at < to_timestamp(?::float8 / 1000))
+              OR (c.created_at = to_timestamp(?::float8 / 1000) AND c.id < ?))
           ORDER BY c.created_at DESC, c.id DESC
           LIMIT ?`,
         [gameId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1]
       )
     : await query<CommentRow>(
         `${SELECT}
-          WHERE c.game_id = ?
+          WHERE c.game_slug = ?
           ORDER BY c.created_at DESC, c.id DESC
           LIMIT ?`,
         [gameId, limit + 1]
@@ -193,7 +203,8 @@ export async function insertComment(input: {
   const id = randomUUID();
   const createdAt = Date.now();
   await query(
-    'INSERT INTO game_comments (id, game_id, user_id, username, content, rating, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    `INSERT INTO game_comments (id, game_slug, user_id, username, content, rating, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, to_timestamp(?::float8 / 1000))`,
     [id, input.gameId, input.userId, input.username, input.content, input.rating, createdAt]
   );
   /*
@@ -232,8 +243,14 @@ export interface RatingSummary {
  * ⚠️ **不做缓存**（和 countGameFavorites 同一个口径）：详情页每次渲染现查，量小、值得。
  */
 export async function getGameRatingSummary(gameId: string): Promise<RatingSummary> {
+  /*
+   * `AVG(...)::float8` 那个显式转换不能省：Postgres 的 AVG 回 numeric，
+   * postgres.js 把它当**字符串**给出来（保精度），前端 `toFixed` 会当场炸。
+   * `COUNT(*)::int` 同理 —— 不转的话是 int8，驱动给 BigInt。
+   */
   const rows = await query<{ n: number; avg: number | null }>(
-    'SELECT COUNT(*) AS n, AVG(rating) AS avg FROM game_comments WHERE game_id = ?',
+    `SELECT COUNT(*)::int AS n, AVG(rating)::float8 AS avg
+       FROM game_comments WHERE game_slug = ?`,
     [gameId]
   );
   const count = Number(rows[0]?.n ?? 0);

@@ -1,10 +1,11 @@
 import { cached } from '@/lib/server/cache';
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
-import CatalogLink from '@/components/CatalogLink';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
+import Paragraphs from '@/components/Paragraphs';
 import {
   SITE_NAME,
   alternatesFor,
@@ -16,8 +17,9 @@ import {
   type MessageKey,
 } from '@/lib/i18n';
 import { pageCountOf, pageHref, parsePageParam } from '@/lib/pager';
-import { getDeveloperPageData, localizeDeveloper, type Developer, type LocalizedDeveloperText } from '@/lib/server/developers';
-import { listGamesByDeveloperCached } from '@/lib/server/games';
+import { entityInitial } from '@/lib/entity-text';
+import { DEVELOPERS_PAGE_REVALIDATE_SECONDS, getDeveloperPageData, localizeDeveloper, type Developer, type LocalizedDeveloperText } from '@/lib/server/developers';
+import { listGamesByDeveloperCached } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
 
@@ -33,7 +35,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * 本组件不读 Cookie，由静态路由或按查询隔离的 ISR 路由调用。
  *
- * 名下那段游戏列表走 `listGamesByDeveloperCached`（24 小时 TTL，和 `/games` 列表页一致）；
+ * 名下那段游戏列表走 `listGamesByDeveloperCached`（30 天 TTL，和 `/games` 列表页一致）；
  * 开发商自己的资料（名字 / 简介 / 介绍）**不缓存** —— 后台改完刷新就能看到。
  */
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -41,7 +43,11 @@ type SearchParams = Record<string, string | string[] | undefined>;
 /** 每页几款游戏。和 `/games` 列表页一致（同一套 5 列网格）。 */
 const PAGE_SIZE = 15;
 
-const loadDeveloper = cached(async (id: string) => getDeveloperPageData(id), ['static-getDeveloper'], { revalidate: 86400, tags: ['developers'] });
+/*
+ * ⚠️ 键尾**版本号**：条目落在 `.next/cache`，不随部署失效。
+ *    2026-10-20 → v2：补了开发商介绍的多语言数据（igs 等），旧条目会继续吐中文正文。
+ */
+const loadDeveloper = cached(async (id: string) => getDeveloperPageData(id), ['static-getDeveloper', 'v2'], { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS, tags: ['developers'] });
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
@@ -245,7 +251,7 @@ export default async function DeveloperDetailPage({
             aria-hidden="true"
             className="pixel-edge pxw-2 pxc-700 flex aspect-square w-[140px] shrink-0 items-center justify-center bg-ink-900 font-pixel text-[44px] text-ink-600 sm:w-[180px]"
           >
-            {Array.from(text.name)[0] ?? '?'}
+            {entityInitial(text.name)}
           </div>
         )}
 
@@ -254,11 +260,16 @@ export default async function DeveloperDetailPage({
             正文就是后台填的「介绍」。没填就一个字都不画 ——
             这一页不像游戏详情页有「《X》是一款 NES 游戏」那种能兜住的话，
             与其编一句废话，不如让版式干净点（下面的资料表和游戏列表已经说明了一切）。
+
+            ⚠️ 用 `Paragraphs` 而不是 `whitespace-pre-wrap` 的单个 `<p>`：库里的介绍是
+            多段、段间存 `\n\n`，pre-wrap 会把空行照样画出来（一段之间空 28px）。
+            见 components/Paragraphs.tsx 的注释。
           */}
           {text.description && (
-            <p className="text-[13px] leading-7 whitespace-pre-wrap text-ink-300">
-              {text.description}
-            </p>
+            <Paragraphs
+              text={text.description}
+              className="text-[13px] leading-7 text-ink-300"
+            />
           )}
 
           {/* 资料表。和游戏详情页同一套 `dl` 写法（这一页的语义也是「字段名 : 值」） */}
@@ -290,13 +301,13 @@ export default async function DeveloperDetailPage({
         {pageCount > 1 && (
           <nav className="mt-10 flex items-center justify-center gap-4">
             {page > 1 ? (
-              <CatalogLink
+              <Link
                 href={developerHref(locale, id, page - 1)}
                 rel="prev"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.prev')}
-              </CatalogLink>
+              </Link>
             ) : (
               <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
             )}
@@ -306,13 +317,13 @@ export default async function DeveloperDetailPage({
             </span>
 
             {page < pageCount ? (
-              <CatalogLink
+              <Link
                 href={developerHref(locale, id, page + 1)}
                 rel="next"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.next')}
-              </CatalogLink>
+              </Link>
             ) : (
               <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
             )}

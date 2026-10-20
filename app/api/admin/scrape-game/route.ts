@@ -34,7 +34,7 @@ import { NextResponse } from 'next/server';
 import type { ConsoleType } from '@/lib/emulator';
 import { romLangToFormValue } from '@/lib/rom-lang';
 import { assertAdmin } from '@/lib/server/admin-guard';
-import { findGameDuplicate } from '@/lib/server/games';
+import { findGameDuplicate } from '@/lib/server/games-admin';
 import { UPSTREAM_LOCALES, UPSTREAM_SITE, fetchUpstreamHtml, toConsoleType } from '@/lib/server/upstream';
 import { failJson } from '@/lib/server/url-guard';
 
@@ -377,11 +377,19 @@ export async function POST(request: Request) {
      * ⚠️ 查重失败（D1 抖一下）**不该拦住抓取本身** —— 上传那一步还会再判一次，那才是兜底。
      */
     const consoleType = primary.consoleType ?? fallbackPage?.consoleType ?? null;
+    /*
+     * ⚠️ **语言认不出（`fr` / `es`…）就整段跳过判重**（2026-10-20 改）。
+     *    新库的判重把语言那一维写成 `EXISTS (… r.language = ?)`，传 `null` 等于
+     *    **这一维不参与**，会命中「同名同机种但只有英文版」的游戏 —— 那不是同一盘 ROM。
+     *    跳过之后交给上传那一步兜底（那边语言是必填的）。
+     */
+    const formLanguage = romLangToFormValue(romLang);
     let duplicateOf: { id: string; title: string; language: string | null } | null = null;
     try {
-      duplicateOf = title
-        ? await findGameDuplicate(title, romLangToFormValue(romLang), consoleType)
-        : null;
+      duplicateOf =
+        title && formLanguage
+          ? await findGameDuplicate(title, formLanguage, consoleType)
+          : null;
     } catch (error) {
       console.warn('[admin] 预检查重失败，交给上传那一步兜底', error);
     }

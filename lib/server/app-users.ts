@@ -8,10 +8,19 @@
  *    scrypt」，和「是谁」无关，重写一遍只会多一份可能漂的代码。
  *
  * 本文件依赖 node:crypto（经由 users.ts），只能在 Node runtime 的路由里用。
+ *
+ * ⚠️ 2026-10-20 起数据源是 Supabase（`./pg`）。三处跟 D1 不一样的写法：
+ *    · **时间列是 `timestamptz`**，对外仍吐**毫秒时间戳**（形状不改）⇒ 读的时候
+ *      `EXTRACT(EPOCH …) * 1000`，写的时候 `to_timestamp(?::float8 / 1000)`；
+ *      新建行干脆用 `now()`，不再把 `Date.now()` 塞进去。
+ *    · **唯一约束的报错文本不同**：Postgres 是
+ *      `duplicate key value violates unique constraint "app_users_username_key"`
+ *      （SQLite 是 `UNIQUE constraint failed: app_users.username`），两个都认。
+ *    · `status` 仍是 smallint（1 正常 / 0 封禁），`toAppUser` 照旧折成布尔。
  */
 
 import { randomUUID } from 'node:crypto';
-import { query } from './d1';
+import { query } from './pg';
 import { publicUrlOrNull } from './r2';
 import { hashPassword, verifyPassword } from './users';
 
@@ -41,6 +50,19 @@ export interface AppUserRow {
   avatar_key: string | null;
   vip_expires_at: number | null;
 }
+
+/**
+ * 所有读 `app_users` 的查询共用的列清单。
+ *
+ * 三个时间列在库里是 `timestamptz`，对外一律吐**毫秒时间戳**（`AppUser` 的形状没变，
+ * 客户端拿它做过比较 / 展示）。`EXTRACT` 遇到 NULL 回 NULL，正好对应「从没登录过 /
+ * 从来不是会员」，不需要额外 `CASE`。
+ */
+const COLUMNS = `id, username, password_hash, status,
+  (EXTRACT(EPOCH FROM created_at) * 1000)::float8      AS created_at,
+  (EXTRACT(EPOCH FROM last_login_at) * 1000)::float8   AS last_login_at,
+  gender, avatar_key,
+  (EXTRACT(EPOCH FROM vip_expires_at) * 1000)::float8  AS vip_expires_at`;
 
 /**
  * 性别取值。`null` = **未知**（默认态）—— 刻意允许，注册时不强制选。
@@ -185,19 +207,15 @@ export function validatePassword(
 
 /** 按用户名查（登录用）。返回的**带 password_hash**，只在登录流程里用。 */
 export async function findAppUser(username: string): Promise<AppUserRow | null> {
-  const rows = await query<AppUserRow>(
-    'SELECT id, username, password_hash, status, created_at, last_login_at, gender, avatar_key, vip_expires_at FROM app_users WHERE username = ?',
-    [username]
-  );
+  const rows = await query<AppUserRow>(`SELECT ${COLUMNS} FROM app_users WHERE username = ?`, [
+    username,
+  ]);
   return rows[0] ?? null;
 }
 
 /** 按 id 查。守卫要用它复核「这个账号还在不在、有没有被封」。 */
 export async function getAppUser(id: string): Promise<AppUser | null> {
-  const rows = await query<AppUserRow>(
-    'SELECT id, username, password_hash, status, created_at, last_login_at, gender, avatar_key, vip_expires_at FROM app_users WHERE id = ?',
-    [id]
-  );
+  const rows = await query<AppUserRow>(`SELECT ${COLUMNS} FROM app_users WHERE id = ?`, [id]);
   const row = rows[0];
   return row ? toAppUser(row) : null;
 }
@@ -223,20 +241,29 @@ export async function registerAppUser(input: RegisterInput): Promise<AppUser | n
   const username = input.username.trim();
   try {
     /*
-     * 新列（gender / avatar_key / vip_expires_at）**显式写 NULL**，不靠「不写就是 NULL」——
-     * 这里列清单写着更清楚，也和 toAppUser 的假设对得上。VIP 一律从「不是」开始，
-     * 开 / 关只有 admin 那条路（setAppUserVip）。
+     * 只写有值的列，其余交给列默认值（`status` 默认 1，`gender` / `avatar_key` /
+     * `vip_expires_at` 默认 NULL）。VIP 一律从「不是」开始 —— 开 / 关只有 admin
+     * 那条路（setAppUserVip）。
+     *
+     * `created_at` 显式写：返回给调用方的 `createdAt` 必须是**库里那一个值**，
+     * 让 `now()` 和 `Date.now()` 各算一次会差几毫秒（后台列表按它排序 / 做游标）。
      */
     await query(
-      `INSERT INTO app_users
-         (id, username, password_hash, status, created_at, last_login_at, gender, avatar_key, vip_expires_at)
-       VALUES (?, ?, ?, 1, ?, NULL, NULL, NULL, NULL)`,
+      `INSERT INTO app_users (id, username, password_hash, status, created_at)
+       VALUES (?, ?, ?, 1, to_timestamp(?::float8 / 1000))`,
       [id, username, hashPassword(input.password), createdAt]
     );
   } catch (error) {
+    /*
+     * 用户名撞车：Postgres 的唯一冲突是 SQLSTATE **23505**，消息形如
+     * `duplicate key value violates unique constraint "app_users_username_key"`。
+     * 消息文本那一条是 D1 时代的写法，留着不吃亏（换个库 / 换个驱动时认得出）。
+     */
+    const code = (error as { code?: string })?.code;
     const message = error instanceof Error ? error.message : String(error);
-    // D1 走 REST，唯一约束错误会以 `UNIQUE constraint failed: app_users.username` 的形式回来
-    if (/UNIQUE constraint failed/i.test(message)) return null;
+    if (code === '23505' || /duplicate key value|UNIQUE constraint failed/i.test(message)) {
+      return null;
+    }
     throw error;
   }
   return {
@@ -273,7 +300,7 @@ export async function authenticateAppUser(input: {
 /** 记一次登录时间。失败不抛 —— 登录已经成功了，时间戳写不上不该把登录搞挂。 */
 export async function touchLastLogin(id: string): Promise<void> {
   try {
-    await query('UPDATE app_users SET last_login_at = ? WHERE id = ?', [Date.now(), id]);
+    await query('UPDATE app_users SET last_login_at = now() WHERE id = ?', [id]);
   } catch (error) {
     console.warn('[nesload] 写 last_login_at 失败（不影响本次登录）：', error);
   }
@@ -290,8 +317,12 @@ export async function touchLastLogin(id: string): Promise<void> {
  */
 export async function setAppUserVip(id: string, expiresAt: number | null): Promise<boolean> {
   const rows = await query<{ id: string }>(
-    'UPDATE app_users SET vip_expires_at = ? WHERE id = ? RETURNING id',
-    [expiresAt, id]
+    `UPDATE app_users
+        SET vip_expires_at = CASE WHEN ?::float8 IS NULL THEN NULL
+                                  ELSE to_timestamp(?::float8 / 1000) END
+      WHERE id = ?
+      RETURNING id`,
+    [expiresAt, expiresAt, id]
   );
   return rows.length > 0;
 }
@@ -426,18 +457,22 @@ export async function listAppUsersPage(options: {
 
   const SELECT = `
     SELECT
-      u.id, u.username, u.password_hash, u.status, u.created_at, u.last_login_at,
-      u.gender, u.avatar_key, u.vip_expires_at,
-      (SELECT COUNT(*) FROM user_history   h WHERE h.user_id = u.id) AS history_count,
-      (SELECT COUNT(*) FROM user_saves     s WHERE s.user_id = u.id) AS save_count,
-      (SELECT COUNT(*) FROM user_favorites f WHERE f.user_id = u.id) AS favorite_count
+      u.id, u.username, u.password_hash, u.status,
+      (EXTRACT(EPOCH FROM u.created_at) * 1000)::float8     AS created_at,
+      (EXTRACT(EPOCH FROM u.last_login_at) * 1000)::float8  AS last_login_at,
+      u.gender, u.avatar_key,
+      (EXTRACT(EPOCH FROM u.vip_expires_at) * 1000)::float8 AS vip_expires_at,
+      (SELECT COUNT(*)::int FROM user_history   h WHERE h.user_id = u.id) AS history_count,
+      (SELECT COUNT(*)::int FROM user_saves     s WHERE s.user_id = u.id) AS save_count,
+      (SELECT COUNT(*)::int FROM user_favorites f WHERE f.user_id = u.id) AS favorite_count
     FROM app_users u`;
 
   // 多取一条用来推 nextCursor（同 feedback：比再发一次 COUNT 便宜）
   const rows = cursor
     ? await query<AppUserRow & { history_count: number; save_count: number; favorite_count: number }>(
         `${SELECT}
-          WHERE (u.created_at < ?) OR (u.created_at = ? AND u.id < ?)
+          WHERE (u.created_at < to_timestamp(?::float8 / 1000))
+             OR (u.created_at = to_timestamp(?::float8 / 1000) AND u.id < ?)
           ORDER BY u.created_at DESC, u.id DESC
           LIMIT ?`,
         [cursor.createdAt, cursor.createdAt, cursor.id, limit + 1]
@@ -463,6 +498,6 @@ export async function listAppUsersPage(options: {
 
 /** 用户总数（后台概览那一行）。 */
 export async function countAppUsers(): Promise<number> {
-  const rows = await query<{ n: number }>('SELECT COUNT(*) AS n FROM app_users');
+  const rows = await query<{ n: number }>('SELECT COUNT(*)::int AS n FROM app_users');
   return Number(rows[0]?.n ?? 0);
 }

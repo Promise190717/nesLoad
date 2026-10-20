@@ -15,7 +15,8 @@ import { NextResponse } from 'next/server';
 import { isConsoleType } from '@/lib/consoles';
 import { assertAdmin } from '@/lib/server/admin-guard';
 import { deleteConsole, getConsole, upsertConsole } from '@/lib/server/consoles';
-import { deleteObject, keyFromPublicUrl, publicUrl, uploadObject } from '@/lib/server/r2';
+import { deleteObject, uploadObject } from '@/lib/server/r2';
+import { mediaKey, mediaPath, mediaUrl } from '@/lib/server/media';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -81,8 +82,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     /*
      * 没选新图就走原地址 —— **不要**在这里把它置空：那会让「只想改个简介」
      * 顺手把机图清掉（和开发商那条同一条规矩）。
+     *
+     * ⚠️ `getConsole` 回的 `imageUrl` 是**拼好域名的展示地址**（见 lib/server/media.ts），
+     *    回写库前要用 `mediaPath` 剥回路径 —— 否则「改个简介」就把域名写死进库里了。
      */
-    let imageUrl = row?.imageUrl ?? null;
+    let imageUrl = mediaPath(row?.imageUrl);
     let uploadedKey: string | null = null;
 
     if (image) {
@@ -92,7 +96,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         new Uint8Array(await image.arrayBuffer()),
         image.type || 'application/octet-stream'
       );
-      imageUrl = publicUrl(uploadedKey);
+      imageUrl = mediaPath(uploadedKey);
     }
 
     await upsertConsole(id, {
@@ -107,12 +111,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     });
 
     // 换过图才清理旧对象。**放在写入之后**：反过来的话，DB 写失败就丢了一张还在用的图。
-    const oldKey = row?.imageUrl ? keyFromPublicUrl(row.imageUrl) : null;
+    const oldKey = row?.imageUrl ? mediaKey(row.imageUrl) : null;
     if (uploadedKey && oldKey && oldKey !== uploadedKey) {
       await Promise.allSettled([deleteObject(oldKey)]);
     }
 
-    return NextResponse.json({ ok: true, console: { type: id, name, imageUrl } });
+    // 回给后台的是展示地址（路径 + 域名）
+    return NextResponse.json({ ok: true, console: { type: id, name, imageUrl: mediaUrl(imageUrl) } });
   } catch (error) {
     console.error('[admin] 修改机种失败', error);
     return fail('update-failed', (error as Error).message, 500);
@@ -143,7 +148,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   }
 
   // 记录已经没了，机图属收尾工作，删不掉也不该让整个请求失败
-  const key = row.imageUrl ? keyFromPublicUrl(row.imageUrl) : null;
+  const key = row.imageUrl ? mediaKey(row.imageUrl) : null;
   if (key) await Promise.allSettled([deleteObject(key)]);
 
   return NextResponse.json({ ok: true });

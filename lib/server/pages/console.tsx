@@ -1,12 +1,13 @@
 import { cached } from '@/lib/server/cache';
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
 import { consoleLabel, isConsoleType } from '@/lib/consoles';
-import CatalogLink from '@/components/CatalogLink';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
 import GamesSearchForm from '@/components/GamesSearchForm';
+import Paragraphs from '@/components/Paragraphs';
 import {
   SITE_NAME,
   alternatesFor,
@@ -19,13 +20,13 @@ import {
 } from '@/lib/i18n';
 import { pageCountOf, parsePageParam } from '@/lib/pager';
 import { GAME_LANGUAGE_LABEL, GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
-import { getConsolePageData, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
+import { CONSOLES_PAGE_REVALIDATE_SECONDS, getConsolePageData, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
 import {
   countConsoleGamesByLanguageCached,
   countGamesCached,
   listGamesByConsoleCached,
   listGamesPageCached,
-} from '@/lib/server/games';
+} from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
 
@@ -44,7 +45,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *    「游戏数」一项。首页与 `/consoles` 的卡片永远指得到这里 —— 绝不 404。
  *
  * ⚠️ 机种自己的资料**不缓存**（后台改完刷新就看到）；名下游戏列表走
- *    `listGamesByConsoleCached`（24 小时 TTL，和 `/games`、开发商详情页一致）。
+ *    `listGamesByConsoleCached`（30 天 TTL，和 `/games`、开发商详情页一致）。
  *    「x款游戏」也取自那次的 total（countGamesCached）—— 2026-10-14 起不再用
  *    资料行上的 gameCount，那个子查询是每请求全表 COUNT（详见 generateMetadata）。
  *
@@ -55,18 +56,22 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 用户要的是「只看中文版」。于是加了一条筛选条（一排链接，和 `/games` 的机种筛选同款），
  * **筛的是 `games.language`，也就是游戏自己的语种**（不是界面语言）。
  *
- * ⚠️ **不写 `?lang=` 时默认 = 全部**（2026-10-16 用户要求：原来是「按界面语言挑一份」，
+ * ⚠️ **不筛语种时默认 = 全部**（2026-10-16 用户要求：原来是「按界面语言挑一份」，
  *    改成「先给全部」）：在中文站打开 `/zh/consoles/nes` 看到的是这个机种下的全部游戏，
  *    想只看中文版再点那一颗。
- *    ⇒ 于是「默认那一份」的地址**就是裸路径**，点「全部」那颗也不会在地址里留下 `?lang=`
- *    （`?lang=all` 会被 307 收敛回裸地址 —— 同一份内容不能有两个 URL，
- *    和 `/games` 的 `?console=xxx`、`?page=01` 同一条规矩）。这也是「刷新不丢」的做法：
+ *    ⇒ 于是「默认那一份」的地址**就是裸路径**，点「全部」那颗也不会在地址里多一段
+ *    （`/consoles/nes/lang/all` 会被 307 收敛回裸地址 —— 同一份内容不能有两个 URL，
+ *    和 `/games/console/xxx`、`/page/01` 同一条规矩）。这也是「刷新不丢」的做法：
  *    地址栏里写着的就是用户选的那一份，界面语言在路径里，两者都是可复制、可收藏的。
  *
- * ⚠️ **认不出的 `?lang=xxx` 与重复参数一律当没给**（于是 307 收敛回裸地址），
- *    和 `/games?console=xxx` 一个字不差。
+ * ⚠️ **2026-10-20 起语种进路径**（`/consoles/nes/lang/zh`，原来是 `?lang=zh`）：
+ *    查询参数那一版会被 `middleware` 改写成影子路由，客户端软导航对不上（点 tab
+ *    整页刷新）。完整推理见 `lib/catalog-route.ts` 文件头。
  *
- * ⚠️ 收录策略：**带 `?lang=` 的那几份 `noindex, follow`**（`?q=` 同款，见 generateMetadata）。
+ * ⚠️ **认不出的语种段与重复参数一律当没给**（于是 307 收敛回裸地址），
+ *    和 `/games/console/xxx` 一个字不差。
+ *
+ * ⚠️ 收录策略：**带语种段的那几份 `noindex, follow`**（搜索那份同款，见 generateMetadata）。
  *    它们只是同一份列表的子集，语种只有四个，全收进去就是四份重复内容。默认那一份
  *    （裸地址）照常收录 —— 它就是「这个机种下的全部游戏」，和加筛选之前一模一样。
  *
@@ -79,7 +84,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 /** 每页几款游戏。和 `/games` 列表页、开发商详情页一致（同一套 5 列网格）。 */
 const PAGE_SIZE = 15;
 
-const loadConsole = cached(async (type: string) => getConsolePageData(type), ['static-console'], { revalidate: 86400, tags: ['consoles'] });
+const loadConsole = cached(async (type: string) => getConsolePageData(type), ['static-console'], { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS, tags: ['consoles'] });
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
@@ -127,9 +132,9 @@ function languageParamOf(language: string | null): string {
  *    （`?lang=a&lang=b`）在 `typeof raw === 'string'` 上就落空了，用「在不在」才能把它们
  *    一起收敛掉（`lib/pager.ts` 的 `parsePageParam` 同一条规矩）。
  * ⚠️ 认不出的值、`all`（＝默认那份的写法）**一律当没给**（都返回 null = 全部），于是
- *    `?lang=xxx` / `?lang=all` 会被判为非规范 ⇒ 307 回裸地址 —— 少了这一步，一个拼错的
+ *    `/lang/xxx` / `/lang/all` 会被判为非规范 ⇒ 307 回裸地址 —— 少了这一步，一个拼错的
  *    语种会静默渲染出一整页「全部」，同一份内容凭空多一个 URL
- *    （和 `/games` 的 `?console=xxx` 同一个理由）。
+ *    （和 `/games/console/xxx` 同一个理由）。
  */
 function parseLanguage(
   raw: string | string[] | undefined
@@ -142,11 +147,16 @@ function parseLanguage(
 }
 
 /**
- * 第几页的地址。**语言前缀在这里加**（`lib/pager.ts` 的 `pageHref` 只认裸路径）。
+ * 这一页的规范地址。**语言前缀在这里加**（`lib/pager.ts` 的 `pageHref` 只认裸路径）。
  *
  * `langParam` 收的是**已经归一化过的那一串**（`parseLanguage` 的 `param` /
  * `languageParamOf` 的结果），不是「哪个语种」—— 归一化只有一处，见那个函数的注释。
- * 参数顺序固定成 `q` → `lang` → `page`（服务端按地址字符串比对是否规范，顺序不同也是两个 URL）。
+ *
+ * ⚠️ **2026-10-20 起分成两套形态**（和 `gamesHref` 同一条理由，见那边的注释）：
+ *   · 有搜索词 → `/consoles/nds/search?q=…&lang=…&page=…`（动态路由，改 query 是软导航）；
+ *   · 没有搜索词 → 全路径 `/consoles/nds/lang/zh/page/2`（真路由，不再被 catalogRewrite
+ *     改写成 `/catalog/...` 影子树，点 tab / 翻页才不整页刷新）。
+ * 顺序固定成 `lang` → `page`（搜索态里是 `q` → `lang` → `page`）。
  */
 function consoleHref(
   locale: Locale,
@@ -155,11 +165,17 @@ function consoleHref(
   keyword = '',
   langParam = ''
 ): string {
-  const query = new URLSearchParams();
-  if (keyword) query.set('q', keyword);
-  if (langParam) query.set('lang', langParam);
-  if (page > 1) query.set('page', String(page));
-  return localePath(locale, `/consoles/${type}`) + (query.size ? `?${query}` : '');
+  if (keyword) {
+    const query = new URLSearchParams({ q: keyword });
+    if (langParam) query.set('lang', langParam);
+    if (page > 1) query.set('page', String(page));
+    return localePath(locale, `/consoles/${type}/search?${query.toString()}`);
+  }
+
+  let path = `/consoles/${type}`;
+  if (langParam) path += `/lang/${langParam}`;
+  if (page > 1) path += `/page/${page}`;
+  return localePath(locale, path);
 }
 
 export async function generateMetadata({
@@ -187,11 +203,11 @@ export async function generateMetadata({
     ? localizeConsole(row, locale)
     : { name: consoleLabel(id, locale), summary: null, description: null };
   /*
-   * 条数：**一律用游戏列表那次查询的 total**（`countGamesCached`，24 小时缓存）。
+   * 条数：**一律用游戏列表那次查询的 total**（`countGamesCached`，30 天缓存）。
    * 2026-10-14 之前这里优先用资料行上「顺带」算出来的 gameCount —— 但那个子查询
    * 没有 console_type 索引、getConsole 又不缓存，等于每个请求全表 COUNT 一遍
    * （见 lib/server/consoles.ts）。改用 total 后这条全表扫描消失，
-   * 代价是后台加/删游戏后这个数字最多晚 24 小时更新 —— 和列表本身同一口径。
+   * 代价是后台加/删游戏后这个数字最多晚 30 天更新 —— 和列表本身同一口径。
    * ⚠️ 传了 `lang.language`，所以这个数是**当前语种那份**的条数 —— 和页面上真正列出来的
    *    条目对得上（描述里那句「共 N 款」不该比用户看到的列表多）。
    */
@@ -210,8 +226,8 @@ export async function generateMetadata({
     /*
      * hreflang 只指**不带筛选项的那一份**（`/consoles/nes`）：语种那几份是 `noindex`
      * 的子集（见下面 robots），让它们互指只会把「两份不同内容声明成同一页」，
-     * Google 会直接判这一组标注无效。和 `/games?console=` 那边「hreflang 带上自己的
-     * 筛选参数」不同 —— 那里 `?console=` 是可收录的真实分类，这里不是。
+     * Google 会直接判这一组标注无效。和 `/games/console/nes` 那边「hreflang 带上自己的
+     * 机种段」不同 —— 那里机种是可收录的真实分类，这里的语种不是。
      */
     alternates: alternatesFor(locale, `/consoles/${id}`),
     openGraph: {
@@ -403,11 +419,13 @@ export default async function ConsoleDetailPage({
             正文就是后台填的「介绍」。没填就一个字都不画 ——
             机种没填过资料时这一栏整个不存在（下面的资料表和游戏列表已经说明了一切），
             与开发商详情页「没介绍就不画」是同一条规矩。
+
+            ⚠️ 和开发商详情页共用 `Paragraphs`：这些介绍段间存的是 `\n\n`，
+            `whitespace-pre-wrap` 会把空行画成整行空白（段间空太大）。
+            ⚠️ 间距只有那一处定义，别在这里再叠 `mt-*`。
           */}
           {text.description && (
-            <p className="text-[13px] leading-7 whitespace-pre-wrap text-ink-300">
-              {text.description}
-            </p>
+            <Paragraphs text={text.description} className="text-[13px] leading-7 text-ink-300" />
           )}
 
           {/* 资料表。和游戏 / 开发商详情页同一套 `dl` 写法（这一页的语义也是「字段名 : 值」） */}
@@ -436,6 +454,8 @@ export default async function ConsoleDetailPage({
           /* 带上当前语种：不然在「日本語」里搜一下就掉回默认那份（见组件那段注释） */
           languageParam={lang.param}
           actionPath={`/consoles/${id}`}
+          /* 「清除」落回**浏览态**的语种地址（`/consoles/nds/lang/zh`），不是带 `?lang=` 的旧形态 */
+          clearHref={consoleHref(locale, id, 1, '', lang.param)}
         />
 
         {/*
@@ -444,7 +464,7 @@ export default async function ConsoleDetailPage({
           当前那颗 accent 高亮 + `aria-current`，「全部」那颗对应「不筛语种」。
 
           ⚠️ 每颗后面挂**这个机种下该语种的条数**（用户要求「每个语种还是显示数量」）：
-          数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，24 小时缓存）。
+          数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，30 天缓存）。
           2026-10-19 起它**跟着关键词走**（用户报「搜了词标签上的数没变」）——
           搜「合金」时标签上就该是 12，不是全机种的 162。
           「全部」那颗用 `allCount`（有关键词 = 命中条数，没有 = 机种总数），和列表上方
@@ -466,11 +486,13 @@ export default async function ConsoleDetailPage({
             /* 0 款的不画；「全部」那颗（`code === null`）永远在 —— 它是默认那一份的入口 */
             if (code && count === 0 && !active) return null;
             return (
-              /* 带 `?lang=` ⇒ 被 catalogRewrite 改写，**不能走软导航**（见 CatalogLink 那段事故说明） */
-              <CatalogLink
+              /* 2026-10-20 起语种进路径（`/consoles/nds/lang/zh`），是真路由 ⇒ 可以软导航 */
+              <Link
                 key={code ?? FILTER_ALL}
                 /* 「全部」那颗给空串 ⇒ 指回裸地址（唯一的那一份，也是默认那份） */
                 href={consoleHref(locale, id, 1, keyword, languageParamOf(code))}
+                /* 语种 tab 是十几颗一排，全预取等于每开一次机种页就多渲染十几条路由 */
+                prefetch={false}
                 aria-current={active ? 'true' : undefined}
                 className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[12px] transition-colors ${
                   active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
@@ -480,7 +502,7 @@ export default async function ConsoleDetailPage({
                 {code ? GAME_LANGUAGE_LABEL[code] : t('gamesPage.filterAll')}
                 {/* 条数：不写 `font-pixel`（那一列字形里没有 CJK），跟着标签同一套字体 */}
                 <span className="ml-1.5 opacity-70">{count}</span>
-              </CatalogLink>
+              </Link>
             );
           })}
         </nav>
@@ -516,13 +538,13 @@ export default async function ConsoleDetailPage({
               少了语种，筛着「日本語」翻一页就变回全部了 —— 用户会以为筛选坏了。
             */}
             {page > 1 ? (
-              <CatalogLink
+              <Link
                 href={consoleHref(locale, id, page - 1, keyword, lang.param)}
                 rel="prev"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.prev')}
-              </CatalogLink>
+              </Link>
             ) : (
               // 首页那个「上一页」整块不画而不是渲染成灰按钮：指向自己的死链比少一个链接更糟
               <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
@@ -533,13 +555,13 @@ export default async function ConsoleDetailPage({
             </span>
 
             {page < pageCount ? (
-              <CatalogLink
+              <Link
                 href={consoleHref(locale, id, page + 1, keyword, lang.param)}
                 rel="next"
                 className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
               >
                 {t('gamesPage.next')}
-              </CatalogLink>
+              </Link>
             ) : (
               <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
             )}

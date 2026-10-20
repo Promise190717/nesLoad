@@ -1,28 +1,34 @@
 /*
  * 前台用户的「云端三件套」：历史记录 / 存档 / 收藏。
  *
- * 三块都是**只针对在线游戏库的游戏**（`game_id` 指向 games.id）——
- * 用户 2026-10-13 明确要求。本机拖进来的文件没有 id、也没有可重新下载的地址，
+ * 三块都是**只针对在线游戏库的游戏**（`game_slug` 指向 games.slug）——
+ * 用户 2026-10-13 明确要求。本机拖进来的文件没有 slug、也没有可重新下载的地址，
  * 一律不进这三张表。
  *
  * 结构上照 lib/server/feedback.ts 的套路：DB 行（snake_case）/ 对外结构（camelCase）
  * 两套类型 + `toXxx()` 映射，列表一律「新的在前」。
  *
+ * ⚠️ 2026-10-20 起数据源是 Supabase（`./pg`），游戏主键换成了**上游 slug**。
+ *    跟 D1 那套的差别集中在三处：
+ *      · 列名 `game_id` → **`game_slug`**（对外字段名仍是 `gameId`，前端不用改）；
+ *      · 时间列是 `timestamptz` ⇒ 读的时候换算成毫秒、写的时候 `to_timestamp`；
+ *      · **没有 `rowid`**（那是 SQLite 的隐式列）⇒ 同毫秒并列时改用 `id DESC` 兜底，
+ *        `user_saves.id` 是 uuid，排序稳定但**不等于**插入顺序（够用了，见各处注释）。
+ *
  * ⚠️ **历史 / 收藏读的时候要「现查游戏资料」，已下架的过滤掉**。这两张表里的
- *    `game_id` 没有外键约束（D1 底下 SQLite 默认不校验，见 schema.sql 的注释），
- *    后台删了游戏就会留下孤儿行 —— 现查是最省事的兜底（也顺带保证返回给前端的
- *    封面 / 名字永远是**最新**的，而不是收藏那一刻的快照）。
+ *    `game_slug` 没有外键约束（游戏下架后历史仍要能读），后台删了游戏就会留下孤儿行
+ *    —— 现查是最省事的兜底（也顺带保证返回给前端的封面 / 名字永远是**最新**的，
+ *    而不是收藏那一刻的快照）。
  *
- * ⚠️ 2026-10-19 起「现查」不再是一句 `JOIN games`，而是 `loadGameCards()`：源站模式
- *    （`CATALOG_SOURCE=upstream`，默认）下前台给出的 id 是**上游 slug**，`games` 表里
- *    没有这一行，JOIN 会把用户自己的收藏 / 历史整条丢掉。用户明确要求「评论、收藏、
- *    存档、注册登录、个人中心照旧用我们自己的 D1」—— 数据写在 D1，**读的时候**再按 id
- *    去上游补一份游戏资料，两边不打架。
+ * ⚠️ 2026-10-19 起「现查」不再是一句 `JOIN games`，而是 `loadGameCards()`。
+ *    D1 时代那样写是为了兼容「源站模式下前台给的 id 是上游 slug、games 表里没有这一行」；
+ *    2026-10-20 起目录全部来自 Supabase、主键就是 slug，两边终于对上了 ——
+ *    但这个函数留着（批量 + 分块 + 顺手把文案取回来，比各处拼 JOIN 省事）。
  *
- * ⚠️ 2026-10-16 起**文案走 `game_texts` 侧表**（原来是 JOIN games 上那几列中英文案）：
- *    这里统一用 `lib/server/games.ts` 导出的 `loadGameTexts()` 批量捞，
- *    拼成「按语言索引的字典」交给前端 —— 形状与 `/api/games` 那条完全一致
- *    （`Game.texts`），前端用同一个 `localizeTexts` 挑语言，不必为这几条接口再写一套。
+ * ⚠️ 2026-10-16 起**文案走 `game_texts` 侧表**：这里统一用 `lib/server/sb-games.ts`
+ *    导出的 `loadGameTexts()` 批量捞，拼成「按语言索引的字典」交给前端 ——
+ *    形状与 `/api/games` 那条完全一致（`Game.texts`），前端用同一个 `localizeTexts`
+ *    挑语言，不必为这几条接口再写一套。
  *
  * 存档则相反：**故意不 JOIN**。存档是「当时那份状态」，游戏下架了那份存档仍然属于用户，
  * 只是他短期内点不开；把行删掉才是真的毁数据。所以存档列表读快照字段，
@@ -31,11 +37,10 @@
 
 import { randomUUID } from 'node:crypto';
 import type { GameTexts } from '@/lib/game-text';
-import { usesUpstreamCatalog } from './catalog-source';
-import { query } from './d1';
-import { loadGameTexts } from './games';
+import { query } from './pg';
+import { loadGameTexts } from './sb-games';
 import { deleteObject, uploadObject, publicUrl } from './r2';
-import { getUpstreamGame } from './upstream-catalog';
+import { mediaPath, mediaUrl } from './media';
 
 /**
  * 每款游戏在云端保留的份数。
@@ -49,7 +54,7 @@ import { getUpstreamGame } from './upstream-catalog';
 const SAVES_PER_GAME = 1;
 
 /* ================================================================== *
- * game_id → 卡片信息（历史 / 收藏 / 存档总览共用）
+ * game_slug → 卡片信息（历史 / 收藏 / 存档总览共用）
  * ================================================================== */
 
 /** 个人中心那几列要画的东西：文案 + 封面 + 名字 + 机种。 */
@@ -68,15 +73,16 @@ interface GameCard {
 const CARD_CHUNK = 50;
 
 /**
- * 批量把 `game_id` 翻成卡片信息（2026-10-19）。
+ * 批量把 `game_slug` 翻成卡片信息。
  *
- * 为什么要这个函数、而不在 SQL 里 `JOIN games`：源站模式（`CATALOG_SOURCE=upstream`，
- * 默认）下前台给出的 id 是**上游 slug**，`games` 表里没有这一行 —— JOIN 会把这些
- * 收藏 / 历史 / 存档整条丢掉，个人中心看起来像「数据没了」。用户明确要求这几块照旧
- * 写自己的 D1，所以读的时候改成「先按 id 批量查库，查不到的再去上游补一份」。
+ * 为什么保留这个函数、而不在 SQL 里各处 `JOIN games`：
+ *   · 个人中心的三条列表都要「卡片 + 四语言文案」，文案在另一张表里，
+ *     JOIN 一次要连 `game_texts` / `developer_texts` / `series_texts` 三张 ——
+ *     在这儿统一走 `loadGameTexts()` 比每条查询各拼一遍 JOIN 省事得多；
+ *   · 分块（`CARD_CHUNK`）是为了 `IN (…)` 的参数个数：一页最多几十个 slug，
+ *     分块不是必需的，但留着能挡住「某天有人一次传几千个」。
  *
- * 查不到又不在源站模式 ⇒ 这款已经下架，调用方照老规矩过滤掉（原来 JOIN 干的就是这事）。
- * 上游抓取失败只跳过这一条：个人中心不该因为某款游戏的上游页 502 就整页 500。
+ * 查不到的 slug = 这一款已经不在目录里，调用方按老规矩过滤掉。
  */
 async function loadGameCards(ids: string[]): Promise<Map<string, GameCard>> {
   const cards = new Map<string, GameCard>();
@@ -85,19 +91,38 @@ async function loadGameCards(ids: string[]): Promise<Map<string, GameCard>> {
 
   for (let i = 0; i < unique.length; i += CARD_CHUNK) {
     const chunk = unique.slice(i, i + CARD_CHUNK);
-    const placeholders = chunk.map((_, index) => `?${index + 1}`).join(', ');
+    /*
+     * ⚠️ 占位符一律写 `?`（不是 D1 时代的 `?1 / ?2`）：`./pg.ts` 的转换是**位置式**的，
+     *    `?1` 会被当成「已经有编号」而原样留在 SQL 里，Postgres 直接语法错。
+     */
+    const placeholders = chunk.map(() => '?').join(', ');
+    /*
+     * ROM 的文件名 / 语言不在 `games` 上（新表把它们拆进了 `game_roms`），
+     * 用 `LEFT JOIN LATERAL` 取**默认那一份**：省掉「先查 games 再查 roms」的第二次往返，
+     * 语义也和 `sb-games.ts` 的 `pickDefaultRom` 对齐（zh → en → ja → ko → 其它）。
+     */
     const rows = await query<{
       id: string;
       image_url: string;
-      rom_name: string;
+      rom_name: string | null;
       console_type: string;
       language: string | null;
       year: number | null;
       developer_id: string | null;
     }>(
-      `SELECT id, image_url, rom_name, console_type, language, year, developer_id
-         FROM games
-        WHERE id IN (${placeholders})`,
+      `SELECT g.slug AS id, g.image_url, g.console_type, g.year,
+              g.developer_slug AS developer_id,
+              r.rom_name, r.language
+         FROM games g
+         LEFT JOIN LATERAL (
+           SELECT rom_name, language FROM game_roms
+            WHERE game_slug = g.slug
+            ORDER BY CASE language
+                       WHEN 'zh' THEN 1 WHEN 'en' THEN 2 WHEN 'ja' THEN 3 WHEN 'ko' THEN 4
+                       ELSE 9 END
+            LIMIT 1
+         ) r ON true
+        WHERE g.slug IN (${placeholders})`,
       chunk
     );
     const texts = await loadGameTexts(rows.map((row) => row.id));
@@ -105,8 +130,9 @@ async function loadGameCards(ids: string[]): Promise<Map<string, GameCard>> {
       cards.set(row.id, {
         id: row.id,
         texts: texts.get(row.id) ?? {},
-        imageUrl: row.image_url,
-        romName: row.rom_name,
+        // 库里存路径，域名现拼（见 lib/server/media.ts）
+        imageUrl: mediaUrl(row.image_url) ?? row.image_url,
+        romName: row.rom_name ?? '',
         consoleType: row.console_type,
         language: row.language,
         year: row.year,
@@ -115,34 +141,11 @@ async function loadGameCards(ids: string[]): Promise<Map<string, GameCard>> {
     }
   }
 
-  if (!usesUpstreamCatalog()) return cards;
-
-  /* 库里查不到的那几款：源站模式下它们本来就是上游的游戏，去补一份资料 */
-  const missing = unique.filter((id) => !cards.has(id));
-  const fetched = await Promise.all(
-    missing.map(async (id) => {
-      try {
-        return [id, await getUpstreamGame(id)] as const;
-      } catch (error) {
-        console.warn('[nesload] 读取上游游戏失败，个人中心跳过这一条：', id, error);
-        return [id, null] as const;
-      }
-    })
-  );
-  for (const [id, data] of fetched) {
-    if (!data) continue;
-    cards.set(id, {
-      id,
-      texts: data.texts,
-      imageUrl: data.imageUrl,
-      romName: data.romName,
-      consoleType: data.consoleType,
-      language: data.language,
-      year: data.year,
-      /* 上游没有开发商这个维度（见 upstream-catalog 文件头） */
-      developerId: null,
-    });
-  }
+  /*
+   * 只认库里的游戏（2026-10-20 起游戏目录全部来自 Supabase）。
+   * 旧实现在源站模式下会为「库里查不到的那几款」现抓上游补一份 —— 那条路已经删了：
+   * 现在 id 就是 `games.slug`，查不到 = 这一款已经不在目录里，卡片就该消失。
+   */
   return cards;
 }
 
@@ -155,11 +158,12 @@ export const MAX_HISTORY = 10;
 
 /** DB 行（文案不在这张表上，由 `game_texts` 现取，见 `listUserHistory`）。 */
 interface HistoryRow {
-  game_id: string;
+  game_slug: string;
   title: string;
   image_url: string;
   rom_name: string;
   console_type: string;
+  /** 毫秒时间戳（库里是 timestamptz，SELECT 里换算好了） */
   played_at: number;
 }
 
@@ -175,7 +179,7 @@ interface HistoryRow {
  *    2026-10-16 换掉：那样加语言又要加字段（正是侧表要解决的问题）。
  */
 export interface UserHistoryItem {
-  /** = game_id。沿用 Cartridge.id 的含义（在线库那个 id）。 */
+  /** = game_slug。沿用 Cartridge.id 的含义（在线库那个 id）。 */
   id: string;
   /** 游戏文案（JOIN game_texts 现取，不是 `user_history.title` 那个快照）。 */
   texts: GameTexts;
@@ -191,19 +195,20 @@ export interface UserHistoryItem {
 /**
  * 某人的云端历史，最近玩的在前。
  *
- * 资料走 `loadGameCards` 现取（D1 有就用库里那份，源站模式下没有的再去上游补），
- * `romUrl` 由 game_id 现拼。上限 MAX_HISTORY 条 —— 和本地那份一样，
+ * 资料走 `loadGameCards` 现取（库里那份永远是最新的：改名 / 换封面都跟着变），
+ * `romUrl` 由 game_slug 现拼。上限 MAX_HISTORY 条 —— 和本地那份一样，
  * 是「最近玩过的 N 款」而不是全量流水。
  *
  * ⚠️ 标题**取现取的那份**（不是 `user_history.title` 那个快照）——
  *    快照是写入时定的，英文站会看到中文名。只有在上游也取不到时才退回快照，
  *    免得列表上出现一行空标题。
- * ⚠️ D1 模式下查不到资料 = 已下架，过滤掉（和以前 `JOIN games` 的效果一致）；
+ * ⚠️ 查不到资料 = 这一款已下架，过滤掉（和 `JOIN games` 的效果一致）；
  *    源站模式照旧列出（那些 id 本来就不在库里）。
  */
 export async function listUserHistory(userId: string): Promise<UserHistoryItem[]> {
   const rows = await query<HistoryRow>(
-    `SELECT game_id, title, image_url, rom_name, console_type, played_at
+    `SELECT game_slug, title, image_url, rom_name, console_type,
+            (EXTRACT(EPOCH FROM played_at) * 1000)::float8 AS played_at
        FROM user_history
       WHERE user_id = ?
       ORDER BY played_at DESC
@@ -211,16 +216,17 @@ export async function listUserHistory(userId: string): Promise<UserHistoryItem[]
     [userId, MAX_HISTORY]
   );
 
-  const cards = await loadGameCards(rows.map((row) => row.game_id));
+  const cards = await loadGameCards(rows.map((row) => row.game_slug));
   const items: UserHistoryItem[] = [];
   for (const row of rows) {
-    const card = cards.get(row.game_id);
-    if (!card && !usesUpstreamCatalog()) continue;
+    const card = cards.get(row.game_slug);
+    /* 库里的游戏被删了 → 这一条历史不再显示（旧实现源站模式下会留着，已随源站读取一起删） */
+    if (!card) continue;
     items.push({
-      id: row.game_id,
+      id: row.game_slug,
       texts: card?.texts ?? snapshotTexts(row.title),
-      romUrl: `/api/games/${row.game_id}/rom`,
-      imageUrl: card?.imageUrl ?? row.image_url,
+      romUrl: `/api/games/${row.game_slug}/rom`,
+      imageUrl: card?.imageUrl ?? mediaUrl(row.image_url) ?? row.image_url,
       romName: card?.romName ?? row.rom_name,
       console: card?.consoleType ?? row.console_type,
       playedAt: row.played_at,
@@ -253,7 +259,7 @@ export interface HistoryInput {
 /**
  * 记一次游玩（**载入成功后调**，同本地 putCartridge 的时机）。
  *
- * 用的是 `INSERT ... ON CONFLICT(user_id, game_id) DO UPDATE`：
+ * 用的是 `INSERT ... ON CONFLICT(user_id, game_slug) DO UPDATE`：
  * 同一款玩两次是更新 played_at（不是插两条），于是历史天然去重。
  * `created_at` 冲突时**不动**（保持第一次玩的时间）。
  *
@@ -266,30 +272,34 @@ export interface HistoryInput {
  */
 export async function recordHistory(userId: string, input: HistoryInput): Promise<void> {
   const now = Date.now();
+  /*
+   * 快照列也只存路径（`mediaPath` 把绝对地址剥成 `/images/…`）—— 客户端传来的
+   * `imageUrl` 是渲染层拼好域名的，直接入库会把域名写死，违背「库里只存路径」的约定。
+   */
   await query(
     `INSERT INTO user_history
-       (user_id, game_id, title, image_url, rom_name, console_type, played_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, game_id) DO UPDATE SET
+       (user_id, game_slug, title, image_url, rom_name, console_type, played_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, to_timestamp(?::float8 / 1000), to_timestamp(?::float8 / 1000))
+     ON CONFLICT (user_id, game_slug) DO UPDATE SET
        title        = excluded.title,
        image_url    = excluded.image_url,
        rom_name     = excluded.rom_name,
        console_type = excluded.console_type,
        played_at    = excluded.played_at`,
-    [userId, input.gameId, input.title, input.imageUrl, input.romName, input.consoleType, now, now]
+    [userId, input.gameId, input.title, mediaPath(input.imageUrl), input.romName, input.consoleType, now, now]
   );
 
   /*
    * 淘汰：留下最近 MAX_HISTORY 条，把更早的删掉。
    *
-   * 一条语句搞定（不用先 SELECT 再 DELETE）—— SQLite 的子查询里能直接读同一张表，
+   * 一条语句搞定（不用先 SELECT 再 DELETE）—— 子查询里能直接读同一张表，
    * 而且删除条件是「第 MAX_HISTORY+1 条起的所有行」，语义清楚。
    */
   await query(
     `DELETE FROM user_history
       WHERE user_id = ?
-        AND game_id NOT IN (
-          SELECT game_id FROM user_history
+        AND game_slug NOT IN (
+          SELECT game_slug FROM user_history
            WHERE user_id = ?
            ORDER BY played_at DESC
            LIMIT ?
@@ -308,14 +318,14 @@ export async function clearUserHistory(userId: string): Promise<void> {
  *
  * 返回是否真删到了 —— 不存在 / 不是他的回 false，调用方据此回 404。
  * 判定用 **`DELETE … RETURNING`**：删中了才回行，一条查询顶过去「先 SELECT 再
- * DELETE」两条（省一次 D1 API 往返，行数额度也省一半）。
+ * DELETE」两条（省一次数据库往返）。
  *
- * `game_id` 是复合主键的另一半，所以 DELETE 必须把 `user_id` 一起带上 ——
+ * `game_slug` 是复合主键的另一半，所以 DELETE 必须把 `user_id` 一起带上 ——
  * 否则「删某一款的历史」会删到全体用户（和归档那份「漏 WHERE user_id」是同一类坑）。
  */
 export async function removeUserHistory(userId: string, gameId: string): Promise<boolean> {
-  const rows = await query<{ game_id: string }>(
-    'DELETE FROM user_history WHERE user_id = ? AND game_id = ? RETURNING game_id',
+  const rows = await query<{ game_slug: string }>(
+    'DELETE FROM user_history WHERE user_id = ? AND game_slug = ? RETURNING game_slug',
     [userId, gameId]
   );
   return rows.length > 0;
@@ -344,18 +354,19 @@ export interface UserSaveSlot {
 interface SaveRow {
   id: string;
   user_id: string;
-  game_id: string;
+  game_slug: string;
   rom_name: string;
   title: string;
   state_key: string;
   size: number;
+  /** 毫秒时间戳（库里是 timestamptz，SELECT 里换算好了） */
   created_at: number;
 }
 
 function toSaveSlot(row: Omit<SaveRow, 'user_id' | 'state_key'>): UserSaveSlot {
   return {
     id: row.id,
-    gameId: row.game_id,
+    gameId: row.game_slug,
     romName: row.rom_name,
     title: row.title,
     size: row.size,
@@ -364,9 +375,20 @@ function toSaveSlot(row: Omit<SaveRow, 'user_id' | 'state_key'>): UserSaveSlot {
 }
 
 /**
+ * 存档列表共用的列清单。
+ *
+ * ⚠️ `size` 是 `bigint`，postgres.js 会给 **BigInt**（或者字符串，看版本）——
+ *    `Number()` 在 `toSaveSlot` 那边做不了（它只是搬运），所以这里直接 `::float8`
+ *    转成普通数字。存档大小远小于 2^53，浮点没有精度问题。
+ */
+const SAVE_COLUMNS = `id, user_id, game_slug, rom_name, title, state_key,
+  size::float8 AS size,
+  (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at`;
+
+/**
  * 某个 ROM 名下的云端存档槽，新的在前。
  *
- * ⚠️ **按 `rom_name` 分组而不是 game_id**：这和本地 lib/saves.ts 一致（那边索引就是 romName）。
+ * ⚠️ **按 `rom_name` 分组而不是 game_slug**：这和本地 lib/saves.ts 一致（那边索引就是 romName）。
  * 一个游戏换了 rom 文件（重新上传），名字不变就还是同一批槽 —— 对用户来说「同一款游戏的存档」
  * 本来就该在一起。
  *
@@ -374,10 +396,10 @@ function toSaveSlot(row: Omit<SaveRow, 'user_id' | 'state_key'>): UserSaveSlot {
  */
 export async function listUserSaves(userId: string, romName: string): Promise<UserSaveSlot[]> {
   const rows = await query<SaveRow>(
-    `SELECT id, user_id, game_id, rom_name, title, state_key, size, created_at
+    `SELECT ${SAVE_COLUMNS}
        FROM user_saves
       WHERE user_id = ? AND rom_name = ?
-      ORDER BY created_at DESC, rowid DESC`,
+      ORDER BY created_at DESC, id DESC`,
     [userId, romName]
   );
   return rows.map(toSaveSlot);
@@ -386,7 +408,7 @@ export async function listUserSaves(userId: string, romName: string): Promise<Us
 /** 某人所有游戏的存档槽（后台「这个号存了多少」用，也方便前端做总览）。 */
 export async function listAllUserSaves(userId: string): Promise<UserSaveSlot[]> {
   const rows = await query<SaveRow>(
-    `SELECT id, user_id, game_id, rom_name, title, state_key, size, created_at
+    `SELECT ${SAVE_COLUMNS}
        FROM user_saves
       WHERE user_id = ?
       ORDER BY created_at DESC`,
@@ -403,10 +425,10 @@ export interface SaveInput {
 }
 
 /**
- * 写一份云端存档：**先传 R2，再写 D1，最后淘汰超额的旧槽**（连 R2 对象一起删）。
+ * 写一份云端存档：**先传 R2，再写库，最后淘汰超额的旧槽**（连 R2 对象一起删）。
  *
  * 顺序很要紧：
- *   ① 先 uploadObject —— 传失败了直接抛，D1 里不会留下一条指向不存在对象的记录；
+ *   ① 先 uploadObject —— 传失败了直接抛，库里不会留下一条指向不存在对象的记录；
  *   ② 再 INSERT 行；
  *   ③ 最后淘汰。淘汰时**必须同时删 R2 对象**，否则对象存储里会攒一堆孤儿
  *      （行没了就再也没人知道那些 key，连人工清理都无从下手）。
@@ -422,8 +444,8 @@ export async function createUserSave(userId: string, input: SaveInput): Promise<
 
   await uploadObject(stateKey, input.state, 'application/octet-stream');
   await query(
-    `INSERT INTO user_saves (id, user_id, game_id, rom_name, title, state_key, size, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO user_saves (id, user_id, game_slug, rom_name, title, state_key, size, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, to_timestamp(?::float8 / 1000))`,
     [id, userId, input.gameId, input.romName, input.title, stateKey, input.state.byteLength, createdAt]
   );
 
@@ -441,7 +463,7 @@ export async function createUserSave(userId: string, input: SaveInput): Promise<
         AND id NOT IN (
           SELECT id FROM user_saves
            WHERE user_id = ? AND rom_name = ?
-           ORDER BY created_at DESC, rowid DESC
+           ORDER BY created_at DESC, id DESC
            LIMIT ?
         )
       RETURNING state_key`,
@@ -478,7 +500,7 @@ export async function getUserSaveUrl(
   saveId: string
 ): Promise<{ slot: UserSaveSlot; url: string } | null> {
   const rows = await query<SaveRow>(
-    `SELECT id, user_id, game_id, rom_name, title, state_key, size, created_at
+    `SELECT ${SAVE_COLUMNS}
        FROM user_saves
       WHERE id = ? AND user_id = ?`,
     [saveId, userId]
@@ -505,8 +527,8 @@ export async function readUserSaveBytes(userId: string, saveId: string): Promise
 /**
  * 删一份存档（行 + R2 对象）。
  *
- * **返回删掉没有**：用 `DELETE … RETURNING` 判 —— 删中了才回行（D1 REST 不回
- * 影响行数，但 RETURNING 的行会进 results）。查不到就是「不是你的 / 不存在」，
+ * **返回删掉没有**：用 `DELETE … RETURNING` 判 —— 删中了才回行，一条查询顶过去
+ * 「先 SELECT 再 DELETE」两条。查不到就是「不是你的 / 不存在」，
  * 返回 false 让路由回 404。
  */
 export async function removeUserSave(userId: string, saveId: string): Promise<boolean> {
@@ -569,9 +591,10 @@ export interface UserFavoriteItem {
   favoritedAt: number;
 }
 
-/** 收藏表那一行 —— 只存 id 和时间，游戏资料现查（见 `loadGameCards`）。 */
+/** 收藏表那一行 —— 只存 slug 和时间，游戏资料现查（见 `loadGameCards`）。 */
 interface FavoriteRow {
-  game_id: string;
+  game_slug: string;
+  /** 毫秒时间戳（库里是 timestamptz） */
   created_at: number;
 }
 
@@ -579,25 +602,25 @@ interface FavoriteRow {
  * 某人的收藏，最近收藏的在前。
  *
  * 资料现查：改了名字、换了封面都该跟着变，快照没有意义。顺带把下架的过滤掉
- * （D1 模式下查不到 = 已下架；源站模式下能查到就是上游那款，照旧列出来）。
+ * （查不到 = 已下架，列表里不占一行）。
  *
  * 文案与游戏列表走**同一条批量读取**（`loadGameTexts`）—— 收藏数是个位到几十的量级，
- * 一次 `WHERE game_id IN (…)` 就够，不必为它单独拼 JOIN。
+ * 一次 `WHERE game_slug IN (…)` 就够，不必为它单独拼 JOIN。
  */
 export async function listUserFavorites(userId: string): Promise<UserFavoriteItem[]> {
   const rows = await query<FavoriteRow>(
-    `SELECT game_id, created_at
+    `SELECT game_slug, (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
        FROM user_favorites
       WHERE user_id = ?
       ORDER BY created_at DESC`,
     [userId]
   );
 
-  const cards = await loadGameCards(rows.map((row) => row.game_id));
+  const cards = await loadGameCards(rows.map((row) => row.game_slug));
   const items: UserFavoriteItem[] = [];
   for (const row of rows) {
-    const card = cards.get(row.game_id);
-    /* 查不到资料 = 这款没了（D1 下架 / 上游也抓不到），列表里不占一行 */
+    const card = cards.get(row.game_slug);
+    /* 查不到资料 = 这款没了（已下架），列表里不占一行 */
     if (!card) continue;
     items.push({
       id: card.id,
@@ -615,7 +638,7 @@ export async function listUserFavorites(userId: string): Promise<UserFavoriteIte
 }
 
 /**
- * 某人收藏的 game_id 集合（含已下架的）。
+ * 某人收藏的 game_slug 集合（含已下架的）。
  *
  * 单独给一份是因为**前台要拿它画星标**：`GameLibraryPanel` 里的卡片是不是收藏过，
  * 得有个 O(1) 的判据。列表接口还要带上全部字段，用来画「我的收藏」那个 tab ——
@@ -626,19 +649,18 @@ export async function listUserFavorites(userId: string): Promise<UserFavoriteIte
  * 这份集合 —— 卡片本来就不会出现在列表里。留着这一行能让「下架又上架」恢复星标。
  */
 export async function listUserFavoriteIds(userId: string): Promise<string[]> {
-  const rows = await query<{ game_id: string }>(
-    'SELECT game_id FROM user_favorites WHERE user_id = ? ORDER BY created_at DESC',
+  const rows = await query<{ game_slug: string }>(
+    'SELECT game_slug FROM user_favorites WHERE user_id = ? ORDER BY created_at DESC',
     [userId]
   );
-  return rows.map((row) => row.game_id);
+  return rows.map((row) => row.game_slug);
 }
 
 /**
  * 某款游戏**被多少人收藏了** —— 详情页那颗收藏钮上的数字（2026-10-13 用户要求）。
  *
- * ⚠️ **刻意不缓存**。这个数每次渲染详情页就要读一遍（D1 走 REST，一次就是一次 API
- *    调用），看着像该缓存；但：
- *    · 它只是 user_favorites 上一句 COUNT，表本身就小，且查询走 game_id 索引；
+ * ⚠️ **刻意不缓存**。这个数每次渲染详情页就要读一遍，看着像该缓存；但：
+ *    · 它只是 user_favorites 上一句 COUNT，表本身就小，且查询走 game_slug 索引；
  *    · 缓存了就会「刚收藏完，自己那边数字没变」，比多一次查询更让人困惑
  *      （按钮上的数字是**乐观更新**的，见 FavoriteButton —— 它读的是这份初值）。
  *    真出现配额压力，正确的做法是在**页侧**套一层 `unstable_cache`（本项目一贯如此，
@@ -646,7 +668,7 @@ export async function listUserFavoriteIds(userId: string): Promise<string[]> {
  */
 export async function countGameFavorites(gameId: string): Promise<number> {
   const rows = await query<{ n: number }>(
-    'SELECT COUNT(*) AS n FROM user_favorites WHERE game_id = ?',
+    'SELECT COUNT(*)::int AS n FROM user_favorites WHERE game_slug = ?',
     [gameId]
   );
   return Number(rows[0]?.n ?? 0);
@@ -663,10 +685,11 @@ export async function countGameFavorites(gameId: string): Promise<number> {
  * 冲突被吃掉时 results 是空的。一条查询顶过去「先 SELECT 再 INSERT」两条。
  */
 export async function addUserFavorite(userId: string, gameId: string): Promise<boolean> {
-  const rows = await query<{ game_id: string }>(
-    `INSERT INTO user_favorites (user_id, game_id, created_at) VALUES (?, ?, ?)
-     ON CONFLICT(user_id, game_id) DO NOTHING
-     RETURNING game_id`,
+  const rows = await query<{ game_slug: string }>(
+    `INSERT INTO user_favorites (user_id, game_slug, created_at)
+     VALUES (?, ?, to_timestamp(?::float8 / 1000))
+     ON CONFLICT (user_id, game_slug) DO NOTHING
+     RETURNING game_slug`,
     [userId, gameId, Date.now()]
   );
   return rows.length > 0;
@@ -677,8 +700,8 @@ export async function addUserFavorite(userId: string, gameId: string): Promise<b
  * （`DELETE … RETURNING` 删中了才回行，一条查询顶过去两条）。
  */
 export async function removeUserFavorite(userId: string, gameId: string): Promise<boolean> {
-  const rows = await query<{ game_id: string }>(
-    'DELETE FROM user_favorites WHERE user_id = ? AND game_id = ? RETURNING game_id',
+  const rows = await query<{ game_slug: string }>(
+    'DELETE FROM user_favorites WHERE user_id = ? AND game_slug = ? RETURNING game_slug',
     [userId, gameId]
   );
   return rows.length > 0;
@@ -728,14 +751,14 @@ export async function countUserData(
   userId: string
 ): Promise<{ history: number; saves: number; favorites: number }> {
   /*
-   * 三块合成一条查询：过去是三次独立的 COUNT = 三次 D1 API 往返；
+   * 三块合成一条查询：过去是三次独立的 COUNT = 三次往返；
    * 现在一条 SELECT 里三个标量子查询，读的行数一样，API 调用只剩一次。
    */
   const rows = await query<{ history: number; saves: number; favorites: number }>(
     `SELECT
-       (SELECT COUNT(*) FROM user_history   WHERE user_id = ?) AS history,
-       (SELECT COUNT(*) FROM user_saves     WHERE user_id = ?) AS saves,
-       (SELECT COUNT(*) FROM user_favorites WHERE user_id = ?) AS favorites`,
+       (SELECT COUNT(*)::int FROM user_history   WHERE user_id = ?) AS history,
+       (SELECT COUNT(*)::int FROM user_saves     WHERE user_id = ?) AS saves,
+       (SELECT COUNT(*)::int FROM user_favorites WHERE user_id = ?) AS favorites`,
     [userId, userId, userId]
   );
   const row = rows[0];
@@ -769,7 +792,7 @@ export async function purgeUserData(
  *
  * 和 `listAllUserSaves` 的区别：那个是按 user 查、字段是全的但**不带游戏信息**；
  * 这个是个人中心要画的东西 —— 加了游戏资料（最新的封面 / 名字，走 `loadGameCards`），
- * 且**只返回拿得到资料的**（源站模式下去上游补，D1 模式下查不到就是下架了）。
+ * 且**只返回拿得到资料的**（查不到就是下架了）。
  *
  * ⚠️ 为什么这里**要查游戏资料**、而 `listUserSaves`（游戏内那个存档列表）**故意不查**：
  *    两者的用途不同。游戏内读档时游戏一定在线（你正在玩它），查了也没有意义；
@@ -792,28 +815,30 @@ export interface UserSaveOverviewRow extends UserSaveSlot {
 export async function listUserSaveOverview(userId: string): Promise<UserSaveOverviewRow[]> {
   const rows = await query<{
     id: string;
-    game_id: string;
+    game_slug: string;
     rom_name: string;
     title: string;
     size: number;
     created_at: number;
   }>(
-    `SELECT id, game_id, rom_name, title, size, created_at
+    `SELECT id, game_slug, rom_name, title,
+            size::float8 AS size,
+            (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
        FROM user_saves
       WHERE user_id = ?
       ORDER BY created_at DESC`,
     [userId]
   );
 
-  const cards = await loadGameCards(rows.map((row) => row.game_id));
+  const cards = await loadGameCards(rows.map((row) => row.game_slug));
   const items: UserSaveOverviewRow[] = [];
   for (const row of rows) {
-    const card = cards.get(row.game_id);
+    const card = cards.get(row.game_slug);
     /* 拿不到资料就画不出封面 / 名字 —— 这一条不列（其余照常） */
     if (!card) continue;
     items.push({
       id: row.id,
-      gameId: row.game_id,
+      gameId: row.game_slug,
       romName: row.rom_name,
       title: row.title,
       size: row.size,

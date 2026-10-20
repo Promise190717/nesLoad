@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getGameForWrite, localizeTexts } from '@/lib/server/games';
+import { getGameForWrite, localizeTexts } from '@/lib/server/sb-games';
 import { REPORT_MAX_LENGTH, insertReport } from '@/lib/server/reports';
 
 export const runtime = 'nodejs';
