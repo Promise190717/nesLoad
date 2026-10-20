@@ -87,7 +87,13 @@ type SearchParams = Record<string, string | string[] | undefined>;
  */
 const PAGE_SIZE = 20;
 
-const loadConsole = cached(async (type: string) => getConsolePageData(type), ['static-console'], { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS, tags: ['consoles'] });
+/*
+ * 机种自己的资料（名字 / 简介 / 介绍 / 机图）。缓存 30 天，所以**改完库里的资料要换键尾版本**，
+ * 否则前台要等一个 TTL 才看到。
+ *   · v1 → v2（2026-10-20）：切 Supabase 时 `console_texts` 只搬了 name，简介 / 介绍全空，
+ *     这一页的介绍整段消失；用 `scripts/fill-console-intros.mjs` 回填后必须换键才生效。
+ */
+const loadConsole = cached(async (type: string) => getConsolePageData(type), ['static-console', 'v2'], { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS, tags: ['consoles'] });
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——

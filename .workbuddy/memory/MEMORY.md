@@ -31,7 +31,8 @@
 - 文案侧表四张：`game_texts`/`developer_texts`/`series_texts`/`console_texts`，主键 (slug, locale)，`game_texts.controls` 是 jsonb；developer/series 名字**不在 game_texts 里**，读取时按 locale JOIN 现取（`sb-games.ts` 的 `loadGameTexts`）。
 - 全量爬取/回填模板 = `scripts/migrate-to-supabase.mjs`（上游**列表页** RSC 载荷一页 18 款带全部字段，比逐款抓详情页省 18 倍）；14 语种回填 = `scripts/fill-game-texts-locales.mjs`（postgres.js 连 `SUPABASE_DB_URL`，⚠️ 连接池跑完全程再 end、developer/series 行要按 slug:locale 去重，两个坑都踩过）。
 - `writeTexts`/`writeDeveloperTexts`（games-admin.ts / developers.ts）只动传进来的语言，别的行一概不碰——后台表单只带四种不会冲掉回填的 14 种。
-- 动过文案/图片数据必须升缓存键版本（条目不随部署失效）：`sb:games:page|latest|by-console|by-developer|by-id` 现 **v2**、`sb:developers:list` **v4**、`sb:developers:top` **v3**、`consoles:list` **v8**。
+- 动过文案/图片数据必须升缓存键版本（条目不随部署失效）：`sb:games:page|latest|by-console|by-developer|by-id` 现 **v2**、`sb:developers:list` **v4**、`sb:developers:top` **v3**、`consoles:list` **v8**、机种页单条 `static-console` **v2**。
+- 机种文案（`console_texts`）切库时只搬了 name，summary/description/release_year 全空过一轮；回填脚本 `scripts/fill-console-intros.mjs`（只补 zh/en 空值、`COALESCE` 不覆盖人工编辑）。
 - ⚠️ R2 公网域按 `max-age=2592000` 缓存 30 天，**换图不能覆盖同名键**（边缘仍发旧字节，且 token 没有 purge 权限）——新图传新键（`-v2`）再改库。开发商厂标只有 133/269 有，其余 136 家上游/维基都没有 logo，库里是 `NULL`，前台走名字首字占位。
 
 ## 主题 / 首屏属性 / 两台机器
