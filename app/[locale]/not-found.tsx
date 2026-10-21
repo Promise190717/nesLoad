@@ -27,19 +27,15 @@ export default function NotFound() {
   /* `{site}` 在这里注入（`notFound.description` 里有站名占位，不传会原样印出来） */
   const t = (key: Parameters<typeof translate>[1]) =>
     translate(locale, key, { site: SITE_NAME[locale] });
-  /*
-   * 回**房间**（`/room`，2026-10-13 之前它是 `/`）。404 页两颗落点（左上角那颗与正文
-   * 下面那颗）都是「回房间」，和 `notFound.description` 那句「回房间里看看」对得上。
-   * 首页（`/`）是落地页，不是迷路的人该被送去的地方。
-   */
-  const room = localePath(locale, '/room');
+  /* 404 的两颗落点（左上角那颗与正文下面那颗）都回首页，和 `notFound.description` 对得上。 */
+  const home = localePath(locale, '/');
 
   return (
     <GamesShell
       locale={locale}
       label="404"
       title={t('notFound.title')}
-      back={{ href: room, label: 'gamesPage.backHome' }}
+      back={{ href: home, label: 'gamesPage.backHome' }}
       showAllGamesLink={false}
       showTopBar={false}
       /* 不挂顶栏，所以左上角那行右边补一颗「首页」（2026-10-13 用户要求，见 GamesShell） */
@@ -50,7 +46,7 @@ export default function NotFound() {
       </p>
       <p className="mt-4">
         <Link
-          href={room}
+          href={home}
           className="pixel-edge pxw-2 pxc-500 inline-block bg-ink-800 px-4 py-2 text-[12px] text-ink-200 transition-colors hover:text-accent"
         >
           {t('gamesPage.backHome')}

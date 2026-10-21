@@ -89,15 +89,33 @@ const nextConfig = {
         ],
       },
       /*
-       * 7z 解压 worker（2026-10-15 加，配合 `lib/unwrap.ts` 的 7z 支持）。
+       * 7z 解压 worker（2026-10-15 加，配合 `lib/unwrap.ts` 的 7z 支持；
+       * 2026-10-21 从 asm.js 换成 wasm，目录里有 `extract7z-wasm.js` +
+       * `7zz.umd.js` + `7zz.wasm` 三份）。
        *
-       * 280 KB 的一份 asm.js，**文件名不带内容 hash**（永远叫 `extract7z.js`），
+       * 它们的文件名都**不带内容 hash**（`7zz.wasm` 换版本还是叫这个），
        * 所以和上面两个目录同一条规矩：浏览器与 CDN 各一天，换文件后 purge CDN。
        * 理由和坑都写在 `lib/unwrap.ts` 的 `EXTRACT_7Z_WORKER` 注释里。
        */
       {
         source: '/compression/:path*',
         headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400',
+          },
+        ],
+      },
+      /*
+       * `7zz.wasm` 必须报 `application/wasm`，否则 `instantiateStreaming` 会被拒
+       * （emscripten 有 `instantiate(arrayBuffer)` 的兜底，但那是白读一遍）。
+       * 静态文件的 MIME 由托管层按扩展名猜，多这一条是给猜错的部署环境兜底 ——
+       * 精确匹配一条，不碰 `/compression/` 下别的东西。
+       */
+      {
+        source: '/compression/7zz.wasm',
+        headers: [
+          { key: 'Content-Type', value: 'application/wasm' },
           {
             key: 'Cache-Control',
             value: 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400',

@@ -591,7 +591,7 @@ export const ja: Record<MessageKey, string> = {
     '「{keyword}」に一致するゲームがありません。短い言葉か、ゲームのタイトルで検索してみてください。',
   'gamesPage.prev': '前へ',
   'gamesPage.next': '次へ',
-  'gamesPage.backHome': '部屋に戻る',
+  'gamesPage.backHome': 'ホームに戻る',
   'gamesPage.backToGames': 'すべてのゲーム',
   'common.back': '戻る',
   'common.home': 'ホーム',
@@ -603,7 +603,7 @@ export const ja: Record<MessageKey, string> = {
   'gamesPage.favorite': 'お気に入りに追加',
   'gamesPage.unfavorite': 'お気に入り済み',
   'gamesPage.favoriteSignIn':
-    'お気に入りの保存にはログインが必要です — 部屋の右上にあるアカウントボタンからどうぞ。',
+    'お気に入りの保存にはログインが必要です — 上部バーのログインボタンからどうぞ。',
   'gamesPage.favoriteFailed': 'お気に入りを更新できませんでした — もう一度お試しください。',
   'gamesPage.favoriteCount': 'お気に入り {n} 人',
   'gamesPage.report': '問題を報告',
@@ -655,7 +655,7 @@ export const ja: Record<MessageKey, string> = {
 
   'notFound.title': 'ページが見つかりません',
   'notFound.description':
-    'そのアドレスは {site} に存在しません。リンクを確認するか、部屋に戻ってみてください。',
+    'そのアドレスは {site} に存在しません。リンクを確認するか、ホームに戻ってみてください。',
   'gamesPage.notFoundTitle': 'ゲームが見つかりません',
   'gamesPage.notFound': 'このゲームはライブラリにありません（削除された可能性があります）。',
   'gamesPage.fallbackDescription': '『{title}』は {console} のゲームです。',

@@ -33,7 +33,7 @@ import {
   type ConsoleType,
   type LoadedRom,
 } from '@/lib/emulator';
-import { unwrapRom } from '@/lib/unwrap';
+import { romFileOf, unwrapRom } from '@/lib/unwrap';
 import { LOCALE_OPTIONS, formatTime, type Locale, type MessageKey } from '@/lib/i18n';
 import { FlagIcon } from './FlagIcon';
 import {
@@ -1433,7 +1433,8 @@ export default function ConsoleScene({
          * （zip 那条路不解 7z、一般很快，不触发回调）。
          */
         const prepared = await unwrapRom(file, (ratio) => setLoading({ ratio }));
-        consoleType = prepared?.console ?? (await detectConsole(prepared?.file ?? file));
+        consoleType =
+          prepared?.console ?? (await detectConsole(prepared ? romFileOf(prepared) : file));
 
         /*
          * 需要 BIOS 的机种（街机 / PS1，见 `lib/bios.ts` 的 `biosTypeFor`）：

@@ -50,7 +50,7 @@ export const ms: Record<MessageKey, string> = {
     'Main permainan NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive dan arcade dalam pelayar. Pilih tajuk dari pustaka dalam talian, atau muatkan fail ROM anda sendiri.',
   'meta.keywords':
     'permainan retro, pustaka permainan retro dalam talian, emulator NES, emulator SNES, emulator SFC, emulator GBA, emulator Game Boy Advance, emulator Game Boy, emulator Game Boy Color, emulator NDS, emulator Nintendo DS, emulator Sega Mega Drive, emulator Sega Genesis, emulator Game Gear, emulator Master System, emulator Sega 32X, emulator WonderSwan, emulator Neo Geo Pocket, emulator PlayStation, emulator PS1, emulator PSX, emulator arcade, main NES dalam pelayar, emulator pelayar, RetroArch WASM, {site}',
-  /* 房间页（`/room`）自己的 meta，标题不写 {site}（根布局的 title.template 会补） */
+  /* 下线页面的 meta，标题不写 {site}（根布局的 title.template 会补） */
   'seo.room.title': 'Bilik Piksel — Main Permainan Retro dalam Pelayar',
   'seo.room.description':
     'Masuk ke bilik piksel: permainan NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive dan arcade berjalan di TV CRT. Pilih tajuk dari pustaka dalam talian, atau lepaskan fail ROM anda sendiri ke skrin.',
@@ -656,7 +656,7 @@ export const ms: Record<MessageKey, string> = {
     'Tiada permainan sepadan dengan “{keyword}”. Cuba perkataan lebih pendek, atau tajuk permainan.',
   'gamesPage.prev': 'Sebelum',
   'gamesPage.next': 'Seterusnya',
-  'gamesPage.backHome': 'Kembali ke bilik',
+  'gamesPage.backHome': 'Kembali ke halaman utama',
   'gamesPage.backToGames': 'Semua permainan',
   /* 内容页左上角那条返回链接的通用文案：实际做的是浏览器回退 */
   'common.back': 'Kembali',
@@ -668,7 +668,7 @@ export const ms: Record<MessageKey, string> = {
   'gamesPage.shareFailed': 'Gagal menyalin',
   'gamesPage.favorite': 'Tambah ke kegemaran',
   'gamesPage.unfavorite': 'Buang dari kegemaran',
-  'gamesPage.favoriteSignIn': 'Log masuk untuk menyimpan kegemaran — ketik butang akaun dalam bilik.',
+  'gamesPage.favoriteSignIn': 'Log masuk untuk menyimpan kegemaran — guna butang log masuk di bar atas.',
   'gamesPage.favoriteFailed': 'Tidak dapat mengemas kini kegemaran — cuba lagi.',
   'gamesPage.favoriteCount': '{n} dalam senarai kegemaran',
   /* 详情页那颗「反馈问题」+ 它弹出的窗，提交不需要登录 */
@@ -723,7 +723,7 @@ export const ms: Record<MessageKey, string> = {
   /* 全站 404，和「这个游戏从库里没了」分开命名 */
   'notFound.title': 'Halaman tidak ditemui',
   'notFound.description':
-    'Alamat itu tidak wujud di {site}. Semak pautan, atau kembali ke bilik.',
+    'Alamat itu tidak wujud di {site}. Semak pautan, atau kembali ke halaman utama.',
   'gamesPage.notFoundTitle': 'Permainan tidak ditemui',
   'gamesPage.notFound': 'Permainan ini tiada dalam pustaka (lagi).',
   'gamesPage.fallbackDescription': '{title} ialah permainan {console}.',

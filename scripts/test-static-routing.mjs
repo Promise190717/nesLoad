@@ -63,11 +63,6 @@ if (process.env.TEST_BASE_URL) {
   const rsc = await get('/games?page=2&_rsc', { RSC: '1' });
   assert.match(rsc.response.headers.get('content-type'), /text\/x-component/);
   assert.ok(!rsc.html.startsWith('<!DOCTYPE html>'));
-  const redirect = await get('/?id=test');
-  assert.equal(redirect.response.status, 307);
-  assert.equal(redirect.response.headers.get('location'), '/room?id=test');
-  const chineseRedirect = await get('/zh?room=ABC');
-  assert.equal(chineseRedirect.response.headers.get('location'), '/zh/room?room=ABC');
   // Cookie name is asserted against the source so this cannot silently test the wrong cookie.
   const i18n = readFileSync(new URL('../lib/i18n.ts', import.meta.url), 'utf8');
   const cookieName = i18n.match(/LOCALE_COOKIE\s*=\s*['"]([^'"]+)/)?.[1];
@@ -98,5 +93,5 @@ if (process.env.TEST_BASE_URL) {
     assert.match(response.headers.get('content-type'), /image\/png/);
     await response.arrayBuffer();
   }
-  console.log('Production HTTP: static HTML, four locales, query cache HITs, RSC isolation, room redirects and auth guards passed.');
+  console.log('Production HTTP: static HTML, four locales, query cache HITs, RSC isolation and auth guards passed.');
 }

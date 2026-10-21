@@ -20,10 +20,9 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 参考 retrogamesnexus.com 那种「内容型首页」的骨架做的：Hero（标题 + 搜索 + 两个入口）
  * → 按机种浏览 → 按开发商浏览 → 折叠问答 → 页脚。
  *
- * **为什么要它**：2026-10-13 之前 `/` 就是那间像素小屋（现在挪到了 `/room`）。
- * 那间屋子整页只有 canvas 和 CSS 画的家具，**没有一个字是能索引的正文**
+ * **为什么要它**：首页原来是整页 canvas 和 CSS 画的像素场景，**没有一个字是能索引的正文**
  * （只有 `seo.heading` 那三句 sr-only）—— 一个没有正文的站在搜索结果里等于不存在。
- * 拆开之后，`/` 负责「让人找到并看懂」，`/room` 负责「真的开玩」。
+ * 所以 `/` 专门负责「让人找到并看懂」，真正开玩走详情页那颗「开始游戏」（`/play`）。
  *
  * ---------------------------------------------------------------------------
  * 几件刻意的事，别照着「常规首页」改回去：
@@ -39,30 +38,18 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   副作用和后台上传游戏那条一样：新传的游戏最多晚 30 天出现在首页
  *   （`/games` 那边 2026-10-20 起同样是 30 天，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
  *
- * - 公共 HTML 按 locale 预生成并缓存 30 天；旧房间查询链接由 middleware 转发。
+ * - 公共 HTML 按 locale 预生成并缓存 30 天。
  *
  * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），
  *   最后按开发商（八家）。参考站还有「类型 / 系列」两个维度，本站没有那两张表
  *   （系列只是 `games.series` 这一列自由文本），所以不做 —— 宁可少一个区块，
  *   也不要做一个点进去什么都没筛出来的入口。
- *
- * - **`?id=` / `?room=` 要透传到 `/room`**：详情页那颗「开始游戏」（`/room?id=<游戏>`）
- *   和联机分享出去的房间链接（`?room=<码>`）在 2026-10-13 之前都是挂在 `/` 上的，
- *   已经分享出去的地址不该因为这次拆分失效。见下面那段重定向。
  */
 
 /** 「按开发商浏览」取 8：两行正好排满（sm 起一行 4 个）。 */
 const DEVELOPER_COUNT = 8;
 /** 「按机种浏览」最多几张卡：8 是这个网格的两整行（`grid-cols-2 sm:grid-cols-4`）。 */
 const HOME_CONSOLE_COUNT = 8;
-
-/**
- * 房间页那三个参数（`?id=` 深链、`?room=` 邀请码）—— 它们从前挂在 `/` 上。
- *
- * ⚠️ 顺序不重要（透传时按这里的顺序重排一遍），但**只认这三个**：别的参数
- * （比如广告投放带进来的 `utm_*`）跟着透传只会把 `/room` 的地址弄脏。
- */
-
 
 /**
  * 折叠问答。写成「键名的两两配对」而不是在 JSX 里拼字符串：
@@ -182,28 +169,13 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             {t('home.hero.lead')}
           </p>
 
-          {/*
-            Hero 的两颗钮（2026-10-15 用户要求加第二颗）。
-
-            左边进列表挑一盘（accent 实底 = 主按钮），右边进屋**加载自己的 ROM**
-            （描边、悬停才点亮 = 次按钮）——「从库里挑」和「带自己的文件来」是两条路，
-            摆在首屏一眼能分。
-
-            ⚠️ 右边那颗落点是 **`/room` 而不是 `/play`**：拖拽 / 选本地文件那条路只在
-               房间里（`/play` 是「一盘具体的游戏」的开局页，没有拖入，见 PlayScene 的注释）。
-          */}
+          {/* Hero 那颗主钮：进列表挑一盘（accent 实底 = 主按钮） */}
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <Link
               href={localePath(locale, '/games')}
               className="inline-flex min-h-11 items-center justify-center bg-accent px-6 text-[13px] font-semibold text-ink-950 transition-colors hover:bg-accent/80"
             >
               {t('home.hero.browse')}
-            </Link>
-            <Link
-              href={localePath(locale, '/room')}
-              className="inline-flex min-h-11 items-center justify-center border border-ink-600 bg-ink-900 px-6 text-[13px] font-semibold text-ink-100 transition-colors hover:border-accent hover:bg-ink-800 hover:text-accent"
-            >
-              {t('home.hero.play')}
             </Link>
           </div>
 
@@ -415,11 +387,6 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
         {/*
           页脚。**对爬虫比对人有用**：内容页之间靠它互相发现（和 `GamesShell` 那个页脚
           同一套落点）。这里**不放「首页」** —— 首页自己就是。
-
-          ⚠️ 2026-10-15：**原先打头的「回到房间」那条删了**（用户要求）。首屏 Hero 右侧
-          已经有「加载本地 ROM」直达 `/room` —— 同一个落点不必在首屏出现两遍。
-          同一天 `GamesShell` / `LegalPage` 两个页脚里那颗「回到房间」也一并删了（用户
-          要求），所以现在全站只剩 404 页正文下那颗钮还在用 `gamesPage.backHome`。
         */}
         <footer className="mt-14 border-t border-ink-800 pt-6">
           <nav className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[12px]">

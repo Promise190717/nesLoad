@@ -628,7 +628,7 @@ export const pt: Record<MessageKey, string> = {
     'Nenhum jogo corresponde a “{keyword}”. Tente uma palavra mais curta ou o título do jogo.',
   'gamesPage.prev': 'Anterior',
   'gamesPage.next': 'Próximo',
-  'gamesPage.backHome': 'Voltar para a sala',
+  'gamesPage.backHome': 'Voltar ao início',
   'gamesPage.backToGames': 'Todos os jogos',
   'common.back': 'Voltar',
   'common.home': 'Início',
@@ -640,7 +640,7 @@ export const pt: Record<MessageKey, string> = {
   'gamesPage.favorite': 'Adicionar aos favoritos',
   'gamesPage.unfavorite': 'Remover dos favoritos',
   'gamesPage.favoriteSignIn':
-    'Entre para guardar favoritos — toque no botão de conta na sala.',
+    'Entre para guardar favoritos — use o botão de entrar na barra superior.',
   'gamesPage.favoriteFailed':
     'Não foi possível atualizar os favoritos — tente de novo.',
   'gamesPage.favoriteCount': '{n} na lista de favoritos',
@@ -693,7 +693,7 @@ export const pt: Record<MessageKey, string> = {
 
   'notFound.title': 'Página não encontrada',
   'notFound.description':
-    'Esse endereço não existe em {site}. Confira o link ou volte para a sala.',
+    'Esse endereço não existe em {site}. Confira o link ou volte para a página inicial.',
   'gamesPage.notFoundTitle': 'Jogo não encontrado',
   'gamesPage.notFound': 'Este jogo não está (mais) na biblioteca.',
   'gamesPage.fallbackDescription': '{title} é um jogo de {console}.',

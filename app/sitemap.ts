@@ -10,8 +10,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * 本站可收录的地址分六类：
  *   · 首页落地页（`/`，2026-10-13 起）—— Hero + 按机种 / 开发商浏览 + FAQ；
- *   · 两页「应用」：房间（`/room`，2026-10-13 从 `/` 挪过来的）与简洁开局页
- *     （`/play`，2026-10-14 加）；
+ *   · 应用页（`/play`，2026-10-14 加）；
  *   · `/privacy` / `/terms` 两页法务文档；
  *   · `/games` 游戏列表（机种筛选 `/games/console/<机种>` 没列进来：它是同一份列表的子集，
  *     只差一个筛选维度，全列等于把一个库拆成十几份近似重复的地址；分页同理只列第 1 页）；
@@ -23,7 +22,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * 法务两页是 2026-10-12 加进来的：它们是**真正的路由**（理由见 app/[locale]/privacy/page.tsx），
  * 而且**必须**能被收录 —— 隐私政策与条款要能直接被搜到、被第三方按固定地址检查，
- * 只挂在房间那颗钮的弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
+ * 只挂在某个弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
  *
  * 2026-10-13 语言分路径之后，**每条地址每种语言一份**（英文无前缀、中文 `/zh`、
  * 日文 `/ja`、韩文 `/ko`，2026-10-16 从两份扩到四份，**2026-10-20 扩到 18 份**），
@@ -150,16 +149,8 @@ export default async function sitemap({ id }: { id: string }): Promise<MetadataR
   return [
     entry(origin, locale, '/', { changeFrequency: 'weekly', priority: 1 }),
     /*
-     * 房间页（`/room`，2026-10-13 从 `/` 挪过来的）给 0.8 —— 比首页（1.0）和游戏列表
-     * （0.9）低一档：它是**真的开玩**那个入口，但对搜索引擎来说几乎没有可索引的正文
-     * （满屏 CSS 场景 + canvas），价值在于「用户点进来能用」，不在于「被搜到」。
-     */
-    entry(origin, locale, '/room', { changeFrequency: 'weekly', priority: 0.8 }),
-    /*
-     * `/play`（2026-10-14 加）同属「应用页」，但比 `/room` 再低一档（0.6）：
-     * 它是从详情页分出来的一条**次级入口**（联机开局的简洁版），正文比 `/room` 还少。
-     * 收录它的理由是它的 canonical 指自己、分享链接又常常带 `?id=`，总得有个正式地址；
-     * 但没必要和 `/room` 争同一个「在线玩」的意图。
+     * `/play`（2026-10-14 加）：正文只有一块 canvas，对搜索引擎几乎没有价值，
+     * 但它的 canonical 指自己、分享链接又常常带 `?id=`，总得有个正式地址。
      */
     entry(origin, locale, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
     entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),

@@ -13,19 +13,14 @@ import LocaleSwitcher from './LocaleSwitcher';
 /**
  * 内容页**顶栏**（2026-10-13 加）：语言切换 + 账号 + 游戏库。
  *
- * 三样东西和房间右上角那一行（`ConsoleScene` 的 `.top-links`）是同一个口径 ——
- * 人在屋里屋外看到的「怎么切语言、怎么登录、怎么去游戏列表」应该是同一套。
- *
  * **顺序（2026-10-14 起）**：语言 → 首页 → 游戏库 → 账号。原来账号夹在首页和游戏库
- * 之间，当天用户要求「登录放在游戏列表后面」，两处一起调成了现在这个组序
- * （房间那行是 语言 → 首页 → 游戏列表 → 账号 → 隐私 → 条款）。
+ * 之间，当天用户要求「登录放在游戏列表后面」，两处一起调成了现在这个组序。
  *
  * **「游戏库」文字前带一个手柄图标**（2026-10-14 加，用户要求「游戏列表文字前面加一个
- * 游戏手柄的图标」）—— 只在这一处，房间那行 / 法务页页脚不加。见下面那条链接的注释。
+ * 游戏手柄的图标」）—— 只在这一处，法务页页脚不加。见下面那条链接的注释。
  *
  * ⚠️ **哪些页面有它**：`/`、`/games*`、`/developers*`、`/privacy`、`/terms`。
- *    **没有**的是 —— `/room`（房间自己那行 `.top-links` 就是它）、
- *    `/login` 与 `/account`（这两页自己就是账号相关的页面，顶栏会重复）、
+ *    **没有**的是 —— `/login` 与 `/account`（这两页自己就是账号相关的页面，顶栏会重复）、
  *    404 页（它只给一个确定去处，不该铺一排入口）、`/admin`（另一套体系，无语言前缀）。
  *
  * ⚠️ **是客户端组件**：语言切换要 `useI18n()`（读当前语言、写 cookie、算另一种语言的
@@ -37,11 +32,11 @@ import LocaleSwitcher from './LocaleSwitcher';
  *    每切一次页面就白打一次 `/api/user/login`。缓存也在那里管登录 / 退出的失效。
  *
  * **登录按钮去 `/login`（2026-10-13 加的独立登录页），并把当前页塞进 `?next=`** ——
- * 登录成功之后能回到他刚才在看的那一页，而不是被扔回房间。`next` 传的是
+ * 登录成功之后能回到他刚才在看的那一页。`next` 传的是
  * **不带语言前缀**的站内路径（`/games?q=mario` 这种），登录页那边再按自己的语言
  * 拼前缀（见 `app/[locale]/login/page.tsx`）—— 否则中文用户会拿到 `/zh/zh/games`。
  *
- * 已登录时这一格变成**用户名**（点进 `/account`），和房间那颗钮同一套写法：
+ * 已登录时这一格变成**用户名**（点进 `/account`）：
  * `max-w-[9rem] truncate` 截断，全名留在 `title` 里。
  */
 function TopBarContent({ showTheme }: { showTheme: boolean }) {
@@ -68,7 +63,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
    * 主题钮（2026-10-19 加）。
    *
    * **真身在 `<html data-theme>`**（首屏由 layout 的内联脚本写入），这份 state 只喂
-   * title / aria-label —— 和房间、`/play` 那一套完全一样：露哪颗图标由 CSS 按属性挑
+   * title / aria-label —— 和 `/play` 那一套完全一样：露哪颗图标由 CSS 按属性挑
    * （globals.css 的 `.theme-toggle`），React 不参与。写成
    * `theme === 'light' ? <Moon/> : <Sun/>` 会先按默认主题画一颗、挂载后再「啪」地换。
    *
@@ -87,7 +82,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
    * 连点两下不会因为 state 批处理丢掉一次翻转。
    *
    * 切完 `saveTheme` 会同时写 `nesload:theme` 和 `data-lamp`（白天自动关灯）。
-   * 过渡优先走 View Transitions（和房间那层「光从左上角推开」同一套 CSS）；
+   * 过渡优先走 View Transitions（和开玩那页「光从左上角推开」同一套 CSS）；
    * 不支持就挂 0.36s 的颜色过渡类 `theme-fading`（globals.css 里那组兜底）。
    */
   const toggleTheme = useCallback(() => {
@@ -127,7 +122,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
       {/*
         首页（2026-10-13 加）。用户要求「除首页外，每个页面都有一颗回首页的入口」——
         顶栏是内容页唯一常驻的导航，放这一处就覆盖了 `/games*`、`/developers*`、
-        `/privacy`、`/terms`（房间那页有它自己那行 `.top-links`，首页自己不需要）。
+        `/privacy`、`/terms`（首页自己不需要）。
 
         排在语言之后：语言切换和它都是「站点级」的东西，再往后才是游戏库 / 账号。
       */}
@@ -141,19 +136,18 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
 
       <span aria-hidden className="h-[10px] w-px bg-ink-500" />
       {/*
-        游戏库。文案借 `topLinks.games`（房间那行、法务页页脚用的是同一个键）——
+        游戏库。文案借 `topLinks.games`（法务页页脚用的是同一个键）——
         同一个落点（`/games`）在站里只该有一个名字。
 
         ⚠️ 文字前面那个**手柄图标是 2026-10-14 用户要求加的**（「游戏列表文字前面加一个
         游戏手柄的图标」）—— 只加在**这个顶栏**（首页 `/` 与 `/games*`、`/developers*`、
-        `/privacy`、`/terms` 共用），房间那行 / 法务页页脚不加。
+        `/privacy`、`/terms` 共用），法务页页脚不加。
 
         ⚠️ **这里刻意不复用 `.row-icon`**：那个类在小屏抽屉里是「左边图标、右边文案」用的，
         但它**大屏默认 `display: none`**（见 globals.css 那段注释 —— 大屏右上角那一行
         照规矩是纯文字）。这个顶栏不是抽屉，直接用一个 inline-flex 的 `<span>` 包住图标
         即可，不碰那套开关。
 
-        用的是 `GamepadIcon` —— 和房间「自定义按键」那颗钮是同一个图标（见 icons.tsx）。
         ⚠️ 2026-10-14 曾给这一处另画过一个实心手柄剪影（`JoystickIcon`），用户看过之后
         **当天就要求换回 `GamepadIcon`**，那个图标已删；别再加第二个手柄图标。
       */}
@@ -173,7 +167,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
 
         ⚠️ **`loading` 期间整格不渲染**（连分隔线一起）—— 首屏还不知道「我是谁」，
            先画成未登录的话，已登录用户会看见它先写「登录」再「啪」地换成自己的名字。
-           那几十毫秒宁可空着，比闪一下好。房间那行也是这个处理。
+           那几十毫秒宁可空着，比闪一下好。
       */}
       {!loading && (
         <>
@@ -214,8 +208,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
         黑夜模式的切换钮」—— 所以排在**账号之后**，是这一排的最后一格。
 
         `showTheme={false}` 目前只有 `/play` 传：那一页右栏的「显示」那一行已经有一颗
-        同一功能的钮（见 PlayScene），顶栏再放一颗就是同一件事说两遍。房间 `/room`
-        不渲染这个顶栏，它自己沿那一列本来就有。
+        同一功能的钮（见 PlayScene），顶栏再放一颗就是同一件事说两遍。
       */}
       {showTheme && (
         <>
@@ -227,7 +220,7 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
             aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
             className="theme-toggle p-1 text-ink-300 transition-colors hover:text-accent"
           >
-            {/* 图标画的是**切过去之后**的那一颗，和 title 同方向（房间那颗同理） */}
+            {/* 图标画的是**切过去之后**的那一颗，和 title 同方向 */}
             <span className="theme-icon-light">
               <SunIcon size={16} />
             </span>

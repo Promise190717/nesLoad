@@ -1,6 +1,6 @@
 export type Theme = 'dark' | 'light';
 
-/** Shared by /play, /room and the first-paint script in SiteDocument. */
+/** Shared by /play and the first-paint script in SiteDocument. */
 export function readTheme(): Theme {
   return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }

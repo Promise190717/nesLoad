@@ -13,7 +13,7 @@ import { useI18n } from './I18nProvider';
  *
  * **去哪儿**：
  *   · 有 `?next=` → 回那一页（顶栏那颗「登录」会自动带上当前页，见 `components/TopBar.tsx`）
- *   · 没有 → 回房间（`/room`）。登录本来就是为了玩，这是最合理的默认。
+ *   · 没有 → 回首页（`/`）。
  *
  * ⚠️ `next` 是**不带语言前缀**的站内路径（`/games?q=mario` 这种），这里用
  *    `useI18n()` 的 `href()` 现拼当前语言的前缀 —— 直接 push 一个带 `/zh` 的值
@@ -31,7 +31,7 @@ export default function LoginPanel({ next }: { next: string | null }) {
   return (
     <AuthForm
       hideCloudLead
-      onAuthed={() => router.push(next ? localeHref(next) : localeHref('/room'))}
+      onAuthed={() => router.push(next ? localeHref(next) : localeHref('/'))}
     />
   );
 }

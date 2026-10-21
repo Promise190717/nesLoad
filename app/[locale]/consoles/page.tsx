@@ -93,7 +93,7 @@ export default async function ConsolesPage({
       label="CONSOLES"
       title={t('consolesPage.heading')}
       intro={t('consolesPage.intro', { count: total })}
-      back={{ href: localePath(locale, '/room'), label: 'common.back', mode: 'history' }}
+      back={{ href: localePath(locale, '/'), label: 'common.back', mode: 'history' }}
     >
       <ul className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
         {ordered.map((type, index) => (

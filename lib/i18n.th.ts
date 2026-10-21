@@ -598,7 +598,7 @@ export const th: Record<MessageKey, string> = {
     'ไม่พบเกมที่ตรงกับ “{keyword}” ลองใช้คำสั้นลง หรือใช้ชื่อเกม',
   'gamesPage.prev': 'ก่อนหน้า',
   'gamesPage.next': 'ถัดไป',
-  'gamesPage.backHome': 'กลับไปที่ห้อง',
+  'gamesPage.backHome': 'กลับไปที่หน้าแรก',
   'gamesPage.backToGames': 'เกมทั้งหมด',
   'common.back': 'ย้อนกลับ',
   'common.home': 'หน้าแรก',
@@ -610,7 +610,7 @@ export const th: Record<MessageKey, string> = {
   'gamesPage.favorite': 'เพิ่มในรายการโปรด',
   'gamesPage.unfavorite': 'นำออกจากรายการโปรด',
   'gamesPage.favoriteSignIn':
-    'ต้องเข้าสู่ระบบเพื่อเก็บรายการโปรด — ใช้ปุ่มบัญชีที่มุมขวาบนของห้อง',
+    'ต้องเข้าสู่ระบบเพื่อเก็บรายการโปรด — ใช้ปุ่มเข้าสู่ระบบบนแถบด้านบน',
   'gamesPage.favoriteFailed': 'อัปเดตรายการโปรดไม่ได้ — ลองอีกครั้ง',
   'gamesPage.favoriteCount': '{n} คนในรายการโปรด',
   'gamesPage.report': 'รายงานปัญหา',
@@ -662,7 +662,7 @@ export const th: Record<MessageKey, string> = {
 
   'notFound.title': 'ไม่พบหน้านี้',
   'notFound.description':
-    'ที่อยู่นี้ไม่มีอยู่ใน {site} ตรวจสอบลิงก์หรือกลับไปที่ห้อง',
+    'ที่อยู่นี้ไม่มีอยู่ใน {site} ตรวจสอบลิงก์หรือกลับไปที่หน้าแรก',
   'gamesPage.notFoundTitle': 'ไม่พบเกม',
   'gamesPage.notFound': 'เกมนี้ไม่อยู่ในคลังแล้ว (อาจถูกลบไปแล้ว)',
   'gamesPage.fallbackDescription': '{title} เป็นเกมของ {console}',

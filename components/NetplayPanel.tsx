@@ -59,7 +59,7 @@ const QUALITY_MESSAGE: Record<StreamQuality, MessageKey> = {
 const QUALITY_ORDER: StreamQuality[] = ['smooth', 'balanced', 'sharp'];
 
 /**
- * 联机面板。和存档列表一样浮在房间上、**不进屏幕** ——
+ * 联机面板。和存档列表一样浮在画面上、**不进屏幕** ——
  * 屏幕里跑的是游戏画面，这张面板要写字、还要输入房间码。
  *
  * 三个状态各自成屏：

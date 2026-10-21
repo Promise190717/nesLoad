@@ -3,7 +3,7 @@
 import { Nostalgist } from 'nostalgist';
 import { resolveArcadeCore } from './arcade-core';
 import { installAudioTap, trackEmulatorAudio } from './audio-tap';
-import { checkChdIntegrity } from './chd';
+import { blobChdSource, bytesChdSource, checkChdIntegrity } from './chd';
 import { releaseEmulatorRuntime, trackCanvasRuntime, trackRuntimeListeners, type EmulatorRuntime } from './emulator-runtime';
 import { biosTypeFor } from './bios';
 import { downloadFile } from './download';
@@ -1335,7 +1335,12 @@ function attachEjsKeyboard(
  *
  * 这里换个走法：内容**不进 `rom`**（换成 0 字节占位，只为让 Nostalgist 照原样建好目录、
  * 算出 `rom[0].name` 那条启动路径和存档路径），真字节在 `beforeLaunch` 里直接写进虚拟
- * 文件系统 —— 一次 `new Uint8Array(size)` + 8 MiB 的 Blob 切片，峰值就是「文件本身一份」。
+ * 文件系统 —— 峰值就是「文件本身一份」。
+ *
+ * ⚠️ 2026-10-21 补：这一份从哪来分两种（见 `RomContent`）。zip / 原文件是
+ *    「`new Uint8Array(size)` + 8 MiB 的 Blob 切片」；7z 解出来的那块数组直接交出去
+ *    （`canOwn` 让 MEMFS 认领），连这一份都不用造 —— 一次 7z 解包以前要走
+ *    「数组 → File 复制 → Blob → 再复制成数组」三轮，现在只剩一轮里本来就有的那份。
  *
  * 为什么落在 `beforeLaunch`：Nostalgist 的启动顺序是
  * `setupFileSystem()`（写 rom/bios/sram）→ `beforeLaunch`（**await 过的**）→ `runMain()`，
@@ -1361,6 +1366,9 @@ const CONTENT_DIRECTORY = '/home/web_user/retroarch/userdata/content';
 /** 占位用的空内容 —— 名字还在，字节由 `writeRomIntoFs` 事后补上。 */
 const EMPTY_BLOB = new Blob([]);
 
+/** 空字节 —— 只在「没有内容却要造一个 File」那种兜底上用（见 `loadRom` 的机种嗅探）。 */
+const EMPTY_BYTES = new Uint8Array(0);
+
 /**
  * 虚拟文件系统里**写入**要用的那几个接口（`Module.FS`）。
  * 和上面 `EmscriptenFs`（只读、读存档用）分开，免得一个接口越滚越大。
@@ -1380,14 +1388,33 @@ interface WritableEmscriptenFs {
   ): unknown;
 }
 
+/**
+ * 一块待落盘的内容。`blob` 和 `bytes` 二选一（见 `lib/unwrap.ts` 的 `UnwrappedEntry`）：
+ * 前者是 zip 解出来的或原文件，后者是 7z 解出来、可以把所有权直接交给 MEMFS 的那块数组。
+ */
+interface RomContent {
+  blob: Blob | null;
+  /**
+   * 泛型参数写死 `ArrayBuffer`：`Blob` 只收 `ArrayBuffer` 背后的视图，而
+   * `Uint8Array` 默认是 `ArrayBufferLike`（还可能是 `SharedArrayBuffer`）。
+   * `unwrapRom` 交出来的本来就是普通 JS 堆上的数组（见 `lib/unwrap.ts` 的 `toBytes`）。
+   */
+  bytes: Uint8Array<ArrayBuffer> | null;
+}
+
 /** 一个待流式落盘的 ROM：`index` 是它在 `rom` 数组里的位置（真名得回去问 Nostalgist）。 */
-interface StagedRom {
+interface StagedRom extends RomContent {
   index: number;
-  blob: Blob;
+  /** 打日志用 —— `blob` / `bytes` 有一半是 null，不能直接 `.size`。 */
+  size: number;
 }
 
 /**
  * 把 `source` 的字节写进虚拟文件系统的 `path`，**全程只有一份副本**。
+ *
+ * 两条来源，开销都是「文件本身一份」：
+ *   · `bytes`（7z 解出来的）—— 数组直接交给 MEMFS，一次复制都不做；
+ *   · `blob`（zip / 原文件）—— 先 `new Uint8Array(size)`，再按 8 MiB 切成 Blob 读进来。
  *
  * `canOwn = true` 是关键：MEMFS 的 `write()` 遇到它直接
  * `node.contents = buffer.subarray(…)`，不复制（见核心 js 里的 MEMFS.write）；
@@ -1399,17 +1426,28 @@ interface StagedRom {
 async function writeRomIntoFs(
   fs: WritableEmscriptenFs,
   path: string,
-  source: Blob
+  source: RomContent
 ): Promise<void> {
   const cut = path.lastIndexOf('/');
   const directory = path.slice(0, cut);
   const name = path.slice(cut + 1);
   fs.mkdirTree(directory);
-  const bytes = new Uint8Array(source.size);
-  for (let offset = 0; offset < bytes.length; offset += ROM_STREAM_CHUNK) {
-    const end = Math.min(offset + ROM_STREAM_CHUNK, bytes.length);
-    const chunk = await source.slice(offset, end).arrayBuffer();
-    bytes.set(new Uint8Array(chunk), offset);
+  let bytes: Uint8Array;
+  if (source.bytes) {
+    /*
+     * 7z 解出来的那块数组**直接交出去**：下面 `createDataFile(..., canOwn = true)`
+     * 会让 MEMFS 认领它（`node.contents = data`），中间一次复制都没有。
+     * 这块数组此后不归我们了 —— 调用方也已经把 `stagedRoms` 清空。
+     */
+    bytes = source.bytes;
+  } else {
+    const blob = source.blob ?? EMPTY_BLOB;
+    bytes = new Uint8Array(blob.size);
+    for (let offset = 0; offset < bytes.length; offset += ROM_STREAM_CHUNK) {
+      const end = Math.min(offset + ROM_STREAM_CHUNK, bytes.length);
+      const chunk = await blob.slice(offset, end).arrayBuffer();
+      bytes.set(new Uint8Array(chunk), offset);
+    }
   }
   /*
    * 占位文件已经在那儿了，而 `createDataFile` 内部是
@@ -1502,6 +1540,18 @@ export class EmulatorController {
   private pendingSram: Uint8Array | null = null;
   private releaseResources: (() => Promise<void>) | null = null;
 
+  /**
+   * `loadRom` 这次启动是否还在路上（从调 `Nostalgist.launch` 到它 resolve 之间）。
+   *
+   * 这段窗口里 `this.instance` 还是 null：用户载入到一半点返回时，`exit()`
+   * 抓不到任何东西可清，而 launch **不会被取消**，它照样会把实例建出来；
+   * 建完再没人认识它，整盘 ROM 就跟着那个实例钉在页面上 —— 和
+   * `dropContentFiles` 治的是同一个病，只是发生在这几秒里（PS1 大盘载入慢，
+   * 这个窗口相当容易被踩到）。所以这里记两笔：启动中 + 期间有人要求退出。
+   */
+  private launching = false;
+  private exitRequested = false;
+
   get rom() {
     return this.currentRom;
   }
@@ -1557,11 +1607,19 @@ export class EmulatorController {
      * 调用方**已经拆过的**包（见 `lib/unwrap.ts`）。`undefined` = 没拆过、这里自己拆；
      * `null` = 拆过但没命中（照旧用原文件）。
      *
-     * 为什么要这个参数：`/room` 的 `loadFile` 必须**先**知道机种（BIOS 和 PS1 那套
+     * 为什么要这个参数：调用方必须**先**知道机种（BIOS 和 PS1 那套
      * 菱形键位都得在启动前定下来），而「知道机种」只能靠拆包 —— 不把结果传下来的话
      * 252 MB 的光盘包会被解两遍（一遍判机种、一遍启动），内存峰值和等待时间都翻倍。
      */
-    prepared?: UnwrappedRom | null
+    prepared?: UnwrappedRom | null,
+    /*
+     * 调用方**已知**的机种。`/play` 从库里那条游戏的 `console` 字段带下来 ——
+     * 那和这条 ROM 是同一条记录，比嗅探文件头更权威，而且省得把 7z 解出来的
+     * `Uint8Array` 再包成 `File`（理由见下面「机种从哪儿来」那段）。
+     *
+     * `undefined` / `null` 都表示「没有提示」，落到 `detectConsole`。
+     */
+    consoleHint?: ConsoleType | null
   ) {
     // 先退出正在运行的实例，避免多个核心叠加占用内存
     await this.exit();
@@ -1590,7 +1648,12 @@ export class EmulatorController {
       prepared === undefined
         ? await unwrapRom(file, onProgress ? (ratio) => onProgress(ratio, 1) : undefined)
         : prepared;
-    const romFile = unwrapped?.file ?? file;
+    /*
+     * 主内容的两条形态（见 `UnwrappedEntry`）：`file` 是 Nostalgist 原路要的 Blob，
+     * `bytes` 是 7z 解出来、直接交给 MEMFS 的那块数组。**大小一律看 `size`**。
+     */
+    const main = unwrapped?.main ?? null;
+    const mainSize = main?.size ?? file.size;
     if (unwrapped) {
       /*
        * 光盘套装（`.cue` + `.bin`）会带伴生文件 —— 日志里必须把它们列出来：
@@ -1603,18 +1666,32 @@ export class EmulatorController {
         : '';
       console.info(
         `[nesload] 「${file.name}」是个 ${unwrapped.container}，` +
-          `已解出内层「${unwrapped.innerName}」（${romFile.size} 字节）${extra}`
+          `已解出内层「${unwrapped.innerName}」（${mainSize} 字节）${extra}`
       );
     }
 
     /*
-     * ⚠️ 光盘套装（`cue` + `bin`，2026-10-19）的机种**由拆包那一层直接给**。
+     * 机种从哪儿来，三条优先级（2026-10-21 重排过）：
      *
-     * 主文件现在是 `.cue` —— 纯文本、没有魔数，而 `EXTENSION_MAP` 刻意不收 `cue`
-     * （直接拖一个 `.cue` 进来仍然该报「认不出」，见那张表的注释）。两条路必须分开，
-     * 所以「从压缩包里解出来的」这一条自己把机种带上（`UnwrappedRom.console`）。
+     *   1. `unwrapped.console` —— 拆包那一层已经知道（光盘套装恒为 `ps1`）。
+     *      主文件是 `.cue` 时只能这样：纯文本、没有魔数，而 `EXTENSION_MAP` 刻意不收
+     *      `cue`（直接拖一个 `.cue` 进来仍然该报「认不出」，见那张表的注释）。
+     *   2. `consoleHint` —— **调用方已经知道**。`/play` 永远带着库里那条游戏的
+     *      `console` 字段下来，喂的又是同一条记录里的 ROM，比嗅探更权威；
+     *      房间页下线之后，前台已经没有「随手拖一个陌生文件进来」这条入口，
+     *      所以这条提示覆盖了全部前台载入，嗅探只留给后台导入；
+     *   3. `detectConsole` —— 兜底，只读文件头 64 KiB。
+     *
+     * ⚠️ 第 2 条不是「省一点 CPU」那么轻：7z 解出来的大盘现在是 `Uint8Array`、
+     *    没有 `File`，而 `detectConsole` 只收 `File`。没有提示就得为了嗅探把整盘
+     *    再包成一个 File —— 那一次复制正好把字节通道省下来的内存全吐回去。
      */
-    const consoleType = unwrapped?.console ?? (await detectConsole(romFile));
+    const consoleType =
+      unwrapped?.console ??
+      consoleHint ??
+      (await detectConsole(
+        main ? (main.file ?? new File([main.bytes ?? EMPTY_BYTES], main.name)) : file
+      ));
     if (!consoleType) {
       throw new UnsupportedRomError();
     }
@@ -1663,16 +1740,23 @@ export class EmulatorController {
      */
     let core = CORE_MAP[consoleType];
     /*
-     * 非街机喂的是**拆包后的** `romFile`（`unwrapRom` 没命中时它恒等于原 `file`，
-     * 没有额外开销）。街机分支下面会立刻覆盖这两个变量，用原始文件重新决定。
+     * 非街机喂的是**拆包后的**内容（`unwrapRom` 没命中时它恒等于原 `file`，
+     * 没有额外开销）。街机分支下面会立刻覆盖这三个变量，用原始文件重新决定。
+     *
+     * `romBlob` / `romBytes` 是主文件的两种形态（见 `UnwrappedEntry`）：
+     * zip 解出来的、以及原文件走 `romBlob`；7z 解出来的走 `romBytes`。
      */
-    let romFileName = romFile.name;
-    let romContent: Blob = romFile;
+    let romFileName = main?.name ?? file.name;
+    let romSize = mainSize;
+    let romBlob: Blob | null = main ? main.file : file;
+    let romBytes: Uint8Array<ArrayBuffer> | null = main ? main.bytes : null;
     if (consoleType === 'arcade') {
       const resolved = await resolveArcadeCore(file);
       core = resolved.core;
       romFileName = resolved.fileName;
-      romContent = resolved.content;
+      romBlob = resolved.content;
+      romSize = resolved.content.size;
+      romBytes = null;
       /*
        * 街机失败是**完全静默**的（屏幕照常出雪花、核心也不抛异常，FBNeo 只把错误画在画面里），
        * 所以这次到底选了哪个核心、romset 被叫成什么、有没有动过字节，必须留一行日志
@@ -1709,11 +1793,17 @@ export class EmulatorController {
      * 与其让用户对着一个菜单猜，不如在这里给一句准话。
      */
     if (consoleType === 'ps1' && /\.chd$/i.test(romFileName)) {
-      const integrity = await checkChdIntegrity(romContent);
+      /*
+       * 两种载体都支持（见 `lib/chd.ts` 的 `ChdSource`）：7z 解出来的盘是内存里的
+       * `Uint8Array`，不包成 Blob —— 那一次复制就是整盘。
+       */
+      const integrity = await checkChdIntegrity(
+        romBytes ? bytesChdSource(romBytes) : blobChdSource(romBlob ?? EMPTY_BLOB)
+      );
       if (integrity === 'truncated') {
         console.error(
           `[nesload] 「${romFileName}」结构不完整：CHD 的 map 表越过了文件末尾` +
-            `（文件只有 ${romContent.size} 字节）—— 多半是下载被截断，重新下一遍。`
+            `（文件只有 ${romSize} 字节）—— 多半是下载被截断，重新下一遍。`
         );
         throw new IncompleteRomError();
       }
@@ -1731,11 +1821,20 @@ export class EmulatorController {
      *    街机 romset 走不到这里（`unwrapRom` 对它返回 `null`，见 `lib/unwrap.ts`），
      *    其余机种也恒为空数组 —— 所以数组长度对它们是 1，行为和以前完全一致。
      */
-    const romFiles: { fileName: string; fileContent: Blob }[] = [
-      { fileName: romFileName, fileContent: romContent },
+    /*
+     * 每一项的两条形态和主文件一样（见 `UnwrappedEntry`）：`blob` 走 Nostalgist 原路，
+     * `bytes` 直接进 MEMFS。`size` 是分流的唯一判据。
+     */
+    const romFiles: (RomContent & { fileName: string; size: number })[] = [
+      { fileName: romFileName, size: romSize, blob: romBlob, bytes: romBytes },
     ];
     for (const companion of unwrapped?.companions ?? []) {
-      romFiles.push({ fileName: companion.name, fileContent: companion });
+      romFiles.push({
+        fileName: companion.name,
+        size: companion.size,
+        blob: companion.file,
+        bytes: companion.bytes,
+      });
     }
 
     /*
@@ -1745,8 +1844,17 @@ export class EmulatorController {
      */
     const stagedRoms: StagedRom[] = [];
     const romPayload = romFiles.map((entry, index) => {
-      if (entry.fileContent.size <= STREAM_ROM_THRESHOLD) return entry;
-      stagedRoms.push({ index, blob: entry.fileContent });
+      if (entry.size <= STREAM_ROM_THRESHOLD) {
+        /*
+         * 小内容走 Nostalgist 原路，它要 Blob —— 7z 那条路这时才有一次复制，
+         * 几十 MB 以内，值不得为它再改一轮路由。
+         */
+        return {
+          fileName: entry.fileName,
+          fileContent: entry.blob ?? new Blob([entry.bytes ?? EMPTY_BYTES]),
+        };
+      }
+      stagedRoms.push({ index, size: entry.size, blob: entry.blob, bytes: entry.bytes });
       return { fileName: entry.fileName, fileContent: EMPTY_BLOB };
     });
 
@@ -1821,6 +1929,12 @@ export class EmulatorController {
       nostalgist = null;
       listeners = null;
     };
+    /*
+     * 从这里开始到 launch resolve，`this.instance` 都是 null —— 退出请求只能先记下来
+     * （见 `exit()` 里那个分支），落地后由下面那段当场回收。
+     */
+    this.launching = true;
+    this.exitRequested = false;
     try {
       nostalgist = await Nostalgist.launch({
         /*
@@ -1845,18 +1959,19 @@ export class EmulatorController {
               // 走到这里说明 Nostalgist 换了 rom 的排布方式，宁可炸也别静默少一盘数据。
               throw new Error(`staged rom has no name at index ${staged.index}`);
             }
-            await writeRomIntoFs(fs, `${CONTENT_DIRECTORY}/${name}`, staged.blob);
+            await writeRomIntoFs(fs, `${CONTENT_DIRECTORY}/${name}`, staged);
             /*
              * 留痕：这条路绕开了 Nostalgist 的写入，「文件到底进没进虚拟文件系统」
              * 从日志上看不出来了，所以自己报一句（成功才会打出来）。
              */
             console.info(
-              `[nesload] 大文件直写：${name}（${staged.blob.size} 字节）→ ${CONTENT_DIRECTORY}`
+              `[nesload] 大文件直写：${name}（${staged.size} 字节）→ ${CONTENT_DIRECTORY}`
             );
           }
           /*
-           * 字节已经在虚拟文件系统里了，把 Blob 引用放掉 —— 这个回调会被
+           * 字节已经在虚拟文件系统里了，把我们这边的引用放掉 —— 这个回调会被
            * `emulatorOptions` 一直攥着，不清就是几百 MiB 一直钉在页面上。
+           * （`bytes` 那条是真·唯一引用：MEMFS 认领的是同一个数组。）
            */
           stagedRoms.length = 0;
         },
@@ -1875,9 +1990,9 @@ export class EmulatorController {
          * 名字用 `romFileName` 而不是 `file.name`：街机的那个名字可能是
          * `resolveArcadeCore()` 按内容认出来纠正过的（见 `lib/arcade-core.ts`）。
          *
-         * 内容同理用 `romContent`：街机那盘可能是**重打包过**的（补了 zip 里的 rom 名），
-         * 也可能取自整合包的内层 zip；NES / SFC 那条路则可能是 `unwrapRom()` 从压缩包里
-         * 解出来的。只有「原样拖进来的普通 ROM」那一种情况它才等于 `file`。
+         * 内容同理用 `romBlob` / `romBytes`：街机那盘可能是**重打包过**的（补了 zip 里的
+         * rom 名），也可能取自整合包的内层 zip；NES / SFC 那条路则可能是 `unwrapRom()`
+         * 从压缩包里解出来的。只有「原样拖进来的普通 ROM」那一种情况它才等于 `file`。
          *
          * ⚠️ 光盘套装（`.cue` + `.bin`）给的是**数组**，见上面 `romFiles` 那段：
          *    第一项是 `.cue`（核心按它找 bin），后面是数据文件。普通 ROM 长度恒为 1，
@@ -1996,19 +2111,29 @@ export class EmulatorController {
        */
       if (e instanceof Error && /out of memory|allocation failed|array buffer/i.test(e.message)) {
         console.error(
-          `[nesload] 上面这条是**内存不足**，不是文件坏了：「${romFileName}」${romContent.size} 字节，` +
+          `[nesload] 上面这条是**内存不足**，不是文件坏了：「${romFileName}」${romSize} 字节，` +
             '写进虚拟文件系统后至少还要占同样多的一份。先关掉别的标签页再试；' +
             '还不行就是这盘超过了这台设备能载入的上限。'
         );
       }
       throw e;
     } finally {
+      this.launching = false;
       stopListening();
       stopWatching?.();
     }
 
     this.instance = nostalgist;
     this.releaseResources = releaseResources;
+    /*
+     * 启动期间有人点过返回（页面已经切走）：实例是刚刚才建出来的，这里当场清掉。
+     * 再等下去就没人认识它了 —— 整盘 ROM 会跟着它一直挂在页面上。
+     */
+    if (this.exitRequested) {
+      this.exitRequested = false;
+      await this.exit();
+      return;
+    }
     /*
      * 注入用的解码器在这里换掉（见 `overrideInjectionKeyMap`）。
      * 快照必须**在这里**取：`this.bindings` 之后随时会被键位面板改掉，
@@ -2260,6 +2385,12 @@ export class EmulatorController {
     this.ejs = null;
 
     if (!instance) {
+      /*
+       * 启动还在路上：此刻没有实例可清，但 launch 不会因此停下。记一笔，
+       * 等它在 `loadRom` 末尾落地时当场回收（见那边的 `exitRequested` 判断）；
+       * 不记的话这次退出就是空转，实例建出来以后没人管。
+       */
+      if (this.launching) this.exitRequested = true;
       await releaseResources?.();
       return;
     }

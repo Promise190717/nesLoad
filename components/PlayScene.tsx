@@ -63,20 +63,16 @@ import { TV_SIZES, type TvSize } from '@/lib/tv-size';
 import { readTheme, saveTheme } from '@/lib/theme';
 
 /*
- * `/play` —— 从游戏详情那颗「联机游戏」进来的**简洁版房间**（2026-10-14 加，用户要求）。
+ * `/play` —— 从游戏详情那颗「联机游戏」进来的**简洁开局页**（2026-10-14 加，用户要求）。
  *
- * 和 `ConsoleScene`（`/room`，满屏像素屋 + 抽屉 + 一堆弹窗）的关系：
- * **同一件事的两种壳**，不是两套实现。加载 ROM、核心、BIOS、键盘转发、联机推流
- * 这些「引擎侧」的事两边都走同一批 lib（`EmulatorController` / `NetplayController` /
- * `lib/http.ts` / `lib/bios.ts`），屏幕那块更干脆 —— 直接复用 `ConsoleScreen`。
+ * 加载 ROM、核心、BIOS、键盘转发、联机推流这些「引擎侧」的事走 `EmulatorController` /
+ * `NetplayController` / `lib/http.ts` / `lib/bios.ts`，屏幕那块直接复用 `ConsoleScreen`。
  *
- * 为什么另起一个组件而不是给 ConsoleScene 加一个 `chrome` 分支：那边 4700 行、
- * 渲染树里全是房间布景和抽屉，简单外壳在它里面只是一小段条件分支，反而更难读；
- * 而这一页的**功能面**确实更窄 —— 没有存档 / 读档 / 历史 / 云端 / 拖本地文件 / 彩蛋。
+ * 这一页的**功能面**刻意窄 —— 没有存档 / 读档 / 历史 / 云端 / 拖本地文件 / 彩蛋。
  * 用户的原话就是「尽量简洁」。
  *
  * 两页刻意**不追求行为一致**的地方只有一个：这一页不会自动载入。用户要的是
- * 「先进房间设置，点开始才加载」——`?id=` 只负责把要玩的那一款摆在黑区里。
+ * 「先选模式，点开始才加载」——`?id=` 只负责把要玩的那一款摆在黑区里。
  *
  * 布局（2026-10-14 第二版，用户改的）：**左边一块屏幕 + 右边一列**。
  * 没有画面时屏幕里那层叠层负责说事 ——「房间选择」（单人 / 创建房间 / 加入 + 链路 + 画质）
@@ -93,7 +89,7 @@ import { readTheme, saveTheme } from '@/lib/theme';
  * 整体保持一致」）：描边走站上那套 `pixel-edge pxw-* pxc-*`，字体与配色走同一批设计令牌
  * （`ink-*` 跟主题翻转；屏幕里那层用 `crt-*`，因为屏幕底永远是黑的）。别在这儿另搞一套
  * 1px 细边 —— 我第一版那么写过，被用户退回来了。
- * 「不要 room 的样式」说的是**别把满屋子的布景 / 电视机 / 抽屉 / 键帽面板搬过来**，
+ * **别把满屋子的布景 / 电视机 / 抽屉 / 键帽面板搬过来**，
  * 也就是「布局和控件集不同」，不是把站上的描边风格也丢掉。
  */
 
@@ -110,7 +106,7 @@ type Phase = 'idle' | 'downloading' | 'booting' | 'ready';
 
 interface PlaySceneProps {
   /**
-   * 服务端预取的那一款。三态和 `/room` 完全一致（见 `room/page.tsx` 的注释）：
+   * 服务端预取的那一款。三态：
    * `undefined` = 地址上没有 `?id=` 或服务端查询抛了异常（客户端打接口兜底）、
    * `null` = 有 id 但库里没有、`Game` = 查到了。
    */
@@ -202,7 +198,7 @@ export default function PlayScene({
       window.removeEventListener('resize', updateSize);
     };
   }, []);
-  /** 防重入：载入中再点一次「开始」不该把正在跑的那次搅了（和 room 里同一个理由） */
+  /** 防重入：载入中再点一次「开始」不该把正在跑的那次搅了 */
   const loadingRef = useRef(false);
   const activeRef = useRef(false);
 
@@ -259,8 +255,7 @@ export default function PlayScene({
    * 这盘 ROM 是站点吃不下的格式时挂上 —— 和 `notice` **并排**显示。
    * 三种：`7z` / `rar`（压缩包），以及 `disc`（**多文件光盘镜像的描述文件**）。
    *
-   * 和 `/room` 的 `archiveHint` 是同一件事、同一份判据（`unsupportedArchive()`），
-   * 只是这一页没有那个弹窗，只能直接摊在屏幕上。
+   * 判据统一走 `unsupportedArchive()`；这一页没有弹窗，只能直接摊在屏幕上。
    *
    * ⚠️ 单独一个 state 而不是塞进 `notice`：`notice` 存的是 `MessageKey`（不带参数），
    *    而 `7z` / `rar` 那条要带 `{ ext }`。两者的生命周期倒是一样的（每次 `load` 开头一起清）。
@@ -271,7 +266,7 @@ export default function PlayScene({
   /**
    * 当前这盘 ROM 的文件本体。
    *
-   * 「重载」拿它重新插一次，不必再下几十 MB —— 和 room 里 `lastRomRef` 同一个用处。
+   * 「重载」拿它重新插一次，不必再下几十 MB。
    * 代价是它整局都留在内存里（浏览器对大 Blob 多半落盘），换「重载不必联网」值得。
    */
   const lastRomRef = useRef<File | null>(null);
@@ -382,7 +377,7 @@ export default function PlayScene({
    * 联机控制器。回调里要读 `controller`（房主把对方的输入打进本机），
    * 而 controller 在上面就建好了 —— 闭包捕获的是那个稳定引用，所以不需要 ref。
    *
-   * 和 room 相比这里**不认「刚连上 / 对方离开」那两枚会自动消失的提示**：
+   * 这里**不认「刚连上 / 对方离开」那两枚会自动消失的提示**：
    * 这一页的状态行是常驻在右侧的（房间码下面那行），不需要另开一条会过期的通道。
    */
   const [netplay] = useState(() => {
@@ -504,7 +499,7 @@ export default function PlayScene({
      * 惰性初始化会让水合前后对不上，只能挂载后同步。
      *
      * 塞进微任务是因为 effect 里同步 setState 会撞上 `react-hooks/set-state-in-effect`
-     * （本仓库既有规则），和 room 那边推到 `.then()` 里是同一个理由。
+     * （本仓库既有规则），所以推到 `.then()` 里。
      */
     const storedTheme = readTheme();
     void Promise.resolve().then(() => setTheme(storedTheme));
@@ -519,8 +514,8 @@ export default function PlayScene({
     void Promise.resolve().then(() => setBindings(stored));
 
     /*
-     * 屏幕尺寸。和 room 共用同一份落盘（`nesload:tv`，也是首屏内联脚本读的那个键），
-     * 所以这一页选完刷新、下次再进来都还是那一档，切到 `/room` 也认得。
+     * 屏幕尺寸用 `nesload:tv` 落盘（首屏内联脚本读的也是这个键），
+     * 所以这一页选完刷新、下次再进来都还是那一档。
      *
      * **为什么读 localStorage 而不是 `<html data-tv>`**：内联脚本只在**整页加载**
      * 时跑一次。从游戏详情点「联机游戏」进这页是 SPA 内部跳转——脚本不会重跑，
@@ -583,10 +578,9 @@ export default function PlayScene({
   /**
    * 下 ROM、启核心。
    *
-   * 和 room 的 `loadRemote` + `loadFile` 是一条路子。和 room 的差别只有「入口」：
    * 这一页没有拖本地文件，`file` 只从「重载 / 恢复电池存档」来。
-   * 取消只覆盖**下载 ROM 那一段**：核心启动之后 Nostalgist 没有公开的中断接口
-   * （和 room 里那条注释说的是同一件事），所以「取消」按钮在 booting 阶段是灰的。
+   * 取消只覆盖**下载 ROM 那一段**：核心启动之后 Nostalgist 没有公开的中断接口，
+   * 所以「取消」按钮在 booting 阶段是灰的。
    */
   const load = useCallback(
     async (file?: File) => {
@@ -660,10 +654,19 @@ export default function PlayScene({
          * ⚠️ 这一段的 phase **还是 `downloading`**（不是 `booting`）：7z 包要在
          *    Worker 里解十几秒，进度得接在 ROM 那根条上，否则那十几秒是一块死屏。
          */
-        const prepared = await unwrapRom(romFile, (ratio) => {
-          if (ac.signal.aborted || !activeRef.current) return;
-          setRomRatio(ratio);
-        });
+        const prepared = await unwrapRom(
+          romFile,
+          (ratio) => {
+            if (ac.signal.aborted || !activeRef.current) return;
+            setRomRatio(ratio);
+          },
+          /*
+           * 把取消信号接进来：7z 解一张几百 MB 的盘要跑几十秒，光 reject 掉 Promise
+           * 不够 —— worker 还在解、输入整包和已解出的字节都还钉在它的堆上。
+           * 信号一到 `extractSevenZip` 就 `terminate()`。
+           */
+          ac.signal
+        );
         if (ac.signal.aborted || !activeRef.current) return;
         setPhase('booting');
 
@@ -722,7 +725,14 @@ export default function PlayScene({
           },
           bios,
           /* 上面已经拆过一次的包（含光盘套装的伴生 bin），别让 loadRom 再拆一遍 */
-          prepared
+          prepared,
+          /*
+           * 机种也从上面那条游戏记录带下去（2026-10-21）：`/play` 只开库里已有的游戏，
+           * 这一页**没有**「随便拖一个文件进来」的入口，所以库里的 `console` 就是权威。
+           * 有了它 `loadRom` 不必再嗅文件头 —— 那一步在 7z 那条路上意味着「把整盘
+           * 再包成一个 File」，正好抵掉字节通道省下的内存（见 `loadRom` 的注释）。
+           */
+          game?.consoleType ?? null
         );
 
         // 核心启动不可中断；离开时尚未完成的启动，在完成后立即退出。
@@ -737,7 +747,7 @@ export default function PlayScene({
         /*
          * 云端历史（登录了才写得进；没登录会回 401，静默忽略）。
          *
-         * ⚠️ **2026-10-19 补上**：这一页原本刻意不写历史（注释还写着「历史是房间的事」），
+         * ⚠️ **2026-10-19 补上**：这一页原本刻意不写历史，
          *    可详情页那颗「开始游戏」早就指向 `/play?id=` 了 —— 于是从它进来的每一局
          *    都不进历史。现象就是个人中心的历史停在某一天不再动，而**云端存档照常在写**
          *    （存档控件这一页有），很容易误判成「历史数据丢了」。
@@ -749,7 +759,7 @@ export default function PlayScene({
          * ⚠️ 只在 `!file` 这条路上写 —— `file` 有值说明是**重载 / 恢复存档**（同一款、
          *    时间戳刚写过），那两条不该再刷一次「最近游玩时间」。
          *
-         * 和房间那边一样不等结果、不管成败：游戏已经跑起来了，历史写不上只是少一行记录。
+         * 不等结果、不管成败：游戏已经跑起来了，历史写不上只是少一行记录。
          */
         if (!file && game?.id) {
           void fetch('/api/user/history', {
@@ -768,8 +778,8 @@ export default function PlayScene({
         else {
           console.error('[play] 载入失败：', title, error);
           /*
-           * 机种认不出时单独认一次压缩格式 —— 和 `/room` 对齐（`ConsoleScene` 的
-           * `archiveHint`）。这一类是「有准话可给」的失败：7z / rar 用不着用户瞎猜。
+           * 机种认不出时单独认一次压缩格式。这一类是「有准话可给」的失败：
+           * 7z / rar 用不着用户瞎猜。
            *
            * 走到这里 `romFile` 必然有值（`UnsupportedRomError` 只在 `detectConsole`
            * 返回 null 时抛，而那一步在下载之后），那个判断只是别让类型收窄难看。
@@ -842,7 +852,7 @@ export default function PlayScene({
    * 右侧那颗主钮按下之后要做的事（按当前选的项目分三条路）。
    *
    * 三个动作都不往外抛：失败原因由 netplay 写进 `state.error`，界面自己读 ——
-   * 和 room 那三个回调同一个规矩，`busy` 一律放 finally（漏一条按钮就永久变灰）。
+   * 三个回调同一个规矩，`busy` 一律放 finally（漏一条按钮就永久变灰）。
    */
   const start = useCallback(async () => {
     if (!activeRef.current) return;
@@ -1100,9 +1110,8 @@ export default function PlayScene({
   /* ---------------- 主题 / 全屏 ---------------- */
 
   /**
-   * 主题与 `/room` 共用，保存后在语言切换、刷新和返回时恢复。
-   * 这份 state 只喂按钮的 title / aria —— 和 room 那边同一套路，
-   * 昼夜切换只做颜色过渡。
+   * 主题保存后在语言切换、刷新和返回时恢复。
+   * 这份 state 只喂按钮的 title / aria，昼夜切换只做颜色过渡。
    */
   const toggleTheme = useCallback(() => {
     const root = document.documentElement;
@@ -1131,7 +1140,7 @@ export default function PlayScene({
    * 切屏幕档位。
    *
    * `data-screen-size` 撑的是**这一页自己的排版**（`--play-size-scale`），
-   * 和 `/room` 那台电视机的 `--tv-ratio` 是两套 CSS，但**档位是同一个偏好**：
+   * 和电视机那套 `--tv-ratio` 是两套 CSS，但**档位是同一个偏好**：
    * 除了本地 state，还要写 `<html data-tv>` 和 `localStorage`（`nesload:tv`）。
    * 不写属性只写 state 的话，刷新就被首屏内联脚本按旧值/默认值覆盖回去 ——
    * 这正是之前「选完刷新又变回原样」的原因。
@@ -1325,7 +1334,7 @@ export default function PlayScene({
                       {/*
                         格式那条（7z / rar / 多文件光盘镜像）跟在报错下面：它不是「出事了」而是
                         「换个包就行」—— 所以用 `crt-ink-300` 而不是 `danger`，
-                        和 `/room` 那边同一个口径（那边是弹窗里的一行）。
+                        口径统一：这一条不是「出事了」，只是「换个包就行」。
                         `disc` 那条不带参数（它说的不是「哪种格式」而是「要单文件」）。
                       */}
                       {archive && (
@@ -1607,7 +1616,6 @@ export default function PlayScene({
                 「按键说明要显示」），NDS 那套丝印和键值由 `buttonsFor` / `buttonLabel`
                 按机种给。
 
-                同一套门禁还有 `/room` 那颗 `.rail-keybind`（见 ConsoleScene）。
                 `KeyBindingsPanel` 里那套 `soloOnly` 逻辑**留着没删**：入口藏起来之后
                 它在 NDS 下确实走不到了，但删掉的话，哪天要放回入口就得连逻辑一起重写。
               */}
@@ -1742,7 +1750,7 @@ export default function PlayScene({
                 </RowBtn>
               </Row>
 
-              {/* 音量：− / 档位格 / +。点档位格直接跳档（和 `/room` 面板上那套同语义） */}
+              {/* 音量：− / 档位格 / +。点档位格直接跳档 */}
               <PlaySaveControls
                 controller={controller}
                 rom={rom}
@@ -1852,27 +1860,27 @@ export default function PlayScene({
 }
 
 /* ================================================================== *
- * 下面这些是这一页自己的小组件与常量（房间那边有各自的一套，没必要合并）
+ * 下面这些是这一页自己的小组件与常量
  * ================================================================== */
 
-/** 重试音频轨的最长尝试次数（每次 500ms）—— 和 ConsoleScene 里那个常量同值 */
+/** 重试音频轨的最长尝试次数（每次 500ms） */
 const AUDIO_RETRY_LIMIT = 10;
 
 /**
- * 屏幕档位的落盘键。**和 room 的 `TV_KEY` 是同一个字符串**（也等于首屏内联脚本
- * 里读的那个键）—— 两页共用一份偏好，所以刻意不另起 `nesload:play-size`。
+ * 屏幕档位的落盘键。**等于首屏内联脚本里读的那个键** —— 全站共用一份偏好，
+ * 所以刻意不另起 `nesload:play-size`。
  */
 const TV_KEY = 'nesload:tv';
 
 /**
  * 这一页的默认档：**中**（2026-10-15 用户指定「初次默认是中」）。
  *
- * 刻意不复用 `lib/tv-size.ts` 的 `DEFAULT_TV_SIZE`（那边是 `small`，是**房间**的默认）：
- * 这里 `medium` 映射的是 `--play-size-scale: .88`，而房间那边同一档是 `--tv-ratio: .9`，
- * 各自是「自己那套排版里合适的大小」，两页的默认没有理由绑在一起。
+ * 刻意不复用 `lib/tv-size.ts` 的 `DEFAULT_TV_SIZE`（那边是 `small`）：
+ * 这里 `medium` 映射的是 `--play-size-scale: .88`，电视机那套同一档是 `--tv-ratio: .9`，
+ * 各自是「自己那套排版里合适的大小」，两者的默认没有理由绑在一起。
  *
  * ⚠️ 这只在**从没选过**时生效。用户一旦点过任意一档，`nesload:tv` 就有值了 ——
- * 包括在 `/room` 里点的那一次，属共用偏好（见上面 `TV_KEY`），这里会照样跟着走。
+ * 在别处点的那一次也属共用偏好（见上面 `TV_KEY`），这里会照样跟着走。
  * 也就是说「初次」指的是**这台浏览器从没记录过档位**，不是「每次打开 /play」。
  */
 const PLAY_DEFAULT_SCREEN_SIZE: TvSize = 'medium';
@@ -2199,8 +2207,8 @@ function Row({
 /**
  * 操作表右侧那颗小方钮。
  *
- * ⚠️ 和 `/room` 的键帽（`.panel-key`）**不是一回事**，别混：那一套有立体描边和按下
- * 下沉，这一页要的就是干净的一格。`danger` 那颗（弹出）默认带一档红 —— 危险动作
+ * ⚠️ 别和 `.panel-key` 那套键帽混：那一套有立体描边和按下下沉，
+ * 这一页要的就是干净的一格。`danger` 那颗（弹出）默认带一档红 —— 危险动作
  * 不靠 hover 才看得出来。`title` / `aria-label` 都取 label：右侧控件只剩图标或符号，
  * 说明文字在左边那一列里（所以两颗都得有，不然读屏读出来是空的）。
  */

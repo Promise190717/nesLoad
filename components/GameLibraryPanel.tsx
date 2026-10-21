@@ -14,7 +14,7 @@ import { useI18n } from './I18nProvider';
  * `/api/games` 返回的条目（字段与 lib/server/games.ts 的 Game 对齐）。
  * 这里刻意只留展示 + 载入需要的字段：真实 ROM 地址不在响应里。
  *
- * ⚠️ 文案是**按语言索引的字典**（`texts`，见 lib/game-text.ts）—— 房间里的语言是运行时
+ * ⚠️ 文案是**按语言索引的字典**（`texts`，见 lib/game-text.ts）—— 场景里的语言是运行时
  *    切的，不是每次请求都重取数据，所以库里有的语言全都拿在手上，由
  *    `localizeLibraryGame` 现挑一份。原来是 `title` + `titleEn` 那套平铺字段，2026-10-16 换掉。
  *
@@ -292,7 +292,7 @@ interface GameLibraryPanelProps {
 
 /**
  * 在线游戏库：全屏弹窗，列出后台上传到 R2/D1 的游戏，点一个直接载入。
- * 和存档 / 联机 / 按键三块面板同一套视觉 —— 浮在房间上、**不进屏幕**。
+ * 和存档 / 联机 / 按键三块面板同一套视觉 —— 浮在画面上、**不进屏幕**。
  *
  * 「历史」tab 列出**从游戏库点开过**的那批（`cartridges` —— 只存名字 / 封面地址 /
  * 下载地址几个字符串，见 lib/library.ts），数据由父级从 IndexedDB 现取 ——
@@ -729,7 +729,7 @@ export default function GameLibraryPanel({
                 >
                   {games.map((game, index) => {
                     const busy = loadingId === game.id;
-                    /* 卡片上的标题 / 元数据按当前界面语言取一份 —— 房间里的语言是运行时切的 */
+                    /* 卡片上的标题 / 元数据按当前界面语言取一份 —— 场景里的语言是运行时切的 */
                     const text = localizeLibraryGame(game, locale);
                     const meta = [game.year, text.developer].filter(Boolean).join(' · ');
                     return (

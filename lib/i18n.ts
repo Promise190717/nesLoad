@@ -360,20 +360,7 @@ const en = {
    * 写一个 `{site}` 版本放在这里也没人会读，属于dead code，干脆不留。
    */
 
-  /*
-   * 房间页（`/room`）自己的 meta（2026-10-13 加）。
-   *
-   * 2026-10-13 之前 `/` 就是那间屋子，它靠根布局那份 `meta.title` / `meta.description`
-   * 当自己的标题说明；现在 `/` 换成了落地页（`app/[locale]/page.tsx`），屋子挪到 `/room`
-   * —— 它得有自己的标题、说明和 canonical，否则在搜索引擎眼里就是首页的重复内容。
-   *
-   * 措辞和根布局那两条**刻意接近但不相同**：那份讲的是「这个站是什么」（首页的活），
-   * 这份讲的是「这间屋子能干什么」（电视机、拖 ROM、免安装），职责不同不是抄漏。
-   *
-   * ⚠️ **标题里不写 `{site}`**：根布局的 `title.template` 会给子页面补上「· 站名」，
-   *    再写一遍就变成「游戏小屋 — … · 游戏小屋」。（`meta.title` 是例外 —— 它是
-   *    `title.default`，不经过 template，所以那一份自己带着站名。）
-   */
+  /* 下线页面（`app/[locale]/_room`）的 meta。键留着是因为那段代码还在引用，删了编译不过。 */
   'seo.room.title': 'Pixel Room — Play Retro Games in Your Browser',
   'seo.room.description':
     'Step into the pixel room: NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive and arcade games run on the CRT. Pick a title from the online library, or drop your own ROM file onto the screen.',
@@ -400,35 +387,22 @@ const en = {
    *
    * 这一页是**内容页**：Hero + 按机种浏览 + 最新收录 + 按开发商浏览 + FAQ。
    * 每个区块都要给爬虫一段能索引的正文 —— 原来那一页整页只有 canvas 和 CSS 画的屋子，
-   * 唯一可读的文字是 sr-only 那三句（见下面 `seo.heading` 那组，现在归 `/room` 用）。
+   * 唯一可读的文字是 sr-only 那三句（见下面 `seo.heading` 那组）。
    *
    * ⚠️ **首页自己不写 metadata**（不导出 `generateMetadata`）：`/` 的标题 / 说明 / canonical
    *    正是根布局那三样（`meta.title` / `meta.description` / `alternatesFor(locale, '/')`），
-   *    再写一份只是把同一句话写两遍。子页面（`/room`、`/games`…）才各写各的。
+   *    再写一份只是把同一句话写两遍。子页面（`/games`、`/developers`…）才各写各的。
    */
   'home.hero.title': 'Play classic retro games in your browser',
   'home.hero.lead':
     '{site} has NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more to play online, with two-player netplay.',
-  /*
-   * 首屏那两颗钮：左边进列表（先挑一挑），右边进屋子（加载自己的 ROM）。
-   *
-   * ⚠️ 2026-10-15：右侧那颗是**同日加回来的**（用户要求），落点 `/room`，文案也从
-   *    「进入小屋」改成了这一句 —— 它点下去要做的正是这件事：进屋把自己的 ROM 文件
-   *    选 / 拖到电视机上（房间里的在线游戏库入口同日收掉了，见 ConsoleScene）。
-   *    顺序按 DOM：`browse` 在左、`play` 在右。
-   *
-   * ⚠️ 同一句话当天又改了一次，落在动词上：先写的是 "Play a local ROM"，两处不妥 ——
-   *    `title` / `lead` 满口「在线」，这一颗却喊「本地」，首屏两个词正面对撞；「游玩」
-   *    本身也虚。换成 "Load a local ROM" 之后**和房间里点进去第一眼那句同源**
-   *    （`screen.tapLoad` = "CLICK TO LOAD A LOCAL ROM"）：按钮说什么，落点第一句
-   *    就说什么，中间没有落差。"ROM" 字样是用户明确要留的（要一眼看出是拿本地文件玩）。
-   */
+  /* 首屏那颗「加载本地 ROM」的文案。钮已下线，键留着是因为 18 份表要逐键对齐。 */
   'home.hero.play': 'Load a local ROM',
   'home.hero.browse': 'Browse all games',
   'home.join.title': 'Play with a friend',
   'home.join.hint': 'Enter the 4-character room code shared by your friend.',
   'home.join.submit': 'Join room',
-  /* 「两颗钮」与「搜索框」之间的分隔词，单独一行（参考站也是这个结构） */
+  /* 首屏按钮与搜索框之间的分隔词，单独一行（参考站也是这个结构） */
   'home.hero.or': 'OR',
   'home.search.label': 'Search the game library',
   'home.search.placeholder': 'Search title / developer / series',
@@ -878,8 +852,7 @@ const en = {
   /*
    * `/play` —— 从游戏详情那颗「联机游戏」进来的那一页（2026-10-14 加）。
    *
-   * 它和 `/room` 是**同一套引擎、两种壳**：房间是「满屏像素屋 + 抽屉」，
-   * `/play` 是「左边一块黑屏 + 右边一列控件」，一页把「怎么开这一局」摆清楚。
+   * 版式是「左边一块黑屏 + 右边一列控件」，一页把「怎么开这一局」摆清楚。
    * 文案刻意短 —— 这一页要的就是简洁。
    *
    * ⚠️ 联机那部分的词**一个都没抄在这里**：房间码 / 分享 / 链路 / 画质 / 状态行
@@ -1421,11 +1394,8 @@ const en = {
   'legal.updated': 'Last updated {date}',
   /*
    * ⚠️ `legal.back` 原先是「Back to the game room」（2026-10-14 用户要求改文案 + 改行为）：
-   *    左上那颗钮现在是**浏览器回退**（`BackLink`），不再承诺回那间屋子，所以文案走
+   *    左上那颗钮现在是**浏览器回退**（`BackLink`），不再承诺固定落点，所以文案走
    *    `common.back`（「返回」）—— 和内容页左上那颗统一。这一条**已删除**，别再加回来。
-   *    ⚠️ 2026-10-15：法务页页脚那颗「返回游戏屋」也删了（用户要求「其他页面底部的
-   *    回到房间也去除」）—— 这一页页脚现在只剩「隐私 ↔ 条款」互链和「游戏列表」。
-   *    见 components/LegalPage.tsx。
    */
   /* 页脚那个小标题，后面跟着邮箱 */
   'legal.contact': 'Contact us:',
@@ -1540,15 +1510,10 @@ const en = {
   'gamesPage.prev': 'Prev',
   'gamesPage.next': 'Next',
   /*
-   * 「回到房间」（`/room` 那间屋子）。
-   *
-   * ⚠️ 2026-10-15：**三处页脚全都删了它**（用户要求「其他页面底部的回到房间也去除」，
-   *    首页那颗同日更早先删，内容页 / 法务页页脚随后也删了 —— 见 GamesShell 与
-   *    LegalPage 里各自的注释）。现在只剩 **404 页那两颗**在用它（左上角那颗真链接
-   *    + 正文下面那颗钮）—— 404 刻意不挂顶栏，那两颗就是迷路的人唯一的确定去处。
-   *    键留着，别跟着 404 一起删。
+   * 「回到首页」。404 页那两颗用它（左上角那颗真链接 + 正文下面那颗钮）——
+   * 404 刻意不挂顶栏，那两颗就是迷路的人唯一的确定去处。
    */
-  'gamesPage.backHome': 'Back to the room',
+  'gamesPage.backHome': 'Back to home',
   'gamesPage.backToGames': 'All games',
   /*
    * 内容页左上角那条返回链接的**通用文案**（2026-10-13 起）。
@@ -1571,13 +1536,7 @@ const en = {
    *  404 页左上角也仍用它们（那页的行为是硬跳列表，不是回退）。
    */
   'common.back': 'Back',
-  /*
-   * 页脚那颗「首页」（2026-10-13 加）。**2026-10-15 起它是页脚里唯一一条「回去的路」**
-   * —— 原先并排那颗「回到房间」删了（见 `backHome` 那条的注释）。
-   *
-   * `backHome` 说的是「回到房间」（`/room`，屋子里那台电视机），这一颗回的是**落地页**
-   * （`/`）—— 2026-10-13 之后那是两个不同的地址、两件不同的事，所以是两个键。
-   */
+  /* 页脚那颗「首页」（2026-10-13 加）。 */
   'common.home': 'Home',
   'gamesPage.play': 'Play now',
   'gamesPage.download': 'Download ROM',
@@ -1594,8 +1553,8 @@ const en = {
    */
   'gamesPage.favorite': 'Add to favorites',
   'gamesPage.unfavorite': 'Remove from favorites',
-  /* 未登录时点它：先提示，再让用户自己去房间右上角登录（这一页没有登录入口） */
-  'gamesPage.favoriteSignIn': 'Sign in to save favorites — tap the account button in the room.',
+  /* 未登录时点它：先提示，再让用户自己去顶栏登录（这一页没有登录入口） */
+  'gamesPage.favoriteSignIn': 'Sign in to save favorites — use the sign-in button in the top bar.',
   /* 请求失败的回滚提示（乐观更新翻回去之后说一句） */
   'gamesPage.favoriteFailed': 'Could not update favorites — try again.',
   /*
@@ -1680,7 +1639,7 @@ const en = {
    */
   'notFound.title': 'Page not found',
   'notFound.description':
-    'That address does not exist on {site}. Check the link, or head back to the room.',
+    'That address does not exist on {site}. Check the link, or head back to the home page.',
   'gamesPage.notFoundTitle': 'Game not found',
   'gamesPage.notFound': 'This game is not in the library (any more).',
   /* 详情页正文：`fallbackDescription` 只在后台没填「说明」时顶上 */
@@ -1750,7 +1709,7 @@ const en = {
    */
   'download.disclaimer':
     'Disclaimer: all ROM files on this page are collected from third parties and are for personal study and backup purposes only. All copyrights belong to their original publishers; if any content infringes your rights, please contact us for removal.',
-  /* 房间页那条 `?id=` 深链（`/room?id=`）：从详情页点「开始游戏」过来，但库里已经没有这条了 */
+  /* `?id=` 深链：从详情页点「开始游戏」过来，但库里已经没有这条了 */
   'deepLink.notFound': 'That game could not be found — it may have been removed.',
   /*
    * 深链载入中那颗**独立弹窗**（ConsoleScene 的 `deepLinkGame`）：标题栏、进度条
@@ -1770,7 +1729,7 @@ const zh: Record<MessageKey, string> = {
     '在浏览器里直接玩复古游戏：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种都能跑。从在线游戏库挑一盘，或载入自己的 ROM 文件，打开即玩、免安装。',
   'meta.keywords':
     '复古游戏, 在线游戏库, 在线玩 FC, FC 模拟器, 红白机, NES 模拟器, SFC 模拟器, 超级任天堂, GBA 模拟器, GBA 游戏, Game Boy Advance, Game Boy 模拟器, GBC 模拟器, NDS 模拟器, NDS 游戏, 任天堂 DS, 世嘉 MD 模拟器, MD 游戏, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, PlayStation 模拟器, PS1 模拟器, PSX 模拟器, 街机模拟器, 浏览器模拟器, 网页模拟器, 免安装, {site}',
-  /* 房间页（`/room`）自己的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
+  /* 下线页面的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
   'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
   'seo.room.description':
     '走进像素小屋：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
@@ -2404,8 +2363,8 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.searchEmpty': '没有匹配「{keyword}」的游戏，换个短一点的词，或者直接搜游戏名。',
   'gamesPage.prev': '上一页',
   'gamesPage.next': '下一页',
-  /* 「回到房间」。⚠️ 2026-10-15 起三处页脚都删了它，只剩 404 页那两颗在用，见 en 那份的注释 */
-  'gamesPage.backHome': '回到房间',
+  /* 「回到首页」。只剩 404 页那两颗在用，见 en 那份的注释 */
+  'gamesPage.backHome': '回到首页',
   'gamesPage.backToGames': '全部游戏',
   /* `gamesPage.backToGame` 已删除，统一到 `common.back`，见英文表里那一段的说明 */
   'common.back': '返回',
@@ -2419,7 +2378,7 @@ const zh: Record<MessageKey, string> = {
   /* 收藏按钮，见英文表里那一段的说明 */
   'gamesPage.favorite': '收藏',
   'gamesPage.unfavorite': '已收藏',
-  'gamesPage.favoriteSignIn': '登录后才能收藏 —— 点房间里右上角那颗账号钮登录。',
+  'gamesPage.favoriteSignIn': '登录后才能收藏 —— 点右上角顶栏那颗登录钮。',
   'gamesPage.favoriteFailed': '收藏没能更新，请重试。',
   /* 收藏钮上那个数字（2026-10-13 加，用户要的「详情页显示游戏收藏数量」），只当悬停说明用 */
   'gamesPage.favoriteCount': '{n} 人收藏',
@@ -2475,7 +2434,7 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.controls': '操作说明',
   'gamesPage.selectLanguage': '选择语言',
   'notFound.title': '这个页面不存在',
-  'notFound.description': '这个地址在 {site} 上不存在。检查一下链接，或者回房间里看看。',
+  'notFound.description': '这个地址在 {site} 上不存在。检查一下链接，或者回首页看看。',
   'gamesPage.notFoundTitle': '找不到这个游戏',
   'gamesPage.notFound': '这个游戏不在游戏库里（可能已经被移除）。',
   'gamesPage.fallbackDescription': '《{title}》是一款 {console} 游戏。',
@@ -2573,12 +2532,7 @@ export function isLocale(value: unknown): value is Locale {
  *   localePath('zh', 'https://x.com') → 'https://x.com'  ← 外链原样放行
  *
  * 为什么 `/` 带 query 要特殊处理：`/zh/?id=3` 不是 `/zh` 的规范形式，
- * Next 会先 308 到 `/zh?id=3`，白白多一跳。
- *
- * ⚠️ 2026-10-13 拆首页之前，最常走这条分支的就是「在房间里打开某款游戏」那条深链
- *    （那时它是挂在 `/` 上的 `/?id=<游戏>`）。现在屋子挪到了 `/room`、深链成了
- *    `/room?id=`，走的是下面那条普通分支。**这个 `/?` 分支仍然留着** —— `/` 是首页，
- *    它照样可能带 query，留着是零成本的正确写法。
+ * Next 会先 308 到 `/zh?id=3`，白白多一跳。`/?` 分支留着 —— `/` 照样可能带 query。
  *
  * 外链那一条不是洁癖：漏掉它，`href="https://github.com/..."` 会变成
  * `https://github.com/...` 被当成相对路径，直接拼成 `/zh/https://...`。

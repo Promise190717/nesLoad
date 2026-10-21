@@ -105,19 +105,6 @@ function adminLocale(): Locale {
  */
 function publicRoute(request: NextRequest, locale: Locale, path: string): NextResponse {
   const url = request.nextUrl.clone();
-  // Keep old shared room links working before serving the static landing page.
-  if (path === '/') {
-    const old = new URLSearchParams();
-    for (const key of ['id', 'room']) {
-      const values = url.searchParams.getAll(key);
-      if (values.length === 1 && values[0].trim()) old.set(key, values[0].trim());
-    }
-    if (old.size) {
-      url.pathname = LOCALE_PREFIX[locale] + '/room';
-      url.search = old.toString();
-      return NextResponse.redirect(url, 307);
-    }
-  }
   /*
    * 旧目录地址的兼容改写（`/games?page=2`、`/consoles/nds?lang=zh` 这类）。
    *

@@ -125,7 +125,7 @@ export default async function DevelopersPage({
       label="DEVELOPERS"
       title={t('developersPage.heading')}
       intro={t('developersPage.intro', { count: data.total })}
-      back={{ href: localePath(locale, '/room'), label: 'common.back', mode: 'history' }}
+      back={{ href: localePath(locale, '/'), label: 'common.back', mode: 'history' }}
     >
       {data.developers.length === 0 ? (
         <p className="mt-8 text-[13px] text-ink-400">{t('developersPage.empty')}</p>

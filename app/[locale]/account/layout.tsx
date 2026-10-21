@@ -9,10 +9,10 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * 未登录 / 令牌过期 → **重定向到登录页**（`/login?next=/account`）。
  *
- * ⚠️ 2026-10-13 改过一次：那天之前前台**没有登录页** —— 登录是屋里那颗账号钮弹出来的
- * 浮层（`UserPanel`），所以守卫只能把人弹回 `/room?from=account`，让房间替他开好登录框。
+ * ⚠️ 2026-10-13 改过一次：那天之前前台**没有登录页** —— 登录是弹出来的浮层
+ * （`UserPanel`），守卫只能把人弹回首页让浮层替他开好登录框。
  * 现在有了独立登录页（`app/[locale]/login/page.tsx`），直接送去那儿更自然：
- * 少一次「闪回房间」的导航，登录完还能顺着 `?next=` 回到这一页。
+ * 少一次导航，登录完还能顺着 `?next=` 回到这一页。
  *
  * `next` 传的是**不带语言前缀**的站内路径（`/account`，不是 `/zh/account`）——
  * 拼前缀是登录页自己的事（见 `components/LoginPanel.tsx`）。

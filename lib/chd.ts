@@ -61,15 +61,41 @@ function readU64BE(bytes: Uint8Array, offset: number): number {
 }
 
 /**
- * 判一个 Blob 是不是**结构完整**的 CHD v5。
+ * 自检要的两样东西：**长度** + 按区间读两个小窗口。
  *
- * 只读两小段（文件头 128 字节 + map 头 16 字节），`Blob.slice()` 不会把整个文件
- * 读进内存，所以对 500 MiB 的盘也没有额外开销。
+ * 为什么不直接收 `Blob`：`/play` 从 7z 里解出来的盘在内存里是 `Uint8Array`
+ * （没有 `File`，见 `lib/unwrap.ts` 的 `UnwrappedEntry`）。为了读两个窗口把它包成
+ * `Blob` 就是整盘一次复制 —— 几百 MiB，正好抵掉字节通道省下来的内存。
+ * 抽象成「长度 + 读」之后，两种载体都是零拷贝。
  */
-export async function checkChdIntegrity(file: Blob): Promise<ChdIntegrity> {
-  if (file.size < HEADER_BYTES) return 'not-chd';
+export interface ChdSource {
+  size: number;
+  read(start: number, end: number): Promise<Uint8Array>;
+}
 
-  const head = new Uint8Array(await file.slice(0, HEADER_BYTES).arrayBuffer());
+/** 从 `Blob` / `File` 取源：`slice()` 不会把整个文件读进内存。 */
+export function blobChdSource(file: Blob): ChdSource {
+  return {
+    size: file.size,
+    read: async (start, end) =>
+      new Uint8Array(await file.slice(start, end).arrayBuffer()),
+  };
+}
+
+/** 从内存里的字节取源：`subarray()` 是视图，不复制。 */
+export function bytesChdSource(bytes: Uint8Array): ChdSource {
+  return { size: bytes.length, read: async (start, end) => bytes.subarray(start, end) };
+}
+
+/**
+ * 判一份内容是不是**结构完整**的 CHD v5。
+ *
+ * 只读两小段（文件头 128 字节 + map 头 16 字节），对 500 MiB 的盘也没有额外开销。
+ */
+export async function checkChdIntegrity(source: ChdSource): Promise<ChdIntegrity> {
+  if (source.size < HEADER_BYTES) return 'not-chd';
+
+  const head = await source.read(0, HEADER_BYTES);
   if (head.length < HEADER_BYTES) return 'not-chd';
   for (let i = 0; i < CHD_TAG.length; i += 1) {
     if (head[i] !== CHD_TAG[i]) return 'not-chd';
@@ -89,13 +115,11 @@ export async function checkChdIntegrity(file: Blob): Promise<ChdIntegrity> {
   // 0 表示 map 还没写过（只出现在正在创建的盘上），不是我们该管的文件。
   if (mapOffset === 0) return 'unknown';
 
-  if (mapOffset + MAP_HEADER_BYTES > file.size) return 'truncated';
+  if (mapOffset + MAP_HEADER_BYTES > source.size) return 'truncated';
 
-  const mapHead = new Uint8Array(
-    await file.slice(mapOffset, mapOffset + MAP_HEADER_BYTES).arrayBuffer()
-  );
+  const mapHead = await source.read(mapOffset, mapOffset + MAP_HEADER_BYTES);
   if (mapHead.length < MAP_HEADER_BYTES) return 'truncated';
 
   const mapBytes = readU32BE(mapHead, 0);
-  return mapOffset + MAP_HEADER_BYTES + mapBytes > file.size ? 'truncated' : 'ok';
+  return mapOffset + MAP_HEADER_BYTES + mapBytes > source.size ? 'truncated' : 'ok';
 }

@@ -42,7 +42,7 @@ export const zhTW: Record<MessageKey, string> = {
     '在瀏覽器裡直接玩復古遊戲：FC（紅白機）、SFC（超任）、GBA、Game Boy、Mega Drive、街機等十幾種機種都能跑。從線上遊戲庫挑一款，或載入自己的 ROM 檔案，打開就能玩、免安裝。',
   'meta.keywords':
     '復古遊戲, 線上遊戲庫, 線上玩 FC, FC 模擬器, 紅白機, NES 模擬器, SFC 模擬器, 超任, GBA 模擬器, GBA 遊戲, Game Boy Advance, Game Boy 模擬器, GBC 模擬器, NDS 模擬器, NDS 遊戲, 任天堂 DS, Mega Drive 模擬器, MD 遊戲, Game Gear, Master System, 32X, WonderSwan, Neo Geo Pocket, PlayStation 模擬器, PS1 模擬器, PSX 模擬器, 街機模擬器, 瀏覽器模擬器, 網頁模擬器, 免安裝, {site}',
-  /* 房間頁（`/room`）自己的 meta，標題不寫 {site}，模板會補 */
+  /* 下線頁面的 meta，標題不寫 {site}，模板會補 */
   'seo.room.title': '像素小屋 —— 用瀏覽器玩復古遊戲',
   'seo.room.description':
     '走進像素小屋：FC（紅白機）、SFC（超任）、GBA、Game Boy、Mega Drive 和街機遊戲都跑在電視上。從線上遊戲庫挑一款，或把自己的 ROM 檔案拖到螢幕上。',
@@ -597,7 +597,7 @@ export const zhTW: Record<MessageKey, string> = {
   'gamesPage.searchEmpty': '找不到符合「{keyword}」的遊戲，換個短一點的詞，或直接搜尋遊戲名稱。',
   'gamesPage.prev': '上一頁',
   'gamesPage.next': '下一頁',
-  'gamesPage.backHome': '回到房間',
+  'gamesPage.backHome': '回到首頁',
   'gamesPage.backToGames': '全部遊戲',
   'common.back': '返回',
   'common.home': '首頁',
@@ -608,7 +608,7 @@ export const zhTW: Record<MessageKey, string> = {
   'gamesPage.shareFailed': '複製失敗',
   'gamesPage.favorite': '收藏',
   'gamesPage.unfavorite': '已收藏',
-  'gamesPage.favoriteSignIn': '登入後才能收藏 —— 點房間右上角那顆帳號鈕登入。',
+  'gamesPage.favoriteSignIn': '登入後才能收藏 —— 點右上角頂欄那顆登入鈕。',
   'gamesPage.favoriteFailed': '收藏沒能更新，請重試。',
   'gamesPage.favoriteCount': '{n} 人收藏',
   'gamesPage.report': '回報問題',
@@ -656,7 +656,7 @@ export const zhTW: Record<MessageKey, string> = {
   'gamesPage.controls': '操作說明',
   'gamesPage.selectLanguage': '選擇語言',
   'notFound.title': '這個頁面不存在',
-  'notFound.description': '這個網址在 {site} 上不存在。檢查一下連結，或回房間裡看看。',
+  'notFound.description': '這個網址在 {site} 上不存在。檢查一下連結，或回首頁看看。',
   'gamesPage.notFoundTitle': '找不到這個遊戲',
   'gamesPage.notFound': '這個遊戲不在遊戲庫裡（可能已經被移除）。',
   'gamesPage.fallbackDescription': '《{title}》是一款 {console} 遊戲。',

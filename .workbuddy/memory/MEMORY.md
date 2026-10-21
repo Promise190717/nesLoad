@@ -23,7 +23,10 @@
 - 14 台全走本站 `public/cores/`（部署必须一起传，否则 404）；arcade 按 romset 挑 `fbneo`/`fbalpha2012_cps1`，驱动纠正进 `lib/arcade-core.ts` 的 `EXTRA_DRIVERS`（别写 `arcade-romsets.json`，只盖 CPS1）。NDS 的 melonds 是 EJS 核，控制/输入面另套（见 DETAILS）。
 - CD 机种（PS1/Sega CD/PCE CD）架构未通。`SCREEN_WIDTH/HEIGHT=720×540` 只是启动基准（NDS 256×384），显示尺寸在 globals.css。
 - 压缩包里内层不是 `lib/unwrap.ts` 的 `ROM_EXTENSIONS` 白名单 ⇒ 包不被拆 ⇒ `detectConsole` 见 `PK` 判街机 ⇒ FBNeo 报错（7z 改名 `.zip`、世嘉裸卡带叫 `.bin` 都栽在这条）。世嘉 `.bin` 由 `pickSegaCartEntry` 按文件头（0x100 `SEGA` / 0x7FF0 `TMR SEGA`）单独兜；这两条指纹在 `unwrap.ts` 与 `emulator.ts` 里**手抄两份、改一处必须同步**（反向 import 成环）。
-- 🔴 **退出必须先 `dropContentFiles()` 再 `exit()`**（2026-10-21 实测后加）：MEMFS 里那盘 ROM（`canOwn=true` 的那块 `Uint8Array`）在 Emscripten 实例退出后**几轮 GC 都不回收**，每进出一次钉住一盘（125.7 MiB 的 bin ⇒ +129 MB/轮，三轮 136→265→394 MB 线性叠加）。`EmulatorController.exit()` 现在两个分支都会先 unlink `CONTENT_DIRECTORY`。看到「返回后内存不降」先查这条；残留 ~70 MB/次是核心 wasm 堆，量级小一个数量级，未追。
+- **机种优先级**（2026-10-21）：`unwrapped.console` → `loadRom` 第 6 参 `consoleHint`（`/play` 传库里 `game.consoleType`）→ `detectConsole`。房间页下线后前台只剩 `/play`，它只开库里已有的游戏 ⇒ 嗅探实际只服务后台导入（`AdminGames` 用 `romFileOf()` 现建 File）。**别在 `/play` 这条路上为了嗅探把 7z 解出的字节包成 `File`** —— 那是整盘一次复制。
+- **`UnwrappedEntry.file` / `bytes` 二选一**（`lib/unwrap.ts`）：7z 解出来的条目只带 `Uint8Array`，`writeRomIntoFs` 用 `createDataFile(canOwn=true)` 让 MEMFS 认领，零拷贝；zip 那条仍给 `File`（`new File([blob])` 只是引用）。任何需要 `File` 的地方（`detectConsole` / `checkChdIntegrity`）都不能先包一层 —— `checkChdIntegrity` 已改成 `ChdSource`（`blobChdSource` / `bytesChdSource`）。大文件分流一律看 `entry.size`，别看 `file.size` / `bytes.length`。
+- **7z 走 wasm（2026-10-21 换）**：`public/compression/` = `extract7z-wasm.js`（手写 worker）+ `7zz.umd.js` + `7zz.wasm`（npm `7z-wasm@1.2.0` / 7-Zip 24.09，两份许可证同目录）。旧的 EJS asm.js `extract7z.js` **已删**，那段「打过 transfer 补丁、换文件会丢补丁」的历史随之作废。主线程 `postMessage(Blob)`（**不再 `arrayBuffer()` + transfer**）：worker 用 emscripten **WORKERFS** 挂 Blob，输入侧零复制（mount 里有 `assert(ENVIRONMENT_IS_WORKER)`）。读回时 `FS.readFile` 给的是「精确长度 + 更大 buffer」的视图（MEMFS 1.125 倍几何扩容），**直接 transfer，下游一律按 `.length` 用；既不 slice，也绝不许拿 `bytes.buffer` 当整体内容**。别改成「精确扩容」—— 7-Zip 边写边扩，会退化成 O(n²)（同一包 16.2 s→74.1 s、内存 3.8 GB）。进度从 stdout 逐字符抠（7z 用 `\b` 重画，`print` 行缓冲永远等不到换行）；worker 内失败走 `{t:9}`（async 流程的未捕获 rejection 不触发 `onerror`）。**实测同一个 PS1 包（265 MB→692 MB）：旧 asm.js 42.6 s → 新 wasm 19.0 s，2.2 倍**（别再引用「5–10 倍」，那是按 NDS 小包外推的错数）`unwrapRom` 收 `AbortSignal`、取消要 `terminate()` worker 且**不吞** abort（「解不开」才吞）。
+- 🔴 **退出必须先 `dropContentFiles()` 再 `exit()`**（2026-10-21 实测后加）：MEMFS 里那盘 ROM（`canOwn=true` 的那块 `Uint8Array`）在 Emscripten 实例退出后**几轮 GC 都不回收**，每进出一次钉住一盘（125.7 MiB 的 bin ⇒ +129 MB/轮，三轮 136→265→394 MB 线性叠加）。`EmulatorController.exit()` 现在两个分支都会先 unlink `CONTENT_DIRECTORY`。看到「返回后内存不降」先查这条；残留 ~70 MB/次是核心 wasm 堆，量级小一个数量级，未追。**载入途中离开**是另一条：`this.instance` 只在 launch resolve 后赋值，那时 `exit()` 空转 → 用 `launching`/`exitRequested` 记一笔、落地后当场 `exit()`（这条只在 `loadRom` 内部修，调用方不兜底）。判据口诀：离开时能进 `exit()` 且 instance 非 null 才清得掉。
 
 ## 数据库 = Supabase（2026-10-20 切换，D1/双源逻辑废弃）
 
@@ -48,14 +51,14 @@
 - ⚠️ 别再给目录页加**新的**查询参数：`middleware` 的 `catalogRewrite` 还在，但它现在**只兜旧外链**（`/games?page=2` 之类）—— 新参数走它就会退回「点一下整页刷新」。地址构造器唯一出口：`gamesHref` / `consoleHref`（页内）、`pageHref`（pager）。
 - 缓存唯一出口 `lib/server/cache.ts` 的 `cached()`；条目不随部署失效 ⇒ 改数据/查询形态必须键尾版本 +1。缓存留在页侧不下沉数据层。
 - 「我是谁」唯一出口 `lib/current-user.ts` 的 `fetchCurrentUser()`（登录/退出必须 remember/forget）；`/login`、`/account` 的 `<Link>` 一律 `prefetch={false}`。
-- `/play` = `/room` 另一个壳（PlayScene + GamesShell，showHeader={false}），`?id=` 会自动载入开玩。`?lang=` 两处语义不同：机种页筛游戏、`/play` 选 ROM 版本。
+- `/play` 是**唯一**的开局页（PlayScene + GamesShell）。`?id=` 会自动载入开玩、`?room=<码>` 当加入者。`?lang=` 两处语义不同：机种页筛游戏、`/play` 选 ROM 版本。
 - 真路由 `/games`(15/页) `/games/[id]`(+`/download`) `/consoles`(+`/[type]`) `/developers`(+`/[id]`) `/play` `/privacy` `/terms`；404 一页盖详情+下载。
-- 存档 = 电池存档 `.srm` 一款一份（快照那套已删别加回）；唯一出口 `saveBattery()`/`stageBatterySave()`；读档 = 带存档重新插卡（`/room` remountRom、`/play` applySave）。
-- `/room` 「游戏库」入口注释式隐藏（三处一起才能恢复）；首页第二颗钮「游玩本地 ROM」→ `/room`。
+- 存档 = 电池存档 `.srm` 一款一份（快照那套已删别加回）；唯一出口 `saveBattery()`/`stageBatterySave()`；读档 = 带存档重新插卡（`/play` applySave）。
+- 🔴 **房间页永久下线**（2026-10-21 用户要求）：代码挪到 `app/[locale]/_room`（`_` 前缀不进路由），`/room` **没有任何入口、也没有任何地址能打开**。别再给它加入口、别再写进 sitemap / ai-policy、别在任何注释里把它当活页面引用（跨文件指向它的注释已清干净）。首屏那颗「游玩本地 ROM」钮随之删除；404 与各处 BackLink 兜底改回 `/`。
 
 ## 部署 / 校验
 
-- ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /room /privacy /terms）；发版后 purge CF。
+- ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /privacy /terms）；发版后 purge CF。
 - 大 ROM 唯一下载路 `lib/http.ts` 的 `fetchRomWithProgress`；`readBodyWithProgress` 只给存档类小文件。R2 无版本控制，删 ROM 永久丢。
 - **ROM 自持范围 = 除 `gba` / `nds` / `ps1` 之外全部**（2026-10-21 用户扩围：arcade/nes/snes 之后又搬 md/gbc/gb/gg/sms/ws/32x/ngp 共 323 行 305 MiB，无一失败；全库现 1216/4047 行、R2 共约 **4.20 GiB**）。剩 gba(1154 行，估 4 GiB 上下)/nds(1107)/ps1(562) 仍回上游 `files:`/`site:`。脚本默认排除表已改成 `gba,nds,ps1`。键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、`--console=` 非空时完全取代默认排除表、写 `size_bytes`）。`route.ts` 取片**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
 - ⚠️ **md 的卡带扩展名就是 `.md`**，上游按 `text/markdown` 回、不带 content-length（字节是真卡带 `00 ff fe`）。`migrate-roms-to-r2.mjs` 的判据因此不能写成「一律拒 `text/*`」（2026-10-21 已改成分层：`HTML_LIKE` 拦 html/json/xml，`text/*` 再看响应体首字节是不是 `<`/`{`）。另注：`route.ts` 的 `HTML_LIKE` 仍是宽版 `^text/`，所以 `.md` 这类 ROM **只在本站 R2 上能放**，回上游那条路会 502。

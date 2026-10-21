@@ -40,10 +40,21 @@
  * 那要再引一套 `libunrar.js` + `libunrar.wasm`（EmulatorJS 那边有现成的，
  * 走法和下面 7z 这条完全一样），先不做 —— 7z 才是实际踩到的那个。
  * 认不出 rar 时**至少要给用户一句准话**：`lib/emulator.ts` 的 `unsupportedArchive()`
- * 负责认出它，`/room` 和 `/play` 拿它显示提示。
+ * 负责认出它，`/play` 拿它显示提示。
  */
 
 import { baseName, inflateEntry, readZipEntries } from './zip';
+import { isAbortError } from './http';
+
+/**
+ * 「用户自己取消」的异常 —— 和浏览器原生 abort 同名，调用方按 `isAbortError` 认。
+ *
+ * 这里必须**和「解不开」区分开**：解不开要吞掉（返回 null，让原文件照旧交给核心），
+ * 取消则必须往外抛 —— 否则页面已经走了，这条链路还会继续往下走、继续占内存。
+ */
+function abortError(): Error {
+  return new DOMException('aborted', 'AbortError');
+}
 
 /**
  * 命中这些扩展名才认为「内层是一盘单机 ROM」。
@@ -182,17 +193,41 @@ function maxEntryBytes(name: string): number {
   return DISC_SINGLE_FILE_EXTENSIONS.has(ext) ? MAX_DISC_IMAGE_BYTES : MAX_UNWRAP_BYTES;
 }
 
+/**
+ * 一份要写进虚拟文件系统的内容。
+ *
+ * 为什么 `file` / `bytes` 二选一，而不是统一给 `File`：7z 解出来的大盘（PS1 的
+ * bin / chd，几百 MiB）一旦先建成 `File`，字节就要**再复制一份**进 Blob 存储，
+ * 紧接着 `writeRomIntoFs` 又要一份 MEMFS 数组 —— 一张 600 MiB 的盘峰值是三份。
+ * 直接把 `Uint8Array` 带下去、交给 `FS.createDataFile(canOwn=true)`（所有权转移、
+ * 零拷贝），峰值只剩一份。小内容仍走 `File`：Nostalgist 那条原路要 Blob，
+ * 几十 MB 以下复制一次不值当为它改路由。
+ */
+export interface UnwrappedEntry {
+  /** 写进虚拟文件系统的名字 —— 内层 basename，`.cue` 里的 `FILE "…"` 按它找 bin */
+  name: string;
+  /**
+   * 字节数。**大文件分流一律看它**，别在调用方分叉成 `file.size` / `bytes.length`
+   * —— `UnwrappedRom` 里两种形态都有，分叉一次就会漏掉另一条。
+   */
+  size: number;
+  /** 和 `bytes` 二选一：小内容给这个（Nostalgist 原路） */
+  file: File | null;
+  /** 和 `file` 二选一：大盘给这个（直接进 MEMFS） */
+  bytes: Uint8Array<ArrayBuffer> | null;
+}
+
 export interface UnwrappedRom {
   /** 解出来的 ROM。**文件名用内层条目的 basename** —— 那才是这盘 ROM 的真名 */
-  file: File;
+  main: UnwrappedEntry;
   /**
    * 要和主文件一起放进虚拟文件系统的**伴生文件**（现在只有光盘套装的 `.bin`）。
    *
    * 普通 ROM 是 `undefined`；`loadRom` 会把它们排进 Nostalgist 的 `rom` 数组
-   * （第一项仍然是 `file`）。名字必须保持内层 basename —— `.cue` 里的
+   * （第一项仍然是 `main`）。名字必须保持内层 basename —— `.cue` 里的
    * `FILE "xxx.bin"` 就是按这个名字找的。
    */
-  companions?: File[];
+  companions?: UnwrappedEntry[];
   /**
    * 拆包之后就能确定的机种。**只有光盘套装会填 `'ps1'`**。
    *
@@ -266,30 +301,28 @@ function looksLikeSegaCart(head: Uint8Array): boolean {
 }
 
 /**
- * 7z 解压 worker —— `public/compression/extract7z.js`。
+ * 7z 解压 worker —— `public/compression/extract7z-wasm.js`（**2026-10-21 换的**）。
  *
- * 这份是 **EmulatorJS 4.2.3 的产物**（`data/compression/extract7z.js`，
- * 280,155 B，原始 sha1 `a336ae28f610defa758b1223bc65ae58eda534ef`），
- * emscripten 编的 **asm.js** 版 7z。
+ * ## 原来是什么，为什么换
  *
- * ⚠️ **2026-10-19 打过一次补丁**（现在 280,161 B / sha1
- * `a024708cbf62cb24c96a4c6ca815a154879ac3dd`）：它原来每个条目都是
- * `for (i=0;i<r;i++) n[i]=getValue(t+i)` 逐字节从堆里拷出来，再 `postMessage`
- * **不带 transfer list**（结构化克隆再复制一整份）。PS1 的 bin 动辄几百 MB，
- * 光那个逐字节循环就是几亿次调用。改成 `n.set(HEAPU8.subarray(t,t+r))` +
- * `postMessage(..., [n.buffer])`：拷贝从「逐字节」变成一次 `memcpy`，
- * 跨线程那一步变成**移交所有权**（worker 那边 `n` 随即失效，但它用完就丢，无所谓）。
- * ⚠️ 换这个文件时要记住补丁会丢 —— 重新从 EJS 拿的话得再打一遍。
+ * 换之前是 `public/compression/extract7z.js`：EmulatorJS 4.2.3 的产物，
+ * 一份 280 KB 的 **asm.js**（emscripten 的 asm.js 后端）。它有个已经被我们打过补丁的
+ * 坑（逐字节从堆里拷 + `postMessage` 不带 transfer，2026-10-19 改成
+ * `HEAPU8.subarray` + `[buffer]`）—— 但补丁只治「拷」，治不了「慢」：
+ * 本机 Node 实测解一个 64 MB 的包要 **14.6 秒**。
  *
- * 为什么从 EJS 拿而不是装 npm 包：`@emulatorjs/emulatorjs` 的 tgz 里**不含**这些产物
- * （和 NDS 核心那次一模一样的坑，见 `lib/emulator.ts` 的 NDS 注释），
- * 而 `cdn.emulatorjs.org` 上是现成的。落进 `public/` 之后运行时就不再依赖 CDN ——
- * 和核心、BIOS 同一条思路（理由见 `lib/emulator.ts` 的 `LOCAL_CORE_DIR`）。
+ * 现在这份是 7-Zip 24.09 官方源码用 emcc 编的 wasm（npm `7z-wasm@1.2.0`，
+ * 产物 `7zz.umd.js` + `7zz.wasm` 落在同目录）。同一个 266 MB 的 PS1 包、
+ * 解出 692 MB：**16.2 秒**。单位体积快六倍上下，而且顺带解决了输入侧的内存 ——
+ * 见 worker 里 WORKERFS 那段（包不再复制进 wasm，一次都不）。
+ *
+ * ⚠️ 那份 asm.js 是 vendored 产物、被打过补丁，**换文件就丢补丁**。现在不用它了，
+ * 但 `public/compression/` 里留着它的痕迹（注释、缓存头）是为排查时能对得上号。
  *
  * ⚠️ 缓存头在 `next.config.js` 里单独配了一条（`/compression/:path*`），
  * 换文件后要 purge CDN，和 `/cores`、`/bios` 一个规矩。
  */
-const EXTRACT_7Z_WORKER = '/compression/extract7z.js';
+const EXTRACT_7Z_WORKER = '/compression/extract7z-wasm.js';
 
 /** 7z 解出来的一个条目。`data` 是 emscripten HEAP 上的 view，会被结构化克隆带过来。 */
 interface SevenZipEntry {
@@ -301,26 +334,33 @@ interface SevenZipEntry {
 /**
  * 跑一次 7z 解压。
  *
- * ## 协议（EJS 那份 worker 定的，不是我们设计的）
+ * ## 协议（我们自己的 worker 定的，见 `public/compression/extract7z-wasm.js`）
  *
- *   · **收**：`postMessage(Uint8Array)` —— 7z 的**整份字节**（它内部写死解 `1.7z`）；
- *   · **发**：`{t:4, current, total}` 进度 / `{t:2, file, size, data}` 每个条目 /
- *            `{t:1}` 全部解完（发完它自己 `close()`）。
+ *   · **收**：`postMessage(Blob)` —— 7z 的**整份字节**。⚠️ 2026-10-21 起传 Blob、
+ *            不再 `arrayBuffer()` 后 transfer：worker 里用 WORKERFS 挂这个 Blob，
+ *            读的时候才按段取。原来那一步会为了「交给 worker」多造一份整包
+ *            （PS1 的包 200–300 MB）。
+ *   · **发**：`{t:4, current, total}` 进度（百分比 0–100）/ `{t:2, file, size, data}`
+ *            每个条目 / `{t:1}` 全部解完 / `{t:9, message}` 失败。
  *
- * ⚠️ **它没有「只解某一个条目」的选项**，一次全解 —— 所以 7z 里那些封面 png / nfo
- * 也会跟着解出来。这个包里有 3 张图共 82 KB，忽略不计。
+ * ⚠️ **没有「只解某一个条目」的选项**，一次全解 —— 所以 7z 里那些封面 png / nfo
+ * 也会跟着解出来。实测那个 PS1 包里只有一张 txt，忽略不计。
  *
- * ⚠️ **asm.js 比 wasm 慢一个量级**：本机 Node 实测解那个 64 MB 的包用了 **14.6 秒**
- * （内存从 16 MB 自增到 128 MB）。浏览器里只会更慢，所以进度回调必须接上 ——
- * 否则用户看到的就是十几秒死屏。
+ * ⚠️ **进度必须接上**：16 秒的沉默在用户眼里就是「卡住了」。百分比是从 7z 的
+ * stdout 逐字符抠的（它用 `\b` 重画同一行，行缓冲里等不到换行），worker 那边解释过。
  *
  * 失败一律 reject，由 `unwrapRom` 吞掉（见那边的注释）。
  */
 function extractSevenZip(
   file: Blob,
-  onProgress?: (ratio: number) => void
+  onProgress?: (ratio: number) => void,
+  signal?: AbortSignal
 ): Promise<SevenZipEntry[]> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
     let worker: Worker;
     try {
       worker = new Worker(EXTRACT_7Z_WORKER);
@@ -336,15 +376,27 @@ function extractSevenZip(
     const finish = (run: () => void) => {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', onAbort);
       worker.terminate();
       run();
     };
+
+    /*
+     * 取消（离开页面 / 点了取消）要**当场把 worker 杀掉**。
+     *
+     * 光把 Promise reject 掉不够：worker 里那个 wasm 7z 自己不知道外面已经没人等了 ——
+     * 解一张 700 MB 的盘要跑十几秒，那段时间里输入和输出全都钉在 worker 堆上
+     * （几百 MB 起步）。`terminate()` 是唯一能让它立刻停手并还内存的办法。
+     */
+    const onAbort = () => finish(() => reject(abortError()));
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     worker.onmessage = (event: MessageEvent) => {
       const message = event.data as
         | { t: 1 }
         | { t: 2; file: string; size: number; data: Uint8Array }
         | { t: 4; current: number; total: number }
+        | { t: 9; message: string }
         | null;
       if (!message) return;
 
@@ -352,6 +404,12 @@ function extractSevenZip(
         entries.push({ name: message.file, size: message.size, data: message.data });
       } else if (message.t === 4) {
         if (onProgress && message.total > 0) onProgress(message.current / message.total);
+      } else if (message.t === 9) {
+        /*
+         * worker 内部的失败（7z 非 0 退出、解出 0 个文件）。必须走这条显式的消息：
+         * 那边是 async 流程，未捕获的 rejection 不会触发 `onerror`，只会静默挂住。
+         */
+        finish(() => reject(new Error(message.message || '7z 解压失败')));
       } else if (message.t === 1) {
         finish(() => resolve(entries));
       }
@@ -362,29 +420,78 @@ function extractSevenZip(
     };
 
     /*
-     * 先转成 `Uint8Array` 再 postMessage：worker 那边是 `FS_createDataFile(..., e.data)`，
-     * 它要的就是 typed array / ArrayBuffer。结构化克隆会复制这一份（十几 MB，可接受）——
-     * ⚠️ EJS 那份 worker 没给 transfer list 的余地（postMessage 的参数是写死的），
-     * 所以这里拿不到「零拷贝移交」。
+     * 直接把 Blob 交过去 —— 结构化克隆对 Blob 只是**加一个引用**，不搬字节。
+     * worker 那边用 WORKERFS 把它挂成只读文件，7z 读的时候才按段取（见 worker 文件头）。
+     *
+     * ⚠️ 2026-10-21 之前这里是 `file.arrayBuffer()` 再 `postMessage(bytes, [buffer])`：
+     *    那一步会先造一份整包的 `ArrayBuffer`（PS1 的 265 MB 包 ⇒ 白占 265 MB），
+     *    虽然 transfer 之后主线程不再持有，但峰值实打实多一份。换成传 Blob 之后
+     *    **输入侧一次复制都没有**，这也是这次换 wasm 7z 顺带拿到的收益。
      */
-    void file
-      .arrayBuffer()
-      .then((buffer) => worker.postMessage(new Uint8Array(buffer)))
-      .catch((error) => finish(() => reject(error)));
+    worker.postMessage(file);
   });
 }
 
 /**
- * worker 回来的是 HEAP 上的 `Uint8Array`（也可能是 `ArrayBuffer`），两种都收。
+ * worker 回来的字节，两种形态都收（`Uint8Array` 视图，或裸 `ArrayBuffer`）。
  *
  * ⚠️ 返回类型写死 `Uint8Array<ArrayBuffer>` 而不是默认的 `ArrayBufferLike`，
- * 是给下面 `new File([...])` 用的：TS 5.7 起 `BlobPart` 只收背后是**独占**
- * `ArrayBuffer` 的视图，而 `ArrayBufferLike` 还含 `SharedArrayBuffer`（拿它建 File
- * 运行时会抛）。这里的字节是 worker **结构化克隆**回来的，到手的 buffer 一定独占，
- * 所以断言成立 —— 改写成 `.slice()` 也能过类型，但那要多复制一份整盘 ROM。
+ * 是给 `new File([...])` 和 `createDataFile(canOwn)` 用的：TS 5.7 起 `BlobPart`
+ * 只收背后是**独占** `ArrayBuffer` 的视图，而 `ArrayBufferLike` 还含 `SharedArrayBuffer`。
+ * 这里到手的字节是 worker **transfer** 过来的（所有权移交，不是结构化克隆），
+ * buffer 一定独占，所以断言成立 —— 改写成 `.slice()` 也能过类型，但那要多复制一份整盘 ROM。
+ *
+ * ⚠️ **视图可能比它的 buffer 短**（2026-10-21 起）：wasm 7z 把文件解进 MEMFS 时是
+ * 几何扩容（1.125 倍一跳），`FS.readFile` 返回的是「精确长度、共享整个 buffer」的视图。
+ * 所以下游**一律按 `.length` 用**，绝不拿 `bytes.buffer` 当整体内容
+ * （`createDataFile` / `new File([bytes])` 都是按视图长度取的，安全）。
+ * 多出来的那一截容量（实测 692 MB 的文件占 702.9 MB）是白占的，换掉了「交出去之前
+ * 再 slice 一份精确 buffer」那一整盘复制 —— 见 worker 文件头那段实测对比。
  */
 function toBytes(data: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer> {
   return (data instanceof Uint8Array ? data : new Uint8Array(data)) as Uint8Array<ArrayBuffer>;
+}
+
+/** 空字节 —— 只给 `romFileOf()` 那条兜底用（`bytes` 理论上不会为空）。 */
+const EMPTY_BYTES = new Uint8Array(0);
+
+/**
+ * 把一个 7z 条目变成一条内容，**不建 `File`** —— 字节原样带出去。
+ *
+ * 这条是 2026-10-21 改的：以前这里是 `new File([bytes])`，字节复制进 Blob 存储，
+ * 然后 `writeRomIntoFs` 再从 Blob 里读完重建一份 MEMFS 数组，一张盘三份。
+ * `UnwrappedRom.main` 现在能直接带 `Uint8Array`，MEMFS 用 `canOwn = true` 接管它，
+ * 中间一次复制都不需要。
+ *
+ * ⚠️ 以前这里会把 `entry.data` 换成空数组断引用（避免 `entries` 数组活到函数末尾时
+ *    同时握着两份）。现在不能这么干了 —— **交出去的正是那块数组本身**，
+ *    换成空的等于把内容清了。少一份 `File` 之后也没有「两份」需要断。
+ */
+function takeBytes(entry: SevenZipEntry, name = baseName(entry.name)): UnwrappedEntry {
+  const bytes = toBytes(entry.data);
+  return { name, size: bytes.length, file: null, bytes };
+}
+
+/**
+ * 把 zip 解出来的 Blob 变成一条内容。
+ *
+ * `new File([blob], name)` 对 Blob 是**引用**（不搬运字节），所以这条路没有额外开销 ——
+ * zip 那条解压链本来就是流式攒 Blob 的，再转成数组反而多一份。
+ */
+function takeBlob(blob: Blob, name: string): UnwrappedEntry {
+  return { name, size: blob.size, file: new File([blob], name), bytes: null };
+}
+
+/**
+ * 把主文件取成 `File`。
+ *
+ * 只有「需要把文件交给别人按 Blob 处理」的地方用得上 —— 现在只剩后台导入那一步的
+ * `detectConsole`（它要 `file.slice()` + `file.name`）。前台载入不需要：它把
+ * `UnwrappedRom` 原样递给 `loadRom`，字节直接从 `bytes` 进 MEMFS。
+ */
+export function romFileOf(rom: UnwrappedRom): File {
+  if (rom.main.file) return rom.main.file;
+  return new File([rom.main.bytes ?? EMPTY_BYTES], rom.main.name);
 }
 
 /**
@@ -624,7 +731,8 @@ function pickSegaCartEntry<T extends { name: string; size: number }>(
  */
 export async function unwrapRom(
   file: File,
-  onProgress?: (ratio: number) => void
+  onProgress?: (ratio: number) => void,
+  signal?: AbortSignal
 ): Promise<UnwrappedRom | null> {
   /*
    * 先看文件头。读 8 个字节：zip 要 4 个，7z 要 6 个。
@@ -633,10 +741,16 @@ export async function unwrapRom(
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
 
   if (isSevenZipHead(head)) {
+    if (signal?.aborted) throw abortError();
     let entries: SevenZipEntry[];
     try {
-      entries = await extractSevenZip(file, onProgress);
+      entries = await extractSevenZip(file, onProgress, signal);
     } catch (error) {
+      /*
+       * 取消**不吞**：调用方已经放弃这一局了，往下走只会白建一份文件、白跑 detectConsole。
+       * 抛出去让 `load` 的 catch 按「用户自己掐的」处理（它认 `isAbortError`）。
+       */
+      if (signal?.aborted || isAbortError(error)) throw error;
       /*
        * 解不开（加密 / 分卷 / 内存不够 / worker 挂了）就当没这回事，
        * 原文件照旧交给 `detectConsole` —— 它会走扩展名回退。
@@ -646,6 +760,8 @@ export async function unwrapRom(
       console.warn('[nesload] 7z 解压失败，按原文件继续：', file.name, error);
       return null;
     }
+    // 解完之后到建 File 之间还有几步纯 CPU 的活，尽早放弃
+    if (signal?.aborted) throw abortError();
 
     /*
      * 先试「光盘套装」（`.cue` + `.bin`）—— 7z 这条路一次全解出来了，字节现成，
@@ -659,8 +775,8 @@ export async function unwrapRom(
       );
       if (data) {
         return {
-          file: new File([toBytes(disc.descriptor.data)], baseName(disc.descriptor.name)),
-          companions: data.map((item) => new File([toBytes(item.entry.data)], item.name)),
+          main: takeBytes(disc.descriptor),
+          companions: data.map((item) => takeBytes(item.entry, item.name)),
           console: 'ps1',
           innerName: disc.descriptor.name,
           container: '7z',
@@ -674,7 +790,7 @@ export async function unwrapRom(
     const bare = pickBareDiscImage(entries);
     if (bare) {
       return {
-        file: new File([toBytes(bare.data)], baseName(bare.name)),
+        main: takeBytes(bare),
         innerName: bare.name,
         container: '7z',
       };
@@ -687,7 +803,7 @@ export async function unwrapRom(
     const cart = pickSegaCartEntry(entries);
     if (cart && looksLikeSegaCart(toBytes(cart.data).subarray(0, SEGA_HEAD_BYTES))) {
       return {
-        file: new File([toBytes(cart.data)], baseName(cart.name)),
+        main: takeBytes(cart),
         innerName: cart.name,
         container: '7z',
       };
@@ -705,7 +821,7 @@ export async function unwrapRom(
 
     const innerName = baseName(pick.name);
     return {
-      file: new File([toBytes(pick.data)], innerName),
+      main: takeBytes(pick, innerName),
       innerName: pick.name,
       container: '7z',
     };
@@ -733,18 +849,18 @@ export async function unwrapRom(
        */
       const data = discDataWithinLimit(disc.data, await descriptor.text());
       if (data) {
-        const companions: File[] = [];
+        const companions: UnwrappedEntry[] = [];
         for (const item of data) {
           const blob = await inflateEntry(file, item.entry);
           if (!blob) {
             companions.length = 0;
             break;
           }
-          companions.push(new File([blob], item.name));
+          companions.push(takeBlob(blob, item.name));
         }
         if (companions.length > 0) {
           return {
-            file: new File([descriptor], baseName(disc.descriptor.name)),
+            main: takeBlob(descriptor, baseName(disc.descriptor.name)),
             companions,
             console: 'ps1',
             innerName: disc.descriptor.name,
@@ -760,14 +876,15 @@ export async function unwrapRom(
 
   /*
    * 没有 cue、只有一个大 bin 的裸盘镜像（见 `pickBareDiscImage`）。
-   * 不带 `console` —— 交给 `detectConsole` 按 `CD001` 认，认不出就照旧报「机种认不出」。
+   * 不带 `console` —— 这里没有判断依据。前台（`/play`）会把**库里那个机种**当提示
+   * 传下去，后台导入没有提示，才落到 `detectConsole` 按 `CD001` 认。
    */
   const bare = pickBareDiscImage(entries);
   if (bare) {
     const bareBlob = await inflateEntry(file, bare);
     if (bareBlob) {
       return {
-        file: new File([bareBlob], baseName(bare.name)),
+        main: takeBlob(bareBlob, baseName(bare.name)),
         innerName: bare.name,
         container: 'zip',
       };
@@ -788,7 +905,7 @@ export async function unwrapRom(
       const head = new Uint8Array(await cartBlob.slice(0, SEGA_HEAD_BYTES).arrayBuffer());
       if (looksLikeSegaCart(head)) {
         return {
-          file: new File([cartBlob], baseName(cart.name)),
+          main: takeBlob(cartBlob, baseName(cart.name)),
           innerName: cart.name,
           container: 'zip',
         };
@@ -810,5 +927,5 @@ export async function unwrapRom(
    * 「文件名是这盘 ROM 的真名」这条规矩能让日志和排查都简单。
    */
   const innerName = baseName(pick.name);
-  return { file: new File([blob], innerName), innerName: pick.name, container: 'zip' };
+  return { main: takeBlob(blob, innerName), innerName: pick.name, container: 'zip' };
 }

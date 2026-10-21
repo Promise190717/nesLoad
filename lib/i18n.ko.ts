@@ -586,7 +586,7 @@ export const ko: Record<MessageKey, string> = {
     '“{keyword}”에 맞는 게임이 없습니다. 더 짧은 단어나 게임 제목으로 검색해 보세요.',
   'gamesPage.prev': '이전',
   'gamesPage.next': '다음',
-  'gamesPage.backHome': '방으로 돌아가기',
+  'gamesPage.backHome': '홈으로 돌아가기',
   'gamesPage.backToGames': '모든 게임',
   'common.back': '뒤로',
   'common.home': '홈',
@@ -598,7 +598,7 @@ export const ko: Record<MessageKey, string> = {
   'gamesPage.favorite': '즐겨찾기에 추가',
   'gamesPage.unfavorite': '즐겨찾기됨',
   'gamesPage.favoriteSignIn':
-    '즐겨찾기를 저장하려면 로그인이 필요합니다 — 방 오른쪽 위의 계정 버튼을 눌러 주세요.',
+    '즐겨찾기를 저장하려면 로그인이 필요합니다 — 상단 바의 로그인 버튼을 눌러 주세요.',
   'gamesPage.favoriteFailed': '즐겨찾기를 바꾸지 못했습니다 — 다시 시도해 주세요.',
   'gamesPage.favoriteCount': '즐겨찾기 {n}명',
   'gamesPage.report': '문제 알리기',
@@ -649,7 +649,7 @@ export const ko: Record<MessageKey, string> = {
 
   'notFound.title': '페이지를 찾을 수 없습니다',
   'notFound.description':
-    '그 주소는 {site}에 없습니다. 링크를 확인하거나 방으로 돌아가 보세요.',
+    '그 주소는 {site}에 없습니다. 링크를 확인하거나 홈으로 돌아가 보세요.',
   'gamesPage.notFoundTitle': '게임을 찾을 수 없습니다',
   'gamesPage.notFound': '이 게임은 라이브러리에 없습니다(삭제되었을 수 있습니다).',
   'gamesPage.fallbackDescription': '《{title}》은(는) {console} 게임입니다.',

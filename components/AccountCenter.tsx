@@ -31,9 +31,9 @@ import { useI18n } from './I18nProvider';
  *    切换用 `history.replaceState` 同步地址 —— 不触发导航、不重拉数据。
  *
  * ⚠️ **为什么点收藏卡片是跳详情页而不是在屋里开玩**：这一页是「管理」，用户正在做的事
- *    是「整理我的收藏」。而屋里那套载入（`loadRemoteGame`）需要那个房间的上下文
- *    （屏幕、控制器、进度条），这一页没有。跳 `/games/<id>` 让用户从详情页自己
- *    「开始游戏」—— 那条路是现成的，而且会把他带回屋子。**历史 tab 同理**（也跳详情页）。
+ *    是「整理我的收藏」。而开玩那套载入需要屏幕、控制器、进度条这些上下文，这一页没有。
+ *    跳 `/games/<id>` 让用户从详情页自己「开始游戏」—— 那条路是现成的。
+ *    **历史 tab 同理**（也跳详情页）。
  *
  * ⚠️ 五个 tab 的数据**各自惰性拉取**（切到那个 tab 才拉），不是首屏全拉。
  *    理由和游戏库面板的收藏 tab 一致：用户可能只想改个密码就走。
@@ -209,7 +209,7 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
    *
    * 和屋里 `UserPanel` 的 `signOut` 是同一个接口（`DELETE /api/user/login` 清掉
    * `nesload_user` 那个 cookie），只是这一页没有「面板开关」要收。
-   * 2026-10-15 改：退出后回**首页**（原来回房间 —— 用户要求改掉）。
+   * 2026-10-15 改：退出后回**首页**（用户要求）。
    * 失败时**不静默**：留在原地并提示，让用户知道那颗钮点过了、只是没成功
    * （cookie 没被清掉，这时跳走会显得「明明点了退出却还登着」）。
    */
@@ -246,13 +246,13 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
     <main className="wall min-h-screen px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-4xl">
         {/*
-          左上「返回」（浏览器回退，兜底去 `/room`，与内容页那颗 BackLink 同一套）+
+          左上「返回」（浏览器回退，兜底去 `/`，与内容页那颗 BackLink 同一套）+
           右上「首页」（2026-10-13 加）。这一页没有内容页那排顶栏（它自己就是账号页），
           所以回首页那颗单独放在右上角 —— 和别的页面保持一致。
         */}
         <div className="flex items-center justify-between gap-4">
           <BackLink
-            href={localeHref('/room')}
+            href={localeHref('/')}
             className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
           >
             <span aria-hidden="true">←</span>
@@ -319,7 +319,7 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
             `ml-auto` 推到这一行最右：页头是 `items-center` 的横排，
             名字那块 `min-w-0` 会随长用户名伸缩，靠右固定才不会跟着漂。
 
-            退出后**回首页**（`router.push('/')`，2026-10-15 用户要求改掉原来的回房间）：
+            退出后**回首页**（`router.push('/')`，2026-10-15 用户要求）：
             这一页是登录态专属，退出去留在原地会立刻被
             `app/[locale]/account/layout.tsx` 的守卫重定向
             （`/login?next=/account`，2026-10-13 有独立登录页之后是这样）——
@@ -680,8 +680,7 @@ function FavoritesTab() {
  * ⚠️ **为什么这里没有「大小」那半格**：历史只是个「玩过什么」的索引（存的是字符串快照），
  *    不像存档那样有实体文件。硬塞一个大小反而要后端多查一次。
  *
- * ⚠️ 点标题 / 缩略图跳 `/games/<id>`（理由同收藏 tab：这一页没有房间上下文，
- *    开玩那条路得回屋里走）。
+ * ⚠️ 点标题 / 缩略图跳 `/games/<id>`（理由同收藏 tab：这一页没有开玩需要的上下文）。
  */
 function HistoryTab() {
   const { t, locale, href: localeHref } = useI18n();

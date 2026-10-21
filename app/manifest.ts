@@ -28,7 +28,7 @@ import { SITE_NAME, translate } from '@/lib/i18n';
  * 桌面端是一间横着铺开的屋子 —— 两者对方向的需求正好相反，锁死任何一个都会让另一半难受。
  * 交给用户自己转。
  *
- * **`theme_color` / `background_color` 取深色主题的房间底**（`--color-ink-950` 的深色值）。
+ * **`theme_color` / `background_color` 取深色主题的底色**（`--color-ink-950` 的深色值）。
  * 这两个值只影响安装后的窗口边框色和启动画面底色，都是静态的 —— 浅色主题的用户会看到
  * 深色启动底，可接受（启动画面一闪而过，而深色底和图标本身是一套的）。
  * `<meta name="theme-color">` 那两条**跟着系统主题走**，在 app/layout.tsx 的 viewport 里。

@@ -1,4 +1,4 @@
-/** Shared media policy for /play and /room. Bitrates are ceilings, not targets. */
+/** Shared media policy for /play. Bitrates are ceilings, not targets. */
 export type StreamQuality = 'smooth' | 'balanced' | 'sharp';
 
 export const DEFAULT_STREAM_QUALITY: StreamQuality = 'balanced';

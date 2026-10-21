@@ -19,7 +19,7 @@ import TopBar from './TopBar';
  * 语言仍是服务端决定的（`locale` 由页面当 prop 传进来），所以加这一行**不会**
  * 让语言闪一下；真正被推进客户端的只是这一页的静态文本。
  *
- * 和房间那一页的关系：这里**不画房间**。那间屋子是给游戏用的（满屏 CSS 场景 + canvas），
+ * 这几页和开玩那两页的关系：这里**不画场景**，那套视觉是给游戏用的（满屏 CSS + canvas），
  * 把长文塞进去既难读又拖慢首屏。这两页只共用同一套设计令牌（`ink-*` 会跟着主题翻转、
  * `accent` 同理、`font-pixel` 是同一款字体），所以深浅两色都不违和，
  * 但它就是一张**文档**。
@@ -47,17 +47,11 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
   }).format(new Date(doc.updated));
 
   /*
-   * 这个常量是 `/room`（那间屋子，2026-10-13 之前它就是 `/`），**不是**落地页 `/`。
-   *
-   * 历史：2026-10-13 页脚那颗「返回游戏屋」走的是它，所以变量名从 `home` 改成了
-   * `room`；2026-10-14 左上角那颗钮改走 `BackLink`（浏览器回退）之后，它只剩兜底用途。
-   *
-   * ⚠️ 2026-10-15 页脚那颗也删了（用户要求「其他页面底部的回到房间也去除」），
-   *    于是它现在**唯一的用途**就是下面那颗 `BackLink` 的兜底 `href`：直接打开这一页
-   *    （分享链接 / 爬虫）时 history 里没有上一站，退到 `/room`。
-   *    页脚那几个落点仍要带语言前缀 —— 不带的话中文页点一下就掉回英文。
+   * 左上角那颗 `BackLink` 的兜底 `href`：直接打开这一页（分享链接 / 爬虫）时
+   * history 里没有上一站，退到首页。页脚那几个落点仍要带语言前缀 ——
+   * 不带的话中文页点一下就掉回英文。
    */
-  const room = localePath(locale, '/room');
+  const home = localePath(locale, '/');
 
   return (
     <main className="wall min-h-screen px-6 py-6 sm:py-12">
@@ -69,20 +63,19 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
 
         {/*
           左上角「返回」（2026-10-14 改）。**行为是浏览器回退**，不是跳固定地址 ——
-          用户要的就是「返回上一页」：从房间那行链接进来就回房间，从下一页进来就回下一页。
+          用户要的就是「返回上一页」：从哪一页进来就回哪一页。
 
           用的就是内容页左上那颗同一套 `BackLink`（`/games`、详情页、开发商页左边都是它）：
           外壳仍是 `<a href>` 的**真链接**骨架，只有普通左键点击被接管成 `router.back()`，
-          中键 / ctrl+click / 爬虫照样当它是一条到 `room` 的链接 —— 法务页要能被整段读走，
+          中键 / ctrl+click / 爬虫照样当它是一条到首页的链接 —— 法务页要能被整段读走，
           返回也得是可达的。文案跟着行为走，用 `common.back`（「返回」）而不是
-          「返回游戏屋」：回退不承诺落点，别写一个承诺。
+          写死某个落点：回退不承诺落点，别写一个承诺。
 
           **不用 target="_blank"**：这里是文档页，点回去就是回到上一站，当前标签页往前走一步
-          最自然（房间那侧才是新标签 —— 从房间点过来时，正在跑的游戏不该被顶掉，
-          见 ConsoleScene 那颗钮的注释）。
+          最自然。
         */}
         <BackLink
-          href={room}
+          href={home}
           className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
         >
           <span aria-hidden="true">←</span>
@@ -132,16 +125,7 @@ export default function LegalPage({ kind, locale }: { kind: LegalKind; locale: L
               {t(other === 'privacy' ? 'legal.privacy' : 'legal.terms')}
             </Link>
             {/*
-              ⚠️ 2026-10-15：**页脚这颗「返回游戏屋」删了**（用户要求「其他页面底部的
-              回到房间也去除」）—— 内容页页脚那颗同一天也删了（见 GamesShell）。
-              这一页现在页脚只剩「隐私 ↔ 条款」互链和「游戏列表」。
-
-              `room` 这个常量**留着**：左上角那颗 `BackLink` 的兜底 `href` 还在用它
-              （直接打开这一页时 history 里没有上一站，退到 `/room`，见上面那段注释）。
-              `gamesPage.backHome` 这个键也留着 —— 404 页正文下那颗钮还在用。
-            */}
-            {/*
-              游戏列表也放一条。**这一条主要是给爬虫的**：房间右上角那一行
+              游戏列表也放一条。**这一条主要是给爬虫的**：顶栏那行
               （游戏列表 / 隐私政策 / 服务条款）在移动端是 `display: none`
               （见 globals.css），而搜索引擎用的是**移动优先索引** ——
               光靠那一行，`/games` 在爬虫眼里可能一条内链都没有。

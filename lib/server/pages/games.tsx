@@ -390,19 +390,18 @@ export default async function GamesPage({
       title={t('gamesPage.heading')}
       intro={intro}
       /*
-       * 左上角：**浏览器回退**（2026-10-13 用户要求「返回上一页」），不再是一颗写死回
-       * `/room` 的链接。这一页最常见的来路是房间右上角那颗「游戏列表」（**当前页跳转**，
-       * 不是新标签，见 ConsoleScene），回退正好把人送回刚离开的那间屋子；而从首页 / 页脚 /
-       * 别的内容页点进来的人，回的是**他来时的那个地址**（可能是 `/?q=…&page=3`），
-       * 比一脚踹回房间更贴合「返回」两个字。
+       * 左上角：**浏览器回退**（2026-10-13 用户要求「返回上一页」），不是一颗写死落点的链接。
+       * 这一页最常见的来路是顶栏那颗「游戏列表」（**当前页跳转**），回退正好把人送回刚离开
+       * 的那一页；而从首页 / 页脚 / 别的内容页点进来的人，回的是**他来时的那个地址**
+       * （可能是 `/?q=…&page=3`），比一脚踹回首页更贴合「返回」两个字。
        *
-       * 文案跟着行为走：`common.back`（「返回」）而不是 `gamesPage.backHome`（「回到房间」）
+       * 文案跟着行为走：`common.back`（「返回」）而不是 `gamesPage.backHome`（「回到首页」）
        * —— 后者承诺的是一个固定落点，而这里回的是来路。**同理别再改回 `link` 模式。**
        *
-       * `href` 仍留着 `/room`：没有上一站时（直开 / 爬虫 / 中键新标签）`BackLink` 兜底跳它，
-       * 中键与右键也仍旧是「到 `/room` 的普通链接」。这一页的「家」就是那间屋子，别改成 `/`。
+       * `href` 仍留着 `/`：没有上一站时（直开 / 爬虫 / 中键新标签）`BackLink` 兜底跳它，
+       * 中键与右键也仍旧是「到首页的普通链接」。
        */
-      back={{ href: localePath(locale, '/room'), label: 'common.back', mode: 'history' }}
+      back={{ href: localePath(locale, '/'), label: 'common.back', mode: 'history' }}
       showAllGamesLink={false}
     >
       {/*

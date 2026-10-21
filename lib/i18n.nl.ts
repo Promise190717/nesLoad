@@ -609,7 +609,7 @@ export const nl: Record<MessageKey, string> = {
     'Geen games gevonden voor “{keyword}”. Probeer een korter woord, of de titel van de game.',
   'gamesPage.prev': 'Vorige',
   'gamesPage.next': 'Volgende',
-  'gamesPage.backHome': 'Terug naar de kamer',
+  'gamesPage.backHome': 'Terug naar startpagina',
   'gamesPage.backToGames': 'Alle games',
   'common.back': 'Terug',
   'common.home': 'Home',
@@ -621,7 +621,7 @@ export const nl: Record<MessageKey, string> = {
   'gamesPage.favorite': 'Aan favorieten toevoegen',
   'gamesPage.unfavorite': 'Uit favorieten verwijderen',
   'gamesPage.favoriteSignIn':
-    'Log in om favorieten te bewaren — tik op de accountknop in de kamer.',
+    'Log in om favorieten te bewaren — gebruik de inlogknop in de bovenbalk.',
   'gamesPage.favoriteFailed': 'Kon favorieten niet bijwerken — probeer het opnieuw.',
   'gamesPage.favoriteCount': '{n} keer favoriet',
   'gamesPage.report': 'Probleem melden',
@@ -673,7 +673,7 @@ export const nl: Record<MessageKey, string> = {
 
   'notFound.title': 'Pagina niet gevonden',
   'notFound.description':
-    'Dat adres bestaat niet op {site}. Controleer de link of ga terug naar de kamer.',
+    'Dat adres bestaat niet op {site}. Controleer de link of ga terug naar de startpagina.',
   'gamesPage.notFoundTitle': 'Game niet gevonden',
   'gamesPage.notFound': 'Deze game zit niet (meer) in de bibliotheek.',
   'gamesPage.fallbackDescription': '{title} is een {console}-game.',

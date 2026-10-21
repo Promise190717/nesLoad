@@ -81,7 +81,7 @@ export async function generateMetadata({
  *   · 必须以单个 `/` 开头（`//evil.com` 是协议相对地址，等于外站，挡掉）
  *   · `/\evil.com` 也挡（有些浏览器把反斜杠当 `/`）
  *   · 不能指回 `/login` 自己（否则登录成功原地打转）
- * 不合法一律返回 `null`，调用方走默认落点 `/room`。
+ * 不合法一律返回 `null`，调用方走默认落点 `/`。
  *
  * 约定：**`next` 不带语言前缀**（`/account`，不是 `/zh/account`）——
  * 顶栏和 `/account` 的守卫都按这个约定生成，拼前缀是登录页自己的事
@@ -122,7 +122,7 @@ export default async function LoginPage({
    */
   const store = await cookies();
   const session = await verifyUserSession(store.get(USER_SESSION_COOKIE)?.value);
-  if (session) redirect(localePath(locale, next ?? '/room'));
+  if (session) redirect(localePath(locale, next ?? '/'));
 
   const t = (key: MessageKey) => translate(locale, key);
 
@@ -165,7 +165,7 @@ export default async function LoginPage({
         {/*
           返回走**浏览器回退**（`BackLink`）：从 `/games?q=…` 点顶栏那颗登录过来的，
           返回该回到那个带参数的地址，而不是一个写死的落点。
-          兜底（直开 / 爬虫）是首页 —— 这一页不是房间，把人送回落地页最合适。
+          兜底（直开 / 爬虫）是首页 —— 把人送回落地页最合适。
         */}
         <div className="flex items-center">
           <BackLink

@@ -643,7 +643,7 @@ export const fr: Record<MessageKey, string> = {
     'Aucun jeu ne correspond à « {keyword} ». Essayez un mot plus court, ou le titre du jeu.',
   'gamesPage.prev': 'Précédent',
   'gamesPage.next': 'Suivant',
-  'gamesPage.backHome': 'Retour à la pièce',
+  'gamesPage.backHome': 'Retour à l’accueil',
   'gamesPage.backToGames': 'Tous les jeux',
   'common.back': 'Retour',
   'common.home': 'Accueil',
@@ -655,7 +655,7 @@ export const fr: Record<MessageKey, string> = {
   'gamesPage.favorite': 'Ajouter aux favoris',
   'gamesPage.unfavorite': 'Retirer des favoris',
   'gamesPage.favoriteSignIn':
-    'Connectez-vous pour enregistrer vos favoris — touchez le bouton de compte dans la pièce.',
+    'Connectez-vous pour enregistrer vos favoris — utilisez le bouton de connexion dans la barre supérieure.',
   'gamesPage.favoriteFailed': 'Impossible de mettre à jour les favoris — réessayez.',
   'gamesPage.favoriteCount': '{n} personnes l’ont en favori',
   'gamesPage.report': 'Signaler un problème',
@@ -707,7 +707,7 @@ export const fr: Record<MessageKey, string> = {
   'gamesPage.selectLanguage': 'Choisir la langue',
   'notFound.title': 'Page introuvable',
   'notFound.description':
-    'Cette adresse n’existe pas sur {site}. Vérifiez le lien, ou retournez dans la pièce.',
+    'Cette adresse n’existe pas sur {site}. Vérifiez le lien, ou retournez à la page d’accueil.',
   'gamesPage.notFoundTitle': 'Jeu introuvable',
   'gamesPage.notFound': 'Ce jeu n’est plus dans la bibliothèque.',
   'gamesPage.fallbackDescription': '{title} est un jeu {console}.',

@@ -629,7 +629,7 @@ export const vi: Record<MessageKey, string> = {
   'gamesPage.searchEmpty': 'Không có game nào khớp “{keyword}”. Hãy thử từ ngắn hơn, hoặc tên game.',
   'gamesPage.prev': 'Trước',
   'gamesPage.next': 'Sau',
-  'gamesPage.backHome': 'Về phòng',
+  'gamesPage.backHome': 'Về trang chủ',
   'gamesPage.backToGames': 'Tất cả game',
   'common.back': 'Quay lại',
   'common.home': 'Trang chủ',
@@ -641,7 +641,7 @@ export const vi: Record<MessageKey, string> = {
   'gamesPage.favorite': 'Thêm vào yêu thích',
   'gamesPage.unfavorite': 'Bỏ khỏi yêu thích',
   'gamesPage.favoriteSignIn':
-    'Đăng nhập để lưu game yêu thích — bấm nút tài khoản trong phòng.',
+    'Đăng nhập để lưu game yêu thích — dùng nút đăng nhập trên thanh trên cùng.',
   'gamesPage.favoriteFailed': 'Không cập nhật được yêu thích — hãy thử lại.',
   'gamesPage.favoriteCount': '{n} người yêu thích',
   'gamesPage.report': 'Báo lỗi',
@@ -694,7 +694,7 @@ export const vi: Record<MessageKey, string> = {
 
   'notFound.title': 'Không tìm thấy trang',
   'notFound.description':
-    'Địa chỉ đó không tồn tại trên {site}. Hãy kiểm tra lại liên kết, hoặc về phòng.',
+    'Địa chỉ đó không tồn tại trên {site}. Hãy kiểm tra lại liên kết, hoặc về trang chủ.',
   'gamesPage.notFoundTitle': 'Không tìm thấy game',
   'gamesPage.notFound': 'Game này không có trong thư viện (nữa).',
   'gamesPage.fallbackDescription': '{title} là một game {console}.',

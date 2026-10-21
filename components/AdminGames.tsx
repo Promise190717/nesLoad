@@ -21,7 +21,7 @@ import {
   type GameTexts,
 } from '@/lib/game-text';
 import { GAME_LANGUAGES, GAME_LANGUAGE_LABEL, romLangToFormValue } from '@/lib/rom-lang';
-import { unwrapRom } from '@/lib/unwrap';
+import { romFileOf, unwrapRom } from '@/lib/unwrap';
 import AdminAddGame from './AdminAddGame';
 import AdminAutoCrawl from './AdminAutoCrawl';
 import AdminBulkImport from './AdminBulkImport';
@@ -574,8 +574,13 @@ export default function AdminGames() {
      * 光盘套装（`.cue` + `.bin`）的机种由拆包那一层直接给 —— 主文件是 `.cue`，
      * 而 `EXTENSION_MAP` 刻意不收 `cue`（直接拖一个 cue 进来该报「认不出」）。
      * 见 `lib/unwrap.ts` 的 `UnwrappedRom.console`。
+     *
+     * ⚠️ 7z 解出来的条目只带字节、不带 `File`（前台把字节直接交给 MEMFS，见 `UnwrappedEntry`），
+     *    而 `detectConsole` 只收 `File` —— 所以这里用 `romFileOf()` 现建一个。
+     *    后台导入的是**一件手动操作、一手文件**，那一次复制可以接受；前台那条路绝不会走到这儿。
      */
-    const detected = unwrapped?.console ?? (await detectConsole(unwrapped?.file ?? file));
+    const detected =
+      unwrapped?.console ?? (await detectConsole(unwrapped ? romFileOf(unwrapped) : file));
     if (detected) setConsoleType(detected);
   };
 

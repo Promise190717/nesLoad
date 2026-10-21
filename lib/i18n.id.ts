@@ -51,7 +51,7 @@ export const id: Record<MessageKey, string> = {
   'meta.keywords':
     'game retro, pustaka game retro online, emulator NES, emulator SNES, emulator SFC, emulator GBA, emulator Game Boy Advance, emulator Game Boy, emulator Game Boy Color, emulator NDS, emulator Nintendo DS, emulator Mega Drive, emulator Sega Genesis, emulator Game Gear, emulator Master System, emulator Sega 32X, emulator WonderSwan, emulator Neo Geo Pocket, emulator PlayStation, emulator PS1, emulator PSX, emulator arcade, main NES di browser, emulator browser, RetroArch WASM, {site}',
 
-  /* 房间页（`/room`）自己的 meta：标题里不写 `{site}`，根布局的 template 会补站名 */
+  /* 下线页面的 meta：标题里不写 `{site}`，根布局的 template 会补站名 */
   'seo.room.title': 'Ruang Piksel — Main Game Retro di Browser',
   'seo.room.description':
     'Masuk ke ruang piksel: game NES, SNES / SFC, Game Boy, GBA, Mega Drive, dan arcade berjalan di layar CRT. Pilih judul dari pustaka online, atau seret file ROM milikmu ke layar.',
@@ -303,7 +303,7 @@ export const id: Record<MessageKey, string> = {
   'netplay.errUnknown':
     'Tidak bisa terhubung ke pemain lain. Alasan tepatnya ada di konsol browser.',
 
-  /* `/play` —— 和 `/room` 同一套引擎、两种壳，文案刻意短 */
+  /* `/play` —— 文案刻意短 */
   'seo.play.title': 'Ruang Main — Muat Game dan Main Online',
   'seo.play.description':
     'Satu layar untuk memulai game: main sendiri, atau buka ruang 1v1 dan bagikan kodenya. Judul NES, SNES / SFC, Game Boy, GBA, Mega Drive, dan arcade.',
@@ -700,7 +700,7 @@ export const id: Record<MessageKey, string> = {
   'gamesPage.prev': 'Sebelumnya',
   'gamesPage.next': 'Berikutnya',
   /* 现在只剩 404 页那两颗在用它（那页刻意不挂顶栏） */
-  'gamesPage.backHome': 'Kembali ke ruang',
+  'gamesPage.backHome': 'Kembali ke halaman utama',
   'gamesPage.backToGames': 'Semua game',
   /* 内容页左上角那条返回链接的通用文案：行为是浏览器回退，所以只说「返回」 */
   'common.back': 'Kembali',
@@ -714,7 +714,7 @@ export const id: Record<MessageKey, string> = {
   /* 详情页那颗收藏钮有文字位，所以说清「点了会发生什么」 */
   'gamesPage.favorite': 'Tambah ke favorit',
   'gamesPage.unfavorite': 'Hapus dari favorit',
-  'gamesPage.favoriteSignIn': 'Masuk untuk menyimpan favorit — ketuk tombol akun di ruang.',
+  'gamesPage.favoriteSignIn': 'Masuk untuk menyimpan favorit — gunakan tombol masuk di bilah atas.',
   'gamesPage.favoriteFailed': 'Favorit tidak bisa diperbarui — coba lagi.',
   /* 收藏钮上那个数字：只当 title / 悬停说明用 */
   'gamesPage.favoriteCount': '{n} orang memfavoritkan',
@@ -771,7 +771,7 @@ export const id: Record<MessageKey, string> = {
   /* 全站 404：和 `gamesPage.notFoundTitle`（游戏没了）是两件事 */
   'notFound.title': 'Halaman tidak ditemukan',
   'notFound.description':
-    'Alamat itu tidak ada di {site}. Periksa tautannya, atau kembali ke ruang.',
+    'Alamat itu tidak ada di {site}. Periksa tautannya, atau kembali ke halaman utama.',
   'gamesPage.notFoundTitle': 'Game tidak ditemukan',
   'gamesPage.notFound': 'Game ini tidak ada lagi di pustaka.',
   'gamesPage.fallbackDescription': '{title} adalah game {console}.',

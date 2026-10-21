@@ -82,7 +82,7 @@ export async function siteMetadata(locale: Locale): Promise<Metadata> {
      * 而它是**静态**的 —— 跟不了语言。理由和 manifest 里 name 那条一模一样，见 app/manifest.ts。
      *
      * `statusBarStyle: 'black'` 而不是 `'black-translucent'`：后者会让页面顶到状态栏底下，
-     * 必须配 `env(safe-area-inset-*)` 才不被遮住，而掌机和房间都没处理安全区。
+     * 必须配 `env(safe-area-inset-*)` 才不被遮住，而掌机那套没处理安全区。
      * 黑色状态栏最稳 —— 深色主题下和房间底色（#08080a）几乎分不出边界。
      */
     appleWebApp: {
@@ -198,7 +198,7 @@ export const viewport: Viewport = {
  *   - 电视机大小：记住，写 localStorage（`nesload:tv`，`small` / `medium` / `large`，
  *     **三个都是合法值**——用户明确选了哪档就是哪档；认不出的值才走分页面兜底）。
  *     **只读这一个键**，尺寸本身在 CSS 里。
- *     ⚠️ **兜底值分页面**：`/play` 是 `medium`，其它页面（`/room`）是 `small` ——
+ *     ⚠️ **兜底值分页面**：`/play` 是 `medium`，其它页面是 `small` ——
  *     两页的档位映射的是**两套 CSS**（`--play-size-scale` vs `--tv-ratio`），
  *     同一档在两页量出来的大小本来就不一样，默认自然也不该一样。
  *     判据是**路径前缀**（下面那段用 `location.pathname` 现读），
