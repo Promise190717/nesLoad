@@ -45,6 +45,17 @@ const nextConfig = {
   async headers() {
     return [
       /*
+       * Service Worker 本体（2026-10-21 加）。
+       *
+       * 浏览器查更新时会绕过 HTTP 缓存直接取 `sw.js`，但**托管层那一层还在**：
+       * 只要 CDN 把 `sw.js` 缓存住，新策略就传不下去。`no-cache` 是明示「每次都问」，
+       * 成本是一次 304，换来 `VERSION` / 策略改动立刻生效。
+       */
+      {
+        source: '/sw.js',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }],
+      },
+      /*
        * ⚠️ **Next 构建产物的默认 `immutable` 在这个站上不成立（2026-10-19 事故）**。
        *
        * Next 给 `/_next/static/*` 发的是 `public, max-age=31536000, immutable`，

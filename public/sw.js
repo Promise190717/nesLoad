@@ -19,8 +19,13 @@
  *     Next 的客户端路由请求（那些是 fetch 出来的 RSC payload，存下来再当 HTML 吐出去
  *     会让页面直接崩 —— 这也是这里用 `request.mode` 而不是「看 URL 长得像不像页面」
  *     来判定的原因）。
- *   · **带内容 hash 的静态资源**（`/_next/static/`）→ cache-first。文件名里那串 hash
- *     就是版本号，内容变了文件名就变了，**永远不存在「拿到旧副本」这回事**。
+ *   · **构建产物（`/_next/static/`）→ network-first**，只有网络失败才回退缓存。
+ *     ⚠️ 这里原来写的是 cache-first，理由是「文件名带内容 hash」。**那个前提是错的**
+ *     （2026-10-21 实测）：Turbopack 的 chunk 名**不随内容变**，同一个 chunk 路径下次
+ *     发版还是它，于是 cache-first 把上一版代码永久钉在 CacheStorage 里 —— 用户无痕
+ *     窗口正常、平时窗口一直跑旧代码（那次的症状就是「返回后内存不降」，其实修好的
+ *     泄漏代码根本没被加载）。`next.config.js` 给 `/_next/static` 钉 `max-age=0,
+ *     must-revalidate` 是同一个道理的 HTTP 层版本，两处必须一致。
  *   · **`/cores/`（街机 WASM 核心）→ 刻意不碰。** 那个 36 MB 的文件已经有两条缓存路径：
  *     next.config.js 给它钉了 7 天的 HTTP 缓存（过期后 `stale-while-revalidate` 后台刷新），
  *     Nostalgist 自己还会往 CacheStorage 里存一份。SW 再插一手**只会破坏更新语义** ——
@@ -42,28 +47,27 @@
  */
 
 /** 改这个值 = 作废所有旧缓存（activate 里会把名字对不上的缓存全删掉）。 */
-const VERSION = 'v1';
+const VERSION = 'v2';
 
 const STATIC_CACHE = `nesload-static-${VERSION}`;
 const PAGE_CACHE = `nesload-page-${VERSION}`;
 
 /**
- * 只有一种资源可以安全地 cache-first：**Next 的构建产物**（`/_next/static/`）。
+ * 构建产物走 network-first 的唯一判据。
  *
- * 它的文件名里带内容 hash（`chunk-a1b2c3d4.js`），内容一变名字就变 ——
- * 所以「命中缓存就返回」永远不会返回过期的东西。
- *
- * 其余全都**不缓存**，包括图标（`/icon.svg`、`/icons/*.png`、favicon）：
- * 那些文件名**不带 hash**，存进 CacheStorage 就再也刷不新了（CacheStorage 里的副本
- * 没有过期时间，只有换 VERSION 才会清），而它们的体积小到根本不值得冒这个险。
- * `/cores/` 同理，理由见文件顶部。
+ * 名字里虽然带 hash，但**不能当版本号用**（Turbopack 的 chunk 名跨版本重复，
+ * 见文件顶部那段）。`/cores/`、图标那些不带 hash 的东西同理不碰。
  */
-function isImmutableAsset(pathname) {
+function isNextAsset(pathname) {
   return pathname.startsWith('/_next/static/');
 }
 
 self.addEventListener('install', (event) => {
-  // 不等旧 SW 下班，直接接班 —— 静态资源带 hash，不存在「新 SW 配旧资源」的问题
+  /*
+   * 不等旧 SW 下班，直接接班。以前这里写的是「静态资源带 hash，不存在新 SW 配旧资源」——
+   * 那个理由不成立（见文件顶部）。仍然要 `skipWaiting()`，因为接班的动作本身是对的：
+   * 它顺带跑 activate 清掉旧 VERSION 的缓存，越早发生越好。
+   */
   event.waitUntil(self.skipWaiting());
 });
 
@@ -119,17 +123,24 @@ async function handleNavigation(request) {
   }
 }
 
-/** 不可变资源：有缓存就直接用，没有再回网络。 */
-async function handleImmutableAsset(request) {
-  const cached = await caches.match(request);
-  if (cached) return cached;
-
-  const response = await fetch(request);
-  if (response.ok) {
-    const cache = await caches.open(STATIC_CACHE);
-    await cache.put(request, response.clone());
+/** 构建产物：在线永远拿新的（HTTP 层是 must-revalidate，正常只回 304），失败才用缓存。 */
+async function handleNextAsset(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(STATIC_CACHE);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    /*
+     * 只在真离线时走到这里。缓存里那份**可能是上一版代码**，但离线时
+     * 「能跑起来」比「一定是新版」重要 —— 有网的下一次导航就会刷新。
+     */
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    return Response.error();
   }
-  return response;
 }
 
 self.addEventListener('fetch', (event) => {
@@ -157,7 +168,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (isImmutableAsset(url.pathname)) {
-    event.respondWith(handleImmutableAsset(request));
+  if (isNextAsset(url.pathname)) {
+    event.respondWith(handleNextAsset(request));
   }
 });

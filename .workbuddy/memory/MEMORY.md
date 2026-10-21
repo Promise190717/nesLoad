@@ -58,7 +58,7 @@
 
 ## 部署 / 校验
 
-- ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /privacy /terms）；发版后 purge CF。
+- ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。**同一个前提也管着 `public/sw.js`**：它对 `/_next/static/` 必须 network-first（曾是 cache-first ⇒ 老用户永久跑上一版 chunk，2026-10-21 内存「没下降」的真凶；`VERSION` 现 v2，改策略要跟着 +1）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /privacy /terms）；发版后 purge CF。
 - 大 ROM 唯一下载路 `lib/http.ts` 的 `fetchRomWithProgress`；`readBodyWithProgress` 只给存档类小文件。R2 无版本控制，删 ROM 永久丢。
 - **ROM 自持范围 = 除 `gba` / `nds` / `ps1` 之外全部**（2026-10-21 用户扩围：arcade/nes/snes 之后又搬 md/gbc/gb/gg/sms/ws/32x/ngp 共 323 行 305 MiB，无一失败；全库现 1216/4047 行、R2 共约 **4.20 GiB**）。剩 gba(1154 行，估 4 GiB 上下)/nds(1107)/ps1(562) 仍回上游 `files:`/`site:`。脚本默认排除表已改成 `gba,nds,ps1`。键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、`--console=` 非空时完全取代默认排除表、写 `size_bytes`）。`route.ts` 取片**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
 - ⚠️ **md 的卡带扩展名就是 `.md`**，上游按 `text/markdown` 回、不带 content-length（字节是真卡带 `00 ff fe`）。`migrate-roms-to-r2.mjs` 的判据因此不能写成「一律拒 `text/*`」（2026-10-21 已改成分层：`HTML_LIKE` 拦 html/json/xml，`text/*` 再看响应体首字节是不是 `<`/`{`）。另注：`route.ts` 的 `HTML_LIKE` 仍是宽版 `^text/`，所以 `.md` 这类 ROM **只在本站 R2 上能放**，回上游那条路会 502。
