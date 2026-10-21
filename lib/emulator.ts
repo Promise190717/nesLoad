@@ -1368,6 +1368,8 @@ const EMPTY_BLOB = new Blob([]);
 interface WritableEmscriptenFs {
   mkdirTree(path: string): void;
   unlink(path: string): void;
+  /** 只给 `dropContentFiles` 用：退出前把那盘内容列出来删掉。 */
+  readdir(path: string): string[];
   createDataFile(
     parent: string,
     name: string,
@@ -1419,6 +1421,39 @@ async function writeRomIntoFs(
     /* 占位文件不在了也无所谓。 */
   }
   fs.createDataFile(directory, name, bytes, true, true, true);
+}
+
+/**
+ * 退出前把内容目录里的文件删掉。**这是「返回后内存不降」的解药**。
+ *
+ * 为什么：整盘字节就是 `writeRomIntoFs` 造的那个 `Uint8Array`（`canOwn = true` 交给 MEMFS，
+ * 挂在 `node.contents` 上）。Emscripten 实例本身要等好几轮 GC 才回收，而实测它**并没有**
+ * 及时回收：2026-10-21 用 headless Chrome 的 `Runtime.getHeapUsage` 量过 ——
+ * 「进游戏 → 玩 → 点返回 → 连做 5 遍 GC」之后，`backingStorageSize` 恰好**留下一盘**
+ * （125.7 MiB 的 bin ⇒ 136 MB 纹丝不动），第二轮 265 MB、第三轮线性叠加。
+ * 盘越大越刺眼：265 MB 的 PS1 游戏进出几次就是 1 GiB 级别的「不下降」。
+ *
+ * 先 unlink 再 exit：那块数组当场变成垃圾，不用等实例被回收；wasm 堆那边（几十 MB）
+ * 照旧交给 GC。删除只动内容目录，`saves/` 下的电池存档不在这条路上。
+ *
+ * 目录不存在（小 ROM 走的是 Nostalgist 原路 / 启动半途失败）就静默跳过 —— 这一步只是
+ * 让内存早点还回去，失败不影响退出。
+ */
+function dropContentFiles(fs: WritableEmscriptenFs): void {
+  let names: string[];
+  try {
+    names = fs.readdir(CONTENT_DIRECTORY);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name === '.' || name === '..') continue;
+    try {
+      fs.unlink(`${CONTENT_DIRECTORY}/${name}`);
+    } catch {
+      /* 删不掉就算了，别让退出流程炸在收尾上。 */
+    }
+  }
 }
 
 export class EmulatorController {
@@ -1768,6 +1803,14 @@ export class EmulatorController {
       // Read the runtime before exit: some builds destroy its accessors on exit.
       let runtime: EmulatorRuntime | null = null;
       try { runtime = (nostalgist ?? starting)?.getEmscripten() ?? null; } catch { /* Not initialized. */ }
+      /*
+       * 先把那盘字节从虚拟文件系统里摘掉（见 `dropContentFiles`）——
+       * 必须在 exit 之前，模块还活着的时候 FS 才在。
+       */
+      try {
+        const fs = (nostalgist ?? starting)?.getEmscriptenFS() as WritableEmscriptenFs | undefined;
+        if (fs) dropContentFiles(fs);
+      } catch { /* FS 还没建起来（启动半途失败）：没什么可删的 */ }
       try { (nostalgist ?? starting)?.exit({ removeCanvas: false }); } catch { /* Continue cleanup. */ }
       try { if (runtime) await releaseEmulatorRuntime(runtime); }
       finally {
@@ -2237,6 +2280,8 @@ export class EmulatorController {
       // 若让 Nostalgist 把它从 DOM 移除，React 后续会拿到脱离文档的节点。
       if (releaseResources) await releaseResources();
       else {
+        // 没有启动时留下的收尾函数（理论上到不了）：至少把内容目录也摘掉，道理同上
+        try { dropContentFiles(instance.getEmscriptenFS() as WritableEmscriptenFs); } catch { /* FS 不可用 */ }
         const runtime = instance.getEmscripten();
         try { instance.exit({ removeCanvas: false }); }
         finally { await releaseEmulatorRuntime(runtime); }

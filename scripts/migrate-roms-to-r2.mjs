@@ -12,9 +12,15 @@
  *
  * ## 范围
  *
- * 默认**排除 `nds` 与 `ps1`**（用户 2026-10-20 指定）：这两台的文件大（NDS 常见
- * 128/256 MB、PS1 光盘镜像更大），先只搬能立刻见效的那批。要搬它们就显式
- * `--console=nds,ps1`（会覆盖默认排除表）。
+ * 默认**排除 `gba` / `nds` / `ps1`**：NDS 常见 128/256 MB、PS1 光盘镜像更大，
+ * GBA 一千多款平均 3~4 MB（合计 4 GiB 上下），这三台先不搬。要搬就显式
+ * `--console=gba`（会覆盖默认排除表）。
+ *
+ * 2026-10-20 先搬完 arcade / nes / snes；2026-10-21 按用户要求补上
+ * md / gbc / gb / gg / sms / ws / 32x / ngp（323 行，合计 ~330 MiB）。
+ *
+ * ⚠️ md 的卡带扩展名是 `.md`，上游按 `text/markdown` 回（不带 content-length），
+ *    见 `downloadRom` 上面那段注释 —— 判据不能写成「一律拒 text/*」。
  *
  * ## 键怎么定
  *
@@ -30,7 +36,7 @@
  *
  *   node --env-file=.env.local scripts/migrate-roms-to-r2.mjs --dry-run
  *   node --env-file=.env.local scripts/migrate-roms-to-r2.mjs --console=nes --limit=3
- *   node --env-file=.env.local scripts/migrate-roms-to-r2.mjs                 # 全量（默认排除 nds/ps1）
+ *   node --env-file=.env.local scripts/migrate-roms-to-r2.mjs                 # 全量（默认排除 gba/nds/ps1）
  *   node --env-file=.env.local scripts/migrate-roms-to-r2.mjs --concurrency=4
  *   node --env-file=.env.local scripts/migrate-roms-to-r2.mjs --force         # 对象在也重传
  *
@@ -58,14 +64,23 @@ const ONLY = new Set(
     .map((item) => item.trim())
     .filter(Boolean)
 );
-/** 默认不搬的机种（用户指定）；`--console=` 给了就以它为准。 */
-const DEFAULT_EXCLUDE = new Set(['nds', 'ps1']);
+/** 默认不搬的机种；`--console=` 给了就以它为准。 */
+const DEFAULT_EXCLUDE = new Set(['gba', 'nds', 'ps1']);
 
 const UPSTREAM_SITE = 'https://retrogamesnexus.com';
 const UPSTREAM_FILES = 'https://files.retrogamesnexus.com';
 /** 回源用的 UA / Referer —— 与后台爬取一致，上游对这套放行。 */
 const UPSTREAM_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+/**
+ * 「一眼就是网页」的类型：挑战页 / 限流页 / 接口报错。语义与
+ * `app/api/games/[id]/rom/route.ts` 的 `HTML_LIKE` 一致（那边刻意宽一点，因为只是
+ * 拦个响应头；这边要按字节判断，所以 `text/*` 单独留给下面那道兜底）。
+ */
+const HTML_LIKE = /^text\/html|application\/xhtml|application\/json|application\/xml|text\/xml/i;
+/** `text/*` 整体：可能是网页，也可能只是 mime 表把扩展名认错了（`.md` 卡带），要看字节。 */
+const TEXT_LIKE = /^text\//i;
 
 for (const key of ['SUPABASE_DB_URL', 'R2_ENDPOINT', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY']) {
   if (!process.env[key]) {
@@ -135,6 +150,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * 从上游取一份 ROM 的完整字节。
  *
+ * ⚠️ **不能一律拒 `text/*`**（2026-10-21 改）：Mega Drive 卡带扩展名就是 `.md`，
+ * 上游的 mime 表把 `.md` 认成 Markdown，回 `text/markdown` 且**不带 content-length**
+ * —— 字节却是真卡带（`00 ff fe …`）。按老判据 md 的 63 条会全部被判「返回网页」而
+ * 失败。现在只拦真像网页的那几种类型（与 `app/api/games/[id]/rom/route.ts` 的
+ * `HTML_LIKE` 同一套语义），再用响应体第一字节兜一道。
+ *
  * 三次机会：上游偶尔回 403（普通驳回，不是 challenge），换一次就过了；
  * **challenge 也算在内**——脚本是本机直连（不是 Worker 出口），被挡多半是瞬时的，
  * 拉长等待再试比直接放弃划算。三次都不行就记失败、继续下一行（不让整批停住）。
@@ -160,7 +181,7 @@ async function downloadRom(url) {
         continue;
       }
       const type = (res.headers.get('content-type') ?? '').split(';')[0].trim();
-      if (/^text\/|application\/xhtml|application\/json/i.test(type)) {
+      if (HTML_LIKE.test(type)) {
         await res.body?.cancel();
         lastError = new Error(`上游返回网页而不是文件（${type}）`);
         await sleep(attempt * 2000);
@@ -175,6 +196,12 @@ async function downloadRom(url) {
       }
       if (bytes.length < 1024) {
         lastError = new Error(`文件过小（${bytes.length} B），多半不是 ROM`);
+        continue;
+      }
+      // 兜底：声明成 text/ 又真的以 `<` / `{` 开头 ⇒ 就是页面（挑战页有时不带 html 类型）。
+      if (TEXT_LIKE.test(type) && /^\s*[<{]/.test(bytes.subarray(0, 64).toString('latin1'))) {
+        lastError = new Error(`响应体是文本页面（${type}）`);
+        await sleep(attempt * 2000);
         continue;
       }
       return bytes;

@@ -23,6 +23,7 @@
 - 14 台全走本站 `public/cores/`（部署必须一起传，否则 404）；arcade 按 romset 挑 `fbneo`/`fbalpha2012_cps1`，驱动纠正进 `lib/arcade-core.ts` 的 `EXTRA_DRIVERS`（别写 `arcade-romsets.json`，只盖 CPS1）。NDS 的 melonds 是 EJS 核，控制/输入面另套（见 DETAILS）。
 - CD 机种（PS1/Sega CD/PCE CD）架构未通。`SCREEN_WIDTH/HEIGHT=720×540` 只是启动基准（NDS 256×384），显示尺寸在 globals.css。
 - 压缩包里内层不是 `lib/unwrap.ts` 的 `ROM_EXTENSIONS` 白名单 ⇒ 包不被拆 ⇒ `detectConsole` 见 `PK` 判街机 ⇒ FBNeo 报错（7z 改名 `.zip`、世嘉裸卡带叫 `.bin` 都栽在这条）。世嘉 `.bin` 由 `pickSegaCartEntry` 按文件头（0x100 `SEGA` / 0x7FF0 `TMR SEGA`）单独兜；这两条指纹在 `unwrap.ts` 与 `emulator.ts` 里**手抄两份、改一处必须同步**（反向 import 成环）。
+- 🔴 **退出必须先 `dropContentFiles()` 再 `exit()`**（2026-10-21 实测后加）：MEMFS 里那盘 ROM（`canOwn=true` 的那块 `Uint8Array`）在 Emscripten 实例退出后**几轮 GC 都不回收**，每进出一次钉住一盘（125.7 MiB 的 bin ⇒ +129 MB/轮，三轮 136→265→394 MB 线性叠加）。`EmulatorController.exit()` 现在两个分支都会先 unlink `CONTENT_DIRECTORY`。看到「返回后内存不降」先查这条；残留 ~70 MB/次是核心 wasm 堆，量级小一个数量级，未追。
 
 ## 数据库 = Supabase（2026-10-20 切换，D1/双源逻辑废弃）
 
@@ -56,7 +57,8 @@
 
 - ⚠️ `/_next/static/*` 绝不能 immutable（Turbopack chunk 名不随内容变；next.config.js 已 max-age=0 must-revalidate，别改回）。⚠️ 纯客户端壳静态页必须 `dynamic='force-dynamic'`（现 /play /room /privacy /terms）；发版后 purge CF。
 - 大 ROM 唯一下载路 `lib/http.ts` 的 `fetchRomWithProgress`；`readBodyWithProgress` 只给存档类小文件。R2 无版本控制，删 ROM 永久丢。
-- **ROM 自持范围 = 只有 `arcade` / `nes` / `snes`**（2026-10-20 用户两次收窄后的最终态：893/901 行落 R2，约 3.9 GiB；其余机种 gba/gb/gbc/md/gg/sms/32x/ws/ngp/nds/ps1 一律回上游 `files:`/`site:`，不要再去搬）。键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、`--console=` 非空时完全取代默认排除表、写 `size_bytes`）。`route.ts` 取片**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
+- **ROM 自持范围 = 除 `gba` / `nds` / `ps1` 之外全部**（2026-10-21 用户扩围：arcade/nes/snes 之后又搬 md/gbc/gb/gg/sms/ws/32x/ngp 共 323 行 305 MiB，无一失败；全库现 1216/4047 行、R2 共约 **4.20 GiB**）。剩 gba(1154 行，估 4 GiB 上下)/nds(1107)/ps1(562) 仍回上游 `files:`/`site:`。脚本默认排除表已改成 `gba,nds,ps1`。键 `roms/<机种>/<game_slug>-<language><ext>`，脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、`--console=` 非空时完全取代默认排除表、写 `size_bytes`）。`route.ts` 取片**先按语言、再优先 `r2:`**。键不含内容 hash ⇒ 换 ROM 必须换键。
+- ⚠️ **md 的卡带扩展名就是 `.md`**，上游按 `text/markdown` 回、不带 content-length（字节是真卡带 `00 ff fe`）。`migrate-roms-to-r2.mjs` 的判据因此不能写成「一律拒 `text/*`」（2026-10-21 已改成分层：`HTML_LIKE` 拦 html/json/xml，`text/*` 再看响应体首字节是不是 `<`/`{`）。另注：`route.ts` 的 `HTML_LIKE` 仍是宽版 `^text/`，所以 `.md` 这类 ROM **只在本站 R2 上能放**，回上游那条路会 502。
 - ⚠️ 上游两个 host **不可互换**：同一文件名常是一边 206 一边 404（如 `avsp.zip` 只在 files 子域）。搬不动时先换另一个 host 探一次，别急着判定「上游没有」。已知 8 个两边都 404：`arcade/sexy-parodius`、`snes/art-of-fighting-snes`、`contra-iii-the-alien-wars-snes`、`dragon-ball-z-super-butoden-3-snes`(fr/ja/ko)、`fushigi-no-dungeon-2-fuurai-no-shiren`(en/ja)。
 - 展示地址一律 `publicUrlOrNull()`；严格版 `publicUrl()` 只给上传/ROM 代理/存档下载。
 - 两个缓存桶脚本，**桶与 `incremental-cache/` 前缀都写死，不接受 `--bucket`/`--prefix` 覆盖**（2026-10-20 加固，此前 `r2-purge` 读 env 的 `R2_BUCKET`＝`games`、`next-cache-purge` 可 `--bucket=games`，裸跑 `--yes` 会连头像/存档/ROM 一起删）：`scripts/next-cache-purge.mjs` = **常规入口**（`pnpm cache:purge`，也是 `cf:deploy` 尾巴，只删旧 buildId 目录、当前那版永远保留，读 `.next/BUILD_ID` 取当前值，取不到就拒删）；`scripts/r2-purge.mjs` = 整桶清空（连当前 buildId 一起删，清完首次访问全现渲染）。改回「按参数选桶」前先想清楚这一点。
