@@ -1605,25 +1605,27 @@ export default function PlayScene({
         </section>
 
         {/*
-          右栏：最上面是按键设置，中间是联机房间卡（进了房才出现），
-          最底下一张平铺的「说明 + 控件」操作表。
+          右栏：上面是联机房间卡（进了房才出现），下面**一张**控制面板 ——
+          上半是键位表、下半是控制行，中间一道发丝线（2026-10-22 用户要求
+          「按键设置和游戏控制不要做两块」）。
 
           ⚠️ 2026-10-19：这一款的**资料块**（封面 + 名字 + 机种 / 年份 / 开发商）已经
           **不在这一列了** —— 用户要求挪到顶栏「返回」右边、尺寸压小一号
           （`StaticPlay.tsx` 的 `PlayGameInfo`，走 `GamesShell` 的 `navExtra`）。
           数据那一层也在那边取（`StaticPlay` 的 `useState`），这一列现在不用 `game.imageUrl`。
-          操作表仍是站上那套描边（`pixel-edge pxw-* pxc-*`）——「干净」指的是
+          面板仍是站上那套描边（`pixel-edge pxw-* pxc-*`）——「干净」指的是
           **只放该有的东西**（说明 + 控件，没有分组卡片、没有键帽、没有多余标题），
           不是把站上的视觉语言砍掉。
         */}
         <aside className="play-sidebar" data-collapsed={sidebarOpen ? undefined : 'true'}>
           {/*
-            收起 / 展开的**窄轨那一颗**（2026-10-19）。
+            收起 / 展开的**窄轨那一颗**。
 
-            为什么有两颗同样的钮：展开时那颗按用户要求摆在「编辑」右边（见下面按键设置
-            标题行），可收起之后三块面板全被 `display: none` 藏起来，那颗也跟着没了 ——
-            这一颗是 `.play-sidebar` 的直接孩子，藏在面板外面，专门负责「把面板叫回来」。
-            两边靠 CSS 分工：窄轨这颗只在**收起时**（以及窄屏 / 触屏上）显示，另一颗反之。
+            为什么有两颗同样的钮：展开时那颗在控制面板的标题行右端（和「编辑」并排，
+            见下面那个 section 的 `play-panel-actions`），可收起之后面板整个被
+            `display: none` 藏起来，那颗也跟着没了 —— 这一颗是 `.play-sidebar` 的直接
+            孩子，藏在面板外面，专门负责「把面板叫回来」。
+            两边靠 CSS 分工：窄轨这颗**只在收起时**显示，展开时（任何宽度）都藏掉。
             ⚠️ 收起时靠 `[data-collapsed='true'] > :not(.play-sidebar-toggle)` 隐藏面板，
                所以两颗钮都必须留着 `.play-sidebar-toggle` 这个类名。
           */}
@@ -1631,11 +1633,11 @@ export default function PlayScene({
             type="button"
             className="play-sidebar-toggle pixel-edge pxw-1 pxc-500 bg-ink-800"
             aria-expanded={sidebarOpen}
-            title={t(sidebarOpen ? 'play.hideSidebar' : 'play.showSidebar')}
+            aria-label={t('play.showSidebar')}
+            title={t('play.showSidebar')}
             onClick={() => setSidebarOpen((open) => !open)}
           >
             <span aria-hidden="true">{sidebarOpen ? '»' : '«'}</span>
-            <span>{t(sidebarOpen ? 'play.hideSidebar' : 'play.showSidebar')}</span>
           </button>
 
           {/*
@@ -1736,36 +1738,65 @@ export default function PlayScene({
             </section>
           )}
 
+          {/*
+            一块面板装两段：上面键位表、下面控制行（2026-10-22 用户要求
+            「按键设置和游戏控制不要做两块」「收起按钮放在模块的其他地方」）。
+
+            原来这是两张描边卡，收起钮骑在两张卡中间那道 12px 缝上（`.play-sidebar-seam`）。
+            合成一张之后收起钮就回到标题行右端、和「编辑」并排 —— 那颗骑缝的
+            绝对定位钮整套删掉了，别加回来。
+
+            ⚠️ 键位表仍然包在 `.play-keys` 里（不是直接铺在卡上）：触屏那档要
+            **只藏这张表**、把下面的控制行留着（见 `:root[data-mobile='on'] .play-keys`）。
+          */}
           <section
-            aria-label={t('keybind.open')}
-            className="play-keys pixel-edge pxw-2 pxc-700"
+            aria-label={t('play.controlsTitle')}
+            className="play-panel pixel-edge pxw-2"
           >
             <div className="play-panel-heading">
-              <h2>{t('keybind.open')}</h2>{' '}
-              {/*
-                ⚠️ **NDS 不画这颗「编辑」**（2026-10-15 用户要求「nds 游戏按钮编辑隐藏」）。
-                它开的是自定义按键面板；NDS 的键位是固定那套（掌机键位没有可换的余地，
-                面板里那 14 个钮也只是给人看的），给一颗点不出结果入口不如不给。
+              <h2>{t('play.controlsTitle')}</h2>
+              <div className="play-panel-actions">
+                {/*
+                  ⚠️ **NDS 不画这颗「编辑」**（2026-10-15 用户要求「nds 游戏按钮编辑隐藏」）。
+                  它开的是自定义按键面板；NDS 的键位是固定那套（掌机键位没有可换的余地，
+                  面板里那 14 个钮也只是给人看的），给一颗点不出结果入口不如不给。
 
-                **只藏入口，不藏这张表** —— 下面那份键位列表照旧列出来（用户明确要
-                「按键说明要显示」），NDS 那套丝印和键值由 `buttonsFor` / `buttonLabel`
-                按机种给。
+                  **只藏入口，不藏这张表** —— 下面那份键位列表照旧列出来（用户明确要
+                  「按键说明要显示」），NDS 那套丝印和键值由 `buttonsFor` / `buttonLabel`
+                  按机种给。
 
-                `KeyBindingsPanel` 里那套 `soloOnly` 逻辑**留着没删**：入口藏起来之后
-                它在 NDS 下确实走不到了，但删掉的话，哪天要放回入口就得连逻辑一起重写。
-              */}
-              {!soloOnly && (
+                  `KeyBindingsPanel` 里那套 `soloOnly` 逻辑**留着没删**：入口藏起来之后
+                  它在 NDS 下确实走不到了，但删掉的话，哪天要放回入口就得连逻辑一起重写。
+                */}
+                {!soloOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setKeybindOpen(true)}
+                    title={t('keybind.open')}
+                    aria-label={t('keybind.open')}
+                    className="play-edit"
+                  >
+                    {t('play.edit')}
+                  </button>
+                )}
+                {/*
+                  收起 = 标题行右端那颗小箭头（2026-10-22）。
+                  它藏在面板**里面**，收起时跟着面板一起消失 —— 右沿窄轨上那颗
+                  （`aside` 的直接孩子）接班，两处都靠 CSS 分工，类名都得留着。
+                */}
                 <button
                   type="button"
-                  onClick={() => setKeybindOpen(true)}
-                  title={t('keybind.open')}
-                  aria-label={t('keybind.open')}
-                  className="play-edit pixel-edge pxw-1 pxc-500 bg-ink-800 px-2 py-1 text-[11px] text-ink-200 transition-colors hover:text-accent"
+                  className="play-sidebar-toggle play-panel-collapse"
+                  aria-expanded={sidebarOpen}
+                  aria-label={t('play.hideSidebar')}
+                  title={t('play.hideSidebar')}
+                  onClick={() => setSidebarOpen(false)}
                 >
-                  {t('play.edit')}
+                  <span aria-hidden="true">»</span>
                 </button>
-              )}
+              </div>
             </div>
+            <div className="play-keys">
             {/*
               P1 / P2 切换**只在单机**时才画（`keysLocked` 为假）。
 
@@ -1777,7 +1808,7 @@ export default function PlayScene({
             */}
             {!keysLocked && (
               <div
-                className="mb-3 flex gap-2"
+                className="play-seg mb-2"
                 role="group"
                 aria-label={t('keybind.open')}
               >
@@ -1787,7 +1818,6 @@ export default function PlayScene({
                     type="button"
                     aria-pressed={keysPlayer === player}
                     onClick={() => setKeysPlayer(player)}
-                    className={`flex-1 px-2 py-1.5 text-[12px] transition-colors ${keysPlayer === player ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
                   >
                     {t(`keybind.${player}`)}
                   </button>
@@ -1799,48 +1829,26 @@ export default function PlayScene({
               `consoleType`）—— NDS 列的是 A / B / X / Y + L / R + L2 / R2 +
               START / SELECT，不是街机那套 A B C X Y Z / 投币。
             */}
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+            <dl className="play-key-list">
               {buttonsFor(consoleType).map((button) => (
-                <div
-                  key={button}
-                  className="flex min-w-0 items-center justify-between gap-1 border-b border-ink-800 pb-2"
-                >
-                  <dt className="shrink-0 text-[12px] text-ink-300">
+                <div key={button} className="play-key">
+                  <dt>
                     {/* PS1 那四颗符号走图形（根因见 components/PadGlyph.tsx） */}
                     <PadGlyph name={buttonLabel(button, t, consoleType)} />
                   </dt>
-                  <dd className="min-w-0 text-right">
-                    <kbd className="inline-block max-w-full break-words border border-ink-600 bg-ink-850 px-1.5 py-0.5 font-mono text-[11px] text-ink-100">
+                  <dd>
+                    <kbd className="play-kbd">
                       {codeLabel(bindings[keysLocked ? 'p1' : keysPlayer][button])}
                     </kbd>
                   </dd>
                 </div>
               ))}
             </dl>
+            </div>
 
-            {/*
-              收起 / 展开：**卡在两块面板的分隔线上、贴着右沿**（2026-10-19 用户指定这个位置）。
-              它用绝对定位挂在按键设置这一块上（`bottom: 0` + `translateY(50%)`）——
-              于是正好骑在「按键设置 / 游戏控制」中间那道 12px 的缝上，**不占布局高度**，
-              两块面板的间距一点没变。
+            {/* 两段之间的发丝线：仍然是一张卡，只是把键位和控制分开读 */}
+            <div className="play-panel-divider" aria-hidden="true" />
 
-              ⚠️ 它藏在面板**里面**，收起时会跟着面板一起消失 —— 右沿窄轨上那颗
-              （`aside` 的直接孩子）就是接班的那颗，窄屏 / 触屏也用它。
-            */}
-            <button
-              type="button"
-              className="play-sidebar-toggle play-sidebar-seam pixel-edge pxw-1 pxc-500 bg-ink-800"
-              aria-expanded={sidebarOpen}
-              aria-label={t('play.hideSidebar')}
-              title={t('play.hideSidebar')}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <span aria-hidden="true">»</span>
-            </button>
-          </section>
-
-          <section className="play-control-panel pixel-edge pxw-2 pxc-700">
-            <h2 className="play-panel-title">{t('play.controlsTitle')}</h2>
             <ul className="play-controls">
               <Row label={t(paused ? 'panel.resume' : 'panel.pause')}>
                 <RowBtn
@@ -1896,12 +1904,7 @@ export default function PlayScene({
                 onApplySave={applySave}
               />
               <Row label={t('play.volume')} wide>
-                <span
-                  className="play-volume-group flex items-center gap-1.5"
-                  style={{
-                    width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)`
-                  }}
-                >
+                <span className="play-volume-group">
                   <RowBtn
                     label={t('volume.down')}
                     onClick={() => changeVolume(volume - 1)}
@@ -1909,7 +1912,7 @@ export default function PlayScene({
                   >
                     −
                   </RowBtn>
-                  <span className="flex items-center gap-[3px]">
+                  <span className="play-ticks">
                     {Array.from({ length: VOLUME_MAX }, (_, i) => i + 1).map(
                       (level) => (
                         <button
@@ -1921,9 +1924,7 @@ export default function PlayScene({
                             level,
                             max: VOLUME_MAX
                           })}
-                          className={`h-[12px] w-[5px] transition-colors ${
-                            level <= volume ? 'bg-accent' : 'bg-ink-700'
-                          }`}
+                          className={`play-tick${level <= volume ? ' is-on' : ''}`}
                         />
                       )
                     )}
@@ -1939,12 +1940,7 @@ export default function PlayScene({
               </Row>
 
               <Row label={t('play.screenSize')} wide>
-                <span
-                  className="play-size-group grid grid-cols-3 items-center gap-3"
-                  style={{
-                    width: `calc(var(--play-control-size, 26px) * 2 + ${VOLUME_MAX * 9 + 9}px)`
-                  }}
-                >
+                <span className="play-size-group">
                   {TV_SIZES.map((size) => (
                     <button
                       key={size}
@@ -1954,7 +1950,7 @@ export default function PlayScene({
                         level: t(`tvSize.opt.${size}`)
                       })}
                       onClick={() => applyScreenSize(size)}
-                      className={`pixel-edge pxw-2 pxc-500 px-2 py-1 text-[12px] transition-colors ${screenSize === size ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'}`}
+                      className={`play-size-btn${screenSize === size ? ' is-on' : ''}`}
                     >
                       {t(`tvSize.opt.${size}`)}
                     </button>
@@ -2330,10 +2326,8 @@ function Row({
   wide?: boolean;
 }) {
   return (
-    <li
-      className={`flex items-center justify-between gap-3 py-2.5 ${wide ? 'col-span-2' : ''}`}
-    >
-      <span className="text-[12px] text-ink-400">{label}</span>
+    <li className={`play-row${wide ? ' play-row-wide' : ''}`}>
+      <span className="play-row-label">{label}</span>
       {children}
     </li>
   );
@@ -2361,11 +2355,7 @@ function RowBtn({
       type="button"
       title={label}
       aria-label={label}
-      className={`play-icon-button pixel-edge pxw-2 pxc-500 flex shrink-0 items-center justify-center text-[12px] leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
-        danger
-          ? 'bg-ink-800 text-danger/75 enabled:hover:bg-ink-700 enabled:hover:text-danger'
-          : 'bg-ink-800 text-ink-300 enabled:hover:bg-ink-700 enabled:hover:text-accent'
-      }`}
+      className={`play-icon-button${danger ? ' is-danger' : ''}`}
       {...props}
     >
       {children}

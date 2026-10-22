@@ -255,9 +255,9 @@ export async function listDevelopers(
   };
 }
 
-/** 列表页与首页「游戏最多的前 N 家」的 TTL（秒）= 30 天（2026-10-20 用户要求，原 24 小时）。 */
-export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 2592000;
-export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 2592000;
+/** 列表页与首页「游戏最多的前 N 家」的 TTL（秒）= 7 天（2026-10-22 迁 Vercel、去 ISR 后从 30 天压回来）。 */
+export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 604800;
+export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 604800;
 
 const countDevelopersCachedRaw = cached(
   async (keyword: string) => countDevelopers({ keyword }),

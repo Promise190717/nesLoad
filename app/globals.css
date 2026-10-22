@@ -1,8 +1,6 @@
 @import 'tailwindcss';
 
-.play-controls { --play-control-size: 26px; }
-.play-size-group { flex-shrink: 0; }
-.play-controls .play-size-group > button { padding-inline: 4px; }
+/* 存档 / 画质这类弹窗：全站唯一带圆角的浮层，里面用的是主题色（不跟右栏面板走） */
 .play-quality-dialog { margin: auto; width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 18px; border: 1px solid var(--color-ink-700); border-radius: 12px; background: var(--color-ink-900); color: var(--color-ink-100); box-shadow: 0 24px 80px rgba(0,0,0,.3); }
 .play-quality-dialog::backdrop { background: rgba(0,0,0,.72); backdrop-filter: blur(5px); }
 .play-quality-dialog button { border-radius: 6px; }
@@ -11,18 +9,22 @@
 .play-quality-dialog #play-quality-title:focus-visible { outline: none; box-shadow: none; }
 
 /* Play keeps the shared pixel edges, with a focused screen and compact controls. */
+/*
+ * 右栏宽度只有一个来源：`--play-sidebar-w`（240px，2026-10-22 从 280 收窄）。
+ * 工作区 / 顶栏那条线 / 网格列三处都读它，`+` 的那部分是「间距 + 右栏」的总宽。
+ */
 .play-page { background: radial-gradient(ellipse at 25% 25%, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent 55%), var(--color-ink-950); }
 .play-page > div { min-height: calc(100dvh - 40px); }
-.play-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: center; gap: 20px; padding-top: 8px; max-width: min(100%, calc(var(--play-display-max-width, 1100px) + 300px)); margin-inline: auto; }
+.play-workspace { --play-sidebar-w: 260px; display: grid; grid-template-columns: minmax(0, 1fr) var(--play-sidebar-w); align-items: center; gap: 18px; padding-top: 8px; max-width: min(100%, calc(var(--play-display-max-width, 1100px) + var(--play-sidebar-w) + 18px)); margin-inline: auto; }
 .play-navigation nav { flex-wrap: wrap; gap: 12px; }
-.play-navigation { width: 100%; max-width: min(100%, calc(var(--play-display-max-width, 1100px) + 300px)); margin-inline: auto; }
+.play-navigation { width: 100%; max-width: min(100%, calc(var(--play-display-max-width, 1100px) + 278px)); margin-inline: auto; }
 .play-stage { position: sticky; top: 24px; align-self: start; padding: 0; border: 0; background: transparent; }
 .play-screen-area { display: flex; width: 100%; height: var(--play-display-height, 80dvh); align-items: flex-start; justify-content: center; border: 0; background: transparent; }
 .play-display { --play-size-scale: 1; width: 100%; height: calc(var(--play-display-height, 80dvh) * var(--play-size-scale)); max-width: min(100%, var(--play-display-max-width, calc((100dvh - 160px) * 4 / 3))); }
 .play-display[data-screen-size='small'] { --play-size-scale: .75; width: 75%; max-width: min(75%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .75)); }
 .play-display[data-screen-size='medium'] { --play-size-scale: .88; width: 88%; max-width: min(88%, calc(var(--play-display-max-width, (100dvh - 160px) * 4 / 3) * .88)); }
 @media (min-width: 1024px) {
-  .play-workspace { --play-size-scale: 1; --play-stage-width: calc(var(--play-display-max-width, 1100px) * var(--play-size-scale)); width: calc(var(--play-stage-width) + 300px); max-width: 100%; grid-template-columns: minmax(0, var(--play-stage-width)) 280px; }
+  .play-workspace { --play-size-scale: 1; --play-stage-width: calc(var(--play-display-max-width, 1100px) * var(--play-size-scale)); width: calc(var(--play-stage-width) + var(--play-sidebar-w) + 18px); max-width: 100%; grid-template-columns: minmax(0, var(--play-stage-width)) var(--play-sidebar-w); }
   .play-workspace[data-screen-size='small'] { --play-size-scale: .75; }
   .play-workspace[data-screen-size='medium'] { --play-size-scale: .88; }
   .play-screen-area { height: auto; }
@@ -37,11 +39,11 @@
   .play-display[data-screen-size='small'],
   .play-display[data-screen-size='medium'] { width: 100%; max-width: min(100%, var(--play-stage-width, 100%)); height: auto; aspect-ratio: 4 / 3; }
   /*
-   * 右栏收起：宽度照旧（`--play-stage-width + 300px`，顶栏那条线也跟着它），
-   * 第一列吃掉那挤出来的 260px、屏幕在其中居中，第二列只剩 40px 的窄轨。
+   * 右栏收起：宽度照旧（`--play-stage-width + 右栏 + 间距`，顶栏那条线也跟着它），
+   * 第一列吃掉那挤出来的宽度、屏幕在其中居中，第二列只剩 40px 的窄轨。
    */
   .play-workspace[data-sidebar='closed'] { grid-template-columns: minmax(0, 1fr) 40px; }
-  .play-sidebar[data-collapsed='true'] .play-sidebar-toggle { display: inline-flex; align-self: start; justify-content: center; width: 40px; padding: 12px 6px; writing-mode: vertical-rl; text-align: center; }
+  .play-sidebar[data-collapsed='true'] > .play-sidebar-toggle { display: inline-flex; align-self: start; justify-content: center; width: 40px; padding: 12px 6px; writing-mode: vertical-rl; text-align: center; }
   /*
    * 竖排（`writing-mode: vertical-rl`）会把字形顺时针转 90°，`«` 于是变成**朝上**。
    * 箭头单独反向转回来，保持「朝左 = 展开」（2026-10-19 用户指出）。
@@ -94,41 +96,62 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-option[aria-pressed='false'] { background: #232323; color: #bcbcbc; --px-c: #414141; }
 .play-option[aria-pressed='true'] { color: #161616; --px-c: var(--color-crt-accent); }
 .play-start { width: 100%; max-width: 320px; min-height: 44px; font-weight: 600; color: #161616; }
-.play-sidebar { display: flex; min-width: 0; width: 100%; flex-direction: column; gap: 12px; align-self: start; }
-/*
- * 右栏的「收起 / 展开」（2026-10-19 加）。
+/* ══ /play 右栏 = 一块「机台面板」（2026-10-22）═══════════════════════
  *
- * 收起时三块面板走 `display: none` 而**不是卸载** —— 键位编辑、联机面板、存档那些
- * 组件里的 state 得留着，收起再展开不该把正在配的东西丢掉。
- * 那颗钮刻意留在 `.play-sidebar-panels` 外面：面板都藏了，它是唯一能把它们叫回来的东西。
+ * 版式上的三条规矩：**一块**面板（标题条 + 键位段 + 通栏发丝线 + 控制段）、
+ * 控制行**一行一项**（名字贴左、控件贴右，不再两列挤在一起撞字）、内边距下在
+ * 每一段上（标题条才能贴满左右边）。
+ *
+ * ⚠️ 颜色**全部走主题 token**（站上有明暗两套，右栏必须跟着翻）。下面的
+ * `--side-*` 只是这一段里的语义别名，取值都是 `--color-ink-*`，别把它们写成
+ * 死色值 —— 那会变成一块永远深色的方块，跟主题切换打架。
  */
-.play-sidebar-toggle { display: inline-flex; align-self: flex-end; align-items: center; gap: 4px; min-height: 24px; padding: 3px 8px; font-size: 11px; color: var(--color-ink-200); transition: color .15s; }
-.play-sidebar-toggle:hover { color: var(--color-accent); --px-c: var(--color-accent); }
-.play-sidebar-toggle[aria-expanded='false'] { letter-spacing: .04em; }
+.play-sidebar {
+  --side-bg: var(--color-ink-900);      /* 面板底 */
+  --side-head: var(--color-ink-950);    /* 标题条：比面板再深/浅一档 */
+  --side-line: var(--color-ink-800);    /* 发丝线 */
+  --side-soft: var(--color-ink-850);    /* 按钮、键值块的底 */
+  --side-text: var(--color-ink-100);    /* 主文字 */
+  --side-dim: var(--color-ink-400);     /* 说明文字 */
+  --px-c: var(--color-ink-700);         /* pixel-edge 描边色，整栏一个 */
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  flex-direction: column;
+  gap: 10px;
+  align-self: start;
+  color: var(--side-text);
+}
 /*
- * 这颗钮有两个位置，**同一份 DOM 放不了两处**，所以是两颗、靠 CSS 分工：
- *   · `.play-sidebar-seam` = 展开时用的那颗，绝对定位骑在「按键设置 / 游戏控制」
- *     两块面板的分隔线上、右半截探出面板右沿（见下一条，不占布局高度）；
- *   · `.play-sidebar` 的直接孩子那颗 = 收起后在右沿窄轨上，窄屏 / 触屏上也用它
- *     （那几个场景里按键设置那张表本身就可能被藏掉，骑缝那颗跟着看不见）。
+ * 收起 / 展开（两颗钮，靠 CSS 分工，同一份 DOM 放不了两处）：
+ *   · `.play-panel-collapse` = 展开时用的那颗，在面板标题条右端、和「编辑」并排；
+ *   · `.play-sidebar` 的直接孩子那颗 = 收起后右沿窄轨上，也是唯一能把面板叫回来的。
+ * 收起走 `display: none` 而不是卸载 —— 键位编辑 / 存档里的 state 得留着。
  */
+.play-sidebar-toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; font-size: 12px; line-height: 1; color: var(--side-dim); background: var(--side-soft); border: 1px solid var(--side-line); transition: color .15s, border-color .15s; }
+.play-sidebar-toggle:hover { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 60%, var(--side-line)); }
 .play-sidebar > .play-sidebar-toggle { display: none; }
-/*
- * 骑缝那颗：**28×28 的纯图标小方块**（2026-10-19 用户：带「收起」两个字太丑）。
- *
- * 位置算的是「两块面板之间那道 12px 缝的正中」：`bottom: 0` 贴的是上面那块的下边，
- * 再往下半个自身（`50%`）+ 半个缝（`6px`）⇒ 上下各压进 8px，两边一样多。
- * 只写 `50%` 的话它会整个被上面那块吃掉一半、下面一点不占，看着就是歪的。
- * `right: -12px` = **故意探出面板右沿**（用户要求「右侧可以超过块的右侧」），
- * 像个挂在边上的小拉手；`main` 左右各有 16px 内边距，探出去这 12px 不会撑出横向滚动。
- */
-.play-sidebar-seam { position: absolute; right: -12px; bottom: 0; z-index: 2; width: 28px; min-height: 0; height: 28px; padding: 0; gap: 0; justify-content: center; font-size: 13px; line-height: 1; transform: translateY(calc(50% + 6px)); }
+.play-sidebar[data-collapsed='true'] > .play-sidebar-toggle { display: inline-flex; }
 .play-sidebar[data-collapsed='true'] > :not(.play-sidebar-toggle) { display: none; }
-/* 四块面板和全站一样走 pixel-edge 像素描边（描边在 TSX 上挂类），不再用普通 border */
-/* `.play-keys` 要当那颗骑缝钮的定位参照（见 `.play-sidebar-seam`） */
-.play-keys { position: relative; }
-.play-keys, .play-room, .play-control-panel { background: var(--color-ink-900); padding: 14px; }
-.play-room { padding: 10px 12px; }
+/* 面板：内边距不下在整块上，而是下在每一段里 —— 标题条要能贴满左右边 */
+.play-panel, .play-room { padding: 0; background: var(--side-bg); }
+/* 标题条：像机台上的标签槽，配一颗强调色小灯 */
+.play-panel > .play-panel-heading,
+.play-room > .play-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 9px 10px 9px 12px; background: var(--side-head); border-bottom: 1px solid var(--side-line); }
+.play-panel > .play-panel-heading h2,
+.play-room > .play-panel-heading h2 { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--side-dim); }
+.play-panel > .play-panel-heading h2::before,
+.play-room > .play-panel-heading h2::before { content: ''; width: 5px; height: 5px; background: var(--color-accent); }
+.play-panel-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
+/* 「编辑」：和收起钮同高同色，只是宽一点 */
+.play-edit { min-height: 24px; padding: 0 8px; font-size: 10px; letter-spacing: .08em; color: var(--side-dim); background: var(--side-soft); border: 1px solid var(--side-line); transition: color .15s, border-color .15s; }
+.play-edit:hover { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 60%, var(--side-line)); }
+/* 房间卡正文贴边（它没有段落容器，只能给每个孩子补左右内边距） */
+.play-room { color: var(--side-dim); }
+.play-room > *:not(.play-panel-heading) { padding-inline: 12px; }
+.play-room > .play-panel-heading + * { padding-top: 9px; }
+.play-room > *:last-child { padding-bottom: 10px; }
+.play-room .play-share-input { color: var(--side-text); background: var(--side-soft); border-color: var(--side-line); }
 /* 房间卡刚出现时的提醒：描边闪主题色几下（steps 保像素感），几秒后停。
    闪的是 --px-c（已 @property 注册成 <color>，可动画）——直接改 box-shadow
    会把 pixel-edge 的四条边整个顶掉 */
@@ -139,23 +162,52 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 @media (prefers-reduced-motion: reduce) {
   .play-room-flash { animation: none; --px-c: var(--color-accent); }
 }
-.play-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.play-panel-heading h2, .play-panel-title { font-size: 12px; font-weight: 600; color: var(--color-ink-200); }
-.play-panel-title { margin-bottom: 8px; }
+/* 键位段 / 控制段之间：通栏一条 */
+.play-panel-divider { height: 1px; margin: 0; background: var(--side-line); }
 .play-share-row > input,
-.play-share-row > button { height: 30px; padding-block: 0; }
-.play-keys dl > div { border-bottom: 0; padding-bottom: 0; min-height: 25px; }
-.play-keys kbd { border-color: var(--color-ink-700); background: var(--color-ink-800); }
-.play-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; border: 0; padding: 0; background: transparent; }
-.play-controls > li { min-width: 0; min-height: 38px; padding-block: 6px; gap: 8px; border-bottom: 1px solid var(--color-ink-800); }
-.play-controls > li > span:first-child { color: var(--color-ink-300); }
-.play-controls > li button { min-height: 26px; min-width: 26px; height: 26px; padding-block: 3px; --px-w: 1px; }
-.play-controls > li button[title] { font-size: 12px; }
-.play-controls .play-icon-button { width: 26px; min-width: 26px; max-width: 26px; height: 26px; min-height: 26px; max-height: 26px; padding: 0; flex: 0 0 26px; box-sizing: border-box; }
-.play-controls > li span > span > button { min-width: 6px; min-height: 16px; height: 16px; padding: 0; }
-/* 按键设置标题行那颗「编辑」。2026-10-19 压到和右边那颗「收起」一般大 —— 两颗并排，
-   一个胖一个瘦看着像两套 UI（用户指出的） */
-.play-edit { min-height: 24px; padding: 3px 8px; font-size: 11px; --px-w: 1px; }
+.play-share-row > button { height: 28px; padding-block: 0; }
+/* ── 键位：两列清单，左边钮名右边键值 ────────────────────────────── */
+.play-keys { padding: 10px 12px 9px; }
+.play-key-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 3px; }
+/* 行之间只靠间距分开，不画线 —— 十几行全挂发丝线会糊成一片（截图里那种「格子感」） */
+.play-key { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
+.play-key dt { flex-shrink: 0; font-size: 11px; letter-spacing: .04em; color: var(--side-dim); }
+.play-key dd { min-width: 0; text-align: right; }
+.play-kbd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .04em; color: var(--side-text); background: var(--side-soft); border: 1px solid var(--side-line); }
+/* P1 / P2 = 分段选择器：一整条，中间一道竖线，选中的那半铺强调色 */
+.play-seg { display: flex; margin-bottom: 10px; border: 1px solid var(--side-line); }
+.play-seg > button { flex: 1; min-height: 24px; padding: 0; font-size: 11px; letter-spacing: .06em; color: var(--side-dim); background: var(--side-soft); transition: color .15s, background .15s; }
+.play-seg > button + button { border-left: 1px solid var(--side-line); }
+.play-seg > button[aria-pressed='true'] { background: var(--color-accent); color: var(--color-ink-950); }
+.play-seg > button[aria-pressed='false']:hover { color: var(--side-text); }
+/* ── 控制段：**一行一项**（2026-10-22 用户：两列挤在一起、按钮和下一列的
+   文字撞上了）。名字贴左、控件贴右，行高 32px，右侧控件一律 24px 见方。 */
+.play-controls { display: flex; flex-direction: column; margin: 0; padding: 2px 12px 8px; list-style: none; border: 0; background: transparent; }
+.play-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; border-bottom: 1px solid var(--side-line); }
+.play-row:last-child { border-bottom: 0; }
+.play-row-label { font-size: 12px; color: var(--side-dim); }
+/* 单列之后没有跨列的概念，保留类名只是为了让 TSX 不用改调用点 */
+.play-row-wide { flex-wrap: wrap; }
+.play-icon-button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; font-size: 12px; line-height: 1; color: var(--side-text); background: var(--side-soft); border: 1px solid var(--side-line); transition: color .15s, border-color .15s; }
+.play-icon-button:hover:not(:disabled) { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 60%, var(--side-line)); }
+.play-icon-button:disabled { opacity: .35; cursor: not-allowed; }
+.play-icon-button.is-danger { color: var(--color-danger); }
+/* 存档 / 载入：一行两格，各占一半 */
+.play-save { padding-block: 6px; }
+.play-save-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; width: 100%; }
+.play-save-cell { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
+.play-save-label { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.play-dim { color: var(--side-dim); }
+/* 音量：− / 档位格 / + */
+.play-volume-group { display: flex; align-items: center; gap: 6px; }
+.play-ticks { display: flex; align-items: center; gap: 3px; }
+.play-tick { width: 5px; height: 14px; padding: 0; background: var(--side-line); transition: background .15s; }
+.play-tick.is-on { background: var(--color-accent); }
+/* 画面大小：三档 */
+.play-size-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.play-size-btn { min-height: 24px; padding: 0 8px; font-size: 11px; color: var(--side-dim); background: var(--side-soft); border: 1px solid var(--side-line); transition: color .15s, border-color .15s; }
+.play-size-btn.is-on { color: var(--color-ink-950); background: var(--color-accent); border-color: var(--color-accent); }
+.play-size-btn:not(.is-on):hover { color: var(--side-text); }
 .play-workspace button:focus-visible,
 .play-workspace input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 5px; }
 .play-overlay button:focus-visible,
@@ -169,16 +221,16 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-display .play-frame,
   .play-display .play-frame > div { height: auto; }
   .play-game-screen:not(:fullscreen) { height: auto; aspect-ratio: 4 / 3; }
-  .play-sidebar { max-width: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  /* 这一档下右栏是两列网格：收起钮横跨整行并贴右，三块面板各自横跨整行 */
-  .play-sidebar-toggle { grid-column: 1 / -1; justify-self: end; }
-  /* 窄窗口统一用窄轨那颗（骑缝那颗在网格里会压到面板角上），触屏另见 :root[data-mobile] 那组 */
-  .play-sidebar > .play-sidebar-toggle { display: inline-flex; }
-  .play-sidebar-seam { display: none; }
-  .play-keys { grid-column: 1 / -1; }
-  .play-room { grid-column: 1 / -1; }
-  .play-control-panel { grid-column: 1 / -1; }
+  .play-sidebar { max-width: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  /* 这一档下右栏是两列网格：两块面板各自横跨整行，窄轨那颗（只在收起时出现）贴右 */
+  .play-sidebar > .play-sidebar-toggle { grid-column: 1 / -1; justify-self: end; }
+  .play-panel, .play-room { grid-column: 1 / -1; }
+  /*
+   * 这一档面板是整屏宽（屏幕在上面占满一行），一行一项会被拉得太长 ——
+   * 控制行改回两列，行距放大。lg 档（右栏 260px）仍是单列。
+   */
   .play-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
+  .play-row-wide { grid-column: 1 / -1; }
 }
 @media (max-width: 540px) {
   .play-sidebar { display: flex; }
@@ -191,7 +243,7 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-setup { gap: 20px; }
   .play-option { padding-inline: 10px; }
   .play-mode-switch > button { font-size: 11px; }
-  .play-controls { column-gap: 16px; padding-inline: 8px; }
+  .play-controls { padding-inline: 10px; }
 }
 
 /*
@@ -211,10 +263,9 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
  * **留在下面那个宽度媒体查询里** —— 它们回答的才是「现在有多宽」，窄窗口照样要收。
  */
 .play-touch { display: none; }
-:root[data-mobile='on'] .play-controls { --play-control-size: 40px; }
-:root[data-mobile='on'] .play-keys { display: none; }
-/* 触屏上按键设置整块不画 ⇒ 骑缝那颗跟着没了，改用 `.play-sidebar` 直接孩子那颗 */
-:root[data-mobile='on'] .play-sidebar > .play-sidebar-toggle { display: inline-flex; }
+/* 触屏上只藏键位表这一段，同一条卡里的控制行留着 ⇒ 那条分隔线也跟着藏 */
+:root[data-mobile='on'] .play-keys,
+:root[data-mobile='on'] .play-panel-divider { display: none; }
 :root[data-mobile='on'] .play-touch {
   display: block;
   width: 100%;
@@ -227,10 +278,13 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 :root[data-mobile='on'] .play-touch-system button,
 :root[data-mobile='on'] .play-shoulders button { min-height: 40px; min-width: 76px; }
 :root[data-mobile='on'] .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
-:root[data-mobile='on'] .play-controls > li { min-height: 52px; }
-:root[data-mobile='on'] .play-controls > li button { min-width: 40px; min-height: 40px; height: 40px; }
-:root[data-mobile='on'] .play-controls .play-icon-button { width: 40px; min-width: 40px; max-width: 40px; height: 40px; min-height: 40px; max-height: 40px; padding: 0; flex-basis: 40px; }
-:root[data-mobile='on'] .play-controls > li span > span > button { min-width: 6px; min-height: 24px; height: 24px; }
+/* 触屏：手指要 34px 起步（右栏这排按钮在桌面上是 24px） */
+:root[data-mobile='on'] .play-row { min-height: 44px; }
+:root[data-mobile='on'] .play-row-label,
+:root[data-mobile='on'] .play-save-label { font-size: 13px; }
+:root[data-mobile='on'] .play-icon-button { width: 34px; min-width: 34px; height: 34px; min-height: 34px; }
+:root[data-mobile='on'] .play-size-btn { min-height: 34px; }
+:root[data-mobile='on'] .play-tick { width: 7px; height: 18px; }
 :root[data-mobile='on'] .play-room input { min-height: 44px; }
 :root[data-mobile='on'] .play-room button { min-height: 40px; }
 :root[data-mobile='on'] .play-page { padding-bottom: env(safe-area-inset-bottom); }
@@ -245,7 +299,6 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-sidebar { display: flex; flex-direction: column; min-width: 0; }
   /* 收起钮**除外**：它是 `inline-flex` 的小标签，拉满整行就没「按钮」的样子了 */
   .play-sidebar > :not(.play-sidebar-toggle) { width: 100%; min-width: 0; }
-  .play-controls { column-gap: 16px; }
 }
 @media (max-width: 359px) {
   /*
@@ -255,7 +308,6 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    */
   :root[data-mobile='on'] .play-touch { --pad-btn: 30px; padding-inline: 2px; }
   :root[data-mobile='on'] .play-touch-main { gap: 8px; }
-  .play-controls { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-height: 540px) and (orientation: landscape) and (pointer: coarse) {
   .play-display { max-width: min(100%, 62vh); }

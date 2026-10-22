@@ -7,7 +7,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
  * 「筛着日本語翻页」就只能退回带查询参数那份、又变回整页刷新）。
  */
 
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{ locale: string; id: string; code: string; n: string }> };
 

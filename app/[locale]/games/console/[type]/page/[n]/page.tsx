@@ -7,7 +7,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/games';
  * 又变成整页刷新。段序固定 `console` → `page`，与 `gamesHref` 的拼法一字不差。
  */
 
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{ locale: string; type: string; n: string }> };
 

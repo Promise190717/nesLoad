@@ -7,7 +7,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
  * 改写成影子路由，客户端软导航对不上 ⇒ 点一下整页刷新。进路径后是真路由，恢复软导航。
  */
 
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{ locale: string; id: string; code: string }> };
 

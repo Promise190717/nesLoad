@@ -243,24 +243,24 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
   };
 
   const buttonClass = 'border border-ink-600 bg-ink-800 px-3 py-1 text-[12px] text-ink-200 hover:text-accent disabled:opacity-40';
-  const iconButtonClass = 'play-icon-button pixel-edge pxw-2 pxc-500 flex shrink-0 items-center justify-center bg-ink-800 text-ink-300 transition-colors hover:bg-ink-700 hover:text-accent disabled:cursor-not-allowed disabled:opacity-35';
+  const iconButtonClass = 'play-icon-button';
   /* 关着的时候才在行内露结果；loadFailed 只在弹窗里说（它本来就开着） */
   const inlineNotice = message && !open && message !== 'loadFailed' ? message : null;
   /* 每种提示一档颜色：成功绿、两个进行中 info / 中性、三种「本机其实没事」是 warn、本机失败 danger */
   const noticeTone =
     inlineNotice === 'saved' ? 'text-ok'
       : inlineNotice === 'uploading' ? 'text-info'
-        : inlineNotice === 'localSaving' ? 'text-ink-300'
+        : inlineNotice === 'localSaving' ? 'play-dim'
           : inlineNotice === 'cloudFailed' || inlineNotice === 'tooLarge' || inlineNotice === 'saveNoLogin'
             ? 'text-warn'
-            : inlineNotice ? 'text-danger' : 'text-ink-300';
+            : inlineNotice ? 'text-danger' : 'play-dim';
   return (
-    <li className="col-span-2 flex flex-col gap-2 py-2">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="flex items-center justify-between gap-2">
+    <li className="play-row play-row-wide play-save">
+      <div className="play-save-grid">
+        <div className="play-save-cell">
           <span
             role={inlineNotice ? 'status' : undefined}
-            className={`truncate text-[12px] ${noticeTone}`}
+            className={`play-save-label ${noticeTone}`}
           >
             {inlineNotice ? t(`play.${inlineNotice}`) : t('panel.save')}
           </span>
@@ -268,8 +268,8 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" shapeRendering="crispEdges" aria-hidden="true"><path d="M2 1h10l3 3v11H1V1h1Zm1 2v4h8V3H3Zm1 7v3h8v-3H4Z" /><rect x="8" y="3" width="2" height="3" /></svg>
           </button>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[12px] text-ink-300">{t('panel.load')}</span>
+        <div className="play-save-cell">
+          <span className="play-save-label play-dim">{t('panel.load')}</span>
           <button type="button" title={t('panel.load')} aria-label={t('panel.load')} className={iconButtonClass} disabled={disabled || pending || !rom} onClick={() => void showList()}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" shapeRendering="crispEdges" aria-hidden="true"><path d="M1 3h6v2h8v9H1V3Zm2 4v5h10V7H3Z" /></svg>
           </button>

@@ -2,6 +2,16 @@
 
 > 只放「改这块之前必须知道」的细节；总纲与硬约束见 `MEMORY.md`。
 
+## Supabase / R2 / 部署补充细节（2026-10-20~22，自 MEMORY.md 移入）
+
+- 全量爬取/回填模板 = `scripts/migrate-to-supabase.mjs`（上游**列表页** RSC 载荷一页 18 款带全部字段）；14 语种回填 = `scripts/fill-game-texts-locales.mjs`（postgres.js 连 `SUPABASE_DB_URL`：连接池跑完全程再 end、developer/series 行按 slug:locale 去重，两个坑都踩过）。机种文案回填 = `scripts/fill-console-intros.mjs`（只补 zh/en 空值、`COALESCE` 不覆盖人工编辑；切库时 console_texts 只搬了 name）。
+- `writeTexts`/`writeDeveloperTexts`（games-admin.ts / developers.ts）只动传进来的语言，别的行一概不碰。
+- 缓存键版本（2026-10-22 时点）：`sb:games:page|latest|by-console|by-developer|by-id` v2、`sb:developers:list` v4、`sb:developers:top` v3、`consoles:list` v8、机种页单条 `static-console` v2。ISR 撤销后数据缓存统一 604800（`GAMES_PAGE_`/`GAME_DETAIL_`/`HOME_`/`CONSOLES_PAGE_`/`DEVELOPERS_PAGE_`/`TOP_DEVELOPERS_`；`listGameStubsCached` 仍 86400）；构建期预渲染已删（三处 `generateStaticParams` + `PRERENDER_LOCALES`）。
+- 开发商厂标只有 133/269 家有，其余库内 `NULL`，前台走名字首字占位。
+- ROM 自持：脚本 `scripts/migrate-roms-to-r2.mjs`（幂等、HeadObject 断点续跑、`--console=` 非空时完全取代默认排除表、写 `size_bytes`；判据分层：`HTML_LIKE` 拦 html/json/xml，`text/*` 再看首字节是不是 `<`/`{`——`.md` 是真卡带）。`route.ts` 取片先按语言、再优先 `r2:`。已知上游两边都 404 的 8 个：`arcade/sexy-parodius`、`snes/art-of-fighting-snes`、`contra-iii-the-alien-wars-snes`、`dragon-ball-z-super-butoden-3-snes`(fr/ja/ko)、`fushigi-no-dungeon-2-fuurai-no-shiren`(en/ja)。
+- 7z wasm 实测：同一 PS1 包（265 MB→692 MB）旧 asm.js 42.6 s → 新 wasm 19.0 s，2.2 倍（别再引用「5–10 倍」）。别改「精确扩容」——7-Zip 边写边扩会退化 O(n²)（16.2 s→74.1 s、3.8 GB）。`unwrapRom` 收 `AbortSignal`，取消要 `terminate()` worker 且不吞 abort（「解不开」才吞）；worker 内失败走 `{t:9}`。内存判据口诀：离开时能进 `exit()` 且 instance 非 null 才清得掉；残留 ~70 MB/次是核心 wasm 堆，量级小一个数量级，未追。
+
+
 ## 机种专题页的语种筛选（`/consoles/[type]` 的 `?lang=`，2026-10-16）
 
 - 只挂在这**一页**上（`/games` 没有语种筛选，那一路永远传 `null`）。筛的是 `games.language` = **游戏自己的语种**，不是界面语言。
@@ -228,7 +238,9 @@
 
 - 外壳 = `GamesShell`（`showHeader={false}` + `fill`，只有它用）；视觉与网站一致：描边 `pixel-edge pxw-* pxc-*`、屏里那层 `crt-*`（底永远黑）。「不要 room 的样式」= 别搬布景/电视机/抽屉/键帽。别给 `.screen` 挂 max-h。
 - 资料条（封面 + 名字 + 机种/年份/开发商）**在顶栏水平居中**（`StaticPlay` 的 `PlayGameInfo` → `GamesShell` 的 `navExtra`）；右栏从按键设置开始。数据只在 `StaticPlay` 这一层取，别再在 `PlaySession` 里取第二遍。
-- 右栏整栏收起（`PlayScene` 的 `sidebarOpen`，不落盘）：收起 = 三块面板 `display:none` + 40px 窄轨；`[data-sidebar='closed']` 那条网格规则**只能写在 `@media(min-width:1024px)` 里**。
-- 收起钮两颗（靠 CSS 分工，都得留 `.play-sidebar-toggle` 类名）：展开时那颗**骑在「按键设置 / 游戏控制」的分隔线上、贴右沿**＝`.play-sidebar-seam`（`absolute bottom:0 + translateY(50%)`，不占高度）；收起后 `aside` 的直接孩子那颗接班。
+- 右栏整栏收起（`PlayScene` 的 `sidebarOpen`，不落盘）：收起 = 面板 `display:none` + 40px 窄轨；`[data-sidebar='closed']` 那条网格规则**只能写在 `@media(min-width:1024px)` 里**。
+- 收起钮两颗（靠 CSS 分工，都得留 `.play-sidebar-toggle` 类名）：展开时那颗在**面板标题条右端**、和「编辑」并排（`.play-panel-collapse`）；收起后 `aside` 的直接孩子那颗（窄轨）接班，否则没有任何东西能把面板叫回来。旧的骑缝钮 `.play-sidebar-seam` 已删，别加回。
+- 右栏宽度唯一出口 `--play-sidebar-w`（240px，2026-10-22 从 280 收窄），工作区 / 顶栏线 / 网格三处都读它；`+ 18px` 是间距。
+- 右栏只有**一块**面板（2026-10-22：按键设置 + 游戏控制合成一张，用户说「不要做两块」）：通栏标题条 + 键位段 + 通栏发丝线 + 控制段；内边距下在段上、不下在 `.play-panel` 上（否则标题条贴不满边）。键位表仍包在 `.play-keys` 里，触屏只藏这一段、控制行要留。
 - ⚠️ lg 档 `.play-display` 的 `max-width` 是 `min(100%, var(--play-stage-width))`，别改回 `none`（否则 4:3 会顶穿视口）。
 - 联机时右侧按键表锁 1P：`keysLocked = soloOnly || mode !== 'solo'` 一起管「不画 P1/P2 切换」+「取值锁 `bindings.p1`」；`KeyBindingsPanel` 可选 `online`。判据用派生的 `mode`，**不是 `netplayState.role`**。

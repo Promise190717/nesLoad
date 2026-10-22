@@ -11,7 +11,6 @@ import GamesShell from '@/components/GamesShell';
 import ReportGameButton from '@/components/ReportGameButton';
 import ShareGameButton from '@/components/ShareGameButton';
 import {
-  PRERENDER_LOCALES,
   SITE_NAME,
   alternatesFor,
   htmlLang,
@@ -27,7 +26,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, listGameStubs, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
+import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -563,38 +562,17 @@ export default async function GameDetailPage({
 }
 
 /*
- * 构建期预渲染默认语言的全部详情页（2026-10-22 加，为压住免费版 CPU 超限）。
+ * 页面级缓存已全部撤掉（2026-10-22 用户决定迁 Vercel）。
  *
- * 为什么必须有它：这一页只写了 `revalidate`、**没有 `generateStaticParams`**，
- * Next 就不知道要提前生成哪些 `[id]`，于是每条 URL 都是 on-demand ISR ——
- * 线上第一次被访问（包括爬虫按 sitemap 扫到的长尾）必须现场跑完整 SSR。
- * Cloudflare Workers 免费版每个请求只有 **10ms CPU**，一次 Next 渲染是几十到几百 ms，
- * 现场渲染必撞 1102「Worker exceeded CPU time limit」，而同一页第二次又能打开
- * （isolate 热了 + 缓存已写入）—— 这正是「同一个页面忽好忽坏」的真身。
+ * 这里曾经有 `generateStaticParams`，把英文 + 中文的全部详情页在构建期预渲染、
+ * 再把 `.open-next/cache` 上传到 R2 靠 `enableCacheInterception` 跳过渲染器 ——
+ * 那是为压住 Cloudflare 免费版 10ms CPU 的 1102 而加的。迁 Vercel 后这个前提不存在，
+ * 几千页的构建时间只剩成本，于是连同它一起删掉。
  *
- * 加了它之后：`cf:build` 时这些页就渲染好，`opennextjs-cloudflare deploy` 会把
- * `.open-next/cache` 里的条目 `populateCache` 上传到 R2，运行时直接命中增量缓存，
- * `enableCacheInterception` 在初始化渲染器之前就把 HTML 返回，CPU 只有几 ms。
- *
- * ⚠️ 语言范围见 `PRERENDER_LOCALES`（现在英文 + 中文）：2110 款 × 18 语言是 3.8 万页，
- *    构建撑不住；其余语言继续 on-demand，靠 sitemap 控制爬虫量。
- * ⚠️ 读库失败时**返回空数组**而不是抛错：宁可这次不预渲染（退回原来的 on-demand），
- *    也不能因为构建环境少一个环境变量就整次部署失败。
- *    注意这**不等于**「不会 1102」—— 它只是把最常被访问的那批页面的渲染搬到构建期。
+ * 现在的分工：页面每次请求都渲染（`force-dynamic`），值得缓存的只有取数，
+ * 由 `getGameCached` 那层负责（7 天，挂 `games` tag 供后台主动失效）。
  */
-export async function generateStaticParams() {
-  try {
-    const stubs = await listGameStubs();
-    return stubs.flatMap((stub) =>
-      PRERENDER_LOCALES.map((locale) => ({ locale, id: stub.id }))
-    );
-  } catch (error) {
-    console.error('[games/[id]] 读取预渲染清单失败，本次不预渲染', error);
-    return [];
-  }
-}
-
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';
 
 /**
  * 收藏数（详情页那一颗钮的初值）。

@@ -141,16 +141,18 @@ export async function listConsoles(): Promise<Console[]> {
 }
 
 /**
- * 机种列表页（`/consoles`）那份缓存的时长（秒）= 30 天。
+ * 机种列表页（`/consoles`）那份缓存的时长（秒）= 7 天。
  *
  * ⚠️ 2026-10-16 从 12 小时提到 24 小时（用户要求「所有列表页统一 24 小时」）；
- *    2026-10-20 用户又要求首页 / 列表页 / 详情页统一 30 天，于是 24 小时 → 30 天。
- *    代价：后台改完机种资料，这一页最多晚 30 天才更新（机种专题页上机种自己的资料
+ *    2026-10-20 又统一到 30 天；2026-10-22 迁 Vercel、去掉全部页面级 ISR 后压回 7 天
+ *    （和 `sb-games.ts` / `developers.ts` 对齐）。
+ *    代价：后台改完机种资料，这一页最多晚 7 天才更新（机种专题页上机种自己的资料
  *    **不缓存**，那边改完是立刻的）。
+ *    ⚠️ 这份缓存**没有挂 tag**，所以后台改机种没有主动失效的路子，7 天是硬等待。
  *
  * 缓存键里没有语言（`Console` 的 `texts` 带了所有语言），用哪份由页面调 `localizeConsole` 决定。
  */
-export const CONSOLES_PAGE_REVALIDATE_SECONDS = 2592000;
+export const CONSOLES_PAGE_REVALIDATE_SECONDS = 604800;
 
 /**
  * `listConsoles` 的缓存版 —— **只给前台用**；后台必须走未缓存的那份。

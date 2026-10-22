@@ -8,7 +8,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/games';
  * 改动的起因见 `lib/catalog-route.ts` 文件头。
  */
 
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{ locale: string; type: string }> };
 

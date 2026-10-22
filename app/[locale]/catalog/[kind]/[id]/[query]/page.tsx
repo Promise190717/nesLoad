@@ -5,8 +5,7 @@ import Developer, { generateMetadata as developerMetadata } from '@/lib/server/p
 import Console, { generateMetadata as consoleMetadata } from '@/lib/server/pages/console';
 import { decodeCatalogQuery } from '@/lib/catalog-route';
 
-export const revalidate = 2592000;
-export function generateStaticParams() { return []; }
+export const dynamic = 'force-dynamic';
 type Props = { params: Promise<{ locale: string; kind: string; id: string; query: string }> };
 const views = { games: Games, developers: Developers, developer: Developer, console: Console };
 const metadata = { games: gamesMetadata, developers: developersMetadata, developer: developerMetadata, console: consoleMetadata };

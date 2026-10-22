@@ -26,10 +26,15 @@ import { readLocaleParam } from '@/lib/server/locale';
  *    卡片退回默认名字（`consoleLabel`，中文站 FC / 英文站 NES）照常渲染 ——
  *    绝不因为资料没填就让一个机种从这页上消失（首页的卡片也指着它呢）。
  *
- * 数据两份都走 30 天缓存：`listConsolesCached`（资料）+ `countGamesByConsoleCached`
- * （各机种游戏数，首页同一份）。后台改完资料，这一页最多晚 30 天更新 —— 和
- * `/developers` 同一个取舍（机种专题页上机种自己的资料**不缓存**，那边改完是立刻的）。
+ * 数据两份都走缓存：`listConsolesCached`（资料）+ `countGamesByConsoleCached`
+ * （各机种游戏数，首页同一份），TTL 7 天。后台改完资料，这一页最多晚 7 天更新 ——
+ * 和 `/developers` 同一个取舍（机种专题页上机种自己的资料**不缓存**，那边改完是立刻的）。
+ *
+ * ⚠️ 这一页原来**什么缓存声明都没有**，于是被 Next 当成构建期静态页（`[locale]` 有
+ *    `generateStaticParams`），HTML 在 build 时就烤死了 —— 数据缓存只在构建那一次生效。
+ *    2026-10-22 迁 Vercel、撤销全部页面级缓存时补上 `force-dynamic`，让它每请求渲染。
  */
+export const dynamic = 'force-dynamic';
 export async function generateMetadata({
   params: routeParams,
 }: {

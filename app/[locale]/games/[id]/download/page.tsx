@@ -31,8 +31,9 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ⚠️ 真正把字节吐出去的是 `/api/games/<id>/rom`（同源代理，见那个文件的注释）。
  * 这一页只负责「说清楚要下什么、给一个按下去要等 6 秒的按钮」。
  *
- * **不写 `export const dynamic`**：读 D1 + 读 cookie 语言，本来就是动态渲染
- * （和 app/privacy/page.tsx 同一个理由）。
+ * **这一页是 `force-dynamic`**（2026-10-22 迁 Vercel、撤掉全部页面级 ISR 时加的）：
+ * 它读库 + 读 cookie 语言，本来每次请求都得现算，页面级缓存只是把渲染结果压进缓存再取回来，
+ * 省不到渲染本身。真正值得缓存的是取数（`getGameCached`，7 天）。
  */
 const loadGame = cache(async (id: string) => getGameCached(id));
 
@@ -144,12 +145,11 @@ export default async function GameDownloadPage({
 }
 
 /*
- * 这一页**刻意不预渲染**（2026-10-22 用户要求）。
+ * 页面级缓存已全部去掉（2026-10-22 用户决定迁 Vercel 后统一走 `force-dynamic`）。
  *
- * 它曾经和详情页一起加过 `generateStaticParams`，后来按用户决定撤掉：这一页只有
- * 「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，内容价值低于详情页，把 2110 页的
- * 构建时间花在这里不划算。所以它保持 **on-demand ISR**：构建期不生成，第一次被访问
- * 时才现场渲染 —— 也就意味着**首访仍可能撞免费版 10ms CPU 的 1102**，
- * 命中过缓存之后就正常。这是已知取舍，不是漏改。
+ * 这一页曾经和详情页一起加过 `generateStaticParams` 做构建期预渲染（为压住 Cloudflare
+ * 免费版 10ms CPU 的 1102），迁 Vercel 后那套前提不存在了，一并撤掉。
+ * 内容只是「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，
+ * 值得缓存的是取数（`getGameCached`，7 天），不是渲染结果。
  */
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';

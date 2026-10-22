@@ -49,21 +49,23 @@ export {
 export const MAX_PAGE_SIZE = 100;
 
 /*
- * 前台读缓存的 TTL（秒）= 30 天。
+ * 前台读缓存的 TTL（秒）= 7 天。
  *
- * 2026-10-20 用户要求「首页 / 列表页 / 详情页的缓存全部改成 30 天」（此前是 24 小时）。
- * 代价是后台改完数据，前台最坏要等 30 天才自然过期 —— 所以后台写路径必须继续
- * `revalidateTag`（`games-admin.ts` 那三处），否则用户看到的是月级延迟的数据。
+ * 2026-10-22 用户决定迁到 Vercel、**页面级 ISR 全部去掉**（见各页面里的
+ * `force-dynamic`），数据缓存成了唯一一层：页面每次请求都渲染，取数走这里，
+ * 7 天自然过期。此前是 30 天（2026-10-20 定的）。
+ *
+ * 代价是后台改完数据最坏要等 7 天才自然过期 —— 所以后台写路径**必须**继续
+ * `revalidateTag('games', { expire: 0 })`（`games-admin.ts` 那三处）。
  * 三份分开是因为键与失效方式不同，但时长有意保持一致。
  *
- * ⚠️ 正因为 TTL 拉到了 30 天，**所有前台读缓存（含列表 / 计数 / 语种条数）都挂上了
- *    `tags: ['games']`**（2026-10-20 加）。以前它们不带 tag，靠 24 小时自然过期兜底；
- *    现在全靠后台那三处 `revalidateTag('games', { expire: 0 })` 立刻刷掉，
- *    否则「后台上传一款新游戏，前台一个月看不到」。新增前台缓存函数时别漏这个 tag。
+ * ⚠️ **所有前台读缓存（含列表 / 计数 / 语种条数）都必须挂 `tags: ['games']`**
+ *    （2026-10-20 加）。没有页面级缓存兜底之后，tag 是「后台一改就立刻可见」的
+ *    唯一手段，漏一个就是「新游戏上线一周后前台才出现」。
  */
-export const GAMES_PAGE_REVALIDATE_SECONDS = 2592000;
-export const GAME_DETAIL_REVALIDATE_SECONDS = 2592000;
-export const HOME_REVALIDATE_SECONDS = 2592000;
+export const GAMES_PAGE_REVALIDATE_SECONDS = 604800;
+export const GAME_DETAIL_REVALIDATE_SECONDS = 604800;
+export const HOME_REVALIDATE_SECONDS = 604800;
 /** sitemap 的 stub 读取仍按天走，理由见 `listGameStubsCached`。 */
 const SITEMAP_STUBS_REVALIDATE_SECONDS = 86400;
 

@@ -1,5 +1,13 @@
 # Cloudflare 免费 Workers：静态页面与 ISR
 
+> ⚠️ **2026-10-22 起这份文档描述的页面级 ISR 策略已经废弃。** 用户决定迁往 Vercel，
+> 所有页面已改成 `export const dynamic = 'force-dynamic'`，页面不再写入增量缓存，
+> 数据缓存统一 7 天。下文关于「预生成 18 种语言」「缓存 30 天」「`populateCache` 预热」
+> 的说法只用于回溯旧部署，不要再照它配置。
+>
+> ⚠️ 迁移完成前**不要在 Cloudflare 上发新版本**：`force-dynamic` 之后每个请求都要现场
+> 渲染，免费版 10ms CPU 会让全站 1102。
+
 Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源、R2 缓存、缓存失效记录及重建队列绑定。
 
 ## 首次配置

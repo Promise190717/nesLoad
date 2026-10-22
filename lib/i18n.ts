@@ -122,22 +122,6 @@ export const LOCALES: readonly Locale[] = [
 export const DEFAULT_LOCALE: Locale = 'en';
 
 /**
- * 构建期预渲染的语言（2026-10-22 加）。
- *
- * 背景：Cloudflare Workers **免费版每个请求的 CPU 硬限是 10ms**（`limits.cpu_ms`
- * 只对付费版生效），而一次 Next 服务端渲染是几十到几百毫秒。所以页面只要在**运行时**
- * 才第一次渲染，就必然撞 1102「Worker exceeded CPU time limit」；只有构建期渲染好、
- * deploy 时被 `populateCache` 传进 R2 的那批，运行时才能靠 `enableCacheInterception`
- * 提前返回、只花几毫秒。
- *
- * 全量铺 18 种语言是 2110 款 × 18 ≈ 3.8 万页，构建撑不住，所以先只铺两份主力语言。
- * 这份清单**只影响预渲染**，不改变任何地址规则：其余语言照旧可以访问，
- * `dynamicParams` 默认 true，只是首访会现场渲染（也就可能 1102）。
- * 真要扩，改这一行 + 接受构建时间上涨即可。
- */
-export const PRERENDER_LOCALES: readonly Locale[] = [DEFAULT_LOCALE, 'zh'];
-
-/**
  * 语言选择器的选项。
  *
  * **文字各用本语言写**（简体中文 / English / 日本語 / Español …）—— 语言选择器的惯例：

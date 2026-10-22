@@ -7,7 +7,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/developer
  * 客户端软导航对不上 ⇒ 点「下一页」整页刷新。
  */
 
-export const revalidate = 2592000;
+export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{ locale: string; n: string }> };
 
