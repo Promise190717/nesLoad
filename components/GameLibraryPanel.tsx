@@ -37,8 +37,15 @@ export interface LibraryGame {
   /**
    * 源站数据里的多语言 ROM 版本（`Game.romLanguages` 的子集）——
    * 播放时据此给 `File` 起名（`?lang=` 选中的那一份用的是它自己的文件名）。
+   *
+   * `discs` 是多碟 CD 游戏的碟片清单（2026-10-22 加，单碟也有一项）：`/play` 靠它拼
+   * `.m3u` 并逐碟下载。`entryName` 是压缩包里写进 m3u 的那一条（chd 这类单文件为 null）。
    */
-  romLanguages?: { code: string; name: string }[];
+  romLanguages?: {
+    code: string;
+    name: string;
+    discs?: { disc: number; name: string; entryName: string | null }[];
+  }[];
 }
 
 type LoadState = 'loading' | 'ready' | 'error';

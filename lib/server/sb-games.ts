@@ -97,7 +97,7 @@ export interface GameRomLanguage {
   code: string;
   name: string;
   /** 该语言的全部碟，按碟号升序。单碟游戏长度恒为 1。 */
-  discs: { disc: number; name: string }[];
+  discs: { disc: number; name: string; entryName: string | null }[];
 }
 
 /** 数据库原始行（ROM 代理要用 `source_url` / `rom_name`）。 */
@@ -177,6 +177,8 @@ interface RomRow {
   /** 第几张碟（2026-10-22 加）。单碟恒为 1；多碟 CD 游戏一张一行。 */
   disc: number;
   rom_name: string;
+  /** 压缩包内「写进 m3u 的那一条」（仅多碟的 zip 有值，见脚本 fill-rom-entries.mjs）。 */
+  entry_name: string | null;
   source_url: string;
 }
 
@@ -190,7 +192,7 @@ async function loadRoms(slugs: string[]): Promise<Map<string, RomRow[]>> {
   if (slugs.length === 0) return map;
 
   const rows = await query<RomRow>(
-    `SELECT game_slug, language, disc, rom_name, source_url
+    `SELECT game_slug, language, disc, rom_name, entry_name, source_url
        FROM game_roms WHERE game_slug IN (${slugs.map(() => '?').join(', ')})
       ORDER BY language, disc`,
     slugs
@@ -231,7 +233,11 @@ function sortRoms(roms: RomRow[] | undefined): GameRomLanguage[] {
     ordered.push({
       code: language,
       name: discs[0].rom_name,
-      discs: discs.map((rom) => ({ disc: rom.disc, name: rom.rom_name })),
+      discs: discs.map((rom) => ({
+        disc: rom.disc,
+        name: rom.rom_name,
+        entryName: rom.entry_name,
+      })),
     });
   };
 
@@ -522,7 +528,12 @@ export async function getGame(id: string): Promise<Game | null> {
 
 export const getGameCached = cached(
   async (id: string) => getGame(id),
-  ['sb:games:by-id', 'v2'],
+  /*
+   * ⚠️ 2026-10-22 v2 → v3：`Game.romLanguages` 的每一项多了 `discs`（碟片清单）。
+   * 缓存条目**不随部署失效**，不升版本的话线上一直读到没有 `discs` 的旧结构，
+   * `/play` 于是永远走「单碟」分支 —— 多碟游戏的换碟等于没上线。改结构必升键尾。
+   */
+  ['sb:games:by-id', 'v3'],
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
 

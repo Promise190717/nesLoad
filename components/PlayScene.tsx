@@ -24,7 +24,7 @@ import {
 import { preloadCoreWasm, settlePreload } from '@/lib/core-preload';
 import { readGamepads } from '@/lib/gamepad';
 import { IncompleteBodyError, fetchRomWithProgress, isAbortError } from '@/lib/http';
-import { unwrapRom } from '@/lib/unwrap';
+import { unwrapRom, type UnwrappedEntry, type UnwrappedRom } from '@/lib/unwrap';
 import { setPlayActive } from '@/lib/play-leave-guard';
 import { localePath, type MessageKey } from '@/lib/i18n';
 import {
@@ -601,6 +601,16 @@ export default function PlayScene({
       // 重载那条路：文件已经在手上，不必再下一次
       let romFile = file ?? null;
       /*
+       * 多碟的 `.m3u` 只是一份播放列表（几行文本），重载 / 读档时不能拿它去启动 ——
+       * 核心要的是碟片镜像。看到它就退回「手上没有文件」，走下面那条重新下载全部碟的路。
+       */
+      if (romFile && /\.m3u$/i.test(romFile.name)) romFile = null;
+      /*
+       * 多碟时由下面那段自己拼出来的「m3u + 全部碟」的包裹结果。
+       * 非多碟恒为 null，`unwrapRom` 照旧在这儿拆一次。
+       */
+      let preparedOverride: UnwrappedRom | null = null;
+      /*
        * 核心预热的句柄（见 `lib/core-preload.ts`）。只在下 ROM 那条路上开，
        * 重载时核心必然已经在缓存里，再预热一遍是白活。
        */
@@ -620,26 +630,89 @@ export default function PlayScene({
            */
           coreWarm = preloadCoreWasm(localCoreWasmUrl(game!.consoleType ?? null), ac.signal);
           /*
-           * 走**分片**那条（见 `lib/http.ts` 的 `fetchRomWithProgress`）：
-           * 一个请求搬不动几百 MB，PS1 的盘动辄 300 MiB，整包 GET 会被截断在几 MB 上。
+           * 多碟 CD 游戏（2026-10-22）走单独一条：**全部碟下完、各自解包，再拼一份 `.m3u` 当启动文件**。
+           *
+           * 为什么不是「按需换碟」：libretro 的 m3u 必须在启动时就列全，而且
+           * `EJS` 那个右下角软盘菜单是**同步切碟**的 —— 它不会等我们下载。文件不在虚拟
+           * 文件系统里，切过去就是黑的。所以能确定的只有这一条：启动前把碟都放进去。
+           *
+           * 顺序有讲究：`loadRom` 里 `runMain()` 取的是 `rom[0].name`，所以 m3u 必须排第一
+           * （见 lib/emulator.ts 的 `romFiles` 那段），其余碟跟在后面一起写进内容目录。
            */
-          const romUrl = romLang
-            ? `/api/games/${game!.id}/rom?lang=${encodeURIComponent(romLang)}`
-            : `/api/games/${game!.id}/rom`;
-          const blob = await fetchRomWithProgress(romUrl, {
-            signal: ac.signal,
-            onProgress: setRomRatio,
-          });
-          /*
-           * 文件名必须跟着**选中的那一份语言**走（源站模式那批才有多个版本）：
-           * `unwrapRom` / `detectConsole` 看扩展名决定要不要解包 —— 选了中文 `.nes`
-           * 却顶着英文版那个 `.zip` 的名字，就会去解一个根本不是压缩包的文件。
-           */
-          const romName =
-            game!.romLanguages?.find((item) => item.code === romLang)?.name ?? game!.romName;
-          romFile = new File([blob], romName, {
-            type: 'application/octet-stream'
-          });
+          const langGroup =
+            game!.romLanguages?.find((item) => item.code === romLang) ?? game!.romLanguages?.[0];
+          const discs = langGroup?.discs ?? [];
+          if (discs.length > 1 && game!.consoleType === 'ps1') {
+            const entries: UnwrappedEntry[] = [];
+            /* m3u 的每一行：解包后主文件的名字（`.cue`），拿不到才退回库里的入口名/原名。 */
+            const lines: string[] = [];
+
+            for (const [index, disc] of discs.entries()) {
+              const query = new URLSearchParams({ disc: String(disc.disc) });
+              if (romLang) query.set('lang', romLang);
+              const report = (ratio: number | null) => {
+                if (!ac.signal.aborted && activeRef.current) {
+                  /* 多碟按碟数均分进度条，否则第二碟会把 0→100% 再走一遍。 */
+                  setRomRatio((index + (ratio ?? 0)) / discs.length);
+                }
+              };
+
+              const blob = await fetchRomWithProgress(
+                `/api/games/${game!.id}/rom?${query.toString()}`,
+                { signal: ac.signal, onProgress: report }
+              );
+              if (ac.signal.aborted || !activeRef.current) return;
+
+              const discFile = new File([blob], disc.name, { type: 'application/octet-stream' });
+              const unwrappedDisc = await unwrapRom(discFile, report, ac.signal);
+              if (ac.signal.aborted || !activeRef.current) return;
+
+              if (unwrappedDisc) {
+                /* zip / 7z：主文件（cue）+ 伴生 bin 一起进内容目录，m3u 写 cue 名。 */
+                entries.push(unwrappedDisc.main, ...(unwrappedDisc.companions ?? []));
+                lines.push(unwrappedDisc.main.name);
+              } else {
+                /* chd / pbp 这类单文件：本身就是 m3u 的一行。 */
+                entries.push({ name: discFile.name, size: discFile.size, file: discFile, bytes: null });
+                lines.push(disc.entryName ?? disc.name);
+              }
+            }
+
+            const m3uName = `${game!.id}.m3u`;
+            const m3uFile = new File([`${lines.join('\n')}\n`], m3uName, {
+              type: 'application/x-mpegurl',
+            });
+            preparedOverride = {
+              main: { name: m3uName, size: m3uFile.size, file: m3uFile, bytes: null },
+              companions: entries,
+              console: 'ps1',
+              innerName: m3uName,
+              container: 'zip',
+            };
+            romFile = m3uFile;
+          } else {
+            /*
+             * 走**分片**那条（见 `lib/http.ts` 的 `fetchRomWithProgress`）：
+             * 一个请求搬不动几百 MB，PS1 的盘动辄 300 MiB，整包 GET 会被截断在几 MB 上。
+             */
+            const romUrl = romLang
+              ? `/api/games/${game!.id}/rom?lang=${encodeURIComponent(romLang)}`
+              : `/api/games/${game!.id}/rom`;
+            const blob = await fetchRomWithProgress(romUrl, {
+              signal: ac.signal,
+              onProgress: setRomRatio,
+            });
+            /*
+             * 文件名必须跟着**选中的那一份语言**走（源站模式那批才有多个版本）：
+             * `unwrapRom` / `detectConsole` 看扩展名决定要不要解包 —— 选了中文 `.nes`
+             * 却顶着英文版那个 `.zip` 的名字，就会去解一个根本不是压缩包的文件。
+             */
+            const romName =
+              game!.romLanguages?.find((item) => item.code === romLang)?.name ?? game!.romName;
+            romFile = new File([blob], romName, {
+              type: 'application/octet-stream'
+            });
+          }
         }
 
         if (ac.signal.aborted || !activeRef.current) return;
@@ -654,7 +727,8 @@ export default function PlayScene({
          * ⚠️ 这一段的 phase **还是 `downloading`**（不是 `booting`）：7z 包要在
          *    Worker 里解十几秒，进度得接在 ROM 那根条上，否则那十几秒是一块死屏。
          */
-        const prepared = await unwrapRom(
+        /* 多碟那条路已经在上面拼好 m3u + 全部碟了，别再拆一遍（m3u 也拆不出东西）。 */
+        const prepared = preparedOverride ?? await unwrapRom(
           romFile,
           (ratio) => {
             if (ac.signal.aborted || !activeRef.current) return;
