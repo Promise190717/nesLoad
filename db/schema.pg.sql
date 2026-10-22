@@ -161,6 +161,15 @@ create table if not exists game_roms (
   disc          smallint not null default 1,
   rom_name      text not null,               -- 原始文件名（FBNeo 靠它认驱动）
   source_url    text not null,               -- `site:/…` / `files:/…` / `r2:/…`
+  /*
+   * 压缩包里「该写进 .m3u 的那一条」文件名（2026-10-22 加，仅多碟的 zip 包有值）。
+   *
+   * 多碟换碟靠 `.m3u`，而 libretro 要求 m3u 里写**解压后的镜像**（cue/chd），不能写 zip。
+   * 内层 cue 名不下载整包就不知道，所以用 Range 读 zip 中央目录探出来存这里
+   * （脚本 `scripts/fill-rom-entries.mjs`）。chd/pbp 这类单文件不需要，为 NULL；
+   * 探不出来的极少数（上游尾部 Range 会挂住）也为 NULL，前端对它们退回全量解压。
+   */
+  entry_name    text,
   size_bytes    bigint,
   created_at    timestamptz not null default now(),
   primary key (game_slug, language, disc),
