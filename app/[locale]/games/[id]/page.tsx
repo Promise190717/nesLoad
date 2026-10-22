@@ -11,7 +11,7 @@ import GamesShell from '@/components/GamesShell';
 import ReportGameButton from '@/components/ReportGameButton';
 import ShareGameButton from '@/components/ShareGameButton';
 import {
-  DEFAULT_LOCALE,
+  PRERENDER_LOCALES,
   SITE_NAME,
   alternatesFor,
   htmlLang,
@@ -576,8 +576,8 @@ export default async function GameDetailPage({
  * `.open-next/cache` 里的条目 `populateCache` 上传到 R2，运行时直接命中增量缓存，
  * `enableCacheInterception` 在初始化渲染器之前就把 HTML 返回，CPU 只有几 ms。
  *
- * ⚠️ 只预渲染 `DEFAULT_LOCALE`（英文，无前缀那条）：2110 款 × 18 语言是 3.8 万页，
- *    构建撑不住；其余 17 种语言继续 on-demand，靠后面的 sitemap 收缩来控制爬虫量。
+ * ⚠️ 语言范围见 `PRERENDER_LOCALES`（现在英文 + 中文）：2110 款 × 18 语言是 3.8 万页，
+ *    构建撑不住；其余语言继续 on-demand，靠 sitemap 控制爬虫量。
  * ⚠️ 读库失败时**返回空数组**而不是抛错：宁可这次不预渲染（退回原来的 on-demand），
  *    也不能因为构建环境少一个环境变量就整次部署失败。
  *    注意这**不等于**「不会 1102」—— 它只是把最常被访问的那批页面的渲染搬到构建期。
@@ -585,7 +585,9 @@ export default async function GameDetailPage({
 export async function generateStaticParams() {
   try {
     const stubs = await listGameStubs();
-    return stubs.map((stub) => ({ locale: DEFAULT_LOCALE, id: stub.id }));
+    return stubs.flatMap((stub) =>
+      PRERENDER_LOCALES.map((locale) => ({ locale, id: stub.id }))
+    );
   } catch (error) {
     console.error('[games/[id]] 读取预渲染清单失败，本次不预渲染', error);
     return [];

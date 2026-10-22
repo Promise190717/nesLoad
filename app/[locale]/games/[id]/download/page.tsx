@@ -5,7 +5,6 @@ import { consoleLabel as consoleLabelOf } from '@/lib/consoles';
 import GamesShell from '@/components/GamesShell';
 import RomDownloadGate from '@/components/RomDownloadGate';
 import {
-  DEFAULT_LOCALE,
   SITE_NAME,
   alternatesFor,
   localePath,
@@ -18,7 +17,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, listGameStubs, localizeGame } from '@/lib/server/sb-games';
+import { getGameCached, localizeGame } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -145,24 +144,12 @@ export default async function GameDownloadPage({
 }
 
 /*
- * 构建期预渲染默认语言的下载页（2026-10-22 加）。
+ * 这一页**刻意不预渲染**（2026-10-22 用户要求）。
  *
- * 和详情页同一个理由：没有它，每条 `/games/<id>/download` 都是 on-demand ISR，
- * 而 sitemap 里**下载页和详情页是一半一半**（2110 × 2 × 18 语言 ≈ 7.6 万条中的一半），
- * 爬虫每扫一条就是一次现场 SSR ⇒ 免费版 10ms CPU 必炸 1102。
- *
- * ⚠️ 本页**不读 cookie / headers**（`readLocaleParam` 只读 params），所以可以预渲染；
- *    文件头那句「读 cookie 语言，本来就是动态渲染」是 2026-10 之前的旧描述，已过时。
- * ⚠️ 读库失败返回空数组，退化成原来的 on-demand，不让构建挂掉。
+ * 它曾经和详情页一起加过 `generateStaticParams`，后来按用户决定撤掉：这一页只有
+ * 「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，内容价值低于详情页，把 2110 页的
+ * 构建时间花在这里不划算。所以它保持 **on-demand ISR**：构建期不生成，第一次被访问
+ * 时才现场渲染 —— 也就意味着**首访仍可能撞免费版 10ms CPU 的 1102**，
+ * 命中过缓存之后就正常。这是已知取舍，不是漏改。
  */
-export async function generateStaticParams() {
-  try {
-    const stubs = await listGameStubs();
-    return stubs.map((stub) => ({ locale: DEFAULT_LOCALE, id: stub.id }));
-  } catch (error) {
-    console.error('[games/[id]/download] 读取预渲染清单失败，本次不预渲染', error);
-    return [];
-  }
-}
-
 export const revalidate = 2592000;
