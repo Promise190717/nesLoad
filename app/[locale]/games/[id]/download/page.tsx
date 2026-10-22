@@ -5,6 +5,7 @@ import { consoleLabel as consoleLabelOf } from '@/lib/consoles';
 import GamesShell from '@/components/GamesShell';
 import RomDownloadGate from '@/components/RomDownloadGate';
 import {
+  DEFAULT_LOCALE,
   SITE_NAME,
   alternatesFor,
   localePath,
@@ -17,7 +18,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame } from '@/lib/server/sb-games';
+import { getGameCached, listGameStubs, localizeGame } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -141,6 +142,27 @@ export default async function GameDownloadPage({
       />
     </GamesShell>
   );
+}
+
+/*
+ * 构建期预渲染默认语言的下载页（2026-10-22 加）。
+ *
+ * 和详情页同一个理由：没有它，每条 `/games/<id>/download` 都是 on-demand ISR，
+ * 而 sitemap 里**下载页和详情页是一半一半**（2110 × 2 × 18 语言 ≈ 7.6 万条中的一半），
+ * 爬虫每扫一条就是一次现场 SSR ⇒ 免费版 10ms CPU 必炸 1102。
+ *
+ * ⚠️ 本页**不读 cookie / headers**（`readLocaleParam` 只读 params），所以可以预渲染；
+ *    文件头那句「读 cookie 语言，本来就是动态渲染」是 2026-10 之前的旧描述，已过时。
+ * ⚠️ 读库失败返回空数组，退化成原来的 on-demand，不让构建挂掉。
+ */
+export async function generateStaticParams() {
+  try {
+    const stubs = await listGameStubs();
+    return stubs.map((stub) => ({ locale: DEFAULT_LOCALE, id: stub.id }));
+  } catch (error) {
+    console.error('[games/[id]/download] 读取预渲染清单失败，本次不预渲染', error);
+    return [];
+  }
 }
 
 export const revalidate = 2592000;
