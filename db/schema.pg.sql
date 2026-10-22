@@ -153,11 +153,18 @@ create index if not exists idx_game_texts_locale on game_texts (locale);
 create table if not exists game_roms (
   game_slug     text not null references games(slug) on delete cascade,
   language      text not null,               -- zh / en / ja / ko
+  /*
+   * 第几张碟（2026-10-22 加）。CD 机种的多碟游戏（FF7 三碟、FF8 四碟、
+   * 合金装备两碟…）一张碟一行；单碟与非 CD 机种恒为 1。
+   * 主键因此从 (game_slug, language) 变成三元组 —— 这是「一款游戏一个语言不止一盘」的唯一表达方式。
+   */
+  disc          smallint not null default 1,
   rom_name      text not null,               -- 原始文件名（FBNeo 靠它认驱动）
-  source_url    text not null,               -- `site:/…` / `files:/…`
+  source_url    text not null,               -- `site:/…` / `files:/…` / `r2:/…`
   size_bytes    bigint,
   created_at    timestamptz not null default now(),
-  primary key (game_slug, language)
+  primary key (game_slug, language, disc),
+  constraint game_roms_disc_check check (disc >= 1)
 );
 
 -- 详情页「默认 ROM」= 按 GAME_LANGUAGES 的顺序取第一份，走主键前缀即可，无需额外索引。

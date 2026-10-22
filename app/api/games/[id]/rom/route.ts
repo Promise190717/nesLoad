@@ -95,8 +95,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   /*
    * `?lang=` = 这一款要哪个语言版本的 ROM（2026-10-20 起由 `game_roms` 直接支持）。
    * 不传就按站内语言顺序取默认那一份（`zh` → `en` → `ja` → `ko`）。
+   *
+   * `?disc=` = 多碟 CD 游戏要第几张碟（2026-10-22 加，默认 1）。
+   * 换碟时前端拿 `?disc=2` 再要一次字节；单碟游戏永远只有 disc 1，传别的号会 404。
    */
-  const lang = new URL(request.url).searchParams.get('lang')?.trim() || null;
+  const searchParams = new URL(request.url).searchParams;
+  const lang = searchParams.get('lang')?.trim() || null;
+  const requestedDisc = Number(searchParams.get('disc') ?? '1');
+  const disc = Number.isInteger(requestedDisc) && requestedDisc >= 1 ? requestedDisc : 1;
 
   /*
    * 回源目标：按 `source_url` 的前缀分派（见文件头）。
@@ -113,14 +119,19 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   /*
    * 取哪一份（2026-10-20 起「自有 R2 优先」）：
-   *   ① `?lang=` 给了 → 先只看这个语言，其中优先 `r2:`，没有才回上游；
-   *   ② 没给 → 任意语言里优先 `r2:`，一份都没有才用第一份。
+   *   ① 先按 `?disc=` 锁死碟号（2026-10-22 加）—— 多碟游戏不同碟是不同文件，
+   *      这一维必须在语言之前，否则 `?disc=2` 会被别的碟的行抢走；
+   *   ② 再按 `?lang=` 挑语言，其中优先 `r2:`，没有才回上游；
+   *   ③ 语言没给 → 任意语言里优先 `r2:`，一份都没有才用第一份。
    * 顺序不能反：先挑语言再挑来源，否则 `?lang=ja` 会被「别的语言的 r2」抢走。
    * 自有对象不经过上游 WAF（没有 challenge、没有兼容重试），能挑就挑它。
    */
-  const candidates = lang ? roms.filter((rom) => rom.language === lang) : roms;
+  const candidates = roms.filter((rom) => rom.disc === disc && (!lang || rom.language === lang));
   const picked =
-    candidates.find((rom) => rom.sourceUrl?.startsWith('r2:')) ?? candidates[0] ?? roms[0];
+    candidates.find((rom) => rom.sourceUrl?.startsWith('r2:')) ??
+    candidates[0] ??
+    roms.find((rom) => rom.disc === disc) ??
+    roms[0];
   const fileName = picked.romName || 'rom';
   const selfHosted = picked.sourceUrl?.startsWith('r2:') ?? false;
   const target = selfHosted

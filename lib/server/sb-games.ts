@@ -84,7 +84,20 @@ export interface Game {
   /** 毫秒时间戳（库里是 timestamptz，读取时转好）。 */
   createdAt: number;
   /** 这一款有哪几个语言的 ROM（含文件名，播放时要用）。 */
-  romLanguages: { code: string; name: string }[];
+  romLanguages: GameRomLanguage[];
+}
+
+/**
+ * 一个语言版本的 ROM 组（2026-10-22 加 `discs`）。
+ *
+ * `name` 保留成**第一碟**的文件名 —— 前台多处（语言选择条、`/play` 的 `romLang`）
+ * 一直读它，改形状会连带改一堆组件。多碟信息放在 `discs` 里，由 `/play` 拼 `.m3u` 用。
+ */
+export interface GameRomLanguage {
+  code: string;
+  name: string;
+  /** 该语言的全部碟，按碟号升序。单碟游戏长度恒为 1。 */
+  discs: { disc: number; name: string }[];
 }
 
 /** 数据库原始行（ROM 代理要用 `source_url` / `rom_name`）。 */
@@ -161,6 +174,8 @@ interface GameBaseRow {
 interface RomRow {
   game_slug: string;
   language: string;
+  /** 第几张碟（2026-10-22 加）。单碟恒为 1；多碟 CD 游戏一张一行。 */
+  disc: number;
   rom_name: string;
   source_url: string;
 }
@@ -175,8 +190,9 @@ async function loadRoms(slugs: string[]): Promise<Map<string, RomRow[]>> {
   if (slugs.length === 0) return map;
 
   const rows = await query<RomRow>(
-    `SELECT game_slug, language, rom_name, source_url
-       FROM game_roms WHERE game_slug IN (${slugs.map(() => '?').join(', ')})`,
+    `SELECT game_slug, language, disc, rom_name, source_url
+       FROM game_roms WHERE game_slug IN (${slugs.map(() => '?').join(', ')})
+      ORDER BY language, disc`,
     slugs
   );
   for (const row of rows) {
@@ -187,28 +203,41 @@ async function loadRoms(slugs: string[]): Promise<Map<string, RomRow[]>> {
   return map;
 }
 
-/** 默认 ROM：按站内语言顺序取第一个存在的（与 `GAME_LANGUAGES` 的顺序一致）。 */
+/**
+ * 默认 ROM：按站内语言顺序取第一个存在的（与 `GAME_LANGUAGES` 的顺序一致）。
+ *
+ * ⚠️ 只认 `disc = 1`：多碟游戏如果按语言 `find` 到哪条算哪条，可能把第 2、3 碟
+ *    当成默认盘直接启动（2026-10-22 加碟片维度时踩到的形状问题）。
+ */
 function pickDefaultRom(roms: RomRow[] | undefined): RomRow | null {
   if (!roms?.length) return null;
   for (const language of GAME_LANGUAGE_VALUES) {
-    const hit = roms.find((rom) => rom.language === language);
+    const hit = roms.find((rom) => rom.language === language && rom.disc === 1);
     if (hit) return hit;
   }
-  return roms[0];
+  return roms.find((rom) => rom.disc === 1) ?? roms[0];
 }
 
-/** 按语言顺序整理 `romLanguages`（前端据此画语言选择条）。 */
-function sortRoms(roms: RomRow[] | undefined): { code: string; name: string }[] {
+/** 按语言顺序整理 `romLanguages`（前端据此画语言选择条，`/play` 据此拼 m3u）。 */
+function sortRoms(roms: RomRow[] | undefined): GameRomLanguage[] {
   if (!roms?.length) return [];
-  const ordered: { code: string; name: string }[] = [];
-  for (const language of GAME_LANGUAGE_VALUES) {
-    const hit = roms.find((rom) => rom.language === language);
-    if (hit) ordered.push({ code: hit.language, name: hit.rom_name });
-  }
+  const ordered: GameRomLanguage[] = [];
+
+  const push = (language: string) => {
+    const discs = roms
+      .filter((rom) => rom.language === language)
+      .sort((a, b) => a.disc - b.disc);
+    if (discs.length === 0) return;
+    ordered.push({
+      code: language,
+      name: discs[0].rom_name,
+      discs: discs.map((rom) => ({ disc: rom.disc, name: rom.rom_name })),
+    });
+  };
+
+  for (const language of GAME_LANGUAGE_VALUES) push(language);
   for (const rom of roms) {
-    if (!ordered.some((item) => item.code === rom.language)) {
-      ordered.push({ code: rom.language, name: rom.rom_name });
-    }
+    if (!ordered.some((item) => item.code === rom.language)) push(rom.language);
   }
   return ordered;
 }
@@ -502,8 +531,22 @@ export async function getGameForWrite(id: string): Promise<Game | null> {
   return getGame(id);
 }
 
+/**
+ * 指定碟号的 ROM：仍按站内语言优先级挑，但只在这个碟号里找。
+ *
+ * 多碟游戏换碟时，代理要的是「同一个语言下的第 N 碟」，不是「第 N 个候选」。
+ */
+function pickRomAt(roms: RomRow[] | undefined, disc: number): RomRow | null {
+  if (!roms?.length) return null;
+  for (const language of GAME_LANGUAGE_VALUES) {
+    const hit = roms.find((rom) => rom.language === language && rom.disc === disc);
+    if (hit) return hit;
+  }
+  return roms.find((rom) => rom.disc === disc) ?? null;
+}
+
 /** ROM 代理要的原始行：默认那一份 ROM 的地址与文件名。 */
-export async function getGameRow(id: string): Promise<GameRow | null> {
+export async function getGameRow(id: string, disc = 1): Promise<GameRow | null> {
   const rows = await query<{
     slug: string;
     image_url: string;
@@ -518,7 +561,7 @@ export async function getGameRow(id: string): Promise<GameRow | null> {
   if (!rows[0]) return null;
 
   const roms = await loadRoms([id]);
-  const preferred = pickDefaultRom(roms.get(id));
+  const preferred = pickRomAt(roms.get(id), disc);
   if (!preferred) return null;
 
   return {
@@ -539,7 +582,11 @@ export const getGameRowCached = cached(
 );
 
 /**
- * 一款游戏的全部 ROM（按站内语言顺序排好）—— ROM 代理按 `?lang=` 挑一份用。
+ * 一款游戏的全部 ROM 行（2026-10-22 起**含碟号**，一行 = 一个语言的一张碟）——
+ * ROM 代理按 `?lang=` / `?disc=` 挑一份用。
+ *
+ * 顺序 = 站内语言优先级（`zh → en → ja → ko`）再按碟号升序，所以
+ * `candidates[0]` 仍然是「默认语言的第一碟」，和加碟片维度之前的行为一致。
  *
  * ⚠️ **不缓存**（2026-10-20 用户要求「只要页面缓存，接口一律不吃缓存」）；
  * 原来这里包了一层 `unstable_cache`（24 小时，键 `sb:games:roms`）。
@@ -547,14 +594,24 @@ export const getGameRowCached = cached(
  */
 export async function getGameRoms(id: string) {
   const rows = await loadRoms([id]);
-  return sortRoms(rows.get(id)).map((item) => {
-    const hit = rows.get(id)?.find((rom) => rom.language === item.code);
-    return {
-      language: item.code,
-      romName: item.name,
-      sourceUrl: hit?.source_url ?? null,
-    };
-  });
+  const all = rows.get(id) ?? [];
+  const ordered: { language: string; disc: number; romName: string; sourceUrl: string | null }[] = [];
+
+  /* 语言顺序用 sortRoms 那份（站内优先级），别自己按字母排。 */
+  for (const group of sortRoms(all)) {
+    const discs = all
+      .filter((row) => row.language === group.code)
+      .sort((a, b) => a.disc - b.disc);
+    for (const row of discs) {
+      ordered.push({
+        language: row.language,
+        disc: row.disc,
+        romName: row.rom_name,
+        sourceUrl: row.source_url,
+      });
+    }
+  }
+  return ordered;
 }
 
 /* ── sitemap ───────────────────────────────────────────────────────────── */
