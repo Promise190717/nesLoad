@@ -270,6 +270,40 @@ export default function PlayScene({
    * 代价是它整局都留在内存里（浏览器对大 Blob 多半落盘），换「重载不必联网」值得。
    */
   const lastRomRef = useRef<File | null>(null);
+  /**
+   * 多碟局（2026-10-22）：屏幕右上角那个换碟控件用。
+   *
+   * `null` = 这一局不是多碟（单碟游戏、或 zip 形态的多碟只加载了第一碟）。
+   * `count` 是碟数，`current` 是**当前碟号（1 起）**。
+   */
+  const [discInfo, setDiscInfo] = useState<{ count: number; current: number } | null>(null);
+  const [discBusy, setDiscBusy] = useState(false);
+
+  /**
+   * 换碟（2026-10-22）：转给 Nostalgist 的 `switchDisc`。
+   *
+   * 它内部会先把目标碟写进虚拟文件系统，再发 `DISK_EJECT_TOGGLE` + `DISK_NEXT/PREV`，
+   * 所以这里只要给「第几张碟」。
+   *
+   * ⚠️ 传下去的 `index` 是 **rom 数组下标**（m3u 是 0、第一碟 1、第二碟 2），
+   *    碟号从 1 起正好对得上 —— 别在这里自己 -1。
+   */
+  const switchDisc = useCallback(
+    async (disc: number) => {
+      if (!discInfo || discBusy) return;
+      if (disc < 1 || disc > discInfo.count) return;
+      setDiscBusy(true);
+      try {
+        await controller.switchDisc(disc);
+        setDiscInfo((prev) => (prev ? { ...prev, current: disc } : prev));
+      } catch (error) {
+        console.error('[nesload] 换碟失败', error);
+      } finally {
+        setDiscBusy(false);
+      }
+    },
+    [controller, discBusy, discInfo]
+  );
 
   const [volume, setVolume] = useState(VOLUME_MAX);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -630,21 +664,27 @@ export default function PlayScene({
            */
           coreWarm = preloadCoreWasm(localCoreWasmUrl(game!.consoleType ?? null), ac.signal);
           /*
-           * 多碟 CD 游戏（2026-10-22）走单独一条：**全部碟下完、各自解包，再拼一份 `.m3u` 当启动文件**。
+           * 多碟 CD 游戏（2026-10-22）走单独一条：**拼一份 `.m3u` 当启动文件，后面跟各碟**。
            *
-           * 为什么不是「按需换碟」：libretro 的 m3u 必须在启动时就列全，而且
-           * `EJS` 那个右下角软盘菜单是**同步切碟**的 —— 它不会等我们下载。文件不在虚拟
-           * 文件系统里，切过去就是黑的。所以能确定的只有这一条：启动前把碟都放进去。
+           * 为什么只收 `.chd` / `.pbp` 这类**单文件**碟：Nostalgist 的多碟模式（`updateRom` 里
+           * `multiDisc = name.endsWith('.m3u')`）把 `rom[1]` 当当前碟立即写进虚拟文件系统，
+           * 其余每项当「一碟」存进 `multiDiscRom`，等 `switchDisc(i)` 时才写入。也就是说
+           * **一个数组项 = 一张碟**。而 zip 里是 cue + bin 两个文件，塞进数组会被当成两张碟，
+           * bin 再也不会被写进文件系统 —— cue 找不到它，启动直接失败。
+           * 所以 zip 形态的多碟**不能进这条路**（libretro 也要求 m3u 里写解压后的镜像），
+           * 它们退回下面单碟那条，只加载第一碟。
            *
-           * 顺序有讲究：`loadRom` 里 `runMain()` 取的是 `rom[0].name`，所以 m3u 必须排第一
-           * （见 lib/emulator.ts 的 `romFiles` 那段），其余碟跟在后面一起写进内容目录。
+           * 顺序有讲究：`loadRom` 里 `runMain()` 取的是 `rom[0].name`，所以 m3u 必须排第一。
            */
           const langGroup =
             game!.romLanguages?.find((item) => item.code === romLang) ?? game!.romLanguages?.[0];
           const discs = langGroup?.discs ?? [];
-          if (discs.length > 1 && game!.consoleType === 'ps1') {
+          const singleFileDiscs =
+            discs.length > 1 &&
+            discs.every((disc) => /\.(chd|pbp)$/i.test(disc.name));
+          if (singleFileDiscs && game!.consoleType === 'ps1') {
             const entries: UnwrappedEntry[] = [];
-            /* m3u 的每一行：解包后主文件的名字（`.cue`），拿不到才退回库里的入口名/原名。 */
+            /* m3u 的每一行：就是该碟在虚拟文件系统里的名字（m3u 与碟同目录）。 */
             const lines: string[] = [];
 
             for (const [index, disc] of discs.entries()) {
@@ -664,18 +704,9 @@ export default function PlayScene({
               if (ac.signal.aborted || !activeRef.current) return;
 
               const discFile = new File([blob], disc.name, { type: 'application/octet-stream' });
-              const unwrappedDisc = await unwrapRom(discFile, report, ac.signal);
-              if (ac.signal.aborted || !activeRef.current) return;
-
-              if (unwrappedDisc) {
-                /* zip / 7z：主文件（cue）+ 伴生 bin 一起进内容目录，m3u 写 cue 名。 */
-                entries.push(unwrappedDisc.main, ...(unwrappedDisc.companions ?? []));
-                lines.push(unwrappedDisc.main.name);
-              } else {
-                /* chd / pbp 这类单文件：本身就是 m3u 的一行。 */
-                entries.push({ name: discFile.name, size: discFile.size, file: discFile, bytes: null });
-                lines.push(disc.entryName ?? disc.name);
-              }
+              /* chd / pbp 本来就是单文件，不拆包也不算伴生 —— 一项就是一张碟。 */
+              entries.push({ name: discFile.name, size: discFile.size, file: discFile, bytes: null });
+              lines.push(disc.entryName ?? disc.name);
             }
 
             const m3uName = `${game!.id}.m3u`;
@@ -690,7 +721,11 @@ export default function PlayScene({
               container: 'zip',
             };
             romFile = m3uFile;
+            /* 告诉屏幕上那个控件「这是多碟局、现在在第一张」。 */
+            setDiscInfo({ count: discs.length, current: 1 });
           } else {
+            /* 单碟，以及 zip 形态的多碟（只加载第一碟）—— 都没有换碟这回事。 */
+            setDiscInfo(null);
             /*
              * 走**分片**那条（见 `lib/http.ts` 的 `fetchRomWithProgress`）：
              * 一个请求搬不动几百 MB，PS1 的盘动辄 300 MiB，整包 GET 会被截断在几 MB 上。
@@ -1368,6 +1403,32 @@ export default function PlayScene({
                     frameClassName="play-game-screen w-full"
                     onExitFullscreen={exitFullscreen}
                   />
+
+                  {/*
+                    换碟控件（2026-10-22）：只有 m3u 多碟局才有（`discInfo` 非 null）。
+                    文案刻意只用「DISC 1/2」和箭头 —— 加一条新文案要同步 18 份语言文件，
+                    而这套符号本身就是主机上的通用写法。
+                    点一下切到下一张，到最后一张回到第一张。
+                  */}
+                  {discInfo ? (
+                    <div className="absolute right-2 top-2 z-20 flex items-center gap-2 bg-ink-900/90 px-2 py-1 pixel-edge pxw-1 pxc-500">
+                      <span className="font-mono text-[11px] leading-none text-ink-100">
+                        DISC {discInfo.current}/{discInfo.count}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={discBusy}
+                        onClick={() =>
+                          switchDisc(discInfo.current >= discInfo.count ? 1 : discInfo.current + 1)
+                        }
+                        title="Next disc"
+                        aria-label="Next disc"
+                        className="text-[12px] leading-none text-accent transition-opacity disabled:opacity-40"
+                      >
+                        {discBusy ? '···' : '⇄'}
+                      </button>
+                    </div>
+                  ) : null}
 
                   {/*
                 叠层：没画面时盖住整块屏幕。三种状态按优先级分开说 ——

@@ -130,8 +130,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const picked =
     candidates.find((rom) => rom.sourceUrl?.startsWith('r2:')) ??
     candidates[0] ??
-    roms.find((rom) => rom.disc === disc) ??
-    roms[0];
+    /*
+     * 兜底**只允许发生在默认碟**。`?disc=3` 这种超出碟数的请求必须 404 ——
+     * 静默回第一碟会让前端拿到一份和碟号对不上的文件，现象比报错难查得多。
+     */
+    (disc === 1 ? roms[0] : undefined);
+  if (!picked) return new Response('disc not found', { status: 404 });
   const fileName = picked.romName || 'rom';
   const selfHosted = picked.sourceUrl?.startsWith('r2:') ?? false;
   const target = selfHosted

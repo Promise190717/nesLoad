@@ -2173,6 +2173,22 @@ export class EmulatorController {
   }
 
   /** 随时捕获当前整机状态，普通核心和 EJS 核分别走各自的快照接口。 */
+  /**
+   * 换碟（2026-10-22）：多碟 `.m3u` 游戏启动之后调用。
+   *
+   * 直接转给 Nostalgist —— 它内部（`switchDisc`）会先把目标碟写进虚拟文件系统，
+   * 再发 `DISK_EJECT_TOGGLE` + `DISK_NEXT` / `DISK_PREV`，`multiDiscIndex` 由它自己维护。
+   *
+   * ⚠️ **`index` 是 rom 数组下标，不是「第几张碟」**：m3u 是 0、第一碟是 1、
+   *    第二碟是 2（见 nostalgist 的 `updateRom`：`multiDiscRom.set(index + 2, file)`）。
+   *    所以第 N 张碟传 N。
+   * ⚠️ 只有 m3u 启动的多碟局才有效；单碟局调它 Nostalgist 会直接返回。
+   */
+  async switchDisc(index: number): Promise<void> {
+    if (!this.instance) throw new Error('模拟器还没启动，换不了碟');
+    await this.instance.switchDisc(index);
+  }
+
   async saveState(): Promise<Blob> {
     if (!this.instance) throw new Error('No running game');
     if (this.ejs) return this.ejs.saveState();
