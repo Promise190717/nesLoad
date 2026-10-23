@@ -4,7 +4,7 @@
 
 ## Supabase / R2 / 部署补充细节（2026-10-20~22，自 MEMORY.md 移入）
 
-- 全量爬取/回填模板 = `scripts/migrate-to-supabase.mjs`（上游**列表页** RSC 载荷一页 18 款带全部字段）；14 语种回填 = `scripts/fill-game-texts-locales.mjs`（postgres.js 连 `SUPABASE_DB_URL`：连接池跑完全程再 end、developer/series 行按 slug:locale 去重，两个坑都踩过）。机种文案回填 = `scripts/fill-console-intros.mjs`（只补 zh/en 空值、`COALESCE` 不覆盖人工编辑；切库时 console_texts 只搬了 name）。
+- 全量爬取/回填模板 = `scripts/migrate-to-supabase.mjs`（上游**列表页** RSC 载荷一页 18 款带全部字段）；14 语种回填 = `scripts/fill-game-texts-locales.mjs`（postgres.js 连 `SUPABASE_DB_URL`：连接池跑完全程再 end、developer/series 行按 slug:locale 去重，两个坑都踩过）。机种文案回填 = `scripts/fill-console-intros.mjs`（只补 zh/en 空值、`COALESCE` 不覆盖人工编辑；切库时 console_texts 只搬了 name）。**机种介绍的文案本体只在 `scripts/console-texts.data.mjs` 一份**（2026-10-23 抽出来：之前 `fill-console-intros` 和 D1 时代的 `seed-consoles` 各抄一份，删内容时删一漏一）。介绍口径 = 全称 → 特色 → 代表作，**不写本站用什么核心跑**（用户 2026-10-23 要求全部删掉，`scripts/strip-console-core-notes.mjs` 是那次清库的记录，幂等）。
 - `writeTexts`/`writeDeveloperTexts`（games-admin.ts / developers.ts）只动传进来的语言，别的行一概不碰。
 - 缓存键版本（2026-10-22 时点）：`sb:games:page|latest|by-console|by-developer|by-id` v2、`sb:developers:list` v4、`sb:developers:top` v3、`consoles:list` v8、机种页单条 `static-console` v2。ISR 撤销后数据缓存统一 604800（`GAMES_PAGE_`/`GAME_DETAIL_`/`HOME_`/`CONSOLES_PAGE_`/`DEVELOPERS_PAGE_`/`TOP_DEVELOPERS_`；`listGameStubsCached` 仍 86400）；构建期预渲染已删（三处 `generateStaticParams` + `PRERENDER_LOCALES`）。
 - 开发商厂标只有 133/269 家有，其余库内 `NULL`，前台走名字首字占位。

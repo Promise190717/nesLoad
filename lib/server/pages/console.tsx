@@ -95,9 +95,11 @@ const PAGE_SIZE = 20;
  *     这一页的介绍整段消失；用 `scripts/fill-console-intros.mjs` 回填后必须换键才生效。
  */
 const loadConsole = cached(
-  /* ⚠️ v2 → v3（2026-10-23）：文案只取「当前语言 + 回退链」，`locale` 进了键。 */
+  /* ⚠️ v2 → v3（2026-10-23）：文案只取「当前语言 + 回退链」，`locale` 进了键。
+   *    v3 → v4（2026-10-23）：介绍里删掉了「本站的 X 游戏通过 Y 核心运行」那一句
+   *    （`scripts/strip-console-core-notes.mjs`），不换键要等 7 天。 */
   async (type: string, locale: string) => getConsolePageData(type, textLocalesFor(locale)),
-  ['static-console', 'v3'],
+  ['static-console', 'v4'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS, tags: ['consoles'] }
 );
 
