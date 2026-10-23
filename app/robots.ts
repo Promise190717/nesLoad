@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { AI_CRAWLER_TOKENS } from '@/lib/ai-policy';
+import { LOCALES } from '@/lib/i18n';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
@@ -70,6 +71,19 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
         disallow: ['/admin', '/api'],
       },
     ],
-    sitemap: `${origin}/sitemap.xml`,
+    /*
+     * ⚠️ **2026-10-23 实测修正：这里原来写的是 `/sitemap.xml`，线上是 404。**
+     *
+     * `app/sitemap.ts` 用了 `generateSitemaps()`（18 种语言各一份，见那边的注释），
+     * 而 Next 在**使用 generateSitemaps 之后不再自动生成 `/sitemap.xml` 索引** ——
+     * 那份索引只在「单个 sitemap 文件」的形态下才有。以前这里写着「Next 会额外生成
+     * 一份索引指过来」，那是错的：线上 `/sitemap.xml` 返回 404 的 `__next_error__` 页，
+     * 而 `/sitemap/<locale>.xml` 18 份全部 200（每份约 10.9 MB）。
+     *
+     * 后果很直接：爬虫读 robots.txt 拿到一个 404 的地址，**整站 sitemap 等于没提交**。
+     * 所以这里改成**直接把 18 个分片挨个列出来**（`Sitemap:` 允许多行，Google 支持）。
+     * 不要为了「好看」改回单条索引 —— 那需要自己再写一个索引路由，多一个会坏的环节。
+     */
+    sitemap: LOCALES.map((locale) => `${origin}/sitemap/${locale}.xml`),
   };
 }
