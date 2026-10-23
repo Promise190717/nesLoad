@@ -85,6 +85,98 @@ function contentDisposition(name: string): string {
   return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
+/** 走「上行出口」时盖的标记头，防止两份部署互相指来指去转成死循环。 */
+const EGRESS_HEADER = 'x-nl-rom-egress';
+
+/**
+ * 把响应原样转给浏览器：只留这几个头，别把 `age` / `cf-*` / `server` 也抄过来
+ * （那会让上游 / 出口那一跳的缓存状态渗透进这一跳的响应头）。
+ */
+function relayEgress(response: Response, fileName: string): Response {
+  if (!response.body) return response;
+  const headers = new Headers();
+  for (const name of [
+    'content-type',
+    'content-length',
+    'content-disposition',
+    'cache-control',
+    'content-range',
+    'accept-ranges',
+    'etag',
+    'last-modified',
+    'retry-after'
+  ]) {
+    const value = response.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  if (!headers.has('content-disposition')) {
+    headers.set('content-disposition', contentDisposition(fileName));
+  }
+  return new Response(response.body, { status: response.status, headers });
+}
+
+/**
+ * 经 `ROM_EGRESS_ORIGIN` 那一跳去取同一份 ROM，失败回 `null`（调用方退回直连）。
+ *
+ * ## 为什么需要这一跳（2026-10-22）
+ *
+ * 实测：同一份上游 ROM，**Cloudflare Workers 上取得到，Vercel 上取不到**。
+ * 跟本仓库的代码无关 —— 上游前面挂着 Cloudflare，风控是按**出口**判的：
+ * Worker 的出口就是 Cloudflare 自己的网段，等于同一张网里的下一跳；
+ * Vercel 函数跑在 AWS 上，机房 IP + 非浏览器的 TLS 指纹，直接被挑战 / 403。
+ *
+ * 所以配了这个变量之后，**上游那批 ROM 不从 Vercel 出网**，改让 Cloudflare 上那份
+ * 站点代取（同一个接口、同一条 Range），本函数只做转发。R2 自持的那批不走这一跳 ——
+ * 公网域名从哪儿都能取。
+ *
+ * 常态是**命中边缘缓存**：出口那一跳回的是 `public, max-age=7d, s-maxage=7d`，
+ * Cloudflare 会整份存住，后续的分片请求根本不会再回源。
+ */
+async function fetchThroughEgress(
+  request: Request,
+  origin: string,
+  id: string,
+  timeoutMs: number
+): Promise<Response | null> {
+  let hop: URL;
+  try {
+    hop = new URL(`/api/games/${encodeURIComponent(id)}/rom`, origin);
+  } catch {
+    console.error('[games] ROM_EGRESS_ORIGIN 不是合法地址，已忽略', origin);
+    return null;
+  }
+  // 自己就是出口那一跳 / 已经在出口侧 → 直连，别绕回自己
+  if (hop.host === new URL(request.url).host) return null;
+  if (request.headers.get(EGRESS_HEADER)) return null;
+  hop.search = new URL(request.url).search; // ?lang= / ?disc= 原样带过去
+
+  const headers = new Headers({ accept: '*/*', [EGRESS_HEADER]: '1' });
+  const range = request.headers.get('range');
+  if (range) headers.set('range', range);
+  const validator = request.headers.get('if-range');
+  if (validator) headers.set('if-range', validator);
+
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DOMException('Egress headers timed out', 'TimeoutError')),
+    Math.max(0, timeoutMs)
+  );
+  try {
+    return await fetch(hop, {
+      headers,
+      cache: 'no-store',
+      signal: AbortSignal.any([request.signal, controller.signal])
+    });
+  } catch (error) {
+    // 出口那一跳挂了不该让整个接口跟着挂：记一笔，退回直连（Vercel 上大概还是 403，
+    // 但那是上游的问题，不是这里的问题）。
+    console.error('[games] 上行出口失败，退回直连', id, error);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const range = request.headers.get('range');
@@ -150,6 +242,24 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    * 缓存键分裂（同一个对象因请求头不同被缓存成多份）。
    */
   const fromUpstream = !selfHosted;
+
+  /*
+   * 上游那批先看有没有配「上行出口」（见 `fetchThroughEgress` 顶上那段）。
+   * 配了就整段交给它，本函数只转发；没配 / 出口挂了 / 已经是出口那一侧 ⇒ 照旧直连。
+   *
+   * ⚠️ 只有上游那批才绕：R2 对象是我们自己的公网域名，从哪儿取都一样，
+   *    多绕一跳只会多一次往返。
+   */
+  const egressOrigin = process.env.ROM_EGRESS_ORIGIN?.trim().replace(/\/+$/, '');
+  if (fromUpstream && egressOrigin) {
+    const viaEgress = await fetchThroughEgress(
+      request,
+      egressOrigin,
+      id,
+      UPSTREAM_TIMEOUT_MS + 10_000
+    );
+    if (viaEgress) return relayEgress(viaEgress, fileName);
+  }
 
   let upstream: Response;
   try {
