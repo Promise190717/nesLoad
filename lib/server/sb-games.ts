@@ -430,6 +430,18 @@ export const countGamesCached = cached(
  * 排序键 `(created_at DESC, slug DESC)`：时间戳可能撞（同一批爬进来的是同一秒），
  * 第二键保证跨查询顺序稳定，不会出现「同一条在第 1 页和第 2 页各出现一次」。
  * 越界时夹回最后一页，并把夹过的 `offset` 一并返回（调用方以返回值为准）。
+ *
+ * ## 一次往返拿回「本页 + 总数」（2026-10-23）
+ *
+ * 原来不传 `total` 时先 `countGames()` 再查列表 —— 每个列表页请求都在等两跳。
+ * 现在不传 `total` 就走**窗口函数快路径**：`COUNT(*) OVER()` 在 `LIMIT` 之前算完
+ * 整个结果集，一条 SQL 同时给出本页数据和总数。数据库那边的工作量没变（窗口函数
+ * 照样要扫一遍匹配行），省的是**一次 HTTPS 往返**，Supabase 单跳 100ms 上下，
+ * 这个钱在每个列表页、每个在线库请求上都要付一次。
+ *
+ * 只有「结果为空」那一步才退回两次查询：空页要么真没数据，要么是 `/games/page/999`
+ * 这类越界旧链接 —— 后者要先把总数拿到才能夹回最后一页。这条路径本来就是异常的，
+ * 多一跳无所谓。
  */
 export async function listGamesPage(
   offset: number,
@@ -439,9 +451,47 @@ export async function listGamesPage(
   attachOptions: AttachOptions = {}
 ): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
   const { where, params } = buildWhere(filter);
-  const resolvedTotal = total ?? (await countGames(filter));
 
-  const lastOffset = Math.max(0, Math.ceil(resolvedTotal / limit) - 1) * limit;
+  if (total === undefined) {
+    const requested = Math.max(0, offset);
+    const rows = await query<GameBaseRow & { total_count: number | string }>(
+      `SELECT ${BASE_COLUMNS}, COUNT(*) OVER() AS total_count FROM games g ${where}
+        ORDER BY g.created_at DESC, g.slug DESC
+        LIMIT ? OFFSET ?`,
+      [...params, limit, requested]
+    );
+
+    if (rows.length > 0) {
+      const counted = Number(rows[0].total_count);
+      return {
+        games: await attach(rows, attachOptions),
+        total: Number.isFinite(counted) ? counted : rows.length,
+        offset: requested,
+        limit,
+      };
+    }
+
+    /* 空页：先确认真的是 0 条，还是 offset 越界了 */
+    const fallbackTotal = await countGames(filter);
+    if (fallbackTotal === 0) return { games: [], total: 0, offset: 0, limit };
+
+    const lastOffset = Math.max(0, Math.ceil(fallbackTotal / limit) - 1) * limit;
+    const safeOffset = Math.min(requested, lastOffset);
+    const retry = await query<GameBaseRow>(
+      `SELECT ${BASE_COLUMNS} FROM games g ${where}
+        ORDER BY g.created_at DESC, g.slug DESC
+        LIMIT ? OFFSET ?`,
+      [...params, limit, safeOffset]
+    );
+    return {
+      games: await attach(retry, attachOptions),
+      total: fallbackTotal,
+      offset: safeOffset,
+      limit,
+    };
+  }
+
+  const lastOffset = Math.max(0, Math.ceil(total / limit) - 1) * limit;
   const safeOffset = Math.min(Math.max(0, offset), lastOffset);
 
   const rows = await query<GameBaseRow>(
@@ -453,7 +503,7 @@ export async function listGamesPage(
 
   return {
     games: await attach(rows, attachOptions),
-    total: resolvedTotal,
+    total,
     offset: safeOffset,
     limit,
   };
@@ -486,9 +536,11 @@ const listGamesPageCachedRaw = cached(
   ) => {
     const needle = keyword.trim();
     const filter = { keyword: needle, consoleType, language };
-    /* total 一起算：列表和计数必须描述同一批数据，否则页码会和实际条目错位 */
-    const total = await countGames(filter);
-    return listGamesPage(offset, limit, filter, total, cardAttachOptions(locale));
+    /*
+     * 不预先 `countGames`：`listGamesPage` 现在用窗口函数一次拿回「本页 + 总数」，
+     * 省掉一次 HTTPS 往返。两者本来就出自同一条 SQL，页码不会和实际条目错位。
+     */
+    return listGamesPage(offset, limit, filter, undefined, cardAttachOptions(locale));
   },
   /*
    * ⚠️ 2026-10-23 v2 → v3：文案改成**按语言裁剪**（18 种 → 最多 3 种 + 不要描述 / 键位表），

@@ -1,0 +1,333 @@
+[
+  {
+    "id": "mario",
+    "name": {
+      "en": "Mario (Super Mario Bros.)",
+      "zh": "马里奥（超级马力欧兄弟）",
+      "ja": "マリオ（スーパーマリオブラザーズ）",
+      "ko": "마리오(슈퍼 마리오 브라더스)"
+    },
+    "palette": {
+      "R": "#d82800",
+      "H": "#7c3f00",
+      "S": "#ffc98a",
+      "K": "#1a1a1a",
+      "B": "#2a5cc8",
+      "Y": "#f7d51d",
+      "D": "#7a4b12"
+    },
+    "rows": [
+      "....RRRRR.......",
+      "...RRRRRRRRR....",
+      "...HHHSSKS......",
+      "..HSHSSSKSSS....",
+      "..HSHHSSSKSSS...",
+      "..HHSSSSKKKK....",
+      "....SSSSSSS.....",
+      "...RRBRRB.......",
+      "..RRRBRRBRRR....",
+      ".RRRRBBBBRRRR...",
+      ".SSRBYBBYBRSS...",
+      ".SSSBBBBBBSSS...",
+      ".SSBBBBBBBBSS...",
+      "...BBB..BBB.....",
+      "..DDD....DDD....",
+      ".DDDD....DDDD..."
+    ]
+  },
+  {
+    "id": "link",
+    "name": {
+      "en": "Link (The Legend of Zelda)",
+      "zh": "林克（塞尔达传说）",
+      "ja": "リンク（ゼルダの伝説）",
+      "ko": "링크(젤다의 전설)"
+    },
+    "palette": {
+      "G": "#3ea23e",
+      "S": "#ffc98a",
+      "K": "#1a1a1a",
+      "D": "#8a5a2b",
+      "Y": "#f7d51d"
+    },
+    "rows": [
+      "................",
+      "................",
+      "......GG........",
+      ".....GGGG.......",
+      "....GGGGGG......",
+      "....DSSSSD......",
+      "....SKSSKS......",
+      "....SSSSSS......",
+      "...GGGGGGGG.....",
+      "..SSGGGGGGGGSS..",
+      "....GGYYYYGG....",
+      "....GGGGGGGG....",
+      "....GGGGGGGG....",
+      "....GGG..GGG....",
+      "...DDD..DDD.....",
+      "...DDD..DDD....."
+    ]
+  },
+  {
+    "id": "samus",
+    "name": {
+      "en": "Samus (Metroid)",
+      "zh": "萨姆斯（银河战士）",
+      "ja": "サムス（メトロイド）",
+      "ko": "사무스(메트로이드)"
+    },
+    "palette": {
+      "O": "#f07a22",
+      "G": "#8cf05f",
+      "R": "#d82800",
+      "Y": "#f7d51d"
+    },
+    "rows": [
+      "................",
+      "................",
+      ".....OOOOO......",
+      "....OOOOOOO.....",
+      "...OOOOOOOOO....",
+      "...OOGGGGGOO....",
+      "...OOGGGGGOO....",
+      "...OOOOOOOOO....",
+      "..RRROOOOORRR...",
+      "..RRRROYOORRR...",
+      "..OOORRRRROOO...",
+      "....ORRRRRO.....",
+      "....OOO.OOO.....",
+      "....OOO.OOO.....",
+      "...RRR...RRR....",
+      "...RRR...RRR...."
+    ]
+  },
+  {
+    "id": "mega-man",
+    "name": {
+      "en": "Mega Man",
+      "zh": "洛克人",
+      "ja": "ロックマン",
+      "ko": "록맨"
+    },
+    "palette": {
+      "B": "#3096f0",
+      "D": "#1850c8",
+      "S": "#ffc98a",
+      "K": "#1a1a1a"
+    },
+    "rows": [
+      "................",
+      ".....BBBB.......",
+      "...BBBBBBBB.....",
+      "..BBBBBBBBBB....",
+      "..BBSSSSSSBB....",
+      "..BBSKSSKSBB....",
+      "..BBSSSSSSBB....",
+      "..BBBSSSSBBB....",
+      "...BBBBBBBB.....",
+      "..BBDDBBDDBB....",
+      "..BBDDBBDDBB....",
+      "..SSDDDDDDSS....",
+      "...DDDDDDDD.....",
+      "...DDD..DDD.....",
+      "..BBBB..BBBB....",
+      "..BBBB..BBBB...."
+    ]
+  },
+  {
+    "id": "ryu",
+    "name": {
+      "en": "Ryu (Street Fighter)",
+      "zh": "隆（街头霸王）",
+      "ja": "リュウ（ストリートファイター）",
+      "ko": "류(스트리트 파이터)"
+    },
+    "palette": {
+      "W": "#f0f0f0",
+      "S": "#ffc98a",
+      "K": "#1a1a1a",
+      "R": "#d82800"
+    },
+    "rows": [
+      "................",
+      ".....KKKKK......",
+      "....KKKKKKK.....",
+      "....RRRRRRR.....",
+      "....SSSSSSS.....",
+      "....SKSSSKS.....",
+      "....SSSSSSS.....",
+      "...WWWWWWWWW....",
+      "..WWWWWWWWWWW...",
+      "..SWWWWWWWWWS...",
+      "..SWWWWWWWWWS...",
+      "....WRRRRRW.....",
+      "....WWWWWWW.....",
+      "...WWW..WWW.....",
+      "...SSS..SSS.....",
+      "...SSS..SSS....."
+    ]
+  },
+  {
+    "id": "contra-commando",
+    "name": {
+      "en": "Contra commando",
+      "zh": "魂斗罗突击兵",
+      "ja": "魂斗羅の兵士",
+      "ko": "콘트라 병사"
+    },
+    "palette": {
+      "S": "#e8a06a",
+      "R": "#d82800",
+      "B": "#2a5cc8",
+      "K": "#1a1a1a"
+    },
+    "rows": [
+      "................",
+      "................",
+      ".....SSSSS......",
+      "....RRRRRRR.....",
+      "....SSSSSSS.....",
+      "....SKSSSKS.....",
+      "....SSSSSSS.....",
+      "...SSSSSSSSS....",
+      "..SSSSSSSSSSS...",
+      "..SSSSSSSSSSS...",
+      "...SBBBBBBS.....",
+      "....BBBBBB......",
+      "....BB..BB......",
+      "....BB..BB......",
+      "...KKK..KKK.....",
+      "...KKK..KKK....."
+    ]
+  },
+  {
+    "id": "pac-man",
+    "name": {
+      "en": "Pac-Man",
+      "zh": "吃豆人",
+      "ja": "パックマン",
+      "ko": "팩맨"
+    },
+    "palette": {
+      "Y": "#f7d51d"
+    },
+    "rows": [
+      "................",
+      ".....YYYYYY.....",
+      "...YYYYYYYYYY...",
+      "..YYYYYYYYYYYY..",
+      "..YYYYYYYYYYYY..",
+      ".YYYYYYYYYYYYYY.",
+      ".YYYYYYYYYYYYYY.",
+      ".YYYYYYYYYYYYYY.",
+      ".YYYYYYY........",
+      ".YYYYY..........",
+      ".YYYYYYY........",
+      ".YYYYYYYYYYYYYY.",
+      ".YYYYYYYYYYYYYY.",
+      "..YYYYYYYYYYYY..",
+      "...YYYYYYYYYY...",
+      "................"
+    ]
+  },
+  {
+    "id": "ghost",
+    "name": {
+      "en": "Ghost (Pac-Man)",
+      "zh": "幽灵（吃豆人）",
+      "ja": "ゴースト（パックマン）",
+      "ko": "고스트(팩맨)"
+    },
+    "palette": {
+      "R": "#e02020",
+      "W": "#ffffff",
+      "B": "#2121ff"
+    },
+    "rows": [
+      "................",
+      ".....RRRRRR.....",
+      "...RRRRRRRRRR...",
+      "..RRRRRRRRRRRR..",
+      "..RWWWRRRWWWRR..",
+      "..RWBWRRRWBWRR..",
+      "..RWWWRRRWWWRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRRRRRRRRRRR..",
+      "..RRR.RRRR.RRR..",
+      "...RR..RR..RR..."
+    ]
+  },
+  {
+    "id": "bomberman",
+    "name": {
+      "en": "Bomberman",
+      "zh": "炸弹人",
+      "ja": "ボンバーマン",
+      "ko": "봄버맨"
+    },
+    "palette": {
+      "W": "#f0f0f0",
+      "P": "#f080c0",
+      "K": "#1a1a1a",
+      "B": "#2870e0"
+    },
+    "rows": [
+      "................",
+      "......PPP.......",
+      ".......P........",
+      "......WWWW......",
+      ".....WWWWWW.....",
+      "....WWWWWWWW....",
+      "....WWKWWKWW....",
+      "....WWKWWKWW....",
+      "....WWWWWWWW....",
+      "...WWWWWWWWWW...",
+      "..WWWWWWWWWWWW..",
+      "..WWWWWWWWWWWW..",
+      "..WWWWWWWWWWWW..",
+      "..WWWWWWWWWWWW..",
+      "...BBB....BBB...",
+      "...BBB....BBB..."
+    ]
+  },
+  {
+    "id": "kirby",
+    "name": {
+      "en": "Kirby",
+      "zh": "星之卡比",
+      "ja": "カービィ",
+      "ko": "커비"
+    },
+    "palette": {
+      "P": "#ffb0d8",
+      "K": "#1a1a1a",
+      "C": "#f87c9c",
+      "M": "#a02040",
+      "R": "#e03050"
+    },
+    "rows": [
+      "................",
+      "................",
+      ".....PPPPPP.....",
+      "...PPPPPPPPPP...",
+      "..PPPPPPPPPPPP..",
+      "..PPPKKPPKKPPP..",
+      "..PPPKKPPKKPPP..",
+      "..PPPPPPPPPPPP..",
+      "..PCPPPPPPPPCP..",
+      "..PPPPPMMPPPPP..",
+      "..PPPPPPPPPPPP..",
+      "..PPPPPPPPPPPP..",
+      "...PPPPPPPPPP...",
+      "....PPPPPPPP....",
+      "..RRRR....RRRR..",
+      "..RRRR....RRRR.."
+    ]
+  }
+]

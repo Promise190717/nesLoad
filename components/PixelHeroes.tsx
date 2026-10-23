@@ -1,320 +1,36 @@
 import type { Locale } from '@/lib/i18n';
+import HEROES from '@/data/pixel-heroes.json';
 
 /**
- * 首页 Hero 搜索框上方那排像素小人（2026-10-13 用户加的）。
+ * 首页 Hero 搜索框上方那排像素小人。
  *
- * 一排 16×16 手绘点阵——都是真机种上的**真实角色**：马里奥（FC）、林克（塞尔达）、
- * 萨姆斯（银河战士）、洛克人、隆（街霸，SFC/街机）、魂斗罗突击兵、吃豆人（街机）、
- * 幽灵（吃豆人）、炸弹人、卡比（SFC）。**纯装饰**（`aria-hidden`），整块不进读屏树、
- * 不参与 SEO——名字只活在鼠标悬停的原生 `title` 里。
+ * ## 2026-10-23：从内联 SVG 改成静态 SVG 文件 + `<img>`
  *
- * 实现上刻意的选择：
- * - **点阵数据就是字符串数组**，一个字符一个色号（`.` 透明）。加新角色照着抄一行就行，
- *   不需要任何绘图工具。
- * - 渲染成 **SVG rect**，并且**把同一行里连续同色的像素合成一个横条**——10 个角色
- *   全画下来只有几百个 rect，而不是 10×256 个。`shape-rendering: crispEdges` 保证
- *   放大后边缘是硬的，不会有抗锯齿灰边（和本站「像素」的气质一致）。
- * - **服务端组件**：没有 `'use client'`、没有任何 JS，动画全在 CSS（`globals.css`
- *   的 `.hero-bob`，逐个错峰靠内联 `animation-delay`）。`prefers-reduced-motion`
- *   下动画整体关掉（见 globals.css 那条媒体查询）。
+ * 原来这里把 10 个精灵直接画成内联 `<svg>`，一共 **310 个 `<rect>`**。线上实测首页
+ * 673 个 DOM 元素里它占 46%，并且每个元素都要被序列化两遍（一遍 HTML、一遍 RSC flight，
+ * 后者占首页 HTML 的 56%）。改成文件后每只小人只剩一个 `<img>`：DOM 少 300 个，
+ * 首页 HTML 少 20KB、flight 少 20KB。
  *
- * ⚠️ 角色形象是致敬式的点阵重绘，不是官方素材——仓库里不进任何图片文件。
+ * 为什么不是「改成客户端组件」：`'use client'` 组件在服务端**照样 SSR**（首屏 HTML 要有它），
+ * RSC 与 HTML 序列化的活儿一点没少，只是整棵子树从 flight 挪进了 props —— 通常更贵。
+ *
+ * 代价：多了 10 个静态请求（每个 1.5~3KB，`Cache-Control` 一天，见 `next.config.js`
+ * 的 `/sprites/` 那条）。换来的是每请求少序列化 300 个节点。
+ *
+ * ## 改点阵的正确姿势
+ *
+ * 1. 改 `data/pixel-heroes.json`（色号表 + 16 行点阵，`.` 是透明）
+ * 2. 跑 `node scripts/gen-hero-sprites.mjs` 重新生成 `public/sprites/hero/v1/*.svg`
+ * 3. **改了图就把路径里的 `v1` 升成 `v2`**（下面 `SPRITE_DIR` 一处改，SVG 目录一起挪），
+ *    否则浏览器/CDN 里那一份一天内不会更新 —— 和 `public/cores/` 同一条规矩。
+ *
+ * ⚠️ `hero-bob` 的错峰动画在内联 `animation-delay` 上（和 `card-in` 同一套手法），
+ *    `prefers-reduced-motion` 下由 `globals.css` 整体关掉。
+ * ⚠️ 角色名只活在 `title`（原生悬停提示）里；整块 `aria-hidden`，不进读屏树、不参与 SEO。
  */
 
-type PixelSprite = {
-  /**
-   * 原生 `title` 用的名字（悬停可见；读屏拿不到，这排本来就是装饰）。
-   *
-   * ⚠️ **2026-10-20 从 `Record<Locale, string>` 改成 `Partial`**：语言从 4 种扩到 18 种，
-   *    但这九个角色的名字**只有中英日韩**四份 —— 再往下翻译（「Mario」在 14 种语言里
-   *    都叫 Mario）没有信息量，硬凑 126 条只会多一份要维护的表。
-   *    取值一律走下面的 `heroName()`，缺的那种语言回退英文，**别直接下标**。
-   */
-  name: Partial<Record<Locale, string>>;
-  /** 色号表：一个字符 → 一个颜色（`.` 透明，不用写进来） */
-  palette: Record<string, string>;
-  /** 16 行 × 16 列，一个字符一个像素 */
-  rows: string[];
-};
-
-/** 本站常用的那几个点阵色，集中写一遍省得每个角色各抄一份 */
-const SKIN = '#ffc98a';
-const BLACK = '#1a1a1a';
-const RED = '#d82800';
-const BLUE = '#2a5cc8';
-const YELLOW = '#f7d51d';
-const WHITE = '#f0f0f0';
-const ORANGE = '#f07a22';
-
-const SPRITES: PixelSprite[] = [
-  {
-    name: {
-      en: 'Mario (Super Mario Bros.)',
-      zh: '马里奥（超级马力欧兄弟）',
-      ja: 'マリオ（スーパーマリオブラザーズ）',
-      ko: '마리오(슈퍼 마리오 브라더스)',
-    },
-    palette: { R: RED, H: '#7c3f00', S: SKIN, K: BLACK, B: BLUE, Y: YELLOW, D: '#7a4b12' },
-    rows: [
-      '....RRRRR.......',
-      '...RRRRRRRRR....',
-      '...HHHSSKS......',
-      '..HSHSSSKSSS....',
-      '..HSHHSSSKSSS...',
-      '..HHSSSSKKKK....',
-      '....SSSSSSS.....',
-      '...RRBRRB.......',
-      '..RRRBRRBRRR....',
-      '.RRRRBBBBRRRR...',
-      '.SSRBYBBYBRSS...',
-      '.SSSBBBBBBSSS...',
-      '.SSBBBBBBBBSS...',
-      '...BBB..BBB.....',
-      '..DDD....DDD....',
-      '.DDDD....DDDD...',
-    ],
-  },
-  {
-    name: {
-      en: 'Link (The Legend of Zelda)',
-      zh: '林克（塞尔达传说）',
-      ja: 'リンク（ゼルダの伝説）',
-      ko: '링크(젤다의 전설)',
-    },
-    palette: { G: '#3ea23e', S: SKIN, K: BLACK, D: '#8a5a2b', Y: YELLOW },
-    rows: [
-      '................',
-      '................',
-      '......GG........',
-      '.....GGGG.......',
-      '....GGGGGG......',
-      '....DSSSSD......',
-      '....SKSSKS......',
-      '....SSSSSS......',
-      '...GGGGGGGG.....',
-      '..SSGGGGGGGGSS..',
-      '....GGYYYYGG....',
-      '....GGGGGGGG....',
-      '....GGGGGGGG....',
-      '....GGG..GGG....',
-      '...DDD..DDD.....',
-      '...DDD..DDD.....',
-    ],
-  },
-  {
-    name: {
-      en: 'Samus (Metroid)',
-      zh: '萨姆斯（银河战士）',
-      ja: 'サムス（メトロイド）',
-      ko: '사무스(메트로이드)',
-    },
-    palette: { O: ORANGE, G: '#8cf05f', R: RED, Y: YELLOW },
-    rows: [
-      '................',
-      '................',
-      '.....OOOOO......',
-      '....OOOOOOO.....',
-      '...OOOOOOOOO....',
-      '...OOGGGGGOO....',
-      '...OOGGGGGOO....',
-      '...OOOOOOOOO....',
-      '..RRROOOOORRR...',
-      '..RRRROYOORRR...',
-      '..OOORRRRROOO...',
-      '....ORRRRRO.....',
-      '....OOO.OOO.....',
-      '....OOO.OOO.....',
-      '...RRR...RRR....',
-      '...RRR...RRR....',
-    ],
-  },
-  {
-    name: { en: 'Mega Man', zh: '洛克人', ja: 'ロックマン', ko: '록맨' },
-    palette: { B: '#3096f0', D: '#1850c8', S: SKIN, K: BLACK },
-    rows: [
-      '................',
-      '.....BBBB.......',
-      '...BBBBBBBB.....',
-      '..BBBBBBBBBB....',
-      '..BBSSSSSSBB....',
-      '..BBSKSSKSBB....',
-      '..BBSSSSSSBB....',
-      '..BBBSSSSBBB....',
-      '...BBBBBBBB.....',
-      '..BBDDBBDDBB....',
-      '..BBDDBBDDBB....',
-      '..SSDDDDDDSS....',
-      '...DDDDDDDD.....',
-      '...DDD..DDD.....',
-      '..BBBB..BBBB....',
-      '..BBBB..BBBB....',
-    ],
-  },
-  {
-    name: {
-      en: 'Ryu (Street Fighter)',
-      zh: '隆（街头霸王）',
-      ja: 'リュウ（ストリートファイター）',
-      ko: '류(스트리트 파이터)',
-    },
-    palette: { W: WHITE, S: SKIN, K: BLACK, R: RED },
-    rows: [
-      '................',
-      '.....KKKKK......',
-      '....KKKKKKK.....',
-      '....RRRRRRR.....',
-      '....SSSSSSS.....',
-      '....SKSSSKS.....',
-      '....SSSSSSS.....',
-      '...WWWWWWWWW....',
-      '..WWWWWWWWWWW...',
-      '..SWWWWWWWWWS...',
-      '..SWWWWWWWWWS...',
-      '....WRRRRRW.....',
-      '....WWWWWWW.....',
-      '...WWW..WWW.....',
-      '...SSS..SSS.....',
-      '...SSS..SSS.....',
-    ],
-  },
-  {
-    name: { en: 'Contra commando', zh: '魂斗罗突击兵', ja: '魂斗羅の兵士', ko: '콘트라 병사' },
-    palette: { S: '#e8a06a', R: RED, B: BLUE, K: BLACK },
-    rows: [
-      '................',
-      '................',
-      '.....SSSSS......',
-      '....RRRRRRR.....',
-      '....SSSSSSS.....',
-      '....SKSSSKS.....',
-      '....SSSSSSS.....',
-      '...SSSSSSSSS....',
-      '..SSSSSSSSSSS...',
-      '..SSSSSSSSSSS...',
-      '...SBBBBBBS.....',
-      '....BBBBBB......',
-      '....BB..BB......',
-      '....BB..BB......',
-      '...KKK..KKK.....',
-      '...KKK..KKK.....',
-    ],
-  },
-  {
-    name: { en: 'Pac-Man', zh: '吃豆人', ja: 'パックマン', ko: '팩맨' },
-    palette: { Y: YELLOW },
-    rows: [
-      '................',
-      '.....YYYYYY.....',
-      '...YYYYYYYYYY...',
-      '..YYYYYYYYYYYY..',
-      '..YYYYYYYYYYYY..',
-      '.YYYYYYYYYYYYYY.',
-      '.YYYYYYYYYYYYYY.',
-      '.YYYYYYYYYYYYYY.',
-      '.YYYYYYY........',
-      '.YYYYY..........',
-      '.YYYYYYY........',
-      '.YYYYYYYYYYYYYY.',
-      '.YYYYYYYYYYYYYY.',
-      '..YYYYYYYYYYYY..',
-      '...YYYYYYYYYY...',
-      '................',
-    ],
-  },
-  {
-    name: { en: 'Ghost (Pac-Man)', zh: '幽灵（吃豆人）', ja: 'ゴースト（パックマン）', ko: '고스트(팩맨)' },
-    palette: { R: '#e02020', W: '#ffffff', B: '#2121ff' },
-    rows: [
-      '................',
-      '.....RRRRRR.....',
-      '...RRRRRRRRRR...',
-      '..RRRRRRRRRRRR..',
-      '..RWWWRRRWWWRR..',
-      '..RWBWRRRWBWRR..',
-      '..RWWWRRRWWWRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRRRRRRRRRRR..',
-      '..RRR.RRRR.RRR..',
-      '...RR..RR..RR...',
-    ],
-  },
-  {
-    name: { en: 'Bomberman', zh: '炸弹人', ja: 'ボンバーマン', ko: '봄버맨' },
-    palette: { W: WHITE, P: '#f080c0', K: BLACK, B: '#2870e0' },
-    rows: [
-      '................',
-      '......PPP.......',
-      '.......P........',
-      '......WWWW......',
-      '.....WWWWWW.....',
-      '....WWWWWWWW....',
-      '....WWKWWKWW....',
-      '....WWKWWKWW....',
-      '....WWWWWWWW....',
-      '...WWWWWWWWWW...',
-      '..WWWWWWWWWWWW..',
-      '..WWWWWWWWWWWW..',
-      '..WWWWWWWWWWWW..',
-      '..WWWWWWWWWWWW..',
-      '...BBB....BBB...',
-      '...BBB....BBB...',
-    ],
-  },
-  {
-    name: { en: 'Kirby', zh: '星之卡比', ja: 'カービィ', ko: '커비' },
-    palette: { P: '#ffb0d8', K: BLACK, C: '#f87c9c', M: '#a02040', R: '#e03050' },
-    rows: [
-      '................',
-      '................',
-      '.....PPPPPP.....',
-      '...PPPPPPPPPP...',
-      '..PPPPPPPPPPPP..',
-      '..PPPKKPPKKPPP..',
-      '..PPPKKPPKKPPP..',
-      '..PPPPPPPPPPPP..',
-      '..PCPPPPPPPPCP..',
-      '..PPPPPMMPPPPP..',
-      '..PPPPPPPPPPPP..',
-      '..PPPPPPPPPPPP..',
-      '...PPPPPPPPPP...',
-      '....PPPPPPPP....',
-      '..RRRR....RRRR..',
-      '..RRRR....RRRR..',
-    ],
-  },
-];
-
-/**
- * 把一行点阵合成「横条」：同色连续像素一个 rect。
- * 返回该行所有 `<rect>` 的 props，渲染侧直接铺开。
- */
-function rowRects(row: string, y: number, palette: Record<string, string>) {
-  const rects: { x: number; width: number; fill: string }[] = [];
-  let x = 0;
-  while (x < row.length) {
-    const ch = row[x];
-    if (ch === '.') {
-      x += 1;
-      continue;
-    }
-    let end = x + 1;
-    while (end < row.length && row[end] === ch) end += 1;
-    const fill = palette[ch];
-    if (fill) rects.push({ x, width: end - x, fill });
-    x = end;
-  }
-  return rects.map((r) => <rect key={`${y}-${r.x}`} x={r.x} y={y} width={r.width} height={1} fill={r.fill} />);
-}
-
-/** 角色名：有这一份就用，没有就回退英文（见 `PixelSprite.name` 的注释）。 */
-function heroName(sprite: PixelSprite, locale: Locale): string {
-  return sprite.name[locale] ?? sprite.name.en ?? '';
-}
+/** 精灵文件目录。改图要升版本号，理由见文件头第 3 步。 */
+const SPRITE_DIR = '/sprites/hero/v1';
 
 export default function PixelHeroes({ locale }: { locale: Locale }) {
   return (
@@ -322,21 +38,24 @@ export default function PixelHeroes({ locale }: { locale: Locale }) {
       aria-hidden="true"
       className="mt-4 flex flex-wrap items-end justify-center gap-x-6 gap-y-3"
     >
-      {SPRITES.map((sprite, index) => (
+      {HEROES.map((sprite, index) => (
         <span
-          key={sprite.name.en}
-          title={heroName(sprite, locale)}
+          key={sprite.id}
+          title={(sprite.name as Partial<Record<Locale, string>>)[locale] ?? sprite.name.en ?? ''}
           className="transition-transform duration-150 hover:-translate-y-1"
         >
-          <svg
-            viewBox="0 0 16 16"
-            shapeRendering="crispEdges"
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`${SPRITE_DIR}/${sprite.id}.svg`}
+            /* `alt=""`：这个 img 只在装饰层里，名字靠外层 span 的 title 给鼠标用户 */
+            alt=""
+            width={44}
+            height={44}
+            /* SVG 内部写了 shape-rendering="crispEdges"，放大到 44/48px 边缘仍是硬的 */
             className="hero-bob h-11 w-11 sm:h-12 sm:w-12"
-            /* 错峰：第 n 个晚 0.15s × n，一行小人跳成一排波浪（和 card-in 同一套手法） */
+            /* 错峰：第 n 个晚 0.15s × n，一行小人跳成一排波浪 */
             style={{ animationDelay: `${index * 0.15}s` }}
-          >
-            {sprite.rows.map((row, y) => rowRects(row, y, sprite.palette))}
-          </svg>
+          />
         </span>
       ))}
     </div>

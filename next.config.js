@@ -100,6 +100,27 @@ const nextConfig = {
         ],
       },
       /*
+       * 首页 Hero 的那排像素小人（2026-10-23 加）。
+       *
+       * 它们是**纯装饰**，原来是内联 SVG 里 310 个 `<rect>`（占首页 DOM 的 46%，
+       * HTML 与 RSC flight 各序列化一遍）。改成文件 + `<img>` 后每个只剩一个请求，
+       * 每个 1~3KB。`public/` 的默认策略是 `max-age=0`，那样每次进首页都要 10 个
+       * 304 往返 —— 比内联还慢，所以这里必须给缓存。
+       *
+       * 路径里带版本段（`/sprites/hero/v1/`），**改图时把 `v1` 升成 `v2`**
+       * （`components/PixelHeroes.tsx` 的 `SPRITE_DIR` 一处改），一天后自然切换，
+       * 不用等 CDN purge。规矩和 `/cores/`、`/bios/` 完全一致。
+       */
+      {
+        source: '/sprites/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400',
+          },
+        ],
+      },
+      /*
        * 7z 解压 worker（2026-10-15 加，配合 `lib/unwrap.ts` 的 7z 支持；
        * 2026-10-21 从 asm.js 换成 wasm，目录里有 `extract7z-wasm.js` +
        * `7zz.umd.js` + `7zz.wasm` 三份）。
