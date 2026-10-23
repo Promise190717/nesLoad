@@ -42,6 +42,7 @@ const ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
   handshake: 'netplay.errHandshake',
   'host-left': 'netplay.errHostLeft',
   'room-full': 'netplay.errRoomFull',
+  'no-room': 'netplay.errNoRoom',
   'join-failed': 'netplay.errUnknown',
 };
 
@@ -309,23 +310,29 @@ export default function NetplayPanel({
                   两个按钮挪到码下面单独一行（原先「复制」挤在码右边）：
                   分享那条的「链接已复制」比「分享」长一截，横排会把房间码顶得左右晃。
                   竖着排之后两个按钮的宽度变化只影响自己那一行，码一直居中不动。
+
+                  只画给房主（2026-10-23，和 /play 右栏那张房间卡同一条规矩）：
+                  加入者手里的码是别人的，再分享出去只会把**同一个**房间发给第三个人，
+                  而本站是 1 对 1（见 netplay.ts 的 `room-full`）。
                 */}
-                <div className="mt-1 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void copyCode()}
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[12px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
-                  >
-                    {copied === 'code' ? t('netplay.copied') : t('netplay.copy')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void copyShareLink()}
-                    className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[12px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
-                  >
-                    {copied === 'link' ? t('netplay.shareCopied') : t('netplay.share')}
-                  </button>
-                </div>
+                {state.role === 'host' && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void copyCode()}
+                      className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[12px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
+                    >
+                      {copied === 'code' ? t('netplay.copied') : t('netplay.copy')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void copyShareLink()}
+                      className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-2 py-1 text-[12px] text-ink-200 transition-colors hover:bg-ink-600 hover:text-accent"
+                    >
+                      {copied === 'link' ? t('netplay.shareCopied') : t('netplay.share')}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 text-[12px]">

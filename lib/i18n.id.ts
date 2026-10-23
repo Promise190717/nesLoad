@@ -299,6 +299,8 @@ export const id: Record<MessageKey, string> = {
   'netplay.errPassword': 'Kode ruang tidak cocok.',
   'netplay.errHandshake': 'Handshake kehabisan waktu — mungkin pemain lain sudah keluar.',
   'netplay.errHostLeft': 'Host keluar dari ruang — ruang sudah ditutup.',
+  'netplay.errNoRoom':
+    'Tidak ada jawaban dari host. Kode ruang mungkin salah, atau host belum membuka ruang.',
   'netplay.errRoomFull': 'Ruang sudah penuh — game ini hanya untuk satu lawan satu.',
   'netplay.errUnknown':
     'Tidak bisa terhubung ke pemain lain. Alasan tepatnya ada di konsol browser.',

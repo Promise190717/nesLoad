@@ -257,6 +257,7 @@ export const zhTW: Record<MessageKey, string> = {
   'netplay.errPassword': '房間代碼不符。',
   'netplay.errHandshake': '握手逾時，對方可能已經離開了。',
   'netplay.errHostLeft': '房主已離開房間，房間已關閉。',
+  'netplay.errNoRoom': '沒等到房主的回應。房間碼可能不對，或者房主還沒開房。',
   'netplay.errRoomFull': '房間已滿，這個遊戲只支援 1 對 1。',
   'netplay.errUnknown': '連不上對方。詳細原因在瀏覽器主控台裡。',
 

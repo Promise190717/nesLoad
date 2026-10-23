@@ -262,6 +262,8 @@ export const fil: Record<MessageKey, string> = {
   'netplay.errPassword': 'Hindi tugma ang room code.',
   'netplay.errHandshake': 'Nag-timeout ang handshake — baka umalis na ang kalaro.',
   'netplay.errHostLeft': 'Umalis ang host sa room — sarado na ito.',
+  'netplay.errNoRoom':
+    'Walang sagot mula sa host. Baka mali ang room code, o hindi pa nagbubukas ng room ang host.',
   'netplay.errRoomFull': 'Puno na ang room na iyon — one-on-one lang ang larong ito.',
   'netplay.errUnknown':
     'Hindi makakonekta sa kalaro. Nasa browser console ang eksaktong dahilan.',

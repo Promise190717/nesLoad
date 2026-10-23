@@ -253,6 +253,8 @@ export const ja: Record<MessageKey, string> = {
   'netplay.errPassword': 'ルームコードが一致しません。',
   'netplay.errHandshake': 'ハンドシェイクがタイムアウトしました — 相手が退出した可能性があります。',
   'netplay.errHostLeft': 'ホストがルームを出ました — ルームは閉じられました。',
+  'netplay.errNoRoom':
+    'ホストから応答がありません。ルームコードが違うか、ホストがまだルームを開いていない可能性があります。',
   'netplay.errRoomFull': 'ルームは満員です — このゲームは1対1のみです。',
   'netplay.errUnknown':
     '相手に接続できませんでした。詳しい理由はブラウザのコンソールに出ています。',

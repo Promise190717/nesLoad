@@ -251,6 +251,8 @@ export const ko: Record<MessageKey, string> = {
   'netplay.errPassword': '방 코드가 일치하지 않습니다.',
   'netplay.errHandshake': '핸드셰이크가 시간 초과했습니다 — 상대가 나갔을 수 있습니다.',
   'netplay.errHostLeft': '호스트가 방을 나갔습니다 — 방이 닫혔습니다.',
+  'netplay.errNoRoom':
+    '호스트의 응답이 없습니다. 방 코드가 틀렸거나 호스트가 아직 방을 열지 않았을 수 있습니다.',
   'netplay.errRoomFull': '방이 가득 찼습니다 — 이 게임은 1대1만 지원합니다.',
   'netplay.errUnknown':
     '상대에게 연결하지 못했습니다. 정확한 원인은 브라우저 콘솔에 나옵니다.',

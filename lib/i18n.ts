@@ -845,6 +845,13 @@ const en = {
   /* 加入者专用：房主退出了，房间已经被我们主动销毁 */
   'netplay.errHostLeft': 'The host left the room — it has been closed.',
   /* 加入者专用：房间已经有一对在玩了。本站只支持 1 对 1，第三个人会被房主请出去 */
+  /*
+   * 加入者专用：等了一会儿没等到房主（见 netplay.ts 的 JOIN_WAIT_MS）。
+   * 信令层没有「房间不存在」这种信号，所以这句必须把两种可能并列写出来，
+   * 不能咬定是码打错了。
+   */
+  'netplay.errNoRoom':
+    'No answer from the host. The room code may be wrong, or the host has not opened the room yet.',
   'netplay.errRoomFull': 'That room is already full — this game is one-on-one only.',
   'netplay.errUnknown':
     'Could not connect to the other player. The browser console has the exact reason.',
@@ -1987,6 +1994,7 @@ const zh: Record<MessageKey, string> = {
   'netplay.errHandshake': '握手超时，对方可能已经离开了。',
   'netplay.errHostLeft': '房主已离开房间，房间已关闭。',
   // 加入者专用：房间已有一对在玩（本站只支持 1 对 1，第三个人会被房主请出去）
+  'netplay.errNoRoom': '没等到房主的回应。房间码可能不对，或者房主还没开房。',
   'netplay.errRoomFull': '房间已满，本游戏只支持 1 对 1。',
   'netplay.errUnknown': '连不上对方。具体原因在浏览器控制台里。',
 

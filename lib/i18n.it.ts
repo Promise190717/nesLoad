@@ -267,6 +267,8 @@ export const it: Record<MessageKey, string> = {
   'netplay.errHandshake':
     'Handshake scaduto — l\'altro giocatore potrebbe essere uscito.',
   'netplay.errHostLeft': 'L\'host ha lasciato la stanza — è stata chiusa.',
+  'netplay.errNoRoom':
+    "Nessuna risposta dall'host. Il codice stanza forse è sbagliato, oppure l'host non ha ancora aperto la stanza.",
   'netplay.errRoomFull':
     'La stanza è già piena — questo gioco è solo uno contro uno.',
   'netplay.errUnknown':

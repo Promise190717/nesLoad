@@ -276,6 +276,8 @@ export const fr: Record<MessageKey, string> = {
   'netplay.errPassword': 'Code de salle incorrect.',
   'netplay.errHandshake': 'Délai de poignée de main dépassé — l’autre joueur est peut-être parti.',
   'netplay.errHostLeft': 'L’hôte a quitté la salle — elle a été fermée.',
+  'netplay.errNoRoom':
+    "Aucune réponse de l'hôte. Le code de salle est peut-être faux, ou l'hôte n'a pas encore ouvert la salle.",
   'netplay.errRoomFull': 'Cette salle est déjà complète — ce jeu se joue uniquement en un contre un.',
   'netplay.errUnknown':
     'Impossible de joindre l’autre joueur. La console du navigateur indique la raison exacte.',

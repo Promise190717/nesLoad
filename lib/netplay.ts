@@ -150,6 +150,15 @@ export type NetplayError =
   | 'host-left'
   /** 加入者专用：房间已经有一对在玩了（1 对 1，第三个来的人被房主请出去） */
   | 'room-full'
+  /**
+   * 加入者专用：等了一会儿没等到房主。
+   *
+   * ⚠️ 这一条**不是**「房间不存在」这个事实 —— MQTT 那边根本没有「房间」这种对象，
+   * 房间只是我们拼出来的 topic 名，加入 = 订阅这个 topic。订阅一个没人订阅过的
+   * topic 不会报错，只会永远静默。所以这里只能**等超时**再下结论，
+   * 文案必须把「码可能不对」和「房主可能不在」并列写出来，不能只咬定一种。
+   */
+  | 'no-room'
   /** 其他，原文见 console */
   | 'join-failed';
 
@@ -303,6 +312,19 @@ export function generateRoomCode(): string {
   return out;
 }
 
+/**
+ * 加入者等多久还没见到房主就判失败（毫秒）。
+ *
+ * 为什么只能靠等：信令层（Trystero + MQTT）里的「房间」只是一个由房间码拼出来的
+ * topic，加入 = 订阅。订阅一个**没人订阅过**的 topic 完全合法，服务端也不会告诉你
+ * 「这房间不存在」—— 于是输错码和房主还没开房在协议层长得一模一样，
+ * 界面原先只能一直停在「正在加入房间…」。
+ *
+ * 20 秒是按「正常建连几秒内就有反应」留的余量：MQTT 连上 + SDP 交换通常在 3 秒内，
+ * 网络差也在 10 秒内。再长就不该让用户继续对着一个死房间干等了。
+ */
+const JOIN_WAIT_MS = 20_000;
+
 /** 把用户输入的码洗干净。长度不对或含非法字符就返回 null（调用方据此报错）。 */
 export function normalizeRoomCode(raw: string): string | null {
   const cleaned = raw
@@ -357,6 +379,8 @@ export class NetplayController {
   private sessionAction: MessageAction<SessionMessage> | null = null;
   private controlAction: MessageAction<ControlMessage> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  /** 加入者的「等房主」超时计时器，见 JOIN_WAIT_MS */
+  private joinTimer: ReturnType<typeof setTimeout> | null = null;
   private state: NetplayState = IDLE_NETPLAY_STATE;
   /**
    * 对方当前按着、且已经被我们注入到本机的按钮。
@@ -424,6 +448,8 @@ export class NetplayController {
    */
   async leave(): Promise<void> {
     this.stopPing();
+    // 退房/换房那条「等房主」的计时也要停，否则它会在下一个房间里放着跑
+    this.stopJoinWatchdog();
     // 必须在重置 state 之前松 —— releaseHeld 要靠 state.role 才知道该注到哪个玩家位
     this.releaseHeld();
 
@@ -619,6 +645,13 @@ export class NetplayController {
     this.sessionAction = room.makeAction<SessionMessage>('s');
     this.controlAction = room.makeAction<ControlMessage>('c');
 
+    /*
+     * 加入者的兜底：房间码打错 / 房主根本没开房时，信令层不会给我们任何事件
+     * （见 JOIN_WAIT_MS 的注释），只能自己掐时间。房主那边不计时 ——
+     * 空房间干等对方是正常状态，不该被判定成错误。
+     */
+    if (role === 'guest') this.startJoinWatchdog();
+
     this.buttonAction.onMessage = (data) => {
       // 对面可能发了脏数据（版本不一致），字段不对就当没收到
       if (typeof data?.b !== 'string') return;
@@ -700,6 +733,8 @@ export class NetplayController {
 
       this.state = { ...this.state, status: 'connected', peerId, error: null };
       this.callbacks.onState(this.state);
+      // 人已到场，「等房主」的兜底不用再跑了
+      this.stopJoinWatchdog();
       this.startPing(peerId);
       /*
        * 补发：流和会话状态都是在对方连上之前就准备好的，Trystero 不会自动补给后来者。
@@ -784,6 +819,31 @@ export class NetplayController {
   private fail(reason: NetplayError): void {
     this.state = { ...this.state, status: 'idle', error: reason };
     this.callbacks.onState(this.state);
+  }
+
+  /**
+   * 加入者的「等房主」兜底计时：开着就说明还在等第一个 peer。
+   *
+   * 到点还没连上就**主动退房**再报原因 —— 和 `host-left` 那边同一个次序
+   * （`leave()` 同步重置 state，`.then` 里的 `fail()` 再把原因码挂上去，
+   * 否则会被随后那次 `error: null` 的状态刷掉）。
+   * 不主动退的话，那个空房间会一直挂在 MQTT 上，用户重新输码时还会撞到它。
+   */
+  private startJoinWatchdog(): void {
+    this.stopJoinWatchdog();
+    this.joinTimer = setTimeout(() => {
+      this.joinTimer = null;
+      // 这中间可能已经连上（stopJoinWatchdog 被叫过）或者用户自己退了 —— 都不是错误
+      if (this.state.role !== 'guest' || this.state.status !== 'waiting') return;
+      void this.leave().then(() => this.fail('no-room'));
+    }, JOIN_WAIT_MS);
+  }
+
+  private stopJoinWatchdog(): void {
+    if (this.joinTimer !== null) {
+      clearTimeout(this.joinTimer);
+      this.joinTimer = null;
+    }
   }
 
   private startPing(peerId: string): void {

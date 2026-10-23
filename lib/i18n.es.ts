@@ -279,6 +279,8 @@ export const es: Record<MessageKey, string> = {
   'netplay.errHandshake':
     'Se agotó el tiempo de conexión: puede que el otro jugador se haya ido.',
   'netplay.errHostLeft': 'El anfitrión ha salido de la sala: se ha cerrado.',
+  'netplay.errNoRoom':
+    'El anfitrión no responde. Puede que el código de sala no sea correcto o que aún no haya abierto la sala.',
   'netplay.errRoomFull': 'La sala está llena: este juego es solo de uno contra uno.',
   'netplay.errUnknown':
     'No se pudo conectar con el otro jugador. La consola del navegador indica el motivo exacto.',

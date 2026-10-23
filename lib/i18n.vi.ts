@@ -273,6 +273,8 @@ export const vi: Record<MessageKey, string> = {
   'netplay.errPassword': 'Mã phòng không khớp.',
   'netplay.errHandshake': 'Quá thời gian bắt tay — có thể người kia đã rời đi.',
   'netplay.errHostLeft': 'Chủ phòng đã rời phòng — phòng đã bị đóng.',
+  'netplay.errNoRoom':
+    'Không có phản hồi từ chủ phòng. Mã phòng có thể sai, hoặc chủ phòng chưa mở phòng.',
   'netplay.errRoomFull': 'Phòng đã đầy — game này chỉ chơi 1 đấu 1.',
   'netplay.errUnknown':
     'Không kết nối được với người kia. Console của trình duyệt có ghi lý do cụ thể.',

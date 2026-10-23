@@ -286,6 +286,8 @@ export const ms: Record<MessageKey, string> = {
   'netplay.errPassword': 'Kod bilik tidak sepadan.',
   'netplay.errHandshake': 'Handshake tamat masa — pemain lain mungkin telah keluar.',
   'netplay.errHostLeft': 'Hos telah keluar dari bilik — bilik telah ditutup.',
+  'netplay.errNoRoom':
+    'Tiada jawapan daripada hos. Kod bilik mungkin salah, atau hos belum membuka bilik.',
   'netplay.errRoomFull': 'Bilik itu sudah penuh — permainan ini hanya satu lawan satu.',
   'netplay.errUnknown':
     'Tidak dapat menyambung kepada pemain lain. Konsol pelayar ada sebab yang tepat.',

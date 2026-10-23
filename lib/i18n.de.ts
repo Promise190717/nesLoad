@@ -256,6 +256,8 @@ export const de: Record<MessageKey, string> = {
   'netplay.errHandshake':
     'Handshake-Zeitüberschreitung — der andere Spieler ist vielleicht gegangen.',
   'netplay.errHostLeft': 'Der Host hat den Raum verlassen — er wurde geschlossen.',
+  'netplay.errNoRoom':
+    'Keine Antwort vom Host. Der Raumcode stimmt vielleicht nicht, oder der Host hat den Raum noch nicht geöffnet.',
   'netplay.errRoomFull': 'Der Raum ist schon voll — dieses Spiel ist nur 1 gegen 1.',
   'netplay.errUnknown':
     'Verbindung zum anderen Spieler fehlgeschlagen. Der genaue Grund steht in der Browser-Konsole.',

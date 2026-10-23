@@ -264,6 +264,8 @@ export const nl: Record<MessageKey, string> = {
   'netplay.errPassword': 'Kamercode komt niet overeen.',
   'netplay.errHandshake': 'Handshake verlopen — de andere speler is misschien weggegaan.',
   'netplay.errHostLeft': 'De host heeft de kamer verlaten — de kamer is gesloten.',
+  'netplay.errNoRoom':
+    'Geen antwoord van de host. De kamercode klopt misschien niet, of de host heeft de kamer nog niet geopend.',
   'netplay.errRoomFull': 'Die kamer is al vol — dit spel is alleen één tegen één.',
   'netplay.errUnknown':
     'Kon geen verbinding maken met de andere speler. De exacte reden staat in de browserconsole.',

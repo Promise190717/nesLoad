@@ -260,6 +260,8 @@ export const th: Record<MessageKey, string> = {
   'netplay.errPassword': 'รหัสห้องไม่ตรงกัน',
   'netplay.errHandshake': 'แฮนด์เชกหมดเวลา — อีกฝ่ายอาจออกไปแล้ว',
   'netplay.errHostLeft': 'โฮสต์ออกจากห้องแล้ว — ห้องถูกปิด',
+  'netplay.errNoRoom':
+    'ไม่มีการตอบกลับจากโฮสต์ รหัสห้องอาจไม่ถูกต้อง หรือโฮสต์ยังไม่เปิดห้อง',
   'netplay.errRoomFull': 'ห้องเต็มแล้ว — เกมนี้เล่นได้แบบ 1 ต่อ 1 เท่านั้น',
   'netplay.errUnknown':
     'เชื่อมต่อกับอีกฝ่ายไม่ได้ สาเหตุที่แน่ชัดอยู่ในคอนโซลของเบราว์เซอร์',

@@ -1670,12 +1670,34 @@ export default function PlayScene({
                 <p className="font-pixel text-[16px] tracking-[0.2em] text-accent">
                   {netplayState.code}
                 </p>
-                <CopyBtn
-                  text={netplayState.code}
-                  label={t('netplay.copy')}
-                  done={t('netplay.copied')}
-                  sidebar
-                />
+                {/*
+                  「复制」和「分享」都只画给房主（2026-10-23 用户要求）。
+                  加入者是拿别人的码进来的 —— 码不是他的，再分享一遍只会把**同一个**
+                  房间的链接发给第三个人（1 对 1，第三个人必然被请出去，见 netplay.ts 的
+                  `room-full`）。谁开的房谁发邀请，这件事指着房主一个人就够了。
+                */}
+                {netplayState.role === 'host' && (
+                  <div className="play-room-actions">
+                    <CopyBtn
+                      text={netplayState.code}
+                      label={t('netplay.copy')}
+                      done={t('netplay.copied')}
+                      sidebar
+                    />
+                    {/*
+                      分享钮紧挨着复制钮 —— 2026-10-23 用户要求把原来那条
+                      「URL 框 + 分享钮」整行去掉，两颗钮并排塞在房间码右边。
+                      链接不再显示（它长得一样、还占掉卡片三分之一的高度），
+                      点一下就进剪贴板，要贴到哪儿由用户自己决定。
+                    */}
+                    <CopyBtn
+                      text={shareLink(netplayState.code)}
+                      label={t('netplay.share')}
+                      done={t('netplay.shareCopied')}
+                      sidebar
+                    />
+                  </div>
+                )}
               </div>
               <p
                 role="status"
@@ -1720,21 +1742,6 @@ export default function PlayScene({
                   {t('play.retry')}
                 </button>
               )}
-              <div className="play-share-row mt-2 flex items-center gap-2">
-                <input
-                  aria-label={t('netplay.share')}
-                  readOnly
-                  value={shareLink(netplayState.code)}
-                  onFocus={(event) => event.currentTarget.select()}
-                  className="play-share-input pixel-edge pxw-1 pxc-700 w-full min-w-0 flex-1 bg-ink-950 px-2 py-1.5 text-[12px] text-ink-300"
-                />
-                <CopyBtn
-                  text={shareLink(netplayState.code)}
-                  label={t('netplay.share')}
-                  done={t('netplay.shareCopied')}
-                  sidebar
-                />
-              </div>
             </section>
           )}
 
@@ -2138,6 +2145,7 @@ const NETPLAY_ERROR_MESSAGE: Record<NetplayError, MessageKey> = {
   handshake: 'netplay.errHandshake',
   'host-left': 'netplay.errHostLeft',
   'room-full': 'netplay.errRoomFull',
+  'no-room': 'netplay.errNoRoom',
   'join-failed': 'netplay.errUnknown'
 };
 

@@ -271,6 +271,8 @@ export const hi: Record<MessageKey, string> = {
   'netplay.errPassword': 'रूम कोड मेल नहीं खाता।',
   'netplay.errHandshake': 'हैंडशेक का टाइम आउट — दूसरा खिलाड़ी शायद चला गया।',
   'netplay.errHostLeft': 'होस्ट रूम छोड़ गया — रूम बंद कर दिया गया है।',
+  'netplay.errNoRoom':
+    'होस्ट से कोई जवाब नहीं आया। रूम कोड गलत हो सकता है, या होस्ट ने रूम अभी खोला नहीं है।',
   'netplay.errRoomFull': 'यह रूम भर चुका है — यह गेम सिर्फ़ एक-एक के बीच है।',
   'netplay.errUnknown':
     'दूसरे खिलाड़ी से कनेक्ट नहीं हो सका। ब्राउज़र कंसोल में पूरी वजह है।',

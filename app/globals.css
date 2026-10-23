@@ -151,7 +151,11 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-room > *:not(.play-panel-heading) { padding-inline: 12px; }
 .play-room > .play-panel-heading + * { padding-top: 9px; }
 .play-room > *:last-child { padding-bottom: 10px; }
-.play-room .play-share-input { color: var(--side-text); background: var(--side-soft); border-color: var(--side-line); }
+/* 房间码右边那两颗小钮（复制 / 分享）。比卡片里其他钮矮一档：它们只是「顺手按一下」，
+   不是这一块的主操作；房间码本身 16px，钮再高就会把这一行顶得比标题条还重。
+   触屏那档由下面 `[data-mobile='on'] .play-room button` 的 40px 盖回来（手指优先）。 */
+.play-room-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
+.play-room-actions > button { height: 22px; padding: 0 8px; font-size: 11px; }
 /* 房间卡刚出现时的提醒：描边闪主题色几下（steps 保像素感），几秒后停。
    闪的是 --px-c（已 @property 注册成 <color>，可动画）——直接改 box-shadow
    会把 pixel-edge 的四条边整个顶掉 */
@@ -164,8 +168,6 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 }
 /* 键位段 / 控制段之间：通栏一条 */
 .play-panel-divider { height: 1px; margin: 0; background: var(--side-line); }
-.play-share-row > input,
-.play-share-row > button { height: 28px; padding-block: 0; }
 /* ── 键位：两列清单，左边钮名右边键值 ────────────────────────────── */
 .play-keys { padding: 10px 12px 9px; }
 .play-key-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 3px; }
@@ -285,7 +287,6 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 :root[data-mobile='on'] .play-icon-button { width: 34px; min-width: 34px; height: 34px; min-height: 34px; }
 :root[data-mobile='on'] .play-size-btn { min-height: 34px; }
 :root[data-mobile='on'] .play-tick { width: 7px; height: 18px; }
-:root[data-mobile='on'] .play-room input { min-height: 44px; }
 :root[data-mobile='on'] .play-room button { min-height: 40px; }
 :root[data-mobile='on'] .play-page { padding-bottom: env(safe-area-inset-bottom); }
 @media (max-width: 767px) {
