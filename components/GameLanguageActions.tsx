@@ -39,6 +39,21 @@ import { PlayersIcon } from './icons';
  *
  * ⚠️ 视觉必须和原来**逐像素一致**：这就是原来那四颗钮，只是从页面里挪进来了
  *    （描边 / 字号 / 图标字号那些注释留在调用处，别在这儿重新设计）。
+ *
+ * ⚠️ 2026-10-23：**这三颗 `<Link>` 全部 `prefetch={false}`**（开始游戏 / 联机游戏 /
+ *    下载 ROM）。它们是详情页首屏唯一可见的三个站内链接，Next 生产模式会把
+ *    **进入视口的 `<Link>`** 全部预取 —— 于是每访问一个详情页，浏览器就额外渲染
+ *    `/play?id=…&mode=solo`、`/play?id=…&mode=host`、`/games/<id>/download` **三个页面**
+ *    （下载页 40 KB、`/play` 是模拟器外壳，都不比详情页轻）。
+ *
+ *    实测这一页只有 169 个 body 元素、55 KB，本身很轻；**贵的是它顺带拖出来的这三页**。
+ *    列表页的卡片早就关了预取（见 `GameCardGrid`），这里当初漏了。
+ *
+ *    为什么可以关：预取的价值是「点下去立刻有」，但这三颗是**动作**不是浏览路径的
+ *    下一步 —— 一次访问里最多点其中一颗，而预取是 100% 触发的。关掉之后点击
+ *    由顶栏那条进度条兜住（`TopBar` 本来就是为导航准备的）。
+ *    ⚠️ 别再给「开始游戏」单独加回预取：它带 `?id=` 和 `?lang=`，是动态路由，
+ *    预取拿不到完整结果，只会白渲染一遍。
  * ⚠️ 收藏钮走 `children` 插进来：它自己是客户端组件、还要拿服务端算好的初值，
  *    在这一层重新实现一遍只会多一条要同步的逻辑。
  */
@@ -143,7 +158,7 @@ export default function GameLanguageActions({
             {playLabel}
           </button>
         ) : (
-          <Link href={withLang(playHref, defaultCode)} className={PLAY_CLASS}>
+          <Link href={withLang(playHref, defaultCode)} className={PLAY_CLASS} prefetch={false}>
             <span aria-hidden="true" className="text-[15px] leading-none">
               ▸
             </span>
@@ -162,7 +177,7 @@ export default function GameLanguageActions({
               {playOnlineLabel}
             </button>
           ) : (
-            <Link href={withLang(hostHref, defaultCode)} className={HOST_CLASS}>
+            <Link href={withLang(hostHref, defaultCode)} className={HOST_CLASS} prefetch={false}>
               <PlayersIcon size={16} />
               {playOnlineLabel}
             </Link>
@@ -171,7 +186,7 @@ export default function GameLanguageActions({
         {children}
 
         {/* 下载钮**不弹框**（见文件头）：直接按默认版本进下载页，那一页自己有一排语言钮 */}
-        <Link href={withLang(downloadHref, defaultCode)} className={DOWNLOAD_CLASS}>
+        <Link href={withLang(downloadHref, defaultCode)} className={DOWNLOAD_CLASS} prefetch={false}>
           <span aria-hidden="true" className="text-[15px] leading-none">
             ↓
           </span>

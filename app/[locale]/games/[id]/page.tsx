@@ -1,4 +1,3 @@
-import { cached } from '@/lib/server/cache';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -322,6 +321,7 @@ export default async function GameDetailPage({
             value: game.developerId ? (
               <Link
                 href={localePath(locale, `/developers/${game.developerId}`)}
+                prefetch={false}
                 className="text-accent transition-colors hover:underline"
               >
                 {text.developer}
@@ -583,26 +583,34 @@ export const dynamic = 'force-dynamic';
  *    `game_id`（源站模式下这个 id 是上游 slug），和游戏资料从哪儿取无关 ——
  *    2026-10-19 用户要求「评论 / 收藏 / 存档照旧用 D1」，所以别再按数据源短路成 0。
  * ⚠️ D1 不可用（额度用尽之类）时回 0：这颗钮上的数字不该把整页拖成 500。
+ *
+ * ## 2026-10-23：从 `cached()`（R2 缓存条目）改成 React `cache()`
+ *
+ * 详情页原来有**两个** `unstable_cache` 条目：`getGameCached`（7 天）+ 这个（24 小时）。
+ * 每多一个条目，每个请求就多一次 R2 GET；miss 时还要 R2 PUT + tag DO 通知。
+ *
+ * 而这个条目的命中率是全站最低的：key 是单个 slug，1995 款 × 18 语言里，
+ * 长尾详情页一天顶多被访问一两次 —— **几乎每次都走完整的 miss 路径**
+ * （R2 GET + 一次 COUNT + R2 PUT + DO），比「直接查一次 COUNT」还贵。
+ * 列表 / 机种 / 开发商页只有几十个固定 key，缓存永远是热的，所以那边不动。
+ *
+ * 换成 React `cache()` 之后只在**同一次渲染**里去重（`generateMetadata` 与页面正文
+ * 共用一份），不落 R2、不产生 tag、不写 DO。收藏数也顺带变准了 ——
+ * 原来是「最多旧 24 小时」，现在每次渲染都是实时值。
+ *
+ * ⚠️ 别再为了「省一次 COUNT」把它加回 `unstable_cache`：那等于把冷路径的成本
+ *    从 1 次轻查询换成 1 次轻查询 + 3 次 R2/DO 操作，正好反了。
  */
-const countFavorites = cached(
-  async (id: string) => {
-    try {
-      return await countGameFavorites(id);
-    } catch (error) {
-      /*
-       * 收藏数只是个数字，**取不到不该把整页带走**（2026-10-20 改）：
-       * 以前这里只吞 `D1UnavailableError`（数据源自动回退那一套），换库之后
-       * 没有那个错误类了 —— 数据库抖一下就让详情页 500，代价远大于少显示一个 0。
-       */
-      console.warn('[games] 收藏数读取失败，按 0 显示', id, error);
-      return 0;
-    }
-  },
-  ['game-favorite-count'],
-  /*
-   * ⚠️ 这里**故意留在 24 小时**，不跟页面一起拉到 30 天（2026-10-20）：
-   *    它不是「页面缓存」而是用户行为的计数，一个月不动会让详情页上的数字明显失真；
-   *    页面本身 30 天、这个数字 1 天，代价只是多一次很轻的 COUNT 查询。
-   */
-  { revalidate: 86400 }
-);
+const countFavorites = cache(async (id: string) => {
+  try {
+    return await countGameFavorites(id);
+  } catch (error) {
+    /*
+     * 收藏数只是个数字，**取不到不该把整页带走**（2026-10-20 改）：
+     * 以前这里只吞 `D1UnavailableError`（数据源自动回退那一套），换库之后
+     * 没有那个错误类了 —— 数据库抖一下就让详情页 500，代价远大于少显示一个 0。
+     */
+    console.warn('[games] 收藏数读取失败，按 0 显示', id, error);
+    return 0;
+  }
+});
