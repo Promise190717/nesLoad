@@ -261,16 +261,19 @@ function parseQuery(raw: SearchParams): {
  *    （`/consoles/[id]` 的 `?lang=`）的事，这一页没有那个筛选项。位置留着是为了
  *    两页共用同一个函数（键形状统一，见 lib/server/games.ts 那个函数的注释）。
  */
-const loadPage = cache(async (page: number, keyword: string, consoleType: ConsoleType | null) => {
-  const data = await listGamesPageCached(
-    (page - 1) * PAGE_SIZE,
-    PAGE_SIZE,
-    keyword,
-    consoleType,
-    null
-  );
-  return { ...data, page, keyword, consoleType };
-});
+const loadPage = cache(
+  async (page: number, keyword: string, consoleType: ConsoleType | null, locale: Locale) => {
+    const data = await listGamesPageCached(
+      (page - 1) * PAGE_SIZE,
+      PAGE_SIZE,
+      keyword,
+      consoleType,
+      null,
+      locale
+    );
+    return { ...data, page, keyword, consoleType };
+  }
+);
 
 export async function generateMetadata({
   params: routeParams,
@@ -281,7 +284,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const [locale, params] = await Promise.all([readLocaleParam(routeParams), searchParams]);
   const { page, keyword, consoleType } = parseQuery(params);
-  const { total } = await loadPage(page, keyword, consoleType);
+  const { total } = await loadPage(page, keyword, consoleType, locale);
 
   /*
    * 描述里的条数是**现读的**：写死会在增减游戏之后变成假话，
@@ -356,7 +359,7 @@ export default async function GamesPage({
   const { page, keyword, consoleType, canonical } = parseQuery(params);
   if (!canonical) redirect(gamesHref(locale, page, keyword, consoleType));
 
-  const data = await loadPage(page, keyword, consoleType);
+  const data = await loadPage(page, keyword, consoleType, locale);
   /*
    * 总页数按**这次数据自己报的**每页条数算，不是写死 15。
    *

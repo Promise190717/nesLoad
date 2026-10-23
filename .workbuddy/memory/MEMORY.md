@@ -32,6 +32,7 @@
 - 读库唯一出口 `lib/server/pg.ts` `query()`，**走 HTTPS**（PostgREST→`public.exec_sql`，定义在 `db/schema.pg.sql` 末尾）。游戏主键 = 上游 slug。
 - 🔴 **绝不在 Worker 直连 Postgres**（node:tls 断连，线上 500 事故）；只有 `scripts/*.mjs` 可直连（`SUPABASE_DB_URL`）。`SUPABASE_URL`+`SUPABASE_SECRET_KEY` 缺一全站 500。
 - 文案侧表四张（game/developer/series/console_texts），主键 (slug, locale)；developer/series 名**不在 game_texts**，按 locale JOIN 现取（`sb-games.ts`）。
+- 🔴 前台读文案一律按语言裁：`textLocalesFor(locale)`（自身+回退链 ≤3 种），列表再加 `content:false` / `roms:false`；**不传 locale 就是全 18 种**（列表一页 245KB、首页 197KB，免费版 10ms 必爆）。新增读路径先想清楚要哪几种，缓存键尾已因此全 +1。
 - 动过文案/图片数据必须升缓存键尾号（见 DETAILS 版本表）。
 - R2 公网域缓存 30 天：**换图传新键（-v2）再改库，不覆盖同名**。
 
@@ -45,6 +46,7 @@
 - 目录页维度全是路径段（分页 `/page/N`、机种、语种，按 console→page / lang→page 嵌套；搜索是动态路由 `?q=`）；链接一律 `next/link`。地址构造唯一出口 `gamesHref`/`consoleHref`/`pageHref`；**别加新查询参数**（middleware 只兜旧外链）。
 - 缓存唯一出口 `lib/server/cache.ts` `cached()`；改数据/查询形态键尾版本 +1；缓存留页侧不下沉。
 - 🔴 2026-10-22 起所有前台页 `dynamic='force-dynamic'`（ISR 全撤），数据缓存统一 7 天；robots/sitemap/llms.txt/ai.txt 路由缓存 86400 保留。后台改数据靠 `revalidateTag('games',{expire:0})`；机种/开发商缓存没挂 tag，改完硬等 7 天。**迁 Vercel 完成前别往 Cloudflare 发这版**（force-dynamic + 免费 10ms = 1102）。
+- 🔴 **列表型 `<Link>` 一律 `prefetch={false}`**：卡片网格 / 机种卡 / 开发商卡一页几十个，开着预取等于每来一个人就额外渲染几十次详情页 RSC（2026-10-23 错误率 54% 的主因）。只有顶栏 / 返回 / 翻页这类每页一两个的链接保留预取。
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`；`/login`、`/account` Link `prefetch={false}`。
 - `/play` 唯一开局页（PlayScene + GamesShell）；`?id=` 自动载入、`?room=` 加入者、`?lang=` 选 ROM 版本。
 - 存档 = 电池 `.srm` 一款一份（快照别加回）；读档 = 带存档重插卡（applySave）。

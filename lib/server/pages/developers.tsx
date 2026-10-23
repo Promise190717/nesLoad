@@ -49,8 +49,8 @@ const PAGE_SIZE = 24;
  * 本页要的数据。包 `cache()` 让 `generateMetadata` 与正文共用同一次查询 ——
  * 两处都要 `total`（一个拼 description 里的条数，一个算总页数）。
  */
-const loadPage = cache(async (page: number) => {
-  const data = await listDevelopersCached((page - 1) * PAGE_SIZE, PAGE_SIZE, '');
+const loadPage = cache(async (page: number, locale: string) => {
+  const data = await listDevelopersCached((page - 1) * PAGE_SIZE, PAGE_SIZE, '', locale);
   return { ...data, page };
 });
 
@@ -72,7 +72,7 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const [locale, params] = await Promise.all([readLocaleParam(routeParams), searchParams]);
   const { page } = parsePageParam(params.page);
-  const { total } = await loadPage(page);
+  const { total } = await loadPage(page, locale);
 
   // 条数现读：写死会在增减开发商之后变成假话
   const title = translate(locale, 'seo.developers.title');
@@ -113,7 +113,7 @@ export default async function DevelopersPage({
   // 非规范写法（`?page=1` / `?page=01` / 重复参数…）一律收敛，别让同一份列表有两个 URL
   if (!canonical) redirect(developersHref(locale, page));
 
-  const data = await loadPage(page);
+  const data = await loadPage(page, locale);
   const pageCount = pageCountOf(data.total, PAGE_SIZE);
 
   // 越界（收藏了一个后来被删空的页码）退到最后一页，地址栏也一起纠正
@@ -146,6 +146,8 @@ export default async function DevelopersPage({
             >
               <Link
                 href={localePath(locale, `/developers/${developer.id}`)}
+                /* 一页 24 家，开了预取等于每次浏览多渲染 24 次详情页 —— 见 GameCardGrid 那条 */
+                prefetch={false}
                 className="pixel-edge pxw-2 pxc-700 flex h-full flex-col items-center gap-2 bg-ink-900 p-4 text-center transition-colors hover:bg-ink-800"
               >
                 {developer.imageUrl ? (

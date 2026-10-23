@@ -76,7 +76,7 @@ export default async function ConsolesPage({
     translate(locale, key, vars);
 
   // 两份数据互不依赖，并行取。理由见文件头：都带 30 天缓存。
-  const [rows, counts] = await Promise.all([listConsolesCached(), countGamesByConsoleCached()]);
+  const [rows, counts] = await Promise.all([listConsolesCached(locale), countGamesByConsoleCached()]);
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
 
   /*

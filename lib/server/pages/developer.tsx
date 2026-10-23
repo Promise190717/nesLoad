@@ -19,7 +19,7 @@ import {
 import { pageCountOf, pageHref, parsePageParam } from '@/lib/pager';
 import { entityInitial } from '@/lib/entity-text';
 import { DEVELOPERS_PAGE_REVALIDATE_SECONDS, getDeveloperPageData, localizeDeveloper, type Developer, type LocalizedDeveloperText } from '@/lib/server/developers';
-import { listGamesByDeveloperCached } from '@/lib/server/sb-games';
+import { listGamesByDeveloperCached, textLocalesFor } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
 
@@ -52,15 +52,21 @@ const PAGE_SIZE = 20;
  *    2026-10-20 → v3：`getDeveloperPageData` 不再查 `description`（免费版出站流量有限），
  *    条目里 `texts` 的形状变了，旧条目还带着那篇长文。
  */
-const loadDeveloper = cached(async (id: string) => getDeveloperPageData(id), ['static-getDeveloper', 'v3'], { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS, tags: ['developers'] });
+const loadDeveloper = cached(
+  /* ⚠️ v3 → v4（2026-10-23）：文案只取「当前语言 + 回退链」，`locale` 进了键。 */
+  async (id: string, locale: string) =>
+    getDeveloperPageData(id, textLocalesFor(locale)),
+  ['static-getDeveloper', 'v4'],
+  { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS, tags: ['developers'] }
+);
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
  * 不过两处要的其实是不同的 `page`，所以真正的作用是同一页里别查两遍。
  */
 const loadGames = cache(
-  async (id: string, page: number) =>
-    listGamesByDeveloperCached(id, (page - 1) * PAGE_SIZE, PAGE_SIZE)
+  async (id: string, page: number, locale: string) =>
+    listGamesByDeveloperCached(id, (page - 1) * PAGE_SIZE, PAGE_SIZE, locale)
 );
 
 /**
@@ -76,7 +82,8 @@ export async function generateMetadata({
   params: Promise<{ locale: string; id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const [locale, developer] = await Promise.all([readLocaleParam(params), loadDeveloper(id)]);
+  const locale = await readLocaleParam(params);
+  const developer = await loadDeveloper(id, locale);
 
   /*
    * 开发商没了就 `notFound()` —— 404 由 `app/developers/[id]/not-found.tsx` 出。
@@ -182,9 +189,10 @@ export default async function DeveloperDetailPage({
   searchParams: Promise<SearchParams>;
 }) {
   const [{ id }, rawQuery] = await Promise.all([params, searchParams]);
-  const [locale, developer, origin] = await Promise.all([
-    readLocaleParam(params),
-    loadDeveloper(id),
+  const locale = await readLocaleParam(params);
+  const [developer, origin] = await Promise.all([
+    /* ⚠️ 文案只取当前语言 + 回退链（≤3 种），要先拿到 locale */
+    loadDeveloper(id, locale),
     resolveSiteOrigin(),
   ]);
   if (!developer) notFound();
@@ -199,7 +207,7 @@ export default async function DeveloperDetailPage({
   // 和 /games 同一套：`?page=1` / `?page=01` / 重复参数都收敛到规范地址
   if (!canonical) redirect(developerHref(locale, id, page));
 
-  const data = await loadGames(id, page);
+  const data = await loadGames(id, page, locale);
   const pageCount = pageCountOf(data.total, PAGE_SIZE);
 
   // 越界（这家公司的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正

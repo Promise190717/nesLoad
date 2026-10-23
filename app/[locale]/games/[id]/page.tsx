@@ -47,7 +47,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * 常用游戏构建期预生成，剩余详情按需生成；公共 HTML 缓存 30 天。
  */
-const loadGame = cache(async (id: string) => getGameCached(id));
+const loadGame = cache(async (id: string, locale: string) => getGameCached(id, locale));
 
 /**
  * 当前浏览者是谁（没登录就是 null）。
@@ -105,7 +105,8 @@ export async function generateMetadata({
   params: Promise<{ locale: string; id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const [locale, game] = await Promise.all([readLocaleParam(params), loadGame(id)]);
+  const locale = await readLocaleParam(params);
+  const game = await loadGame(id, locale);
 
   /*
    * 游戏没了就 `notFound()` —— 由 `app/games/[id]/not-found.tsx` 渲染那个 404 页
@@ -239,9 +240,10 @@ export default async function GameDetailPage({
    *   · `readViewer` —— 评论模块要的登录态（**不查库**，见上面那个函数的注释）。
    * 代价是 404 时那几句查询白跑一次 —— 404 是少数，不值得为它让每个正常页面多等一程。
    */
-  const [locale, game, origin, favoriteCount] = await Promise.all([
-    readLocaleParam(params),
-    loadGame(id),
+  const locale = await readLocaleParam(params);
+  const [game, origin, favoriteCount] = await Promise.all([
+    /* ⚠️ `locale` 必须先拿到：文案只取「当前语言 + 回退链」那一小份，取全量要贵 20 倍 */
+    loadGame(id, locale),
     resolveSiteOrigin(),
     countFavorites(id),
   ]);

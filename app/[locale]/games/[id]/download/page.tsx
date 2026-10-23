@@ -35,7 +35,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 它读库 + 读 cookie 语言，本来每次请求都得现算，页面级缓存只是把渲染结果压进缓存再取回来，
  * 省不到渲染本身。真正值得缓存的是取数（`getGameCached`，7 天）。
  */
-const loadGame = cache(async (id: string) => getGameCached(id));
+const loadGame = cache(async (id: string, locale: string) => getGameCached(id, locale));
 
 /*
  * 这里**不重复 getGame 的查询**：`generateMetadata` 和页面正文都用 `loadGame`，
@@ -48,7 +48,8 @@ export async function generateMetadata({
   params: Promise<{ locale: string; id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const [locale, game] = await Promise.all([readLocaleParam(params), loadGame(id)]);
+  const locale = await readLocaleParam(params);
+  const game = await loadGame(id, locale);
   if (!game) notFound();
 
   /* 机种标签按语言取（中文站 FC、英文站 NES），见 lib/consoles.ts 的 `consoleLabel` */
@@ -87,7 +88,8 @@ export default async function GameDownloadPage({
   params: Promise<{ locale: string; id: string }>;
 }) {
   const { id } = await params;
-  const [locale, game] = await Promise.all([readLocaleParam(params), loadGame(id)]);
+  const locale = await readLocaleParam(params);
+  const game = await loadGame(id, locale);
   if (!game) notFound();
 
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>

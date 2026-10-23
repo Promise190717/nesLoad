@@ -239,6 +239,18 @@ export function entityFallbackChain(locale: string): string[] {
 }
 
 /**
+ * 渲染一页真正要取哪几种语言的文案 = 当前语言 + 回退链（去重后的完整清单）。
+ *
+ * ⚠️ **2026-10-23 加（Cloudflare 免费版 10ms CPU）**：文案表是 `(实体, 语言)` 一行，
+ *    一次全取就是 18 倍数据。实测一页 15 款游戏的全语言文案 245KB、首页开发商 149KB，
+ *    而渲染只用得到其中一两种 —— `JSON.parse` 和对象构造全白付。
+ *    凡是「读出来只为了给当前页面渲染」的地方都该传这个，只有后台编辑表单例外（它要一次改四种）。
+ */
+export function textLocalesFor(locale: string): string[] {
+  return [locale, ...entityFallbackChain(locale)];
+}
+
+/**
  * 按语言取一条游戏的文案。**目标语言缺哪个字段，就按回退链找第一个有的**（逐字段，不是整份）。
  *
  * 规则（2026-10-20 起**回退链**化）：

@@ -16,6 +16,12 @@ export default function ConsoleCard({ type, row, count, locale }: {
   return (
     <Link
       href={localePath(locale, `/consoles/${type}`)}
+      /*
+       * ⚠️ **必须关预取**（2026-10-23）：首页一次画 14 张机种卡，开着预取就是每来一个
+       *    访客额外渲染 14 次机种专题页。免费版 Workers 每请求只有 10ms CPU，这批
+       *    预取请求是「错误率 54%」的主力之一。理由同 `GameCardGrid` 那条。
+       */
+      prefetch={false}
       className="pixel-edge pxw-2 pxc-700 flex h-full flex-col items-center gap-2 bg-ink-900 p-4 text-center transition-colors hover:bg-ink-800"
     >
       {row?.imageUrl ? (

@@ -116,9 +116,9 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
    * 与正文共用同一次查询，而**首页不写 metadata**（见文件头），一次请求只会走一次这里。
    */
   const [consoles, counts, developers] = await Promise.all([
-    listConsolesCached(),
+    listConsolesCached(locale),
     countGamesByConsoleCached(),
-    listTopDevelopersCached(DEVELOPER_COUNT),
+    listTopDevelopersCached(DEVELOPER_COUNT, locale),
   ]);
 
   /*
@@ -332,7 +332,8 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
                     className="card-in"
                     style={{ animationDelay: `${cardDelayMs(index)}ms` }}
                   >
-                    <Link href={localePath(locale, `/developers/${developer.id}`)} className={chip}>
+                    {/* prefetch={false}：8 家开发商 = 8 次额外渲染，理由同 ConsoleCard 那条 */}
+                    <Link href={localePath(locale, `/developers/${developer.id}`)} prefetch={false} className={chip}>
                       {developer.imageUrl ? (
                         /* eslint-disable-next-line @next/next/no-img-element */
                         <img

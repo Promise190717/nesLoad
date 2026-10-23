@@ -2795,15 +2795,31 @@ export function dateLocale(locale: Locale): string {
   return DATE_LOCALE[locale];
 }
 
+/**
+ * `Intl.DateTimeFormat` 实例缓存（按语言标签）。
+ *
+ * ⚠️ **2026-10-23 加（免费版 10ms CPU）**：构造一个 `Intl.DateTimeFormat` 要初始化
+ *    该语言的 ICU 日期数据，在 Workers 里是毫秒级的操作，而原来的 `formatTime` 是
+ *    **每次调用都 new 一个** —— 一个存档 / 收藏列表有几十行，就是几十次初始化。
+ *    formatter 本身无状态、可复用，按标签缓存一份即可。
+ */
+const timeFormatters = new Map<string, Intl.DateTimeFormat>();
+
 export function formatTime(timestamp: number, locale: Locale): string {
-  return new Intl.DateTimeFormat(DATE_LOCALE[locale], {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(timestamp));
+  const tag = DATE_LOCALE[locale];
+  let formatter = timeFormatters.get(tag);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(tag, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    timeFormatters.set(tag, formatter);
+  }
+  return formatter.format(new Date(timestamp));
 }
 
 export function translate(

@@ -26,6 +26,7 @@ import {
   countGamesCached,
   listGamesByConsoleCached,
   listGamesPageCached,
+  textLocalesFor,
 } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -93,18 +94,23 @@ const PAGE_SIZE = 20;
  *   · v1 → v2（2026-10-20）：切 Supabase 时 `console_texts` 只搬了 name，简介 / 介绍全空，
  *     这一页的介绍整段消失；用 `scripts/fill-console-intros.mjs` 回填后必须换键才生效。
  */
-const loadConsole = cached(async (type: string) => getConsolePageData(type), ['static-console', 'v2'], { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS, tags: ['consoles'] });
+const loadConsole = cached(
+  /* ⚠️ v2 → v3（2026-10-23）：文案只取「当前语言 + 回退链」，`locale` 进了键。 */
+  async (type: string, locale: string) => getConsolePageData(type, textLocalesFor(locale)),
+  ['static-console', 'v3'],
+  { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS, tags: ['consoles'] }
+);
 
 /**
  * 名下的游戏。包 `cache()` 是为了让 `generateMetadata` 与正文共用同一次查询 ——
  * 两处要的其实是不同的 `page`，所以真正的作用是同一页里别查两遍。
  */
 const loadGames = cache(
-  async (type: string, page: number, keyword = '', language: string | null = null) => {
+  async (type: string, page: number, keyword: string, language: string | null, locale: string) => {
     if (!isConsoleType(type)) return { games: [], total: 0, offset: 0, limit: PAGE_SIZE };
     return keyword
-      ? listGamesPageCached((page - 1) * PAGE_SIZE, PAGE_SIZE, keyword, type, language)
-      : listGamesByConsoleCached(type, (page - 1) * PAGE_SIZE, PAGE_SIZE, language);
+      ? listGamesPageCached((page - 1) * PAGE_SIZE, PAGE_SIZE, keyword, type, language, locale)
+      : listGamesByConsoleCached(type, (page - 1) * PAGE_SIZE, PAGE_SIZE, language, locale);
   }
 );
 
@@ -202,7 +208,7 @@ export async function generateMetadata({
 
   const lang = parseLanguage(rawQuery.lang);
 
-  const [row, games] = await Promise.all([loadConsole(id), loadGames(id, 1, '', lang.language)]);
+  const [row, games] = await Promise.all([loadConsole(id, locale), loadGames(id, 1, '', lang.language, locale)]);
 
   /*
    * 没资料行就用默认名字（`consoleLabel`，中文站是 FC、英文站是 NES）——
@@ -300,9 +306,10 @@ export default async function ConsoleDetailPage({
   searchParams: Promise<SearchParams>;
 }) {
   const [{ id }, rawQuery] = await Promise.all([params, searchParams]);
-  const [locale, row, origin] = await Promise.all([
-    readLocaleParam(params),
-    loadConsole(id),
+  const locale = await readLocaleParam(params);
+  const [row, origin] = await Promise.all([
+    /* ⚠️ 文案只取当前语言 + 回退链（≤3 种），要先拿到 locale */
+    loadConsole(id, locale),
     resolveSiteOrigin(),
   ]);
 
@@ -346,7 +353,7 @@ export default async function ConsoleDetailPage({
   }
 
   const [data, gameCount, matchCount, langCounts] = await Promise.all([
-    loadGames(id, page, keyword, lang.language),
+    loadGames(id, page, keyword, lang.language, locale),
     /*
      * 机种总数：**不筛语种、也不筛关键词**（`countGamesCached` 的四个参数里那两个都是
      * 空 / null）。资料表里「共 N 款游戏」说的是「这个机种有多少款」，不随搜索框变 ——

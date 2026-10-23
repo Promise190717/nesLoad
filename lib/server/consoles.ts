@@ -22,6 +22,7 @@
 import { cached } from './cache';
 import { mediaUrl } from './media';
 import { query } from './pg';
+import { textLocalesFor } from '@/lib/game-text';
 import {
   EMPTY_ENTITY_TEXT,
   isBlankEntityText,
@@ -79,9 +80,20 @@ function toConsole(row: ConsoleRow & { game_count?: number }, texts: EntityTexts
 }
 
 /** 批量加载机种文案。 */
-async function loadConsoleTexts(types: string[]): Promise<Map<string, EntityTexts>> {
+async function loadConsoleTexts(
+  types: string[],
+  locales?: readonly string[]
+): Promise<Map<string, EntityTexts>> {
   if (types.length === 0) return new Map();
   const placeholders = types.map(() => '?').join(',');
+  /*
+   * ⚠️ 2026-10-23 起可裁语言：首页 / 机种页只用得到当前语言 + 回退链那一两份，
+   *    全表 14 台 × 18 语言 = 47.7KB，裁到一个语言剩 8KB（JSON.parse 全在 CPU 预算里）。
+   *    不传 = 全部（后台机种编辑要一次拿齐）。
+   */
+  const localeFilter = locales?.length
+    ? ` AND locale IN (${locales.map(() => '?').join(',')})`
+    : '';
   const rows = await query<{
     console_type: string;
     locale: string;
@@ -90,8 +102,8 @@ async function loadConsoleTexts(types: string[]): Promise<Map<string, EntityText
     description: string | null;
   }>(
     `SELECT console_type, locale, name, summary, description
-       FROM console_texts WHERE console_type IN (${placeholders})`,
-    types
+       FROM console_texts WHERE console_type IN (${placeholders})${localeFilter}`,
+    locales?.length ? [...types, ...locales] : types
   );
 
   const map = new Map<string, EntityTexts>();
@@ -129,14 +141,14 @@ async function writeConsoleTexts(type: string, texts: EntityTexts): Promise<void
  * 它就不在结果里，调用方（前台页面 / 后台列表）负责对照 `CONSOLE_TYPES` 补默认值，
  * 本函数不知道枚举的存在（数据层不该反过来依赖组件）。
  */
-export async function listConsoles(): Promise<Console[]> {
+export async function listConsoles(locales?: readonly string[]): Promise<Console[]> {
   const rows = await query<ConsoleRow & { game_count: number }>(
     `SELECT console_type, image_url, release_year,
             (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at,
             ${GAME_COUNT}
        FROM consoles ORDER BY sort_order ASC, console_type ASC`
   );
-  const textsMap = await loadConsoleTexts(rows.map((r) => r.console_type));
+  const textsMap = await loadConsoleTexts(rows.map((r) => r.console_type), locales);
   return rows.map((r) => toConsole(r, textsMap.get(r.console_type) ?? {}));
 }
 
@@ -150,7 +162,8 @@ export async function listConsoles(): Promise<Console[]> {
  *    **不缓存**，那边改完是立刻的）。
  *    ⚠️ 这份缓存**没有挂 tag**，所以后台改机种没有主动失效的路子，7 天是硬等待。
  *
- * 缓存键里没有语言（`Console` 的 `texts` 带了所有语言），用哪份由页面调 `localizeConsole` 决定。
+ * 缓存键里**现在带语言**（2026-10-23 起 `texts` 只装当前语言 + 回退链那几份，
+ * 不是全部 18 种了 —— 免费版 10ms CPU 下 47.7KB 全量文案是白付）。
  */
 export const CONSOLES_PAGE_REVALIDATE_SECONDS = 604800;
 
@@ -161,16 +174,18 @@ export const CONSOLES_PAGE_REVALIDATE_SECONDS = 604800;
  *    才看得到新图新简介（2026-10-14 补机图时从 v1 升到了 v2，2026-10-15 补 nds 图升到 v3，
  *    2026-10-16 加多语言侧表升到 v4，同日补日韩文案升到 v5，同日加 ps1 机种升到 v6，
  *    2026-10-19 nes 中文名改「红白机（FC）」升到 v7）。
+ * ⚠️ 2026-10-23 v8 → v9：文案按语言裁剪，`locale` 进了键；不升版本线上会继续读到
+ *    带 18 种语言的全量条目，这次优化等于没上线。
  */
 const listConsolesCachedRaw = cached(
-  async () => listConsoles(),
-  ['consoles:list', 'v8'],
+  async (locale: string) => listConsoles(textLocalesFor(locale)),
+  ['consoles:list', 'v9'],
   { revalidate: CONSOLES_PAGE_REVALIDATE_SECONDS }
 );
 
 /** 全部机种资料 —— 直接读库（源站模式已随 2026-10-20 的迁移一起删掉）。 */
-export async function listConsolesCached(): Promise<Console[]> {
-  return listConsolesCachedRaw();
+export async function listConsolesCached(locale: string): Promise<Console[]> {
+  return listConsolesCachedRaw(locale);
 }
 
 /**
@@ -185,7 +200,10 @@ export async function listConsolesCached(): Promise<Console[]> {
  *    `countGamesCached` 那份缓存总数（见专题页 generateMetadata），调用方不要再读
  *    返回值里的 `gameCount`（恒为 0）。`listConsoles` 那边带缓存，子查询照留。
  */
-export async function getConsole(type: string): Promise<Console | null> {
+export async function getConsole(
+  type: string,
+  locales?: readonly string[]
+): Promise<Console | null> {
   const rows = await query<ConsoleRow>(
     `SELECT console_type, image_url, release_year,
             (EXTRACT(EPOCH FROM created_at) * 1000)::float8 AS created_at
@@ -193,7 +211,7 @@ export async function getConsole(type: string): Promise<Console | null> {
     [type]
   );
   if (!rows[0]) return null;
-  const texts = (await loadConsoleTexts([type])).get(type) ?? {};
+  const texts = (await loadConsoleTexts([type], locales)).get(type) ?? {};
   return toConsole(rows[0], texts);
 }
 
@@ -206,8 +224,11 @@ export async function getConsole(type: string): Promise<Console | null> {
  *    同样的坑还有一个：`games.ts` 的写入路径用 `getDeveloper` 反查厂名，
  *    那边也不能跟着切（见 `developers.ts` 的 `getDeveloper`）。
  */
-export async function getConsolePageData(type: string): Promise<Console | null> {
-  return getConsole(type);
+export async function getConsolePageData(
+  type: string,
+  locales?: readonly string[]
+): Promise<Console | null> {
+  return getConsole(type, locales);
 }
 
 export interface ConsoleInput {

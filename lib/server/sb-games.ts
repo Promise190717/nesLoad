@@ -26,6 +26,7 @@ import {
   CONTENT_LOCALES,
   localizeTexts,
   normalizeControls,
+  textLocalesFor,
   type ContentLocale,
   type GameTexts,
   type LocalizedGameText,
@@ -251,14 +252,48 @@ function sortRoms(roms: RomRow[] | undefined): GameRomLanguage[] {
 }
 
 /**
+ * 文案取多少 —— 两个维度，都是「少取就少解析」。
+ *
+ * ⚠️ **2026-10-23 加（为压 Cloudflare 免费版 10ms CPU）**：原来这里一律把 18 种语言
+ *    整批捞回来，一页 15 款实测 **245KB** JSON（`page_texts` 270 行）。免费版每请求
+ *    只有 10ms CPU，光是 JSON.parse + 270 个对象构造就吃掉一大块，而卡片上只用得到
+ *    一个标题。现在前台一律传裁剪参数，**只有后台编辑表单才要全量**（它要四种语言一起改）。
+ */
+export interface TextLoadOptions {
+  /** 只取这些语言的文案行。不给 = 全部 18 种。 */
+  locales?: readonly string[];
+  /** 要不要 `description` / `controls`。列表卡片只用 title / developer / series。 */
+  content?: boolean;
+}
+
+/**
+ * 渲染一款游戏真正用得到的语言 = 当前语言 + 逐字段回退链（规则见 `localizeTexts`）。
+ *
+ * 回退链最多再补两种（`zh-TW` → zh/en；其余 → en/zh），所以 18 种能收到 3 种以内。
+ * ⚠️ 别图省事只传当前语言 —— 英文站缺字段时就不回退中文了，卡片标题会变空白。
+ * 定义在 `lib/game-text.ts`（机种 / 开发商那条读路径也要用），这里转出去给页面少导一层。
+ */
+export { textLocalesFor } from '@/lib/game-text';
+
+/**
  * 一次把一批游戏的文案捞回来（`slug → GameTexts`）。
  *
  * 开发商名 / 系列名从各自的文案表 JOIN 进来，而不是存在 `game_texts` 里 ——
  * 那样改一次开发商名要改四行游戏文案，这里改一行就够。
  */
-export async function loadGameTexts(slugs: string[]): Promise<Map<string, GameTexts>> {
+export async function loadGameTexts(
+  slugs: string[],
+  options: TextLoadOptions = {}
+): Promise<Map<string, GameTexts>> {
   const map = new Map<string, GameTexts>();
   if (slugs.length === 0) return map;
+
+  const locales = options.locales?.length ? [...options.locales] : null;
+  /*
+   * `content: false` 时仍然选这两列，只是直接给 NULL —— 保持返回行的形状一致，
+   * 下游 `normalizeControls(row.controls)` 拿到 null 就返回 null（它认这个）。
+   */
+  const withContent = options.content !== false;
 
   const rows = await query<{
     game_slug: string;
@@ -275,14 +310,17 @@ export async function loadGameTexts(slugs: string[]): Promise<Map<string, GameTe
     developer: string | null;
     series: string | null;
   }>(
-    `SELECT t.game_slug, t.locale, t.title, t.description, t.controls,
+    `SELECT t.game_slug, t.locale, t.title,
+            ${withContent ? 't.description' : 'NULL::text AS description'},
+            ${withContent ? 't.controls' : 'NULL::jsonb AS controls'},
             d.name AS developer, s.name AS series
        FROM game_texts t
        JOIN games g ON g.slug = t.game_slug
        LEFT JOIN developer_texts d ON d.developer_slug = g.developer_slug AND d.locale = t.locale
        LEFT JOIN series_texts s ON s.series_slug = g.series_slug AND s.locale = t.locale
-      WHERE t.game_slug IN (${slugs.map(() => '?').join(', ')})`,
-    slugs
+      WHERE t.game_slug IN (${slugs.map(() => '?').join(', ')})
+        ${locales ? `AND t.locale IN (${locales.map(() => '?').join(', ')})` : ''}`,
+    locales ? [...slugs, ...locales] : slugs
   );
 
   for (const row of rows) {
@@ -299,11 +337,25 @@ export async function loadGameTexts(slugs: string[]): Promise<Map<string, GameTe
   return map;
 }
 
+/** `attach` 的取数范围；在文案那两个维度之外再加「要不要 ROM 行」。 */
+interface AttachOptions extends TextLoadOptions {
+  /**
+   * 要不要查 `game_roms`。**列表页不需要**：卡片上只有封面 / 标题 / 年份 / 机种 / 开发商，
+   * 没有语言角标（2026-10-19 去掉的），也没有下载信息 —— 那次查询和 `sortRoms` 白跑。
+   * 跳过后 `romName` 是空串、`romLanguages` 是空数组，详情页与 `/play` 用的是自己的取数。
+   */
+  roms?: boolean;
+}
+
 /** 把一批基础行组装成 `Game[]`（文案 + ROM 各一次批量查询）。 */
-async function attach(base: GameBaseRow[]): Promise<Game[]> {
+async function attach(base: GameBaseRow[], options: AttachOptions = {}): Promise<Game[]> {
   if (base.length === 0) return [];
   const slugs = base.map((row) => row.slug);
-  const [texts, roms] = await Promise.all([loadGameTexts(slugs), loadRoms(slugs)]);
+  const withRoms = options.roms !== false;
+  const [texts, roms] = await Promise.all([
+    loadGameTexts(slugs, options),
+    withRoms ? loadRoms(slugs) : Promise.resolve(new Map<string, RomRow[]>()),
+  ]);
 
   return base.map((row) => {
     const ownRoms = roms.get(row.slug);
@@ -383,7 +435,8 @@ export async function listGamesPage(
   offset: number,
   limit: number,
   filter: GamePageQuery = {},
-  total?: number
+  total?: number,
+  attachOptions: AttachOptions = {}
 ): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
   const { where, params } = buildWhere(filter);
   const resolvedTotal = total ?? (await countGames(filter));
@@ -398,7 +451,17 @@ export async function listGamesPage(
     [...params, limit, safeOffset]
   );
 
-  return { games: await attach(rows), total: resolvedTotal, offset: safeOffset, limit };
+  return {
+    games: await attach(rows, attachOptions),
+    total: resolvedTotal,
+    offset: safeOffset,
+    limit,
+  };
+}
+
+/** 列表页的取数范围：卡片要标题 / 开发商，不要描述 / 键位表 / ROM 清单。 */
+function cardAttachOptions(locale: string): AttachOptions {
+  return { locales: textLocalesFor(locale), content: false, roms: false };
 }
 
 export async function listGamesPageCached(
@@ -406,9 +469,10 @@ export async function listGamesPageCached(
   limit: number,
   keyword: string,
   consoleType: ConsoleType | null,
-  language: string | null
+  language: string | null,
+  locale: string
 ): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
-  return listGamesPageCachedRaw(offset, limit, keyword, consoleType, language);
+  return listGamesPageCachedRaw(offset, limit, keyword, consoleType, language, locale);
 }
 
 const listGamesPageCachedRaw = cached(
@@ -417,37 +481,44 @@ const listGamesPageCachedRaw = cached(
     limit: number,
     keyword: string,
     consoleType: ConsoleType | null,
-    language: string | null
+    language: string | null,
+    locale: string
   ) => {
     const needle = keyword.trim();
     const filter = { keyword: needle, consoleType, language };
     /* total 一起算：列表和计数必须描述同一批数据，否则页码会和实际条目错位 */
     const total = await countGames(filter);
-    return listGamesPage(offset, limit, filter, total);
+    return listGamesPage(offset, limit, filter, total, cardAttachOptions(locale));
   },
-  ['sb:games:page', 'v2'],
+  /*
+   * ⚠️ 2026-10-23 v2 → v3：文案改成**按语言裁剪**（18 种 → 最多 3 种 + 不要描述 / 键位表），
+   *    所以 `locale` 进了缓存键，返回结构也变小了。条目**不随部署失效**，不升版本的话
+   *    线上会继续读到旧形状（带着 18 种语言的全量文案），这次优化等于没上线。
+   */
+  ['sb:games:page', 'v3'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
 export const listLatestGamesCached = cached(
-  async (limit: number) => listGamesPage(0, limit, {}, undefined),
-  ['sb:games:latest', 'v2'],
+  async (limit: number, locale: string) =>
+    listGamesPage(0, limit, {}, undefined, cardAttachOptions(locale)),
+  ['sb:games:latest', 'v3'],
   { revalidate: HOME_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
 /** 机种专题页：`/consoles/<type>`。 */
 export const listGamesByConsoleCached = cached(
-  async (consoleType: ConsoleType, offset: number, limit: number, language: string | null) =>
-    listGamesPage(offset, limit, { consoleType, language }),
-  ['sb:games:by-console', 'v2'],
+  async (consoleType: ConsoleType, offset: number, limit: number, language: string | null, locale: string) =>
+    listGamesPage(offset, limit, { consoleType, language }, undefined, cardAttachOptions(locale)),
+  ['sb:games:by-console', 'v3'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
 /** 开发商专题页：`/developers/<slug>`。 */
 export const listGamesByDeveloperCached = cached(
-  async (developerId: string, offset: number, limit: number) =>
-    listGamesPage(offset, limit, { developerId }),
-  ['sb:games:by-developer', 'v2'],
+  async (developerId: string, offset: number, limit: number, locale: string) =>
+    listGamesPage(offset, limit, { developerId }, undefined, cardAttachOptions(locale)),
+  ['sb:games:by-developer', 'v3'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
@@ -518,24 +589,34 @@ export const countConsoleGamesByLanguageCached = cached(
 
 /* ── 单条 ──────────────────────────────────────────────────────────────── */
 
-export async function getGame(id: string): Promise<Game | null> {
+/**
+ * 单款游戏。
+ *
+ * ⚠️ `locale` 给了就**只取那一份语言 + 回退链**的文案（详情页用）；
+ *    不给则是全部 18 种（后台编辑表单、写路径的完整性检查要用）。
+ *    取全量时一款 ≈ 18KB，只为渲染一页时那份是 0.8KB —— 免费版 10ms CPU 下差一倍。
+ */
+export async function getGame(id: string, locale?: string): Promise<Game | null> {
   const rows = await query<GameBaseRow>(
     `SELECT ${BASE_COLUMNS} FROM games g WHERE g.slug = ?`,
     [id]
   );
   if (!rows[0]) return null;
-  const games = await attach(rows);
+  const games = await attach(rows, locale ? { locales: textLocalesFor(locale) } : {});
   return games[0] ?? null;
 }
 
 export const getGameCached = cached(
-  async (id: string) => getGame(id),
+  async (id: string, locale: string) => getGame(id, locale),
   /*
    * ⚠️ 2026-10-22 v2 → v3：`Game.romLanguages` 的每一项多了 `discs`（碟片清单）。
    * 缓存条目**不随部署失效**，不升版本的话线上一直读到没有 `discs` 的旧结构，
    * `/play` 于是永远走「单碟」分支 —— 多碟游戏的换碟等于没上线。改结构必升键尾。
+   *
+   * ⚠️ 2026-10-23 v3 → v4：文案改成按 `locale` 裁剪（18 种 → 最多 3 种），
+   *    `locale` 也进了键。不升版本会继续读到 18 种语言的全量条目。
    */
-  ['sb:games:by-id', 'v3'],
+  ['sb:games:by-id', 'v4'],
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
 

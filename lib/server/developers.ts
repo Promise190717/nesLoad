@@ -22,6 +22,7 @@
 import { cached } from './cache';
 import { mediaUrl } from './media';
 import { query } from './pg';
+import { textLocalesFor } from '@/lib/game-text';
 import {
   CONTENT_LOCALES,
   isBlankEntityText,
@@ -138,9 +139,17 @@ function toDeveloper(row: DeveloperRow & { game_count?: number }, texts: EntityT
  */
 async function loadDeveloperTexts(
   slugs: string[],
-  withDescription = false
+  withDescription = false,
+  locales?: readonly string[]
 ): Promise<Map<string, EntityTexts>> {
   if (slugs.length === 0) return new Map();
+  /*
+   * ⚠️ 2026-10-23 起可裁语言（免费版 10ms CPU）：首页那 8 家开发商的全语言文案实测
+   *    149KB，而页面只渲染当前语言。不传 = 全部（后台编辑要一次拿齐四种）。
+   */
+  const localeFilter = locales?.length
+    ? ` AND locale IN (${locales.map(() => '?').join(',')})`
+    : '';
   const rows = await query<{
     developer_slug: string;
     locale: string;
@@ -149,8 +158,8 @@ async function loadDeveloperTexts(
     description?: string | null;
   }>(
     `SELECT developer_slug, locale, name, summary${withDescription ? ', description' : ''}
-       FROM developer_texts WHERE developer_slug IN (${slugs.map(() => '?').join(',')})`,
-    slugs
+       FROM developer_texts WHERE developer_slug IN (${slugs.map(() => '?').join(',')})${localeFilter}`,
+    locales?.length ? [...slugs, ...locales] : slugs
   );
 
   const map = new Map<string, EntityTexts>();
@@ -224,7 +233,8 @@ export async function listDevelopers(
   offset: number,
   limit: number,
   filter: DeveloperPageQuery = {},
-  total?: number
+  total?: number,
+  locales?: readonly string[]
 ): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
   const search = searchWhere(filter.keyword ?? '');
   const resolvedTotal = total ?? (await countDevelopers(filter));
@@ -246,7 +256,7 @@ export async function listDevelopers(
     rows = await select(safeOffset);
   }
 
-  const textsMap = await loadDeveloperTexts(rows.map((r) => r.id));
+  const textsMap = await loadDeveloperTexts(rows.map((r) => r.id), false, locales);
   return {
     developers: rows.map((r) => toDeveloper(r, textsMap.get(r.id) ?? {})),
     total: resolvedTotal,
@@ -272,24 +282,35 @@ export async function countDevelopersCached(keyword: string): Promise<number> {
 /**
  * 列表缓存键 v5：2026-10-20 起 `loadDeveloperTexts` 不再查 `description`，
  * 条目里那层 `texts` 的形状变了（v4 是补厂标那次）。
+ * ⚠️ v5 → v6（2026-10-23）：文案按语言裁剪，`locale` 进了键。
  */
 const listDevelopersCachedRaw = cached(
-  async (offset: number, limit: number, keyword: string) =>
-    listDevelopers(offset, limit, { keyword }, await countDevelopers({ keyword })),
-  ['sb:developers:list', 'v5'],
+  async (offset: number, limit: number, keyword: string, locale: string) =>
+    listDevelopers(
+      offset,
+      limit,
+      { keyword },
+      await countDevelopers({ keyword }),
+      textLocalesFor(locale)
+    ),
+  ['sb:developers:list', 'v6'],
   { revalidate: DEVELOPERS_PAGE_REVALIDATE_SECONDS }
 );
 
 export async function listDevelopersCached(
   offset: number,
   limit: number,
-  keyword: string
+  keyword: string,
+  locale: string
 ): Promise<{ developers: Developer[]; total: number; offset: number; limit: number }> {
-  return listDevelopersCachedRaw(offset, limit, keyword);
+  return listDevelopersCachedRaw(offset, limit, keyword, locale);
 }
 
 /** 「游戏最多的前 N 家」—— 首页区块用，按 game_count 倒序。 */
-export async function listTopDevelopers(limit: number): Promise<Developer[]> {
+export async function listTopDevelopers(
+  limit: number,
+  locales?: readonly string[]
+): Promise<Developer[]> {
   const rows = await query<DeveloperRow & { game_count: number }>(
     `SELECT ${COLUMNS}, ${GAME_COUNT}
        FROM developers d
@@ -297,36 +318,45 @@ export async function listTopDevelopers(limit: number): Promise<Developer[]> {
       LIMIT ?`,
     [limit]
   );
-  const textsMap = await loadDeveloperTexts(rows.map((r) => r.id));
+  const textsMap = await loadDeveloperTexts(rows.map((r) => r.id), false, locales);
   return rows.map((r) => toDeveloper(r, textsMap.get(r.id) ?? {}));
 }
 
-/** 同上，首页「游戏最多的前 N 家」也得跟着失效（v4 = 不再查 `description` 那次）。 */
+/**
+ * 同上，首页「游戏最多的前 N 家」也得跟着失效（v4 = 不再查 `description` 那次）。
+ * ⚠️ v4 → v5（2026-10-23）：文案按语言裁剪，`locale` 进了键。
+ */
 const listTopDevelopersCachedRaw = cached(
-  async (limit: number) => listTopDevelopers(limit),
-  ['sb:developers:top', 'v4'],
+  async (limit: number, locale: string) => listTopDevelopers(limit, textLocalesFor(locale)),
+  ['sb:developers:top', 'v5'],
   { revalidate: TOP_DEVELOPERS_REVALIDATE_SECONDS }
 );
 
-export async function listTopDevelopersCached(limit: number): Promise<Developer[]> {
-  return listTopDevelopersCachedRaw(limit);
+export async function listTopDevelopersCached(limit: number, locale: string): Promise<Developer[]> {
+  return listTopDevelopersCachedRaw(limit, locale);
 }
 
 /* ── 单条 ──────────────────────────────────────────────────────────────── */
 
-export async function getDeveloper(id: string): Promise<Developer | null> {
+export async function getDeveloper(
+  id: string,
+  locales?: readonly string[]
+): Promise<Developer | null> {
   const rows = await query<DeveloperRow>(
     `SELECT ${COLUMNS} FROM developers d WHERE d.slug = ?`,
     [id]
   );
   if (!rows[0]) return null;
-  const texts = (await loadDeveloperTexts([id])).get(id) ?? {};
+  const texts = (await loadDeveloperTexts([id], false, locales)).get(id) ?? {};
   return toDeveloper(rows[0], texts);
 }
 
 /** 前台详情页用 —— 与 `getDeveloper` 同一份（源站模式已删）。 */
-export async function getDeveloperPageData(id: string): Promise<Developer | null> {
-  return getDeveloper(id);
+export async function getDeveloperPageData(
+  id: string,
+  locales?: readonly string[]
+): Promise<Developer | null> {
+  return getDeveloper(id, locales);
 }
 
 export async function getDeveloperRow(id: string): Promise<DeveloperRow | null> {

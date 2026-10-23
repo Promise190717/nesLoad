@@ -79,6 +79,16 @@ export default function GameCardGrid({
           >
             <Link
               href={localePath(locale, `/games/${game.id}`)}
+              /*
+               * ⚠️ **必须关预取**（2026-10-23 加，为压 Cloudflare 免费版 10ms CPU）。
+               *    Next 在生产模式下会预取「进入视口的 `<Link>`」所指向的路由，而这一页
+               *    一次就画 15~24 张卡片 —— 等于每来一个访客就**额外渲染 15~24 次详情页**
+               *    RSC。详情页是全站最重的一页（文案 + 收藏数 + 评论模块），免费版每请求
+               *    只有 10ms CPU，这批预取请求直接把错误率推到 50% 以上（2026-10-23 实测
+               *    线上 CPU 中位数 12.91ms / 错误率 54%）。
+               *    代价：点卡片时多等一个 RSC 往返（本地几十毫秒）。换掉一半的错误率，值。
+               */
+              prefetch={false}
               className="pixel-edge pxw-2 pxc-700 block h-full bg-ink-900 transition-colors hover:bg-ink-800"
             >
               <span className="relative block aspect-[3/4] w-full overflow-hidden bg-ink-950">
