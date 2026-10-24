@@ -155,3 +155,14 @@ export default async function GameDownloadPage({
  * 内容只是「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，取数走 `getGameCached`（7 天）。
  */
 export const revalidate = 604800; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
+
+/*
+ * 动态段要进按需 ISR 必须有这个钩子：返回空数组 = 构建期一个参数组合都不预渲染，
+ * 未知参数在运行时首次访问时生成并写入增量缓存（相当于 fallback: 'blocking'）。
+ * 没有它，这条路由永远逐请求渲染（免费版 10ms CPU 必超限），Cache-Control 也是
+ * private, no-cache（2026-10-24 踩过：只写 revalidate 时 /games/[id] 就是这个表现）。
+ */
+export const dynamicParams = true;
+export function generateStaticParams() {
+  return [];
+}
