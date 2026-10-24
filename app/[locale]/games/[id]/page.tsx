@@ -25,7 +25,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame, GAME_DETAIL_REVALIDATE_SECONDS, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
+import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -577,7 +577,7 @@ export default async function GameDetailPage({
  *
  * 取数仍由 `getGameCached` 那层负责（同样 7 天，挂 `games` tag）。
  */
-export const revalidate = GAME_DETAIL_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 
 /**
  * 收藏数（详情页那一颗钮的初值）。

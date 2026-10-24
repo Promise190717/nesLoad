@@ -12,7 +12,7 @@ import {
   translate,
   type MessageKey,
 } from '@/lib/i18n';
-import { listConsolesCached, CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
+import { listConsolesCached } from '@/lib/server/consoles';
 import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -35,7 +35,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  *    2026-10-22 迁 Vercel 时改成 `force-dynamic`；2026-10-24 回 CF 免费版后恢复
  *    按需缓存（`revalidate`，首次访问渲染、之后走增量缓存，见 docs/cloudflare-deployment.md）。
  */
-export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = CONSOLES_PAGE_REVALIDATE_SECONDS(lib/server/consoles.ts)；Next 的段配置只认字面量，别改回常量导入
 export async function generateMetadata({
   params: routeParams,
 }: {

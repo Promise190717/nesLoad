@@ -1,7 +1,5 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
-import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
-
 /**
  * `/consoles/nds/page/2` —— 机种页分页进路径（2026-10-20）。
  *
@@ -9,7 +7,7 @@ import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
  * 起因见 `lib/catalog-route.ts` 文件头。
  */
 
-export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = CONSOLES_PAGE_REVALIDATE_SECONDS(lib/server/consoles.ts)；Next 的段配置只认字面量，别改回常量导入
 
 type Props = { params: Promise<{ locale: string; id: string; n: string }> };
 

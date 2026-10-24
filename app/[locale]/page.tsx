@@ -10,7 +10,7 @@ import { cardDelayMs } from '@/lib/card-stagger';
 import { entityInitial } from '@/lib/entity-text';
 import { SITE_NAME, localePath, translate, type MessageKey } from '@/lib/i18n';
 import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/developers';
-import { countGamesByConsoleCached, HOME_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
+import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { listConsolesCached } from '@/lib/server/consoles';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -105,7 +105,7 @@ function Section({
   );
 }
 
-export const revalidate = HOME_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = HOME_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const locale = await readLocaleParam(params);
 

@@ -1,7 +1,5 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
-import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
-
 /**
  * `/consoles/nds/lang/zh/page/2` —— 语种筛选 + 分页的组合（2026-10-20）。
  *
@@ -9,7 +7,7 @@ import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
  * 「筛着日本語翻页」就只能退回带查询参数那份、又变回整页刷新）。
  */
 
-export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = CONSOLES_PAGE_REVALIDATE_SECONDS(lib/server/consoles.ts)；Next 的段配置只认字面量，别改回常量导入
 
 type Props = { params: Promise<{ locale: string; id: string; code: string; n: string }> };
 

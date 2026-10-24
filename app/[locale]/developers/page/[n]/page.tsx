@@ -1,7 +1,5 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/developers';
 
-import { DEVELOPERS_PAGE_REVALIDATE_SECONDS } from '@/lib/server/developers';
-
 /**
  * `/developers/page/2` —— 开发商列表分页进路径（2026-10-20）。
  *
@@ -9,7 +7,7 @@ import { DEVELOPERS_PAGE_REVALIDATE_SECONDS } from '@/lib/server/developers';
  * 客户端软导航对不上 ⇒ 点「下一页」整页刷新。
  */
 
-export const revalidate = DEVELOPERS_PAGE_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = DEVELOPERS_PAGE_REVALIDATE_SECONDS(lib/server/developers.ts)；Next 的段配置只认字面量，别改回常量导入
 
 type Props = { params: Promise<{ locale: string; n: string }> };
 

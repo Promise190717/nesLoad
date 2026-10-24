@@ -1,7 +1,5 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
-import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
-
 /*
  * 页面级按需缓存（2026-10-24 恢复；构建期预渲染仍然不做）。
  *
@@ -11,7 +9,7 @@ import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
  * 外面再叠一层 worker.ts 的 10 分钟边缘缓存（见 docs/cloudflare-deployment.md）。
  * 取数仍走 `listConsolesCached`（7 天）。
  */
-export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = CONSOLES_PAGE_REVALIDATE_SECONDS(lib/server/consoles.ts)；Next 的段配置只认字面量，别改回常量导入
 type Props = { params: Promise<{ locale: string; id: string }> };
 export function generateMetadata(props: Props) { return metadata({ ...props, searchParams: Promise.resolve({}) }); }
 export default function StaticPage(props: Props) { return Page({ ...props, searchParams: Promise.resolve({}) }); }

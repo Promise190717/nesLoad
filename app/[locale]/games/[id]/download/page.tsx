@@ -17,7 +17,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame, GAME_DETAIL_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
+import { getGameCached, localizeGame } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -154,4 +154,4 @@ export default async function GameDownloadPage({
  * 会撞 10ms CPU，于是恢复「首次访问渲染、之后走增量缓存」的按需形态。
  * 内容只是「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，取数走 `getGameCached`（7 天）。
  */
-export const revalidate = GAME_DETAIL_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入

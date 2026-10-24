@@ -1,7 +1,5 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/games';
 
-import { GAMES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
-
 /**
  * `/games/console/nes` —— 机种筛选从 `?console=nes` 搬进路径段（2026-10-20）。
  *
@@ -10,7 +8,7 @@ import { GAMES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
  * 改动的起因见 `lib/catalog-route.ts` 文件头。
  */
 
-export const revalidate = GAMES_PAGE_REVALIDATE_SECONDS;
+export const revalidate = 604800; // = GAMES_PAGE_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 
 type Props = { params: Promise<{ locale: string; type: string }> };
 
