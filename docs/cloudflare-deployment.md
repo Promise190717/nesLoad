@@ -20,6 +20,13 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
 首次访问现场渲染并写入 R2 增量缓存，之后 `enableCacheInterception` 在初始化渲染器之前
 直接返回；后台改动靠既有的 `revalidateTag('games')` 立即失效。
 
+⚠️ **动态段路由（`/games/[id]` 这类）光有 `revalidate` 不够**：App Router 只有挂了
+`generateStaticParams` 的动态段才进 ISR，否则永远逐请求渲染、响应头
+`private, no-cache, no-store`（2026-10-24 踩过）。这些页面加了
+`generateStaticParams() { return [] }` + `dynamicParams = true` ——
+返回空数组 = 构建期零预渲染，未知参数运行时首次访问生成并缓存（`fallback: 'blocking'`
+的等价物），正好满足「构建期预渲染不做」的口径。
+
 仍然 `force-dynamic`（刻意保留）：搜索页（`searchParams`）、`/play` 与 `/room`
 （空壳渲染只要几毫秒，不值得把 HTML 钉住——见 play 页注释里 chunk 死循环那段）、
 `/privacy` `/terms`（同上）、`/account` `/login`、`/catalog` 影子路由（旧地址兼容）。
