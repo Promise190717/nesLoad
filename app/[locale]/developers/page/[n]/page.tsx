@@ -1,5 +1,7 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/developers';
 
+import { DEVELOPERS_PAGE_REVALIDATE_SECONDS } from '@/lib/server/developers';
+
 /**
  * `/developers/page/2` —— 开发商列表分页进路径（2026-10-20）。
  *
@@ -7,7 +9,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/developer
  * 客户端软导航对不上 ⇒ 点「下一页」整页刷新。
  */
 
-export const dynamic = 'force-dynamic';
+export const revalidate = DEVELOPERS_PAGE_REVALIDATE_SECONDS;
 
 type Props = { params: Promise<{ locale: string; n: string }> };
 

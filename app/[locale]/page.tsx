@@ -10,7 +10,7 @@ import { cardDelayMs } from '@/lib/card-stagger';
 import { entityInitial } from '@/lib/entity-text';
 import { SITE_NAME, localePath, translate, type MessageKey } from '@/lib/i18n';
 import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/developers';
-import { countGamesByConsoleCached } from '@/lib/server/sb-games';
+import { countGamesByConsoleCached, HOME_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
 import { listConsolesCached } from '@/lib/server/consoles';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -38,7 +38,8 @@ import { readLocaleParam } from '@/lib/server/locale';
  *   副作用和后台上传游戏那条一样：新传的游戏最多晚 30 天出现在首页
  *   （`/games` 那边 2026-10-20 起同样是 30 天，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
  *
- * - 公共 HTML 按 locale 预生成并缓存 30 天。
+ * - 公共 HTML 按 locale **按需缓存**（2026-10-24 恢复：`revalidate` 7 天，
+ *   首次访问渲染、之后走增量缓存；构建期预渲染不做）。
  *
  * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），
  *   最后按开发商（八家）。参考站还有「类型 / 系列」两个维度，本站没有那两张表
@@ -104,7 +105,7 @@ function Section({
   );
 }
 
-export const dynamic = 'force-dynamic';
+export const revalidate = HOME_REVALIDATE_SECONDS;
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const locale = await readLocaleParam(params);
 

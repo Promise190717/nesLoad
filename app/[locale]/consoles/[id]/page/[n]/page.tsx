@@ -1,5 +1,7 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
+import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
+
 /**
  * `/consoles/nds/page/2` —— 机种页分页进路径（2026-10-20）。
  *
@@ -7,7 +9,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
  * 起因见 `lib/catalog-route.ts` 文件头。
  */
 
-export const dynamic = 'force-dynamic';
+export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
 
 type Props = { params: Promise<{ locale: string; id: string; n: string }> };
 

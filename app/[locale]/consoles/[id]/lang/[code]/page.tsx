@@ -1,5 +1,7 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
+import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
+
 /**
  * `/consoles/nds/lang/zh` —— 语种筛选从 `?lang=zh` 搬进路径段（2026-10-20）。
  *
@@ -7,7 +9,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
  * 改写成影子路由，客户端软导航对不上 ⇒ 点一下整页刷新。进路径后是真路由，恢复软导航。
  */
 
-export const dynamic = 'force-dynamic';
+export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
 
 type Props = { params: Promise<{ locale: string; id: string; code: string }> };
 

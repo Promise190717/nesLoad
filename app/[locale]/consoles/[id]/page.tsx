@@ -1,14 +1,17 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
+import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
+
 /*
- * 页面级缓存已撤掉（2026-10-22 迁 Vercel）。
+ * 页面级按需缓存（2026-10-24 恢复；构建期预渲染仍然不做）。
  *
- * 这里曾经用 `generateStaticParams` 把 14 台机种 × 英文/中文在构建期预渲染，
- * 为的是让爬虫第一次抓 sitemap 里的机种页时不现场 SSR（Cloudflare 免费版 10ms CPU）。
- * 迁 Vercel 后那个前提消失了，预渲染只剩构建成本，一并删掉。
+ * 历史上曾用 `generateStaticParams` 把机种页在构建期预渲染（为压住 Cloudflare
+ * 免费版 10ms CPU 的 1102），2026-10-22 迁 Vercel 时删掉。现在回到按需生成：
+ * 首次访问现场渲染并写入增量缓存，之后由 `enableCacheInterception` 直接返回，
+ * 外面再叠一层 worker.ts 的 10 分钟边缘缓存（见 docs/cloudflare-deployment.md）。
  * 取数仍走 `listConsolesCached`（7 天）。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
 type Props = { params: Promise<{ locale: string; id: string }> };
 export function generateMetadata(props: Props) { return metadata({ ...props, searchParams: Promise.resolve({}) }); }
 export default function StaticPage(props: Props) { return Page({ ...props, searchParams: Promise.resolve({}) }); }

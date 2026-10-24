@@ -17,7 +17,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame } from '@/lib/server/sb-games';
+import { getGameCached, localizeGame, GAME_DETAIL_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -31,9 +31,9 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ⚠️ 真正把字节吐出去的是 `/api/games/<id>/rom`（同源代理，见那个文件的注释）。
  * 这一页只负责「说清楚要下什么、给一个按下去要等 6 秒的按钮」。
  *
- * **这一页是 `force-dynamic`**（2026-10-22 迁 Vercel、撤掉全部页面级 ISR 时加的）：
- * 它读库 + 读 cookie 语言，本来每次请求都得现算，页面级缓存只是把渲染结果压进缓存再取回来，
- * 省不到渲染本身。真正值得缓存的是取数（`getGameCached`，7 天）。
+ * 这一页读库 + 读 cookie 语言（cookie 语言走路径，页面只读库），渲染本身很轻；
+ * 真正贵的是取数（`getGameCached`，7 天）。页面级按需缓存 2026-10-24 恢复
+ * （见详情页那段注释），渲染结果也照常进增量缓存。
  */
 const loadGame = cache(async (id: string, locale: string) => getGameCached(id, locale));
 
@@ -147,11 +147,11 @@ export default async function GameDownloadPage({
 }
 
 /*
- * 页面级缓存已全部去掉（2026-10-22 用户决定迁 Vercel 后统一走 `force-dynamic`）。
+ * 页面级按需缓存（2026-10-24 恢复；构建期预渲染仍然不做，理由与详情页相同）。
  *
- * 这一页曾经和详情页一起加过 `generateStaticParams` 做构建期预渲染（为压住 Cloudflare
- * 免费版 10ms CPU 的 1102），迁 Vercel 后那套前提不存在了，一并撤掉。
- * 内容只是「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，
- * 值得缓存的是取数（`getGameCached`，7 天），不是渲染结果。
+ * 历史：这里曾和详情页一起加过 `generateStaticParams` 做构建期预渲染，2026-10-22
+ * 迁 Vercel 时一并撤掉、全站 `force-dynamic`；回到 CF 免费版后每个请求现场渲染
+ * 会撞 10ms CPU，于是恢复「首次访问渲染、之后走增量缓存」的按需形态。
+ * 内容只是「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，取数走 `getGameCached`（7 天）。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = GAME_DETAIL_REVALIDATE_SECONDS;

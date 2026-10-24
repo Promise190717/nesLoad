@@ -40,6 +40,9 @@
     ".open-next",
     ".wrangler",
     ".backup-*",
-    "workers"
+    "workers",
+    // OpenNext 自定义入口：import 构建期才存在的 `.open-next/worker.js`，
+    // 由 wrangler/esbuild 打包，不参与 tsc（见 worker.ts 文件头）
+    "worker.ts"
   ]
 }

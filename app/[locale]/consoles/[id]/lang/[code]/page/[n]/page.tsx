@@ -1,5 +1,7 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
 
+import { CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
+
 /**
  * `/consoles/nds/lang/zh/page/2` —— 语种筛选 + 分页的组合（2026-10-20）。
  *
@@ -7,7 +9,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/console';
  * 「筛着日本語翻页」就只能退回带查询参数那份、又变回整页刷新）。
  */
 
-export const dynamic = 'force-dynamic';
+export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
 
 type Props = { params: Promise<{ locale: string; id: string; code: string; n: string }> };
 

@@ -1,5 +1,7 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/developer';
 
+import { DEVELOPERS_PAGE_REVALIDATE_SECONDS } from '@/lib/server/developers';
+
 /**
  * `/developers/nintendo/page/2` —— 开发商详情页「他名下的游戏」分页进路径（2026-10-20）。
  *
@@ -7,7 +9,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/developer
  * 和列表页同一条规矩 —— 真路由才能软导航（起因见 `lib/catalog-route.ts` 文件头）。
  */
 
-export const dynamic = 'force-dynamic';
+export const revalidate = DEVELOPERS_PAGE_REVALIDATE_SECONDS;
 
 type Props = { params: Promise<{ locale: string; id: string; n: string }> };
 

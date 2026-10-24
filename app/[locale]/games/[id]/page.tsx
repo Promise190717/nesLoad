@@ -25,7 +25,7 @@ import {
   defaultRomLanguage as defaultRomLanguageOf,
   romLanguageOptions as romLanguageChoices,
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
+import { getGameCached, localizeGame, GAME_DETAIL_REVALIDATE_SECONDS, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -564,17 +564,20 @@ export default async function GameDetailPage({
 }
 
 /*
- * 页面级缓存已全部撤掉（2026-10-22 用户决定迁 Vercel）。
+ * 页面级按需缓存（2026-10-24 恢复；构建期预渲染仍然不做）。
  *
- * 这里曾经有 `generateStaticParams`，把英文 + 中文的全部详情页在构建期预渲染、
- * 再把 `.open-next/cache` 上传到 R2 靠 `enableCacheInterception` 跳过渲染器 ——
- * 那是为压住 Cloudflare 免费版 10ms CPU 的 1102 而加的。迁 Vercel 后这个前提不存在，
- * 几千页的构建时间只剩成本，于是连同它一起删掉。
+ * 历史：这里曾有 `generateStaticParams` 把详情页在构建期预渲染（为压住 Cloudflare
+ * 免费版 10ms CPU 的 1102）；2026-10-22 迁 Vercel 时连同全部页面级缓存一起删掉，
+ * 全站 `force-dynamic`。后来实际部署仍走 CF 免费版，每个请求现场渲染 2/3 超限
+ * （1102），于是 2026-10-24 回到「按需生成」：**没有** `generateStaticParams`
+ * （构建期不预渲染任何详情页），首次访问现场渲染并写入增量缓存，之后由
+ * `enableCacheInterception` 在初始化渲染器之前直接从 R2 返回。TTL 7 天，
+ * 后台改动靠 `revalidateTag('games')` 立即失效；外面还叠了一层 worker.ts 的
+ * 10 分钟边缘缓存（见 docs/cloudflare-deployment.md）。
  *
- * 现在的分工：页面每次请求都渲染（`force-dynamic`），值得缓存的只有取数，
- * 由 `getGameCached` 那层负责（7 天，挂 `games` tag 供后台主动失效）。
+ * 取数仍由 `getGameCached` 那层负责（同样 7 天，挂 `games` tag）。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = GAME_DETAIL_REVALIDATE_SECONDS;
 
 /**
  * 收藏数（详情页那一颗钮的初值）。

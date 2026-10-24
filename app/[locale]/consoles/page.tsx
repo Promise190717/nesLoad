@@ -12,7 +12,7 @@ import {
   translate,
   type MessageKey,
 } from '@/lib/i18n';
-import { listConsolesCached } from '@/lib/server/consoles';
+import { listConsolesCached, CONSOLES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/consoles';
 import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 
@@ -32,9 +32,10 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * ⚠️ 这一页原来**什么缓存声明都没有**，于是被 Next 当成构建期静态页（`[locale]` 有
  *    `generateStaticParams`），HTML 在 build 时就烤死了 —— 数据缓存只在构建那一次生效。
- *    2026-10-22 迁 Vercel、撤销全部页面级缓存时补上 `force-dynamic`，让它每请求渲染。
+ *    2026-10-22 迁 Vercel 时改成 `force-dynamic`；2026-10-24 回 CF 免费版后恢复
+ *    按需缓存（`revalidate`，首次访问渲染、之后走增量缓存，见 docs/cloudflare-deployment.md）。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = CONSOLES_PAGE_REVALIDATE_SECONDS;
 export async function generateMetadata({
   params: routeParams,
 }: {

@@ -1,14 +1,50 @@
 # Cloudflare 免费 Workers：静态页面与 ISR
 
-> ⚠️ **2026-10-22 起这份文档描述的页面级 ISR 策略已经废弃。** 用户决定迁往 Vercel，
-> 所有页面已改成 `export const dynamic = 'force-dynamic'`，页面不再写入增量缓存，
-> 数据缓存统一 7 天。下文关于「预生成 18 种语言」「缓存 30 天」「`populateCache` 预热」
-> 的说法只用于回溯旧部署，不要再照它配置。
->
-> ⚠️ 迁移完成前**不要在 Cloudflare 上发新版本**：`force-dynamic` 之后每个请求都要现场
-> 渲染，免费版 10ms CPU 会让全站 1102。
+> ⚠️ **2026-10-24 起缓存策略调整为两层（见下面「缓存策略」一节）**：页面级缓存
+> 恢复的是**运行时按需生成**那份（`revalidate`，构建期预渲染仍然不做——
+> 不再有 `generateStaticParams`），外面叠一层 worker.ts 的 Cache API 边缘缓存。
+> 下文关于「预生成 18 种语言」「`populateCache` 预热」的说法只用于回溯旧部署。
 
 Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源、R2 缓存、缓存失效记录及重建队列绑定。
+
+## 缓存策略（2026-10-24，两层）
+
+背景：2026-10-22 迁 Vercel 后全站 `force-dynamic`，而实际部署走 CF 免费版 Workers ——
+每个请求现场渲染，免费版 10ms CPU（按中位数执行）装不下，实测 2117 成功 / 4298 超限（1102）。
+修复分两层，**构建期预渲染（`generateStaticParams`）两样都没有**：
+
+### 第 1 层：页面级按需缓存（Next 增量缓存）
+
+目录类页面恢复 `export const revalidate = <7 天常量>`（首页 / `/games` 及分页与机种筛选 /
+详情 / 下载 / 机种 / 开发商，共 16 个页面，常量见 `lib/server/sb-games.ts` 等）。
+首次访问现场渲染并写入 R2 增量缓存，之后 `enableCacheInterception` 在初始化渲染器之前
+直接返回；后台改动靠既有的 `revalidateTag('games')` 立即失效。
+
+仍然 `force-dynamic`（刻意保留）：搜索页（`searchParams`）、`/play` 与 `/room`
+（空壳渲染只要几毫秒，不值得把 HTML 钉住——见 play 页注释里 chunk 死循环那段）、
+`/privacy` `/terms`（同上）、`/account` `/login`、`/catalog` 影子路由（旧地址兼容）。
+
+### 第 2 层：worker.ts 的 Cache API 边缘缓存
+
+`wrangler.jsonc` 的 `main` 指向根目录 `worker.ts`（OpenNext 自定义 Worker 入口，
+官方 howto：opennext.js.org/cloudflare/howtos/custom-worker），在 OpenNext handler 外包一层
+`caches.default`：
+
+- **只缓存**匿名（无 `nesload_user` / `nesload_admin` cookie）`GET` 的 **200 / 404** 响应，
+  内容为 HTML / XML / 纯文本；TTL 200 存 **10 分钟**、404 存 2 分钟。
+- **一律放行**：`/api/*`、`/admin/*`、`/_next/*`、带 `RSC` 头的软导航请求、
+  带 session cookie 的请求、307/301 重定向（语言跳转依赖 cookie，不能缓存）、5xx。
+- 缓存键剥掉 `utm_*` / `fbclid` / `gclid` 追踪参数。
+- 命中的请求**完全不消耗 CPU**；第 1 层命中还要进 Worker 读一次 R2，这一层连那次都省掉。
+- 静态资产（`assets` 绑定）不进 Worker、不受影响；所以没用 wrangler 的
+  `"cache": { "enabled": true }` —— 那会把资产请求也变成计入额度的请求。
+
+第 1 层的陈旧窗口由 `revalidateTag` 即时清掉；第 2 层固定 10 分钟，发版后条目**跨版本存活**，
+不可接受就在仪表盘（Caching → Purge Everything）刷一次，可接受就不用管。
+边缘 TTL 只在 `worker.ts` 顶部两个常量里。
+
+sitemap 同步瘦身：**下载页（`/games/<id>/download`）不再进 sitemap**（每语言省约 2100 条，
+抓取邀请面减半）。页面照常可收录 —— 每个详情页都有指过去的链接，只是不再主动推荐。
 
 ## 首次配置
 

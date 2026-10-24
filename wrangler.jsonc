@@ -2,6 +2,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   // Existing production Worker, confirmed in the Cloudflare dashboard.
   "name": "nesload",
+  // 入口是根目录的 worker.ts（OpenNext 自定义 Worker）：包了一层 Cache API 边缘
+  // 缓存压免费版 10ms CPU，见该文件头注释。⚠️ 它 import 的 `.open-next/worker.js`
+  // 由 `pnpm cf:build` 生成 —— 别绕过 cf:build 直接 wrangler deploy。
+  "main": "worker.ts",
   // Runtime variables are also maintained in the Cloudflare dashboard.
   // Preserve entries not explicitly listed in vars when publishing new code.
   "keep_vars": true,

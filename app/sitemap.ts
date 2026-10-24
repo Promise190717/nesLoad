@@ -14,7 +14,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  *   · `/privacy` / `/terms` 两页法务文档；
  *   · `/games` 游戏列表（机种筛选 `/games/console/<机种>` 没列进来：它是同一份列表的子集，
  *     只差一个筛选维度，全列等于把一个库拆成十几份近似重复的地址；分页同理只列第 1 页）；
- *   · 每款游戏的 `/games/<id>` 与 `/games/<id>/download`（**从库里现取**）；
+ *   · 每款游戏的 `/games/<id>`（**从库里现取**）；
  *   · `/developers` 开发商列表 + 每家的 `/developers/<id>`（2026-10-12 加，同样现取）；
  *   · `/consoles` 机种列表 + 每个机种的 `/consoles/<type>`（2026-10-14 加，同样现取）。
  * 游戏库 / 存档 / 联机 / 键位那些面板全是屏幕上的浮层，没有各自的 URL，
@@ -31,7 +31,13 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 这正是分语言路径最容易被忽略的代价。
  *
  * ⚠️ **18 种语言必须拆成 18 份 sitemap**（`generateSitemaps`）：2110 款游戏 ×
- *    2 个地址 × 18 语言 ≈ 7.6 万条，单文件上限是 5 万，超了整份作废。
+ *    18 语言 ≈ 3.8 万条（2026-10-24 起下载页不进 sitemap，此前是 × 2 个地址 ≈ 7.6 万条），
+ *    单文件上限是 5 万，历史上就是为了这个上限拆的份。
+ *
+ * ⚠️ **每条 URL 都是一次会超免费版 CPU 的现场渲染**（全站 force-dynamic，
+ *    见 docs/cloudflare-deployment.md），所以 sitemap 只列真正值得收录的地址：
+ *    下载页、分页、机种筛选这类「能被链接发现」的地址不主动推荐，把抓取预算
+ *    留给详情页。
  *
  * ⚠️ **游戏 / 开发商那几条是「动态部分」**：逐个从 D1 现读
  * （`listGameStubs` / `listDeveloperStubs`）。这正是用户要的「函数形式，这样增减都会更新」——
@@ -155,22 +161,22 @@ export default async function sitemap({ id }: { id: string }): Promise<MetadataR
     entry(origin, locale, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
     entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*
-     * 详情页给 0.8、下载页给 0.6：详情页是「内容」，下载页是「动作」。
-     * 用户明确要求下载页也要能被收录，所以不能省 —— 但排序上让详情页在前。
+     * 详情页给 0.8。
+     *
+     * ⚠️ **下载页（`/games/<id>/download`）2026-10-24 起不再进 sitemap**，原因见
+     *    docs/cloudflare-deployment.md：全站 force-dynamic 之下每个被抓的 URL 都是
+     *    一次会超免费版 CPU 的渲染，下载页把爬虫邀请面直接翻倍。它们**照常可收录**
+     *    —— 每个详情页都有指过去的链接，爬虫顺着链接照抓，只是不再主动推荐；
+     *    「用户要求下载页能被收录」这个决定没有变，变的只是发现途径。
      */
-    ...stubs.flatMap((stub) => [
+    ...stubs.map((stub) =>
       entry(origin, locale, `/games/${stub.id}`, {
         /* `createdAt === 0` = 不知道收录时间（源站模式下上游 sitemap 不给日期）*/
         lastModified: stub.createdAt ? new Date(stub.createdAt) : undefined,
         changeFrequency: 'monthly',
         priority: 0.8,
-      }),
-      entry(origin, locale, `/games/${stub.id}/download`, {
-        lastModified: stub.createdAt ? new Date(stub.createdAt) : undefined,
-        changeFrequency: 'monthly',
-        priority: 0.6,
-      }),
-    ]),
+      })
+    ),
     /*
      * 开发商列表给 0.7（介于游戏列表 0.9 和法务页 0.3 之间：它是内容入口，
      * 但不是这个站的主体），每家的详情页 0.6 —— 和「游戏下载页」同档，

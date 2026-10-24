@@ -1,5 +1,7 @@
 import Page, { generateMetadata as metadata } from '@/lib/server/pages/games';
 
+import { GAMES_PAGE_REVALIDATE_SECONDS } from '@/lib/server/sb-games';
+
 /**
  * `/games/page/2` —— 分页从 `?page=2` 搬进路径段（2026-10-20）。
  *
@@ -10,7 +12,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/games';
  * 改动的起因见 `lib/catalog-route.ts` 文件头。
  */
 
-export const dynamic = 'force-dynamic';
+export const revalidate = GAMES_PAGE_REVALIDATE_SECONDS;
 
 type Props = { params: Promise<{ locale: string; n: string }> };
 
