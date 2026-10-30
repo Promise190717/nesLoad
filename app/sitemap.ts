@@ -60,8 +60,20 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 留着只是给别的引擎一点排序提示。
  */
 /*
- * 必须动态渲染 —— 理由和 app/robots.ts 里那段一样：<loc> 要是绝对地址，
- * 域名只能等请求进来才知道，构建期预渲染会把它烤成兜底值（localhost）。
+ * 24 小时 ISR，**不是请求期渲染**。
+ *
+ * ⚠️ 这段以前写着「必须动态渲染，否则域名会被烤成构建值」—— 那是错的，代码从来没
+ *    加过 `dynamic = 'force-dynamic'`，构建产物里一直躺着 18 个 `.xml.body` 预渲染文件。
+ *    后果是真实存在过的：2026-10-30 换域名，包不重打，sitemap 里就一直是旧域
+ *    （`.open-next/assets` 那批 `<loc>` 全是 retrogamesonline.fun）。
+ *
+ * 所以 `<loc>` 的域名有两层来源：**构建期**用 `SITE_URL`（没配就落到 `lib/site.ts`
+ * 的兜底值），**运行期重渲染**（ISR 到期后）用 Worker 里的同名变量。换域名时
+ * 重新 `pnpm cf:build` 是最干净的一条路 —— 光 `wrangler deploy` 复用旧产物，
+ * 那 18 份旧域名的副本还会一直在，得等各自 24 小时到期、且第一条请求拿到的还是旧副本。
+ *
+ * 为什么不改成 force-dynamic：sitemap 是爬虫反复抓的地址，每次现场渲染都要全表扫一遍
+ * 游戏 / 开发商 / 机种，正是免费版 10ms CPU 最扛不住的那类请求（见 docs/cloudflare-deployment.md）。
  */
 export const revalidate = 86400;
 
@@ -73,8 +85,11 @@ type ChangeFrequency = NonNullable<MetadataRoute.Sitemap[number]['changeFrequenc
  * ⚠️ **2026-10-20 从「一条路径出 N 条」改成「一条路径 × 一种语言出一条」**：
  *    语言从 4 种扩到 18 种之后，游戏 2110 款 × 2 个地址 × 18 语言 ≈ 7.6 万条 URL，
  *    直接超过 **sitemap 单文件 5 万条**的上限 —— 超了不是截断，是整份被判无效。
- *    所以拆成**每语言一份 sitemap**（`generateSitemaps`，Next 会额外生成一份
- *    `/sitemap.xml` 索引指过来），每份约 4 千多条，留足余量。
+ *    所以拆成**每语言一份 sitemap**（`generateSitemaps`），每份约 4 千多条，留足余量。
+ *    ⚠️ 这种形态下 Next **只**产出 `/sitemap/<id>.xml`，**不产 `/sitemap.xml` 索引**
+ *    （2026-10-23 线上实测：索引是 404 的 `__next_error__`，18 份分片全 200；
+ *    官方 `generate-sitemaps.md` 的 URLs 一节也只承诺分片地址）。所以 `app/robots.ts`
+ *    那边是直接列 18 条分片，别改回单条索引 —— 索引要自己写路由，多一个会坏的环节。
  *
  * `alternates` 仍然把**全部 18 种语言**列出来（不管这份 sitemap 是哪种语言的）：
  * hreflang 要求的是「这一组里每条都互相指全」，只列本语言那一条等于没标注。
@@ -100,9 +115,10 @@ function entry(
 }
 
 /**
- * 每语言一份 sitemap —— Next 会据此生成 `/sitemap/<locale>.xml` 和一份索引
- * `/sitemap.xml`（`app/robots.ts` 里指的还是索引那个地址，不用改）。
+ * 每语言一份 sitemap —— Next 据此生成 `/sitemap/<locale>.xml`（18 份）。
  *
+ * ⚠️ **这里没有 `/sitemap.xml` 索引**（见上面那段 2026-10-23 的实测），
+ *    `app/robots.ts` 里列的就是这 18 条分片，不是索引地址。
  * ⚠️ 别改回「一个文件装下所有语言」：那就是上面那段说过的 5 万条上限。
  */
 export async function generateSitemaps() {
@@ -112,11 +128,27 @@ export async function generateSitemaps() {
 /**
  * 一份 sitemap = 一种语言的全部地址（`generateSitemaps` 传进来的 `id` 就是 locale）。
  *
- * ⚠️ `id` 是 `string`（Next 的约定），认不出就退回默认语言 —— 别直接断言成 `Locale`，
- *    那样拼错一个地址就会在运行时拿到 `undefined` 前缀。
+ * 🔴 **`id` 在 Next 16 起是 `Promise<string>`，必须 `await`**（官方文档版本表：
+ *    `v16.0.0` — "The `id` values returned from `generateSitemaps` are now passed
+ *    as a promise"）。2026-10-30 修的就是这个：以前签名写的是 `{ id: string }`、
+ *    直接喂给 `isLocale()`，而 `isLocale` 是 `LOCALES.includes(value)` ——
+ *    拿到 Promise 永远 false，于是**18 份分片全都回退成默认语言**，
+ *    构建产物里 18 个 `.xml.body` 的 md5 完全相同、全是英文地址 && 全无语言前缀。
+ *
+ *    ⚠️ 类型系统不会替你挡这一刀：默认导出的 props 类型没被 Next 校验，
+ *    写成 `{ id: string }` 照样编译通过，只在运行时静默走错分支。
+ *    `await` 对字符串是幂等的，所以这一句在 Next 15/16 上都成立，别再改回去。
+ *
+ * `id` 认不出就退回默认语言 —— 别直接断言成 `Locale`，那样拼错一个地址
+ * 就会在运行时拿到 `undefined` 前缀。
  */
-export default async function sitemap({ id }: { id: string }): Promise<MetadataRoute.Sitemap> {
-  const locale: Locale = isLocale(id) ? id : DEFAULT_LOCALE;
+export default async function sitemap({
+  id,
+}: {
+  id: string | Promise<string>;
+}): Promise<MetadataRoute.Sitemap> {
+  const resolved = await id;
+  const locale: Locale = isLocale(resolved) ? resolved : DEFAULT_LOCALE;
   const origin = await resolveSiteOrigin();
 
   /*

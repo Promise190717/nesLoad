@@ -18,7 +18,7 @@
  *    它们由 `translate()` 在运行时替换；漏掉一个不会报错，只会在页面上少一段字。
  *    葡语语序可以把占位符挪位置，但**不能改名、不能丢**。
  *
- * ⚠️ **站点名一律写 `Game Hut`，不翻译**；`{site}` 占位符照留（由 `SITE_NAME` 替换）。
+ * ⚠️ **站点名一律写 `Retro Games Box`，不翻译**；`{site}` 占位符照留（由 `SITE_NAME` 替换）。
  *
  * 术语口径（全表统一，改的时候一起改）：
  *   · console → console；developer → desenvolvedor；series → série

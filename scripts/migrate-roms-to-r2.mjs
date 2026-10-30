@@ -8,7 +8,7 @@
  * 用户只看到「上游要求浏览器验证」（见 `lib/server/rom-upstream.ts`），而且这条路的
  * 可用性完全由上游的脸色决定（换接入点 / 换国家就可能被挡）。
  * 落进本站 R2 之后：`app/api/games/[id]/rom` 走 `selfHosted` 分支，不碰上游、没有
- * challenge、没有兼容重试，出口只有 `games.retrogamesonline.fun`。
+ * challenge、没有兼容重试，出口只有 `files.retrogamesbox.com`。
  *
  * ## 范围
  *

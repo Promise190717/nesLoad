@@ -78,7 +78,7 @@ import { SITE_NAME, type Locale } from './i18n';
  * 只在这一处定义 —— 两份文档的「联系我们」节都由它拼出来。
  * 改邮箱只改这里（页脚那个 mailto 也读它）。
  */
-export const SUPPORT_EMAIL = 'support@retrogamesonline.fun';
+export const SUPPORT_EMAIL = 'support@retrogamesbox.com';
 
 export type LegalKind = 'privacy' | 'terms';
 

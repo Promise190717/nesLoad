@@ -11,7 +11,7 @@
  *
  * 现在的约定：
  *   · **库里只存路径**（`/images/games/cover/nes/contra.webp`），域名一个字节都不存；
- *   · **渲染时现拼** `R2_PUBLIC_BASE`（`https://games.retrogamesonline.fun`）；
+ *   · **渲染时现拼** `R2_PUBLIC_BASE`（`https://files.retrogamesbox.com`）；
  *   · 图片字节在 R2 上，键就是路径去掉开头的 `/`
  *     （`images/games/cover/nes/contra.webp`）—— 和上游的目录结构**逐字对齐**，
  *     所以把上游那张图搬过来时路径不用换算，搬完就能用。
@@ -36,6 +36,19 @@
 /** 上游主站与文件子域（见 `./upstream.ts` 的 `UPSTREAM_ROOT`；这里刻意不 import，避免循环）。 */
 const UPSTREAM_HOSTS = ['retrogamesnexus.com', 'files.retrogamesnexus.com'];
 
+/**
+ * **本站已经退役的 R2 公网域名**（2026-10-30 随站点迁域：games.retrogamesonline.fun
+ * → files.retrogamesbox.com）。
+ *
+ * 留着它是为了「库里还存着旧绝对地址」那批历史数据 —— 2026-10-20 才改成只存路径，
+ * 之前写进去的绝对地址不保证全刷过。少了这一行，这些值会被当成**别人的图**原样返回，
+ * 页面继续指向旧域；旧域一旦解绑就是一片破图，而且看起来像迁移没做干净。
+ *
+ * 放进来之后它们跟当前域名等价：`mediaPath` 照常剥成路径，`mediaUrl` 于是重拼到新域上。
+ * 等确认库里一个旧地址都不剩（`select count(*) … like '%retrogamesonline%'`）再删。
+ */
+const LEGACY_PUBLIC_HOSTS = ['games.retrogamesonline.fun'];
+
 /** 本站 R2 公网域名的 host（`R2_PUBLIC_BASE` 可能带路径前缀，取 host 比较）。 */
 function publicBase(): string | null {
   const raw = process.env.R2_PUBLIC_BASE?.trim();
@@ -43,7 +56,7 @@ function publicBase(): string | null {
 }
 
 function knownHosts(): string[] {
-  const hosts = [...UPSTREAM_HOSTS];
+  const hosts = [...UPSTREAM_HOSTS, ...LEGACY_PUBLIC_HOSTS];
   const base = publicBase();
   if (base) {
     try {

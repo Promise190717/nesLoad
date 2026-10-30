@@ -61,9 +61,19 @@ import { PlayersIcon } from './icons';
 /** 两颗主钮共用的样式（`<Link>` 与 `<button>` 两种形态必须长得一模一样） */
 const PLAY_CLASS =
   'pixel-edge pxw-3 pxc-600 inline-flex items-center gap-1.5 bg-accent px-5 py-2 text-[12px] text-ink-950 transition-colors hover:bg-accent/80';
+/**
+ * 联机钮 = **绿色实心**（2026-10-30 用户要求「改成绿色」）。
+ *
+ * 只换色料，写法跟「开始游戏」那颗一模一样（实心底 + `text-ink-950` 反白字，
+ * hover 用 `/80` 压暗一档）—— 这样它在明暗两套主题下都自动成立：深色主题是
+ * 亮绿底深字，浅色主题是深绿底浅字，不用手写 `dark:` 变体。
+ * `bg-ok` 是主题令牌（深色 #4ade80 / 浅色 #1f9d55），别写死十六进制。
+ */
 const HOST_CLASS =
+  'pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ok px-3.5 py-2 text-[12px] text-ink-950 transition-colors hover:bg-ok/80';
+/** 下载钮保持中性灰（**别跟着联机变绿**：它是次要动作，不该和主钮抢眼） */
+const DOWNLOAD_CLASS =
   'pixel-edge pxw-2 pxc-600 inline-flex items-center gap-1.5 bg-ink-800 px-3.5 py-2 text-[12px] text-ink-200 transition-colors hover:bg-ink-700 hover:text-accent';
-const DOWNLOAD_CLASS = HOST_CLASS;
 
 export default function GameLanguageActions({
   playHref,

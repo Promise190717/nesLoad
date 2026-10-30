@@ -18,7 +18,7 @@ import { SITE_NAME } from './i18n';
  *
  * **2. 图上一律英文。** 和屏幕提示同一个原因：默认字体没有汉字，中文会渲染成豆腐块。
  *    alt 文本倒是跟着语言走（在 layout 的 metadata 里给的），读屏用户不吃这个亏。
- *    站名也因此取 `SITE_NAME.en`（「游戏小屋」写成 Game Hut）——
+ *    站名也因此取 `SITE_NAME.en`（「游戏小屋」写成 Retro Games Box）——
  *    中文名直接画上去就是一排方框。
  *
  * **3. 尺寸写死 1200×630。** 这是 Facebook / X / LinkedIn / Slack 的共同推荐尺寸（1.91:1），
@@ -137,21 +137,24 @@ export function renderOgImage(): ImageResponse {
 
             {/*
               站名。letterSpacing 拉得很开是「电子感」的主要来源。
-              字号 104 是量出来的 —— 而且**这回的瓶颈在纵向，不在横向**：
+              字号是量出来的，而且**瓶颈在哪个方向取决于名字多长**：
               屏幕里从上面那行 eyebrow（20px）到最下面那行副标题（20px）高度都是死的，
               中间留给站名这一块的只有百来像素；lineHeight 是 1，所以
-              fontSize + marginBottom(22) 顶到那儿就溢出去了，104 还留着余量。
-              横向反倒很松 —— 「Game Hut」只有 8 个字符，占不到屏幕净宽的一半。
+              fontSize + marginBottom(22) 顶到那儿就溢出去了。
 
-              历史：上一个名字 "Retro Game House" 有 16 个字符，**横向**才是瓶颈，那时定的
-              是 76。所以「字号跟名字长度绑着」这件事在两个方向上都成立，
-              **下次改名（尤其是改长）记得把宽、高两头都核一遍**。
+              历史（每次改名都要回来核这两头，别只看一眼就走）：
+                · "Retro Game House" 16 字符 → **横向**是瓶颈，定 76；
+                · "Game Hut" 8 字符 → 横向很松，改成**纵向**瓶颈，定 104；
+                · 2026-10-30 "Retro Games Box" 15 字符 → 又回到横向瓶颈，
+                  取回 76（跟 16 字符那次同等量级，比它少一个字符，还留 6% 余量）。
+                  别按 15/8 的比例往 80 以上调 —— Satori 里这行不设 nowrap，
+                  一旦超宽会**折行**，那比字小难看十倍。
             */}
             <div
               style={{
                 display: 'flex',
                 color: '#ffffff',
-                fontSize: 104,
+                fontSize: 76,
                 fontWeight: 700,
                 letterSpacing: 4,
                 lineHeight: 1,

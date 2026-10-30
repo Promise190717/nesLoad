@@ -82,7 +82,7 @@ async function request(url, { binary = false, attempts = 5 } = {}) {
     try {
       const res = await fetch(url, {
         dispatcher,
-        headers: { 'user-agent': 'nesLoad-fill-logos/1.0 (contact: admin@retrogamesonline.fun)' },
+        headers: { 'user-agent': 'nesLoad-fill-logos/1.0 (contact: admin@retrogamesbox.com)' },
         signal: AbortSignal.timeout(40_000),
       });
       if (res.ok) return binary ? new Uint8Array(await res.arrayBuffer()) : await res.json();

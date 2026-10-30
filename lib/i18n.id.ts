@@ -35,7 +35,7 @@
  *    PlayStation / Arcade）。标签位上取的是 `lib/consoles.ts` 的
  *    `consoleLabel(type, locale)`，和文案同源，别在这里另写一套。
  *
- * 站点名统一写 `Game Hut`（不翻译）；文案里一律用 `{site}` 占位，由 `translate()` 替换。
+ * 站点名统一写 `Retro Games Box`（不翻译）；文案里一律用 `{site}` 占位，由 `translate()` 替换。
  */
 
 import type { MessageKey } from './i18n';

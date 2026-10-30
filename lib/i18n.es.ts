@@ -18,7 +18,7 @@
  *    `{seconds}` / `{code}` …），它们由 `translate()` 在运行时替换；漏掉一个不会报错，
  *    只会在页面上少一段字。西语语序和英语不同，占位符**可以挪位置**，但不能丢、不能改名。
  *
- * ⚠️ 站名统一写 `Game Hut`，`{site}` 由调用方替换成 `SITE_NAME[locale]`，别在值里手写站名。
+ * ⚠️ 站名统一写 `Retro Games Box`，`{site}` 由调用方替换成 `SITE_NAME[locale]`，别在值里手写站名。
  *
  * 术语口径（全表统一，改的时候一起改）：
  *   · console → consola；developer → desarrollador；series → serie

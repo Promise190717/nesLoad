@@ -24,13 +24,17 @@
   "migrations": [{ "tag": "next-cache-v1", "new_sqlite_classes": ["DOQueueHandler", "DOShardedTagCache"] }],
   "observability": { "enabled": true },
   "vars": {
-    "SITE_URL": "https://www.retrogamesonline.fun",
+    // 站点公网地址（canonical / og:image / sitemap 的绝对地址都由它拼）。
+    // ⚠️ 2026-10-30 迁移：旧域 www.retrogamesonline.fun → www.retrogamesbox.com。
+    "SITE_URL": "https://www.retrogamesbox.com",
     // R2 的公网读取域名（头像 / 封面 / ROM 都由它拼出来）。
     // ⚠️ 2026-10-19 线上事故：这个变量只在仪表盘里配过、后来掉了，于是带头像的账号
     // 一调 /api/user/* 就空 500，个人中心四个 tab 全打不开。写进这里跟代码一起发版，
     // 免得再靠「记得在仪表盘配一下」。它不是机密（浏览器天天在下载这些地址），
     // 所以放 vars 而不是 secrets；必须和 R2 那边绑定的自定义域名一致。
-    "R2_PUBLIC_BASE": "https://games.retrogamesonline.fun",
+    // 2026-10-30 随站点迁域一起从 games.retrogamesonline.fun 换成 files.retrogamesbox.com
+    // （库里图片只存路径、域名渲染时现拼，所以只换这一处就整体切换，见 lib/server/media.ts）。
+    "R2_PUBLIC_BASE": "https://files.retrogamesbox.com",
     // Supabase 项目地址（库的所有查询都经它：HTTPS → PostgREST → exec_sql）。
     // ⚠️ 只有 URL 能写在这里 —— 密钥 `SUPABASE_SECRET_KEY` 必须用
     //    `wrangler secret put SUPABASE_SECRET_KEY`（仪表盘里同名 secret 也行），

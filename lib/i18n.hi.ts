@@ -26,7 +26,7 @@
  *   · 印度玩家日常说的英语借词直接保留：download → डाउनलोड，online → ऑनलाइन，
  *     settings → सेटिंग्स，account → अकाउंट，sign in → साइन इन。
  *
- * ⚠️ 站点名统一写 `Game Hut`（天城文里直接写拉丁字母，不音译）；`{site}` 占位符照留。
+ * ⚠️ 站点名统一写 `Retro Games Box`（天城文里直接写拉丁字母，不音译）；`{site}` 占位符照留。
  *    机种名用印度玩家的通行写法（拉丁字母）：NES / SNES / Game Boy / GBC / GBA / NDS /
  *    Mega Drive / Game Gear / Master System / 32X / WonderSwan / Neo Geo Pocket /
  *    PlayStation / Arcade。标签位上取的是 `lib/consoles.ts` 的 `consoleLabel(type, locale)`。

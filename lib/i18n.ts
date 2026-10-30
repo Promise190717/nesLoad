@@ -252,7 +252,10 @@ export const LOCALE_HEADER = 'x-nesload-locale';
 export const LOCALE_COOKIE = 'nesload_locale';
 
 /**
- * 站点名（品牌）。2026-10-10 定名、**2026-10-12 用户改成「游戏小屋」**（英文 Game Hut）。
+ * 站点名（品牌）。2026-10-10 定名、**2026-10-12 用户改成「游戏小屋」**。
+ * **2026-10-30 随域名迁移（`www.retrogamesbox.com`）把非中文名全部改成
+ * `Retro Games Box`** —— 用户的原话是「除了中文的不变，因为现在域名变了」，
+ * 所以 `zh` / `zh-TW` 两份一个字都没动（它们本来也不叫 Game Hut）。
  *
  * **为什么是「按语言的映射」而不是一个字符串**：站名会出现在 <title>、description、
  * JSON-LD、分享图上，而这些全都跟着语言走（中文用户看到「游戏小屋 — 在浏览器里…」，
@@ -274,37 +277,38 @@ export const LOCALE_COOKIE = 'nesload_locale';
  * 联机的 APP_ID（lib/netplay.ts）都**不是**它，改这些会让老用户的数据和联机房间全部失联。
  *
  * ⚠️ 2026-10-16 加日韩时，用户定的是「**起一个本地友好的名字**」而不是沿用
- *    `Game Hut` —— 所以四份都是本地写法。日文取「ゲーム小屋」（和中文同构，
- *    `ゲーム` 是日语里通用的外来语写法）；韩文取「게임 하우스」（韩文里
- *    `하우스` 作店名 / 品牌后缀比直译「오두막」自然得多）。
+ *    英文品牌 —— 所以日韩是本地写法。2026-10-30 改名时这条口径保留：
+ *    日文「レトロゲームボックス」、韩文「레트로 게임 박스」（`レトロ` / `레트로`
+ *    就是 retro 的音译，`ゲーム` / `게임` 是两边通用的外来语写法）。
  *    改名仍然只动这一处。
  *
- * ⚠️ **2026-10-20 加其余 14 种时，口径反过来**：一律沿用英文品牌 `Game Hut`，
+ * ⚠️ **2026-10-20 加其余 14 种时，口径反过来**：一律沿用英文品牌，
  *    只有 `zh-TW` 跟简体那份走、写「遊戲小屋」（同一个中文品牌，只是字形不同）。
  *    理由：拉丁字母品牌在 es / fr / de / it / pt / nl / vi / id / ms / fil 里
  *    直接当专名用是常态，硬译成「Cabaña de Juegos」「Spielehütte」反而像另一个站；
  *    而 hi / th / ru 里品牌名保留拉丁字母也比音译更好认。
  *    以后真要本地化某一个，只改那一行即可，别顺手全改。
+ *    （2026-10-30 换掉品牌名时，这一条照样适用：15 种语言共用 `Retro Games Box`。）
  */
 export const SITE_NAME: Record<Locale, string> = {
   zh: '游戏小屋',
   'zh-TW': '遊戲小屋',
-  en: 'Game Hut',
-  ja: 'ゲーム小屋',
-  ko: '게임 하우스',
-  es: 'Game Hut',
-  hi: 'Game Hut',
-  pt: 'Game Hut',
-  fr: 'Game Hut',
-  de: 'Game Hut',
-  it: 'Game Hut',
-  ru: 'Game Hut',
-  fil: 'Game Hut',
-  nl: 'Game Hut',
-  vi: 'Game Hut',
-  th: 'Game Hut',
-  ms: 'Game Hut',
-  id: 'Game Hut',
+  en: 'Retro Games Box',
+  ja: 'レトロゲームボックス',
+  ko: '레트로 게임 박스',
+  es: 'Retro Games Box',
+  hi: 'Retro Games Box',
+  pt: 'Retro Games Box',
+  fr: 'Retro Games Box',
+  de: 'Retro Games Box',
+  it: 'Retro Games Box',
+  ru: 'Retro Games Box',
+  fil: 'Retro Games Box',
+  nl: 'Retro Games Box',
+  vi: 'Retro Games Box',
+  th: 'Retro Games Box',
+  ms: 'Retro Games Box',
+  id: 'Retro Games Box',
 };
 
 /** 英文是基准表，中文必须逐键对齐（漏键会在编译期报错）。 */

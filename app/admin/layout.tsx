@@ -33,5 +33,6 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
-  return <SiteDocument locale="zh">{children}</SiteDocument>;
+  /* `analytics={false}`：后台不统计（理由见 components/SiteDocument.tsx 里 <Analytics> 那段注释） */
+  return <SiteDocument locale="zh" analytics={false}>{children}</SiteDocument>;
 }

@@ -34,7 +34,8 @@ pnpm-debug.log*
 
 # 本地工作笔记（不属于项目源码）
 .workbuddy-ai/
-
+.workbuddy/
+.trae/
 # 一次性素材暂存：开发商 logo（已传 R2，见 scripts/fill-developer-logos.mjs）
 scripts/developer-logos/
 

@@ -57,7 +57,7 @@ sitemap 同步瘦身：**下载页（`/games/<id>/download`）不再进 sitemap*
 
 1. 在 R2 创建一个**私有缓存桶** `nesload-next-cache`，不要复用公开的 ROM 桶。可在控制台创建，或运行 `pnpm exec wrangler r2 bucket create nesload-next-cache`。
 2. 保留现有 Worker 的域名和运行时 secrets。构建环境也需要 `CF_ACCOUNT_ID`、`CF_D1_API_TOKEN`、`D1_DATABASE_ID`，以及应用原有的 R2 公共地址配置，因为现在构建时会读取公共游戏资料。只授予构建令牌所需权限，不要把 secrets 写进仓库。
-3. 构建环境设置 `SITE_URL=https://www.retrogamesonline.fun`，使静态 canonical 和分享地址与线上一致。
+3. 构建环境设置 `SITE_URL=https://www.retrogamesbox.com`，使静态 canonical 和分享地址与线上一致。
 4. Cloudflare Git 构建命令使用 `pnpm cf:build`，部署命令使用 `pnpm cf:deploy`。部署命令会填充构建期缓存；不要直接用裸 `wrangler deploy` 跳过这一步。
 5. 本地验证：`pnpm cf:build` 后运行 `pnpm cf:preview`，它使用本地存储，不会发布到线上。OpenNext 推荐在 Linux/WSL 或 Cloudflare 的 Linux 构建环境打包。
 

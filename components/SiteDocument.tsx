@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import NextTopLoader from 'nextjs-toploader';
+import Analytics from '@/components/Analytics';
 import BootAttributes from '@/components/BootAttributes';
 import { I18nProvider } from '@/components/I18nProvider';
 import LocalePrompt from '@/components/LocalePrompt';
@@ -307,7 +308,9 @@ function buildJsonLd(origin: string, locale: Locale, name: string, description: 
   };
 }
 
-export default async function SiteDocument({ children, locale }: { children: React.ReactNode; locale: Locale }) {
+export default async function SiteDocument({ children, locale, analytics = true }: {
+  children: React.ReactNode; locale: Locale; analytics?: boolean;
+}) {
   const origin = await resolveSiteOrigin();
   const jsonLd = buildJsonLd(
     origin,
@@ -415,6 +418,14 @@ export default async function SiteDocument({ children, locale }: { children: Rea
           它不渲染任何东西，也不依赖 i18n 上下文。
         */}
         <BootAttributes />
+        {/*
+          Google Analytics（GA4，见 components/Analytics.tsx）。
+          **`analytics` 默认 true，只有 /admin 传 false** —— 后台是自己的操作台，
+          混进 GA 里只会把「自己点了几次」算成真实流量，而且 /admin 本来就不该被收录。
+          注意它**不是 `<head>` 里的裸标签**：走 `next/script` 的 afterInteractive，
+          水合之后才拉，不占首屏关键路径。
+        */}
+        <Analytics enabled={analytics} />
       </body>
     </html>
   );

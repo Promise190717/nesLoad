@@ -29,7 +29,7 @@
  *    PlayStation / Arcade），不译。标签位上取的是 `lib/consoles.ts` 的
  *    `consoleLabel(type, locale)`，和文案同源。
  *
- * ⚠️ 站名统一写 `Game Hut`（不译）；标题 / 说明里一律用 `{site}` 占位，别手写。
+ * ⚠️ 站名统一写 `Retro Games Box`（不译）；标题 / 说明里一律用 `{site}` 占位，别手写。
  * ⚠️ 排版：引号用 „…“；名词首字母大写；按钮用不定式（„Spielen“ / „Herunterladen“）。
  */
 

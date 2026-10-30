@@ -19,7 +19,7 @@
  *    `{time}` / `{date}` / `{lang}` / `{ext}` / `{player}` / `{button}` / `{pressed}`）。
  *    菲语语序可以把它们挪位置，但**不能丢、不能改名、不能换成实际值**。
  *
- * ⚠️ **站点名一律写 `Game Hut`，不翻译**。带 `{site}` 的那几条照留占位符，
+ * ⚠️ **站点名一律写 `Retro Games Box`，不翻译**。带 `{site}` 的那几条照留占位符，
  *    由调用方替换成 `SITE_NAME[locale]`，别在这里手写站名。
  *
  * ⚠️ `games.remoteSlow` 在 `en` 表里就是**空串**（只有中文版有那句话），

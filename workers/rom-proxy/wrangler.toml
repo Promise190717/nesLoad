@@ -19,4 +19,4 @@ database_id = "9ab0a67e-b4dc-4c7f-bdcb-8ee1ded8ffc4"
 
 [vars]
 # 与 Vercel 那边的 R2_PUBLIC_BASE 保持一致（Worker 走 R2 那条路时要用）
-R2_PUBLIC_BASE = "https://games.retrogamesonline.fun"
+R2_PUBLIC_BASE = "https://files.retrogamesbox.com"

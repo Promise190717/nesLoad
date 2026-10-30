@@ -26,7 +26,7 @@
  *   · netplay → jeu en réseau；save → sauvegarde；key bindings → affectation des touches
  *   · game library → bibliothèque de jeux；guestbook → livre d’or；favorites → favoris
  *   · 按钮一律用**不定式**（Jouer / Télécharger / Charger / Fermer），不用 « Veuillez… » 那种客套
- *   · 站名统一写 `Game Hut`，**不翻译**；`{site}` 占位符照留
+ *   · 站名统一写 `Retro Games Box`，**不翻译**；`{site}` 占位符照留
  *
  * ⚠️ 机种名用**法语玩家的通行写法**：NES / Super Nintendo (SNES) / Game Boy / GBC / GBA /
  *    NDS / Mega Drive / Game Gear / Master System / 32X / WonderSwan / Neo Geo Pocket /
