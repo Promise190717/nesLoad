@@ -86,6 +86,13 @@ export interface Game {
   developerId: string | null;
   /** 毫秒时间戳（库里是 timestamptz，读取时转好）。 */
   createdAt: number;
+  /**
+   * 最多支持几人同玩（`games.players`，2026-10-30 加）。
+   *
+   * `null` = 不知道 / 没填 —— **调用方必须把它当「可能多人」**（详情页据此照画联机钮）。
+   * 取值约定 1 / 2 / 4。只影响详情页那颗钮，不参与筛选、不进列表。
+   */
+  players: number | null;
   /** 这一款有哪几个语言的 ROM（含文件名，播放时要用）。 */
   romLanguages: GameRomLanguage[];
 }
@@ -172,6 +179,8 @@ interface GameBaseRow {
   year: number | null;
   developer_slug: string | null;
   created_at: number;
+  /** `games.players`（2026-10-30 加）。老库没跑 alter 时这里会是 undefined，读取处兜成 null。 */
+  players: number | null;
 }
 
 interface RomRow {
@@ -374,12 +383,14 @@ async function attach(base: GameBaseRow[], options: AttachOptions = {}): Promise
       year: row.year,
       developerId: row.developer_slug,
       createdAt: row.created_at,
+      /* `?? null`：列是 2026-10-30 才加的，老库没跑 alter 时这一列读不到 */
+      players: row.players ?? null,
       romLanguages: sortRoms(ownRoms),
     };
   });
 }
 
-const BASE_COLUMNS = `g.slug, g.image_url, g.console_type, g.year, g.developer_slug,
+const BASE_COLUMNS = `g.slug, g.image_url, g.console_type, g.year, g.developer_slug, g.players,
   (EXTRACT(EPOCH FROM g.created_at) * 1000)::float8 AS created_at`;
 
 /**
@@ -415,7 +426,23 @@ export async function countGames(filter: GamePageQuery = {}): Promise<number> {
   return Number(rows[0]?.total ?? 0);
 }
 
-export const countGamesCached = cached(
+/**
+ * 计数。**带关键词时不吃缓存**（2026-10-30）—— 理由见 `listGamesPageCached` 顶上那段。
+ *
+ * ⚠️ 机种专题页搜索（`lib/server/pages/console.tsx`）走的是这个函数，不是列表那个，
+ *    所以两条路径都要堵，只改一处等于没改。
+ */
+export async function countGamesCached(
+  keyword: string,
+  consoleType: ConsoleType | null,
+  developerId: string | null,
+  language: string | null
+): Promise<number> {
+  if (keyword.trim()) return countGames({ keyword, consoleType, developerId, language });
+  return countGamesCachedRaw(keyword, consoleType, developerId, language);
+}
+
+const countGamesCachedRaw = cached(
   async (keyword: string, consoleType: ConsoleType | null, developerId: string | null, language: string | null) =>
     countGames({ keyword, consoleType, developerId, language }),
   ['sb:games:count', 'v1'],
@@ -514,6 +541,28 @@ function cardAttachOptions(locale: string): AttachOptions {
   return { locales: textLocalesFor(locale), content: false, roms: false };
 }
 
+/**
+ * 分页列表。**带关键词时绝不写缓存**（2026-10-30 用户定）。
+ *
+ * 为什么搜索必须排除：
+ *
+ *   `keyword` 是任意用户输入，键的基数由真实搜索词决定。以前 `lib/server/pages/games.tsx`
+ *   的注释据此认为「每条都有 TTL、超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀」。
+ *   **这个前提在 OpenNext + R2 上不成立**：`r2IncrementalCache` 只实现了
+ *   get / put / delete，**没有 LRU、没有容量上限、也没有到期自动删除**。所谓 TTL
+ *   只是读的时候拿对象的 `uploaded` 时间和 `revalidate` 比一比，过期了就下次访问
+ *   覆盖写同一个 key —— 而一个再也不会被搜第二次的词，它的对象会**永远躺在桶里**。
+ *   爬虫拿不同词扫一遍就是几万条常驻对象（桶因此涨到 8 GB）。
+ *
+ *   所以搜索这条路径直连数据库：低频、长尾、命中率极低，缓存它省不下多少 CPU
+ *   （重复词已经被 `worker.ts` 那层 10 分钟的 HTML 副本挡住了），却把 R2 当成了
+ *   一个只进不出的日志。**只有「key 基数有界」的列表才配进这一层** —— 翻页 offset
+ *   有上界，console / language 是定值，locale 只有 18 个，关键词没有上界。
+ *
+ *   ⚠️ 别只改这一个函数：`countGamesCached` 同样带关键词，机种页搜索调的是它。
+ *   ⚠️ 已经写进桶里的搜索条目不会被这次改动静默清掉，它们只是再也命中不到；
+ *      要收回来得靠 R2 的生命周期规则，或 `scripts/r2-purge.mjs` 整桶清空。
+ */
 export async function listGamesPageCached(
   offset: number,
   limit: number,
@@ -522,39 +571,48 @@ export async function listGamesPageCached(
   language: string | null,
   locale: string
 ): Promise<{ games: Game[]; total: number; offset: number; limit: number }> {
+  if (keyword.trim()) return loadGamesPage(offset, limit, keyword, consoleType, language, locale);
   return listGamesPageCachedRaw(offset, limit, keyword, consoleType, language, locale);
 }
 
+/** 真正查库的那一步（自己不吃缓存），缓存分支和搜索分支共用。 */
+async function loadGamesPage(
+  offset: number,
+  limit: number,
+  keyword: string,
+  consoleType: ConsoleType | null,
+  language: string | null,
+  locale: string
+) {
+  const needle = keyword.trim();
+  const filter = { keyword: needle, consoleType, language };
+  /*
+   * 不预先 `countGames`：`listGamesPage` 现在用窗口函数一次拿回「本页 + 总数」，
+   * 省掉一次 HTTPS 往返。两者本来就出自同一条 SQL，页码不会和实际条目错位。
+   */
+  return listGamesPage(offset, limit, filter, undefined, cardAttachOptions(locale));
+}
+
 const listGamesPageCachedRaw = cached(
-  async (
-    offset: number,
-    limit: number,
-    keyword: string,
-    consoleType: ConsoleType | null,
-    language: string | null,
-    locale: string
-  ) => {
-    const needle = keyword.trim();
-    const filter = { keyword: needle, consoleType, language };
-    /*
-     * 不预先 `countGames`：`listGamesPage` 现在用窗口函数一次拿回「本页 + 总数」，
-     * 省掉一次 HTTPS 往返。两者本来就出自同一条 SQL，页码不会和实际条目错位。
-     */
-    return listGamesPage(offset, limit, filter, undefined, cardAttachOptions(locale));
-  },
+  loadGamesPage,
   /*
    * ⚠️ 2026-10-23 v2 → v3：文案改成**按语言裁剪**（18 种 → 最多 3 种 + 不要描述 / 键位表），
    *    所以 `locale` 进了缓存键，返回结构也变小了。条目**不随部署失效**，不升版本的话
    *    线上会继续读到旧形状（带着 18 种语言的全量文案），这次优化等于没上线。
+   *
+   * ⚠️ v3 → v4 是 2026-10-30 加 `games.players` 那次（`Game` 形状变了）。
+   *
+   * ⚠️ 这次（搜索改成直连）**故意不升版本**：带关键词的旧条目只是再也命中不到，
+   *    不需要换 key 空间把它们全作废 —— 升版本反而会让所有正常列表一起冷启动。
    */
-  ['sb:games:page', 'v3'],
+  ['sb:games:page', 'v5'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
 export const listLatestGamesCached = cached(
   async (limit: number, locale: string) =>
     listGamesPage(0, limit, {}, undefined, cardAttachOptions(locale)),
-  ['sb:games:latest', 'v3'],
+  ['sb:games:latest', 'v5'],
   { revalidate: HOME_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
@@ -562,7 +620,7 @@ export const listLatestGamesCached = cached(
 export const listGamesByConsoleCached = cached(
   async (consoleType: ConsoleType, offset: number, limit: number, language: string | null, locale: string) =>
     listGamesPage(offset, limit, { consoleType, language }, undefined, cardAttachOptions(locale)),
-  ['sb:games:by-console', 'v3'],
+  ['sb:games:by-console', 'v5'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
@@ -570,7 +628,7 @@ export const listGamesByConsoleCached = cached(
 export const listGamesByDeveloperCached = cached(
   async (developerId: string, offset: number, limit: number, locale: string) =>
     listGamesPage(offset, limit, { developerId }, undefined, cardAttachOptions(locale)),
-  ['sb:games:by-developer', 'v3'],
+  ['sb:games:by-developer', 'v5'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
@@ -668,7 +726,7 @@ export const getGameCached = cached(
    * ⚠️ 2026-10-23 v3 → v4：文案改成按 `locale` 裁剪（18 种 → 最多 3 种），
    *    `locale` 也进了键。不升版本会继续读到 18 种语言的全量条目。
    */
-  ['sb:games:by-id', 'v4'],
+  ['sb:games:by-id', 'v6'],
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
 

@@ -43,18 +43,22 @@
  * ⚠️ 顺带：**技术架构细节一律不写** —— 存储介质（cookie 叫什么名字、localStorage 还是
  *    IndexedDB）、hash 算法、数据库与对象存储是什么产品、令牌怎么签，全不写；
  *    「为什么这么实现」也不写（那是代码里的事）。
- *    但第三方资源的具体域名 / 协议名（`fonts.googleapis.com`、`broker.emqx.io`、
- *    STUN、MQTT）同样不写，**只留服务商的名字**（Google Fonts / jsDelivr / Cloudflare）——
- *    那是隐私政策必须披露的「数据接收方」，去掉反而不合规；联机那条也要留，
+ * 但第三方资源的具体域名 / 协议名（`fonts.googleapis.com`、`broker.emqx.io`、
+ *    STUN、MQTT）同样不写，**只留服务商的名字**（Google Fonts / Google Analytics /
+ *    Cloudflare）—— 那是隐私政策必须披露的「数据接收方」，去掉反而不合规；联机那条也要留，
  *    因为「对方能看到你的 IP」是真会影响读者决定的事。
  * 判断标准：**这句话对读者的决定有没有用**。
  *
  * ⚠️ **内容必须与本站实际行为一致**，别照抄别的站的模板：
- * 本站**没有广告、没有接第三方统计（GA 之类）、没有服务端记录游玩行为** ——
+ * 本站**没有广告、没有服务端记录游玩行为** ——
  * 抄一段「我们使用 cookie 分析你的浏览行为」就是不实陈述。
- * 涉及第三方的那一节（Google Fonts / jsDelivr / Cloudflare / 联机中继）是**逐条核对过
- * 代码**才写的：字体在 app/layout.tsx 的 <link>，内核在 lib/emulator.ts，
- * 人机验证在 lib/server/turnstile.ts，联机链路在 lib/netplay.ts。改那几处要回来同步。
+ * 但**访问统计是真的接了**（`components/Analytics.tsx` 的 GA4，2026-10-30 起全站生效），
+ * 所以 2026-10-30 把原来那句「未接入第三方统计分析工具」改成了正面披露 —— 这条别再删，
+ * 删了就是隐私政策与实现相反。涉及第三方的那一节（Google Fonts / Google Analytics /
+ * Cloudflare / 联机中继）是**逐条核对过代码**才写的：字体在 SiteDocument 的 <link>、
+ * 统计在 components/Analytics.tsx、人机验证在 lib/server/turnstile.ts、
+ * 联机链路在 lib/netplay.ts。改那几处要回来同步。
+ * （jsDelivr 那条 2026-10-30 删掉了：2026-10-19 起 14 台机种的核心全在本站 `/cores/`。）
  *
  * ⚠️ **账号系统（2026-10-14 加，用户要求）**：现在**支持登录**了，所以隐私政策多了
  *    「账号信息」和「与账号关联的云端数据」两节，条款多了「账号」一节。
@@ -104,8 +108,15 @@ export interface LegalDoc {
   sections: LegalSection[];
 }
 
-/** 两份文档同一天改的（加账号系统的这一版），日期一起走。 */
-const UPDATED = '2026-10-14';
+/**
+ * 两份文档同一天改的，日期一起走。
+ *
+ * 2026-10-30：换域名/站名的那一版已经动过联系方式；同一天又修正了三处与事实不符的
+ * 旧陈述 —— 统计口径（实际接了 GA4，原文写着「未接入第三方统计分析」）、
+ * 第三方清单（jsDelivr 早就不再加载，14 台机种的核心全在本站 `/cores/`）、
+ * 以及条款里漏掉的「按用户要求下载」。改正文就必须改这个日期（页面第 10 节承诺过）。
+ */
+const UPDATED = '2026-10-30';
 
 function privacy(locale: Locale): LegalDoc {
   const site = SITE_NAME[locale];
@@ -165,8 +176,8 @@ function privacy(locale: Locale): LegalDoc {
         {
           heading: '6. Cookie',
           body: [
-            '本站使用 cookie 记录界面语言与登录状态，不影响其他网站，也不向第三方开放。',
-            '本站**不使用广告 cookie，也未接入第三方统计分析工具**。',
+            '本站自己的 cookie 只记录界面语言与登录状态，不影响其他网站，也不向第三方开放；访问统计用的 cookie 见下一条与第 7 节。',
+            '本站**不使用广告 cookie**。访问统计使用 Google Analytics，只用于了解访问量与常用页面，不用于广告投放；它会在你的浏览器里设置统计 cookie，并把访问数据传给 Google。',
           ],
         },
         {
@@ -176,7 +187,7 @@ function privacy(locale: Locale): LegalDoc {
           ],
           bullets: [
             'Google Fonts：页面使用的像素字体。',
-            'jsDelivr：模拟器内核文件。',
+            'Google Analytics：访问统计，会设置统计 cookie 并获取你的 IP 地址。',
             'Cloudflare：本站的托管与存储服务，以及注册、登录时的人机验证。',
             '联机功能：通过公共中继服务器建立点对点连接，**对方可获取你的 IP 地址**。请仅与信任的人联机。',
             '上述第三方的隐私做法不受本站控制，建议查阅其各自的隐私政策。',
@@ -272,8 +283,8 @@ function privacy(locale: Locale): LegalDoc {
         {
           heading: '6. Cookie',
           body: [
-            'cookie はインターフェースの言語とログイン状態の記録に使用します。他のサイトには影響せず、第三者にも提供しません。',
-            '**広告 cookie は使用せず、第三者のアクセス解析も導入していません。**',
+            'cookie はインターフェースの言語とログイン状態の記録に使用します。他のサイトには影響せず、第三者にも提供しません。アクセス解析用の cookie は次の項目と第 7 節に記載します。',
+            '**広告 cookie は使用しません**。アクセス解析には Google Analytics を使用し、訪問数とよく見られるページの把握だけに用い、広告配信には使いません。同サービスはブラウザに統計用 cookie を設定し、アクセスデータを Google に送信します。',
           ],
         },
         {
@@ -283,7 +294,7 @@ function privacy(locale: Locale): LegalDoc {
           ],
           bullets: [
             'Google Fonts：ページが使用するピクセルフォント。',
-            'jsDelivr：エミュレータのコアファイル。',
+            'Google Analytics：アクセス解析。統計用 cookie を設定し、IP アドレスを取得します。',
             'Cloudflare：本サービスのホスティングとストレージ、および登録・ログイン時の人間確認。',
             '通信対戦：公共の中継サーバーを介して端末間を直接接続するため、**相手はあなたの IP アドレスを取得できます**。信頼できる相手とのみ対戦してください。',
             'これらの第三者の取り扱いは本サービスの管理外です。各社のポリシーを確認してください。',
@@ -373,8 +384,8 @@ function privacy(locale: Locale): LegalDoc {
         {
           heading: '6. Cookie',
           body: [
-            'cookie는 인터페이스 언어와 로그인 상태를 기록하는 데 사용합니다. 다른 사이트에 영향을 주지 않으며 제3자에게 제공하지 않습니다.',
-            '**광고 cookie를 쓰지 않고, 제3자 접속 분석 도구도 넣지 않았습니다.**',
+            'cookie는 인터페이스 언어와 로그인 상태를 기록하는 데 사용합니다. 다른 사이트에 영향을 주지 않으며 제3자에게 제공하지 않습니다. 접속 분석용 cookie는 다음 항목과 제7조에 적습니다.',
+            '**광고 cookie는 쓰지 않습니다**. 접속 분석에는 Google Analytics를 사용하며, 방문 수와 자주 보는 페이지를 파악하는 데만 쓰고 광고 집행에는 쓰지 않습니다. 이 서비스는 브라우저에 통계용 cookie를 설정하고 접속 데이터를 Google로 보냅니다.',
           ],
         },
         {
@@ -384,7 +395,7 @@ function privacy(locale: Locale): LegalDoc {
           ],
           bullets: [
             'Google Fonts: 페이지가 쓰는 픽셀 글꼴.',
-            'jsDelivr: 에뮬레이터 코어 파일.',
+            'Google Analytics: 접속 분석. 통계용 cookie를 설정하고 IP 주소를 얻습니다.',
             'Cloudflare: 이 서비스의 호스팅과 저장, 그리고 가입·로그인 시의 사람 확인.',
             '온라인 대전: 공용 중계 서버를 거쳐 기기 간 직접 연결을 맺으므로 **상대가 여러분의 IP 주소를 얻을 수 있습니다**. 신뢰하는 상대와만 대전하세요.',
             '이들 제3자의 처리 방식은 이 서비스의 통제 밖입니다. 각자의 방침을 확인하세요.',
@@ -473,8 +484,8 @@ function privacy(locale: Locale): LegalDoc {
       {
         heading: '6. Cookies',
         body: [
-          'Cookies are used to remember the interface language and to keep you signed in. They do not affect other sites and are not shared with third parties.',
-          'We run **no advertising cookies and no third-party analytics**.',
+          'Cookies are used to remember the interface language and to keep you signed in. They do not affect other sites and are not shared with third parties. The analytics cookie is described in the next item and in section 7.',
+          'We run **no advertising cookies**. For traffic statistics we use Google Analytics, solely to see visitor numbers and which pages are read, never for ad targeting; it sets a statistics cookie in your browser and sends usage data to Google.',
         ],
       },
       {
@@ -484,7 +495,7 @@ function privacy(locale: Locale): LegalDoc {
         ],
         bullets: [
           'Google Fonts: the pixel typeface used by the page.',
-          'jsDelivr: the emulator core files.',
+          'Google Analytics: traffic statistics; it sets a statistics cookie and obtains your IP address.',
           'Cloudflare: hosting and storage, and the human check at registration and sign-in.',
           'Netplay: a public relay server sets up a peer-to-peer connection, and the other player **can obtain your IP address**. Play only with people you trust.',
           'Those third parties’ privacy practices are outside our control; consult their own policies.',
@@ -548,7 +559,7 @@ function terms(locale: Locale): LegalDoc {
           heading: '3. 知识产权与版权声明',
           body: [
             '**重要版权声明**：所有游戏 ROM 及其程序、图形、音乐、音效、角色与商标，均为各自版权持有者的知识产权。本站**不拥有、也不主张拥有**任何游戏内容的任何权利。',
-            '本站不制作、不出售任何 ROM。站内可访问的 ROM 与游戏内容**来自第三方**；本站仅提供使其在浏览器中运行的技术条件。',
+            '本站不制作、不出售任何 ROM。站内可访问的 ROM 与游戏内容**来自第三方**；本站仅提供使其在浏览器中运行、以及在用户要求时下载的技术条件。',
             '相关内容仅供**学习、研究与怀旧**之用。你需自行确认有权访问和使用，并自行承担相应责任。',
             '版权持有者如认为本站内容侵犯其权利，请立即联系本站。对每一份有效通知，本站将在核实后**及时移除相关内容**。',
             '本站保留在收到版权持有者请求、或知悉可能存在侵权时移除任何内容的权利。',
@@ -642,7 +653,7 @@ function terms(locale: Locale): LegalDoc {
           heading: '3. 知的財産と著作権表示',
           body: [
             '**重要な著作権表示**：すべてのゲーム ROM とそのプログラム、グラフィック、音楽、効果音、キャラクター、商標は、それぞれの権利者の知的財産です。本サービスは、いかなるゲーム内容についても権利を**所有せず、主張もしません**。',
-            '本サービスは ROM を制作も販売もしません。ここで閲覧できる ROM とゲーム内容は**第三者から提供されたもの**であり、本サービスはブラウザで動作させる技術的な手段を提供するだけです。',
+            '本サービスは ROM を制作も販売もしません。ここで閲覧できる ROM とゲーム内容は**第三者から提供されたもの**であり、本サービスはブラウザで動作させ、利用者の求めに応じてダウンロードさせる技術的な手段を提供するだけです。',
             '当該内容は**学習、研究、懐かしむこと**のみを目的とします。アクセスと利用の権利があることはご自身で確認し、その責任を負ってください。',
             '権利者が本サービスの内容が自らの権利を侵害すると考える場合は、直ちにご連絡ください。有効な通知については確認のうえ**速やかに関連内容を削除します**。',
             '本サービスは、権利者からの要請があった場合、または権利侵害の可能性を認識した場合に、いかなる内容も削除する権利を留保します。',
@@ -735,7 +746,7 @@ function terms(locale: Locale): LegalDoc {
           heading: '3. 지식재산권과 저작권 고지',
           body: [
             '**중요한 저작권 고지**: 모든 게임 ROM과 그 프로그램, 그래픽, 음악, 효과음, 캐릭터, 상표는 각 권리자의 지식재산입니다. 이 서비스는 어떤 게임 내용에 대해서도 권리를 **소유하지 않고 주장하지도 않습니다**.',
-            '이 서비스는 ROM을 만들거나 판매하지 않습니다. 여기서 볼 수 있는 ROM과 게임 내용은 **제3자로부터 온 것**이며, 이 서비스는 브라우저에서 실행할 기술적 수단만 제공합니다.',
+            '이 서비스는 ROM을 만들거나 판매하지 않습니다. 여기서 볼 수 있는 ROM과 게임 내용은 **제3자로부터 온 것**이며, 이 서비스는 브라우저에서 실행하고 이용자가 요청할 때 내려받게 하는 기술적 수단만 제공합니다.',
             '해당 내용은 **학습, 연구, 추억** 목적으로만 제공됩니다. 접속하고 이용할 권리가 있는지는 본인이 확인하고 그 책임을 지세요.',
             '권리자가 이 서비스의 내용이 자신의 권리를 침해한다고 판단하면 즉시 연락해 주세요. 유효한 신고는 확인 후 **지체 없이 해당 내용을 삭제합니다**.',
             '이 서비스는 권리자의 요청이 있거나 침해 가능성을 알게 된 경우 어떤 내용이든 삭제할 권리를 보유합니다.',
@@ -827,7 +838,7 @@ function terms(locale: Locale): LegalDoc {
         heading: '3. Intellectual property and copyright notice',
         body: [
           '**Important copyright notice.** All game ROMs and their programs, graphics, music, sound, characters and trademarks are the intellectual property of their respective copyright holders. We do not own, and do not claim to own, any rights in any game content.',
-          'We do not create or sell ROMs. The ROMs and game content reachable here **come from third parties**; the Service only provides the technical means to run them in a browser.',
+          'We do not create or sell ROMs. The ROMs and game content reachable here **come from third parties**; the Service only provides the technical means to run them in a browser, and to download them at the user\u2019s request.',
           'That content is provided for **study, preservation and nostalgia** only. You are responsible for confirming that you have the right to access and use it.',
           'If you are a rights holder and believe content here infringes your rights, contact us at once. Every valid notice is taken seriously and the content will be removed promptly once verified.',
           'We reserve the right to remove any content on request from a rights holder or upon becoming aware of a possible infringement.',

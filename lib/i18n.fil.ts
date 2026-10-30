@@ -566,7 +566,7 @@ export const fil: Record<MessageKey, string> = {
     'I-drag ang ROM file (.nes, .sfc, .gba, .md, .gb …) o arcade .zip sa TV, o i-click lang ang screen para pumili ng file. Walang ROM na kasama sa repo na ito — gamitin ang sarili mo.',
   'tour.rail.title': 'Ang rail ng switch',
   'tour.rail.body':
-    'Tatlong grupo, mula taas pababa. Tingnan: theme (night / day), wika (中文 / English / 日本語 / 한국어), Fullscreen (ang screen mismo ang nag-fullscreen), Simple mode (wall, TV, desk at floor lang ang itira), laki ng TV (nagbubukas ng malaki / katamtaman / maliit na picker — lumalapad ang desk kasabay nito). Mga laro: Netplay, Key bindings. Tulong: Controls, at ang Guestbook.',
+    'Tatlong grupo, mula taas pababa. Tingnan: theme (night / day), wika (18 wika), Fullscreen (ang screen mismo ang nag-fullscreen), Simple mode (wall, TV, desk at floor lang ang itira), laki ng TV (nagbubukas ng malaki / katamtaman / maliit na picker — lumalapad ang desk kasabay nito). Mga laro: Netplay, Key bindings. Tulong: Controls, at ang Guestbook.',
 
   'topLinks.label': 'Mga page ng site',
   'topLinks.games': 'Listahan ng laro',
@@ -608,6 +608,10 @@ export const fil: Record<MessageKey, string> = {
   'gamesPage.share': 'I-share ang larong ito',
   'gamesPage.shareCopied': 'Nakopya ang link',
   'gamesPage.shareFailed': 'Nabigo ang pagkopya',
+  'gamesPage.shareCopy': 'Kopyahin ang link',
+  'gamesPage.shareText': '{name} — laruin sa browser sa {site}',
+  'gamesPage.shareEmail': 'Email',
+  'gamesPage.shareClose': 'Isara',
   'gamesPage.favorite': 'Idagdag sa mga paborito',
   'gamesPage.unfavorite': 'Alisin sa mga paborito',
   'gamesPage.favoriteSignIn': 'Mag-sign in para i-save ang mga paborito — gamitin ang sign-in button sa itaas.',

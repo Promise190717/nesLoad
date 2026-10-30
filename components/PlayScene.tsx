@@ -221,18 +221,18 @@ export default function PlayScene({
   const consoleType = rom?.console ?? game?.consoleType ?? null;
 
   /**
-   * 单人机 —— 现在只有 NDS（2026-10-15 用户定的：「nds 不支持双人了」）。
+   * NDS 的键位表锁在 1P，且不画「编辑」那颗钮（2026-10-15 用户要求）。
    *
-   * 这一页要拦的是**地址栏上手动塞进来的联机参数**：`?mode=host`（建房）和
-   * `?room=XXXX`（当加入者）。两个都不该对 NDS 生效 —— 见下面 `mode` 和那条
-   * 自动加入的 effect。
-   *
-   * 判据跟着 `consoleType` 走，所以服务端预取到了（正常情况）第一帧就成立；
-   * 万一服务端那次查询抛了、走客户端兜底，`game` 到齐那一刻也会自动成立。
+   * ⚠️ **这一条已经和联机无关了**（2026-10-30 改）：原先它叫 `soloOnly`，还负责把
+   *    `?mode=host` / `?room=` 按回单人 —— 那套已经撤掉。联机能不能开由详情页按钮
+   *    控制（`games.players === 1` 就不画入口），这一页不再按机种拦任何参数：
+   *    NDS 走 EJS 核，远端输入有 `pressButton` 的 `simulate_input` 分支兜着
+   *    （见 lib/emulator.ts），双人不是技术问题，是「这一款有没有第二个人」的问题。
+   *    剩下这半条只管键位面板的显示，别顺手连它一起删。
    */
-  const soloOnly = consoleType === 'nds';
+  const isNds = consoleType === 'nds';
 
-  const directSolo = (autoStart && initialMode === 'solo') || (soloOnly && Boolean(game));
+  const directSolo = autoStart && initialMode === 'solo';
   /** ROM 整包下载进度（0..1），null = 拿不到字节数或这一阶段还没开始 */
   const [romRatio, setRomRatio] = useState<number | null>(null);
   /** 核心包下载进度（0..1），null = 拿不到字节数 */
@@ -356,21 +356,18 @@ export default function PlayScene({
    */
   const [rawMode] = useState<PlayMode>(initialRoomCode ? 'join' : initialMode);
   /**
-   * 实际生效的模式。
+   * 实际生效的模式 —— 就是地址栏上写的那个，**不再按机种打折**。
    *
-   * ⚠️ **单人机（NDS）一律落回单人**：`?mode=host` / `?room=` 是可以在地址栏上手打的，
-   * 用户 2026-10-15 明确要求「即使自己添加联机参数进来也要忽略」。拦在这里而不是只拦
-   * 在游戏详情那颗钮上 —— 那颗钮只管「正常入口」，管不住手打地址。
-   *
-   * 派生而不是 `useEffect` 里改 state：`consoleType` 可能晚一步才知道（服务端预取失败
-   * 时走客户端兜底），派生出来的一定跟着变，不会留下一个已经点开了的建房弹窗。
+   * 2026-10-30 撤掉了原先那道「NDS 一律落回单人」：联机开不开由详情页那颗钮控制
+   * （`games.players === 1` 就不画入口），这一页不再替任何机种否决 `?mode=host`。
+   * 也就是说 NDS 手打 `?mode=host` 现在会真的开房 —— 有意为之，别再补回去。
    */
-  const mode: PlayMode = soloOnly ? 'solo' : rawMode;
+  const mode: PlayMode = rawMode;
   /**
    * 右侧那张按键表是不是**锁在 1P**、并且不画 P1 / P2 切换。两种情况锁的是同一组：
    *
-   *   · **单人机（NDS）**：它不支持双人，摆一颗「玩家 2」出来等于告诉用户「这台机器
-   *     能双人」（2026-10-15 用户要求）—— 和 `KeyBindingsPanel` 的 `soloOnly` 同一个理由。
+   *   · **NDS**：键位面板不画 P1 / P2 切换（2026-10-15 用户要求，和 `KeyBindingsPanel`
+   *     里那套判断同源）。**这条和联机无关** —— 见上面 `isNds` 的注释。
    *   · **联机（房主 / 加入者）**：两位玩家各在自己的设备前，用的都是**自己那套 1P 键位**。
    *     房主本机跑模拟器，核心只读 `input_player1_*`；加入者转发按键也按自己的
    *     `bindings.p1` 反查（见 lib/keybindings.ts 的 `codeToButton`）。P2 那组在联机里
@@ -379,7 +376,7 @@ export default function PlayScene({
    * 判据用派生的 `mode` 而不是 `netplayState.role`：后者要连上才有，而地址上带了
    * `?room=` / `?mode=host` 进来时，**进页面那一刻起**两边用的就都是 1P 键位了。
    */
-  const keysLocked = soloOnly || mode !== 'solo';
+  const keysLocked = isNds || mode !== 'solo';
   /**
    * 房间卡「刚出现」的高亮。建好房 / 加入成功那一刻置 true，几秒后自己落回 ——
    * 对应卡片边框闪主题色（`play-room-flash`），提醒用户看右栏。
@@ -1027,8 +1024,8 @@ export default function PlayScene({
   /*
    * `?room=XXXX` 进来就自动加入。
    *
-   * `mode` 已经是派生过的（单人机被按成 `'solo'`），所以 NDS 手打 `?room=` 时这里
-   * 整条不会跑 —— 不需要再单独判一次 `soloOnly`。
+   * `mode` 就是地址栏上那个，不再按机种打折（见上面 `mode` 的注释）——
+   * 所以这里不需要再单独判一次机种。
    */
   useEffect(() => {
     if (mode !== 'join' || !joinCode || autoStartedRef.current) return;
@@ -1775,7 +1772,7 @@ export default function PlayScene({
                   `KeyBindingsPanel` 里那套 `soloOnly` 逻辑**留着没删**：入口藏起来之后
                   它在 NDS 下确实走不到了，但删掉的话，哪天要放回入口就得连逻辑一起重写。
                 */}
-                {!soloOnly && (
+                {!isNds && (
                   <button
                     type="button"
                     onClick={() => setKeybindOpen(true)}

@@ -609,7 +609,7 @@ export const fr: Record<MessageKey, string> = {
     'Glissez un fichier ROM (.nes, .sfc, .gba, .md, .gb …) ou une archive .zip d’arcade sur le téléviseur, ou cliquez simplement sur l’écran pour choisir un fichier. Aucune ROM n’est fournie avec ce dépôt — apportez la vôtre.',
   'tour.rail.title': 'La colonne d’interrupteurs',
   'tour.rail.body':
-    'Trois groupes, de haut en bas. Voyez : thème (nuit / jour), langue (中文 / English / 日本語 / 한국어), plein écran (c’est bien l’écran qui passe en plein écran), mode simple (ne garder que le mur, le téléviseur, le bureau et le sol), taille du téléviseur (ouvre un sélecteur grande / moyenne / petite — le bureau s’élargit d’autant). Jeux : jeu en réseau, affectation des touches. Aide : aide sur les commandes, et le livre d’or.',
+    'Trois groupes, de haut en bas. Voyez : thème (nuit / jour), langue (18 langues), plein écran (c’est bien l’écran qui passe en plein écran), mode simple (ne garder que le mur, le téléviseur, le bureau et le sol), taille du téléviseur (ouvre un sélecteur grande / moyenne / petite — le bureau s’élargit d’autant). Jeux : jeu en réseau, affectation des touches. Aide : aide sur les commandes, et le livre d’or.',
 
   /* 内容页顶栏 / 小屏抽屉 / 离开确认 */
   'topLinks.label': 'Pages du site',
@@ -654,6 +654,10 @@ export const fr: Record<MessageKey, string> = {
   'gamesPage.share': 'Partager ce jeu',
   'gamesPage.shareCopied': 'Lien copié',
   'gamesPage.shareFailed': 'Échec de la copie',
+  'gamesPage.shareCopy': 'Copier le lien',
+  'gamesPage.shareText': '{name} — jouez-y dans votre navigateur sur {site}',
+  'gamesPage.shareEmail': 'E-mail',
+  'gamesPage.shareClose': 'Fermer',
   'gamesPage.favorite': 'Ajouter aux favoris',
   'gamesPage.unfavorite': 'Retirer des favoris',
   'gamesPage.favoriteSignIn':

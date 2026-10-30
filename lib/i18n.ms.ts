@@ -620,7 +620,7 @@ export const ms: Record<MessageKey, string> = {
     'Lepaskan fail ROM (.nes, .sfc, .gba, .md, .gb …) atau .zip arcade ke TV, atau klik skrin untuk pilih fail. Tiada ROM disertakan dengan repo ini — bawa sendiri.',
   'tour.rail.title': 'Rel suis',
   'tour.rail.body':
-    'Tiga kumpulan, dari atas ke bawah. Rupa: tema (malam / siang), bahasa (中文 / English / 日本語 / 한국어 / Bahasa Melayu), Skrin penuh (skrin itu sendiri yang menjadi skrin penuh), Mod ringkas (kekalkan hanya dinding, TV, meja dan lantai), Saiz TV (buka pemilih besar / sederhana / kecil — meja turut melebar). Permainan: Main rangkaian, Pemetaan kekunci. Bantuan: Bantuan kawalan, dan Buku tetamu.',
+    'Tiga kumpulan, dari atas ke bawah. Rupa: tema (malam / siang), bahasa (18 bahasa), Skrin penuh (skrin itu sendiri yang menjadi skrin penuh), Mod ringkas (kekalkan hanya dinding, TV, meja dan lantai), Saiz TV (buka pemilih besar / sederhana / kecil — meja turut melebar). Permainan: Main rangkaian, Pemetaan kekunci. Bantuan: Bantuan kawalan, dan Buku tetamu.',
 
   /* 房间右上角那一行，以及小屏的菜单抽屉 */
   'topLinks.label': 'Halaman laman',
@@ -668,6 +668,10 @@ export const ms: Record<MessageKey, string> = {
   'gamesPage.share': 'Kongsi permainan ini',
   'gamesPage.shareCopied': 'Pautan disalin',
   'gamesPage.shareFailed': 'Gagal menyalin',
+  'gamesPage.shareCopy': 'Salin pautan',
+  'gamesPage.shareText': '{name} — main dalam pelayar di {site}',
+  'gamesPage.shareEmail': 'E-mel',
+  'gamesPage.shareClose': 'Tutup',
   'gamesPage.favorite': 'Tambah ke kegemaran',
   'gamesPage.unfavorite': 'Buang dari kegemaran',
   'gamesPage.favoriteSignIn': 'Log masuk untuk menyimpan kegemaran — guna butang log masuk di bar atas.',

@@ -42,6 +42,33 @@ const nextConfig = {
    * ⚠️ 现在**所有核心都在这份配置的覆盖范围内**（2026-10-19 把 NES / SFC 的
    *    fceumm / snes9x 也搬进了 `public/cores/`），换核心后记得 purge 一次 CDN。
    */
+  /**
+   * `/sitemap.xml` → `/sitemap-index.xml`（2026-10-30）。
+   *
+   * `app/sitemap.ts` 用了 `generateSitemaps()`，Next 只产 `/sitemap/<locale>.xml`
+   * 18 份分片，**不产 `/sitemap.xml` 索引**（具体原因见 `app/sitemap.ts` 的注释）。
+   * 而 `/sitemap.xml` 是爬虫和站长工具默认先试的地址，`/llms.txt` 里也写着它。
+   *
+   * 索引由 `app/sitemap-index.xml/route.ts` 产出，这里把它挂到那个标准路径上。
+   * 用 rewrite 而不是直接建 `app/sitemap.xml/route.ts`：后者会和 Next 内置的
+   * sitemap 元数据路由抢名字，不同版本行为不一致。改任一头的路径，两处一起改。
+   *
+   * ⚠️ 这是**内部重写**，浏览器/爬虫看到的地址仍是 `/sitemap.xml`，不会多一跳。
+   *
+   * ⚠️ 必须放在 `beforeFiles`，不能放默认的 `afterFiles`：那个路径**已经被 Next
+   *    内置的 sitemap 元数据路由占着**（线上实测返回 404 的 `__next_error__` 页，
+   *    不是路由层的空 404）。`afterFiles` 要等文件系统匹配失败才轮到，而它「匹配上了」
+   *    —— 只是匹配到一个会报错的处理器，于是重写永远不执行。
+   *    `beforeFiles` 在文件系统之前，才抢得到。
+   */
+  async rewrites() {
+    return {
+      beforeFiles: [{ source: '/sitemap.xml', destination: '/sitemap-index.xml' }],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
+
   async headers() {
     return [
       /*

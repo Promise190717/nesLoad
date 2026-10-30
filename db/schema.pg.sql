@@ -110,9 +110,26 @@ create table if not exists games (
   tags            text[] not null default '{}',
   is_featured     boolean not null default false,
   is_popular      boolean not null default false,
+  /*
+   * 最多支持几人同玩（2026-10-30 加）。
+   *
+   * 只用来决定详情页那颗「联机游戏」钮画不画 —— 联机的本质是「把另一台设备当 2P
+   * 手柄」，单人游戏连上去对方按了没反应，摆个入口等于骗人。
+   *
+   * ⚠️ 取值只有 **1 / 2 / 4**，`null` = 不知道 / 没填。**前台把 null 当「可能多人」**，
+   *    也就是钮照画：两千多款老数据不会被一次回填卡住，误藏「其实能双人」的代价
+   *    比误露一款真单机大得多。要藏就明确填 1。
+   * ⚠️ 判据里 NDS 那台**整机不画**（双屏 + 触屏，2P 注入不成立），与这一列无关，
+   *    见 app/[locale]/games/[id]/page.tsx 的 hostHref。
+   */
+  players         smallint,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+
+-- ⚠️ 老库（表早就建好了）不会被上面的 `create table if not exists` 补列 ——
+--    这一句必须跟着一起跑。幂等，重跑整份 schema 也安全。
+alter table games add column if not exists players smallint;
 
 -- 列表主查询：`where console_type = ? order by created_at desc`
 create index if not exists idx_games_console_created on games (console_type, created_at desc);

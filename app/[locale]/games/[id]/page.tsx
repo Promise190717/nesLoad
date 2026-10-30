@@ -413,7 +413,7 @@ export default async function GameDetailPage({
               三颗之间 `gap-2`（8px）—— 比原来的 10px 再收紧一点，小尺寸下 10px 会显得散。
 
             第二层 · **次要动作**（两颗，**去掉描边和底色的文字链接**，带 16px 像素图标）
-              · 「分享游戏」「反馈问题」—— 一个往剪贴板写地址、一个开弹窗写问题，
+              · 「分享游戏」「反馈问题」—— 一个开分享弹窗、一个开弹窗写问题，
                 都不是「玩这款游戏」本身。所以压到下一行、去掉钮身，
                 只剩「图标 + 字」，字色 = `accent`（2026-10-13 用户要「增加图标 +
                 修改文字颜色」改的，原来是暗灰 `ink-400`）——
@@ -434,17 +434,31 @@ export default async function GameDetailPage({
             前两颗**都是 `<Link>` 不是 `<button>`** —— 它们去的是两个真地址
             （`/play?id=` 和 `/games/<id>/download`），用链接才能：新标签打开、被复制、
             被爬虫顺着走。按钮语义在这里是错的。
-            「分享游戏」不一样：它不跳转，只是把**这一页的地址**写进剪贴板，
-            所以是 `<button>`，而且必须是客户端组件（见 ShareGameButton）。
-            复制的是 `origin` 现算的规范地址，不是 `window.location` —— 免得把
+            「分享游戏」不一样：它不跳转，只是把**这一页的地址**摊出来给人分发
+            （2026-10-30 起是个弹窗，见 ShareGameButton），
+            所以是 `<button>`，而且必须是客户端组件。
+            分享的是 `origin` 现算的规范地址，不是 `window.location` —— 免得把
             `?id=` 之类的来源参数一起分享出去。
             `FavoriteButton` / `ReportGameButton` 同样得是客户端组件
             （一个要读登录态 + 打接口，一个要开关弹窗 + 提交）。
           */}
           <GameLanguageActions
             playHref={localePath(locale, `/play?id=${game.id}&mode=solo`)}
+            /*
+             * 联机钮画不画 —— **只看这一款支持几个人**（`games.players`，2026-10-30 加，
+             * 后台「人数」那栏填）。联机的本质是「把另一台设备当 2P 手柄」，单人游戏
+             * 连上去对方按了没反应 —— 摆个入口等于骗人。
+             *
+             * ⚠️ `players` 为 `null`（没填 / 老数据）时**照画**。故意这么定：两千多款老数据
+             *    不可能一次补全，而误藏「其实能双人」的游戏（用户根本找不到入口）比误露
+             *    一款真单机（点了发现对方按了没用）代价大得多。要藏就明确填 1。
+             * ⚠️ 2026-10-30 起**机种不再参与判断**：原先那条 `consoleType !== 'nds'` 撤了。
+             *    NDS 走 EJS 核，远端输入由 `pressButton` 的 `simulate_input` 分支落地
+             *    （见 lib/emulator.ts），技术上本来就通；能不能联机归根到底是「这一款
+             *    有没有第二个人要按」，机种给不出这个答案。
+             */
             hostHref={
-              game.consoleType !== 'nds'
+              game.players !== 1
                 ? localePath(locale, `/play?id=${game.id}&mode=host`)
                 : null
             }
@@ -463,7 +477,10 @@ export default async function GameDetailPage({
 
           {/* 第二层：图标 + 文字链接（口径见上面那段注释，字色 = accent） */}
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <ShareGameButton url={`${origin}${localePath(locale, `/games/${game.id}`)}`} />
+            <ShareGameButton
+              url={`${origin}${localePath(locale, `/games/${game.id}`)}`}
+              gameName={text.title}
+            />
             <ReportGameButton gameId={game.id} gameName={text.title} />
           </div>
 

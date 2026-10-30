@@ -54,6 +54,13 @@ interface AdminGame {
    * 所以这里编辑时只认 id；厂名文字在 `texts.*.developer` 里，只在列表上显示用。
    */
   developerId: string | null;
+  /**
+   * 最多支持几人同玩（`games.players`，2026-10-30 加）。`null` = 没填。
+   *
+   * 唯一用途是详情页那颗「联机游戏」钮：填 1 就不画了。所以这一栏**留空是安全的默认**
+   * （照画），只有确实知道是单人时才需要选「单人」。
+   */
+  players: number | null;
   createdAt: number;
   /** 与这一行共用同一份文案的 ROM 条数（含自己，2026-10-16 加）。1 = 库里只有这一盘。 */
   groupSize: number;
@@ -309,6 +316,11 @@ export default function AdminGames() {
   const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
   const [year, setYear] = useState('');
   /*
+   * 人数（2026-10-30 加）：空串 = 未指定（= null，详情页照画联机钮）。
+   * 存成字符串是为了跟年份那栏一致（受控 input 不掺 null）。
+   */
+  const [players, setPlayers] = useState('');
+  /*
    * 开发商：从 2026-10-12 起是**下拉框**（值 = developers.id），不再手填文字。
    * 空串 = 未指定。取值列表由下面那条 effect 从后台接口拉。
    */
@@ -486,6 +498,7 @@ export default function AdminGames() {
     setConsoleType('nes');
     setLanguage(DEFAULT_LANGUAGE);
     setYear('');
+    setPlayers('');
     setDeveloperId('');
     setUnlinkedDeveloper('');
     setImage(null);
@@ -539,6 +552,7 @@ export default function AdminGames() {
     setConsoleType(game.consoleType);
     setLanguage(game.language ?? '');
     setYear(game.year === null ? '' : String(game.year));
+    setPlayers(game.players === null || game.players === undefined ? '' : String(game.players));
     // 老记录（迁移前上传、或开发商那列是自由文本的）可能没有 id，那就退成「未指定」
     setDeveloperId(game.developerId ?? '');
     setUnlinkedDeveloper(game.developerId ? '' : zh.developer ?? '');
@@ -828,6 +842,8 @@ export default function AdminGames() {
           consoleType,
           language: language || null,
           year: parsedYear,
+          // 空串 → null（= 未指定）。接口那边只收 1 / 2 / 4，别把 '' 传过去
+          players: players ? Number(players) : null,
           // 下拉框给的是 developers.id；名字由服务端反查后写进 developer 那列
           developerId: developerId || null,
         };
@@ -871,6 +887,7 @@ export default function AdminGames() {
         form.set('console_type', consoleType);
         form.set('language', language);
         form.set('year', yearText);
+        form.set('players', players);
         form.set('developer_id', developerId);
         form.set('image', image as File);
         form.set('rom', rom as File);
@@ -1185,6 +1202,26 @@ export default function AdminGames() {
                     inputMode="numeric"
                     className={FIELD_CLASS}
                   />
+                </label>
+
+                {/*
+                  人数（2026-10-30 加）。**唯一消费者是详情页那颗「联机游戏」钮**：
+                  选「单人」就不画了，其余照画。所以「未指定」是安全默认，不必为了凑数据去填。
+                  ⚠️ 别再拿它去筛列表 / 做「支持几人」的角标 —— 目前没有可靠的批量数据源，
+                     2000 多款只会有零星几行有值，露出来反而像 bug。
+                */}
+                <label className={LABEL_CLASS}>
+                  {'人数'}
+                  <select
+                    value={players}
+                    onChange={(e) => setPlayers(e.target.value)}
+                    className={FIELD_CLASS}
+                  >
+                    <option value="">{'未指定'}</option>
+                    <option value="1">{'单人'}</option>
+                    <option value="2">{'2 人'}</option>
+                    <option value="4">{'4 人'}</option>
+                  </select>
                 </label>
 
                 <label className={LABEL_CLASS}>

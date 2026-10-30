@@ -21,10 +21,10 @@
 import { SITE_NAME } from '@/lib/i18n';
 
 /** 政策版本。改了正文（尤其拒绝清单）就把这个数加一，并同步下面的更新日期。 */
-export const AI_POLICY_VERSION = '1.0';
+export const AI_POLICY_VERSION = '1.1';
 
 /** 政策更新日期（YYYY-MM-DD）。 */
-export const AI_POLICY_UPDATED = '2026-10-12';
+export const AI_POLICY_UPDATED = '2026-10-30';
 
 /*
  * 主流 AI 爬虫的 UA 令牌（**只用于显式放行**，见 app/robots.ts）。
@@ -146,17 +146,22 @@ function aboutZh(site: string, origin: string): string[] {
   return [
     `- 名称：${site}（英文名 ${SITE_NAME.en}）`,
     `- 地址：${origin}`,
-    '- 是什么：一个免费的在线复古游戏厅。FC（红白机）、SFC（超级任天堂）、GBA 和街机游戏直接跑在浏览器里，',
+    '- 是什么：一个免费的在线复古游戏厅。FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、',
+    '  世嘉 MD、NDS、PlayStation 和街机等十余款机种的游戏直接跑在浏览器里，',
     '  内核是编译成 WebAssembly 的 RetroArch，**全部在本机运行**，不向服务器上传任何文件。',
+    '- 机种（共 14 款）：FC / SFC / GB / GBC / GBA / NDS / 世嘉 MD / Game Gear /',
+    '  Master System / 世嘉 32X / WonderSwan / Neo Geo Pocket / PlayStation（PS1）/ 街机。',
     '- 怎么用：从站内「在线游戏库」挑一盘，或把自己的 ROM 文件拖到页面上的像素电视机上。',
-    '- 收费：完全免费，无需注册、无需登录。',
-    '- 语言：简体中文 / English，**按路径区分**。英文是默认语言、不占前缀（`/`、`/games`），',
-    '  中文在 `/zh` 下（`/zh`、`/zh/games`）。同一个页面两种语言各有一个地址，两者互指 hreflang。',
-    '  **带前缀的地址就是那个语言**（`/zh/games` 一定是中文，对谁都一样）。只有访问无前缀地址时，',
-    '  才会按用户**主动设置过**的语言（cookie）决定要不要转到 `/zh`；没设置过就直接渲染英文，',
-    '  **不自动跳转**（浏览器语言只在页面上弹一句询问，由用户自己选）。',
-    '- 不提供什么：本站**不托管、也不提供任何游戏 ROM 的下载**，站内不存放受版权保护的游戏文件；',
-    '  「在线游戏库」只是一份指向外部资源的索引。',
+    '- 收费：完全免费。**游玩无需注册**；注册是可选的，注册后才能保存云端存档、收藏游戏、发表评论。',
+    '- 语言：**18 种**（界面与内容同为一套），**按路径区分**。英文是默认语言、不占前缀',
+    '  （`/`、`/games`），其余语言各占一个前缀（`/zh`、`/zh-TW`、`/ja`、`/ko`、`/es` …）。',
+    '  同一个页面每种语言各有一个地址，互相 hreflang。**带前缀的地址就是那个语言**',
+    '  （`/zh/games` 一定是中文，对谁都一样）；只有访问无前缀地址时，才会按用户**主动设置过**',
+    '  的语言（cookie）决定要不要转到对应语言 —— 没设置过就直接渲染英文，**不自动跳转**',
+    '  （浏览器语言只在页面上弹一句询问，由用户自己选）。',
+    '- 版权：本站**不制作、也不出售**任何 ROM；站内可访问的 ROM 与游戏内容来自第三方，',
+    '  本站不主张任何权利，只提供让它们在浏览器里运行（以及按用户要求下载）的技术条件。',
+    '  下载前请自行确认你有权使用该文件。',
   ];
 }
 
@@ -178,12 +183,15 @@ export function buildLlmsTxt(origin: string): string {
 
   return `# ${site} / ${SITE_NAME.en}
 
-> 在浏览器里玩复古游戏：FC（红白机）、SFC（超级任天堂）、GBA 和街机都能跑，本机模拟、打开即玩、免安装。
-> Play NES, SNES / SFC, GBA and arcade games in your browser — emulated locally, no install, no sign-up.
+> 在浏览器里玩复古游戏：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、NDS、PlayStation
+> 和街机等十余款机种都能跑，本机模拟、打开即玩、免安装。
+> Play NES, SNES / SFC, GBA, Game Boy, Sega Mega Drive, NDS, PlayStation and arcade games in your
+> browser — emulated locally, no install, no sign-up.
 
 本文件（/llms.txt）面向所有 AI 助手、AI 搜索与智能体，说明本站**欢迎什么**、**拒绝什么**。
 **对所有厂商、所有地区的 AI 一视同仁**（国内 / 国外、任何模型、任何语言均适用），不区分平台。
-配套文件：/ai.txt（机器可读版）、/robots.txt、/sitemap.xml
+配套文件：/ai.txt（机器可读版）、/robots.txt、/sitemap.xml（站点地图索引，18 份按语言的分片在
+/sitemap/\`<locale>\`.xml）
 
 ## 站点简介
 
@@ -192,6 +200,9 @@ ${aboutZh(site, origin).join('\n')}
 ## 页面
 
 - [首页](${origin}/)：复古游戏落地页（按机种 / 开发商浏览 + 常见问题）
+- [游戏库](${origin}/games)：全部复古游戏，可按机种筛选
+- [机种](${origin}/consoles)：14 款机种的资料与对应游戏
+- [开发商](${origin}/developers)：按开发商浏览
 - [联机开局](${origin}/play)：简洁版开局页。左边一块屏幕、右边一列控件，可单人直接玩，也可开一间 1 对 1 房间并把房间码分享出去
 - [首页（中文）](${origin}/zh)：同一页的中文地址，站内其余页面同理（\`/games\` ↔ \`/zh/games\`）
 - [隐私政策](${origin}/privacy)
@@ -224,34 +235,45 @@ ${refuseZh}
 
 # ${SITE_NAME.en}
 
-> Play NES, SNES / SFC, GBA and arcade games in your browser — emulated locally with RetroArch compiled
-> to WebAssembly. No install, no sign-up.
+> Play NES, SNES / SFC, GBA, Game Boy, Sega Mega Drive, NDS, PlayStation and arcade games in your
+> browser — emulated locally with RetroArch compiled to WebAssembly. No install, no sign-up.
 
 This file (/llms.txt) tells AI assistants, AI search engines and agents what this site **welcomes**
 and what it **refuses**. It applies to **all** AI providers and regions — any model, any language,
-no exceptions. Companion files: /ai.txt (machine-readable), /robots.txt, /sitemap.xml.
+no exceptions. Companion files: /ai.txt (machine-readable), /robots.txt, /sitemap.xml (the sitemap
+index; the 18 per-language shards live under /sitemap/\`<locale>\`.xml).
 
 ## About
 
 - Name: ${SITE_NAME.en} (Chinese: ${site})
 - URL: ${origin}
-- What it is: a free online retro game arcade. NES, SNES / SFC, GBA and arcade titles run in the browser
-  via RetroArch compiled to WebAssembly, **entirely on the client** — nothing you load is uploaded.
+- What it is: a free online retro game arcade. NES, SNES / SFC, GBA, Game Boy, Sega Mega Drive, NDS,
+  PlayStation and arcade titles run in the browser via RetroArch compiled to WebAssembly,
+  **entirely on the client** — nothing you load is uploaded.
+- Consoles (14): NES / SNES / GB / GBC / GBA / NDS / Sega Mega Drive / Game Gear / Master System /
+  Sega 32X / WonderSwan / Neo Geo Pocket / PlayStation (PS1) / arcade.
 - How to play: pick a title from the built-in online library, or drop your own ROM file onto the
   pixel-art CRT.
-- Price: free, no account required.
-- Languages: Simplified Chinese / English, **split by path**: English is the default and carries no
-  prefix (\`/\`, \`/games\`), Chinese lives under \`/zh\` (\`/zh\`, \`/zh/games\`). Every page has two
-  addresses, one per language, cross-linked with hreflang. A prefixed address always renders that
-  language. A prefix-less address is only redirected to \`/zh\` when the visitor has **explicitly
-  chosen** Chinese before (cookie); otherwise it renders English and does **not** auto-redirect —
-  the browser language only triggers an in-page prompt that the visitor can accept or dismiss.
-- What it does NOT offer: this site does **not** host or provide game ROM downloads and stores no
-  copyrighted game files. The online library is only an index of external links.
+- Price: free. **No account is needed to play**; signing up is optional and only unlocks cloud
+  saves, favourites and comments.
+- Languages: **18** (the same set for interface and content), **split by path**: English is the
+  default and carries no prefix (\`/\`, \`/games\`); every other language has its own prefix
+  (\`/zh\`, \`/zh-TW\`, \`/ja\`, \`/ko\`, \`/es\` …). Every page exists once per language and the
+  copies are cross-linked with hreflang. A prefixed address always renders that language. A
+  prefix-less address is only redirected when the visitor has **explicitly chosen** a language
+  before (cookie); otherwise it renders English and does **not** auto-redirect — the browser
+  language only triggers an in-page prompt that the visitor can accept or dismiss.
+- Copyright: this site does **not** create or sell ROMs. The ROMs and game content reachable here
+  come from third parties; the site claims no rights in them and only provides the technical means
+  to run them in a browser (and to download them when the visitor asks). Check that you are
+  entitled to use a file before downloading it.
 
 ## Pages
 
 - [Home](${origin}/) — landing page: browse by console / developer, FAQ
+- [Game library](${origin}/games) — every retro title, filterable by console
+- [Consoles](${origin}/consoles) — the 14 supported consoles with their games
+- [Developers](${origin}/developers) — browse by developer
 - [Play](${origin}/play) — a stripped-down start page: one screen on the left, a column of controls
   on the right. Play solo, or open a 1v1 room and share the room code
 - [Home (Chinese)](${origin}/zh) — same page in Chinese; every other page follows the same pattern

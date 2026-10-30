@@ -577,7 +577,7 @@ export const nl: Record<MessageKey, string> = {
    *    TV-grootte 那项把三档念出来 —— 和 en / ja 同一套写法，改开关就得回来改这句。
    */
   'tour.rail.body':
-    'Drie groepen, van boven naar beneden. Uiterlijk: thema (nacht / dag), taal (中文 / English / 日本語 / 한국어), volledig scherm (het scherm zelf gaat naar volledig scherm), eenvoudige modus (alleen muur, tv, bureau en vloer), TV-grootte (opent een keuze groot / middel / klein — het bureau groeit mee). Games: netplay, toetsindeling. Hulp: besturing, en het gastenboek.',
+    'Drie groepen, van boven naar beneden. Uiterlijk: thema (nacht / dag), taal (18 talen), volledig scherm (het scherm zelf gaat naar volledig scherm), eenvoudige modus (alleen muur, tv, bureau en vloer), TV-grootte (opent een keuze groot / middel / klein — het bureau groeit mee). Games: netplay, toetsindeling. Hulp: besturing, en het gastenboek.',
 
   'topLinks.label': 'Sitepagina’s',
   'topLinks.games': 'Gamelijst',
@@ -620,6 +620,10 @@ export const nl: Record<MessageKey, string> = {
   'gamesPage.share': 'Deze game delen',
   'gamesPage.shareCopied': 'Link gekopieerd',
   'gamesPage.shareFailed': 'Kopiëren mislukt',
+  'gamesPage.shareCopy': 'Link kopiëren',
+  'gamesPage.shareText': '{name} — speel het in je browser op {site}',
+  'gamesPage.shareEmail': 'E-mail',
+  'gamesPage.shareClose': 'Sluiten',
   'gamesPage.favorite': 'Aan favorieten toevoegen',
   'gamesPage.unfavorite': 'Uit favorieten verwijderen',
   'gamesPage.favoriteSignIn':

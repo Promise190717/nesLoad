@@ -3821,42 +3821,39 @@ export default function ConsoleScene({
           靠 `order` 从按钮前面挪到后面 —— 这里别为了好看改 DOM 顺序，
           大屏那侧靠的正是「读数在前、按钮在后」+ `right-full`。
 
-          ⚠️ **载入 NDS 卡带时整块不画**（2026-10-15 用户定的「nds 不支持双人」）：
-          它没有第二个手柄口，站里的联机也推不动它 —— 和游戏详情页那颗「联机游戏」
-          是同一个门禁。手打 `?room=` 进来的那条由 `PlayScene` / 这里各自忽略。
-
-          判据里 `status === 'idle'` 那半句**不能省**：房主先开房、再拖一盘 NDS 卡带
-          进来是完全可能的，那时候把入口收掉等于**把人关在房间里出不来** ——
-          「离开房间」那颗钮就在这个面板里。所以只收「本来就没在房间里」这一种。
+          ⚠️ 2026-10-30 起**不再按机种收这块**：原先 NDS 卡带载入时整块不画
+          （2026-10-15 用户定的「nds 不支持双人」）。那条已经撤了 —— NDS 走 EJS 核，
+          远端输入由 `pressButton` 的 `simulate_input` 分支落地（见 lib/emulator.ts），
+          技术上不构成限制；「这一款是不是单人」由详情页那颗钮判
+          （`games.players === 1` 就不画入口），这里不再重复。
+          **别把机种判据补回来。**
         */}
-        {!(rom?.console === 'nds' && netplayState.status === 'idle') && (
-          <div className="rail-netplay relative">
-            {/*
-              延迟。只在**真的连上**且**测出值**时出现：`rtt` 是 ping 的往返时间，
-              连上到第一次 ping 回来之间有一小段空窗，那时不显示比显示个「--」干净。
-              用 font-pixel 的英文/数字（`123ms`），和面板里那一处读数同一套。
-            */}
-            {netplayState.status === 'connected' && netplayState.rtt !== null && (
-              <span className="rail-rtt absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[12px] text-accent">
-                {Math.round(netplayState.rtt)}ms
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => setNetplayOpen(true)}
-              title={t('netplay.open')}
-              aria-label={t('netplay.open')}
-              className={`pixel-edge pxw-2 p-1.5 transition-colors ${
-                netplayState.status !== 'idle'
-                  ? 'pxc-accent bg-accent/20 text-accent'
-                  : 'bg-ink-800 text-ink-300 hover:text-accent'
-              }`}
-            >
-              <PlayersIcon size={16} />
-              <span className="row-label">{t('netplay.open')}</span>
-            </button>
-          </div>
-        )}
+        <div className="rail-netplay relative">
+          {/*
+            延迟。只在**真的连上**且**测出值**时出现：`rtt` 是 ping 的往返时间，
+            连上到第一次 ping 回来之间有一小段空窗，那时不显示比显示个「--」干净。
+            用 font-pixel 的英文/数字（`123ms`），和面板里那一处读数同一套。
+          */}
+          {netplayState.status === 'connected' && netplayState.rtt !== null && (
+            <span className="rail-rtt absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap font-pixel text-[12px] text-accent">
+              {Math.round(netplayState.rtt)}ms
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setNetplayOpen(true)}
+            title={t('netplay.open')}
+            aria-label={t('netplay.open')}
+            className={`pixel-edge pxw-2 p-1.5 transition-colors ${
+              netplayState.status !== 'idle'
+                ? 'pxc-accent bg-accent/20 text-accent'
+                : 'bg-ink-800 text-ink-300 hover:text-accent'
+            }`}
+          >
+            <PlayersIcon size={16} />
+            <span className="row-label">{t('netplay.open')}</span>
+          </button>
+        </div>
 
         {/* 自定义按键。单机双人也用得上，所以不跟着联机状态走。
             图标用手柄而不是键盘：这屋子里的按键本来就分手柄 / 键盘两条路，

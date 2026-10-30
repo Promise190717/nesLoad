@@ -64,11 +64,15 @@ function PlaySession({ id, game, room, host, lang }: {
   host: boolean;
   lang: string;
 }) {
-  // Determine NDS restrictions before PlayScene starts joining a room. A shared
-  // static document cannot decide this from per-request query parameters.
-  const soloOnly = game?.consoleType === 'nds';
-  const effectiveRoom = soloOnly ? '' : room;
-  const effectiveHost = host && !soloOnly;
+  /*
+   * 2026-10-30 起**这里不再按机种拦任何参数**：原先 NDS 会被按成单人
+   * （`soloOnly = game?.consoleType === 'nds'`，清掉 room、压掉 host）。
+   * 联机开不开现在由详情页那颗钮决定（`games.players === 1` 就不画入口），
+   * NDS 走 EJS 核、远端输入由 `pressButton` 的 `simulate_input` 分支落地，
+   * 技术上不构成限制。**别把这段补回来。**
+   */
+  const effectiveRoom = room;
+  const effectiveHost = host;
   /* ⚠️ `serverGame` 的三态用 `id ? game : undefined` 传，别写成 `game ?? undefined`：
      后者会把「有 id 但库里没有」（`null`）压成「没有 id」，`PlayScene` 于是又去打一遍接口。 */
   return <PlayScene serverGame={id ? game : undefined} initialMode={effectiveHost ? 'host' : 'solo'}

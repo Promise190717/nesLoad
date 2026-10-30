@@ -595,7 +595,7 @@ export const pt: Record<MessageKey, string> = {
     'Arraste um arquivo ROM (.nes, .sfc, .gba, .md, .gb …) ou um .zip de arcade para a TV, ou clique na tela para escolher um arquivo. Nenhuma ROM vem com este site — traga a sua.',
   'tour.rail.title': 'A coluna de interruptores',
   'tour.rail.body':
-    'Três grupos, de cima para baixo. Aparência: tema (noite / dia), idioma (中文 / English / 日本語 / 한국어), tela cheia (é a própria tela que fica em tela cheia), modo simples (deixe só a parede, a TV, a mesa e o chão), tamanho da TV (abre um seletor grande / média / pequena — a mesa acompanha). Jogos: jogo online, configuração de teclas. Ajuda: controles e livro de visitas.',
+    'Três grupos, de cima para baixo. Aparência: tema (noite / dia), idioma (18 idiomas), tela cheia (é a própria tela que fica em tela cheia), modo simples (deixe só a parede, a TV, a mesa e o chão), tamanho da TV (abre um seletor grande / média / pequena — a mesa acompanha). Jogos: jogo online, configuração de teclas. Ajuda: controles e livro de visitas.',
 
   'topLinks.label': 'Páginas do site',
   'topLinks.games': 'Lista de jogos',
@@ -639,6 +639,10 @@ export const pt: Record<MessageKey, string> = {
   'gamesPage.share': 'Compartilhar este jogo',
   'gamesPage.shareCopied': 'Link copiado',
   'gamesPage.shareFailed': 'Falha ao copiar',
+  'gamesPage.shareCopy': 'Copiar link',
+  'gamesPage.shareText': '{name} — jogue no navegador em {site}',
+  'gamesPage.shareEmail': 'E-mail',
+  'gamesPage.shareClose': 'Fechar',
   'gamesPage.favorite': 'Adicionar aos favoritos',
   'gamesPage.unfavorite': 'Remover dos favoritos',
   'gamesPage.favoriteSignIn':

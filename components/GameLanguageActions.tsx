@@ -91,7 +91,7 @@ export default function GameLanguageActions({
 }: {
   /** 开始游戏（solo）的地址，**已经带好 `?id=` 与 `mode=solo`** */
   playHref: string;
-  /** 联机游戏的地址；null = 这一台不支持联机（NDS），整颗不画 */
+  /** 联机游戏的地址；null = 这一款不支持联机（`players === 1` 的单人游戏），整颗不画 */
   hostHref: string | null;
   /** 下载页地址 */
   downloadHref: string;

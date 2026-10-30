@@ -661,7 +661,7 @@ export const id: Record<MessageKey, string> = {
   'tour.rail.title': 'Deretan sakelar di kanan',
   /* 逐项念那一列开关；语言那一项括号里写全名（和主题、电视大小那两处同一写法） */
   'tour.rail.body':
-    'Tiga kelompok, dari atas ke bawah. Tampilan: tema (malam / siang), bahasa (中文 / English / 日本語 / 한국어 / Bahasa Indonesia), Layar penuh (yang penuh adalah layar gamenya), Mode sederhana (sisakan hanya dinding, TV, meja, dan lantai), Ukuran TV (membuka pilihan besar / sedang / kecil — mejanya ikut melebar). Game: Main Jaringan, Pemetaan tombol. Bantuan: Panduan kontrol, dan Buku tamu.',
+    'Tiga kelompok, dari atas ke bawah. Tampilan: tema (malam / siang), bahasa (18 bahasa), Layar penuh (yang penuh adalah layar gamenya), Mode sederhana (sisakan hanya dinding, TV, meja, dan lantai), Ukuran TV (membuka pilihan besar / sedang / kecil — mejanya ikut melebar). Game: Main Jaringan, Pemetaan tombol. Bantuan: Panduan kontrol, dan Buku tamu.',
 
   'topLinks.label': 'Halaman situs',
   'topLinks.games': 'Daftar game',
@@ -713,6 +713,10 @@ export const id: Record<MessageKey, string> = {
   'gamesPage.share': 'Bagikan game ini',
   'gamesPage.shareCopied': 'Tautan tersalin',
   'gamesPage.shareFailed': 'Gagal menyalin',
+  'gamesPage.shareCopy': 'Salin tautan',
+  'gamesPage.shareText': '{name} — mainkan di browser di {site}',
+  'gamesPage.shareEmail': 'Email',
+  'gamesPage.shareClose': 'Tutup',
   /* 详情页那颗收藏钮有文字位，所以说清「点了会发生什么」 */
   'gamesPage.favorite': 'Tambah ke favorit',
   'gamesPage.unfavorite': 'Hapus dari favorit',

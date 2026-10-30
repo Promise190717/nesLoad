@@ -43,6 +43,22 @@ import { getGame, loadGamesBySlugs, MAX_PAGE_SIZE, type Game } from './sb-games'
 export { MAX_PAGE_SIZE };
 
 /**
+ * 合法的人数取值（`games.players`，2026-10-30 加）。
+ *
+ * 三档而不是「1..N 的整数」：这一列唯一的作用是决定详情页那颗「联机游戏」钮画不画，
+ * 精确到「支持 3 人」没有任何地方会用到。`null`（未指定）不在这个数组里，它单独合法。
+ *
+ * 这里的白名单与后台下拉框的选项（`components/AdminGames.tsx` 的「人数」那栏）必须一致 ——
+ * 接口用它对上传 / 修改两条路做校验，填了别的值就拒。
+ */
+export const PLAYER_OPTIONS = [1, 2, 4] as const;
+
+/** `PLAYER_OPTIONS` 的类型守卫，给接口层解析请求体用。 */
+export function isPlayerCount(value: unknown): value is (typeof PLAYER_OPTIONS)[number] {
+  return typeof value === 'number' && (PLAYER_OPTIONS as readonly number[]).includes(value);
+}
+
+/**
  * 「没标语言」的哨兵值。
  *
  * 为什么不干脆让 `game_roms.language` 可空：它是复合主键的一半，SQL 主键列不能为 NULL。
@@ -427,6 +443,13 @@ export interface NewGame {
   year: number | null;
   /** 开发商 slug（`/api/admin/developers` 那个下拉框的值，现在就是 slug）。 */
   developerId: string | null;
+  /**
+   * 最多支持几人同玩（`games.players`，2026-10-30 加）。`null` = 没填 / 不知道。
+   *
+   * 只有 1 / 2 / 4 三个合法值，由接口层校验（见 app/api/admin/games/route.ts）。
+   * 新增这条路（上传 ROM）一般拿不到这个信息 —— 传 `null`，之后再编辑填也行。
+   */
+  players: number | null;
 }
 
 /**
@@ -452,16 +475,25 @@ export async function insertGame(input: NewGame): Promise<Game & { group: GameGr
    *    很可能是空的，不能因此把中文版填好的资料清掉。
    */
   await query(
-    `INSERT INTO games (slug, console_type, image_url, year, developer_slug, series_slug)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO games (slug, console_type, image_url, year, developer_slug, series_slug, players)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (slug) DO UPDATE SET
        console_type   = excluded.console_type,
        image_url      = excluded.image_url,
        year           = COALESCE(excluded.year, games.year),
        developer_slug = COALESCE(excluded.developer_slug, games.developer_slug),
        series_slug    = COALESCE(excluded.series_slug, games.series_slug),
+       players        = COALESCE(excluded.players, games.players),
        updated_at     = now()`,
-    [group.slug, input.consoleType, input.imageUrl, input.year, developer?.id ?? null, seriesSlug]
+    [
+      group.slug,
+      input.consoleType,
+      input.imageUrl,
+      input.year,
+      developer?.id ?? null,
+      seriesSlug,
+      input.players,
+    ]
   );
 
   await writeTexts(group.slug, input.texts);
@@ -499,6 +531,11 @@ export interface GamePatch {
   language: string | null;
   year: number | null;
   developerId: string | null;
+  /**
+   * 最多支持几人同玩（2026-10-30 加）。**这里写 `null` 就是真的清空**（和开发商那栏同理：
+   * 表单每次带齐，用户选回「未指定」时要的就是清掉）。清空后详情页照画联机钮。
+   */
+  players: number | null;
 }
 
 export async function updateGame(id: string, patch: GamePatch): Promise<void> {
@@ -522,9 +559,10 @@ export async function updateGame(id: string, patch: GamePatch): Promise<void> {
             year           = ?,
             developer_slug = ?,
             series_slug    = ?,
+            players        = ?,
             updated_at     = now()
       WHERE slug = ?`,
-    [patch.consoleType, patch.year, developer?.id ?? null, seriesSlug, id]
+    [patch.consoleType, patch.year, developer?.id ?? null, seriesSlug, patch.players, id]
   );
 
   await writeTexts(id, patch.texts);

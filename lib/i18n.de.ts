@@ -563,7 +563,7 @@ export const de: Record<MessageKey, string> = {
     'Zieh eine ROM-Datei (.nes, .sfc, .gba, .md, .gb …) oder ein Arcade-.zip auf den Fernseher, oder klicke auf den Bildschirm, um eine Datei zu wählen. In diesem Repository sind keine ROMs enthalten — bring deine eigenen mit.',
   'tour.rail.title': 'Die Schalterleiste',
   'tour.rail.body':
-    'Drei Gruppen von oben nach unten. Aussehen: Design (Nacht / Tag), Sprache (中文 / English / 日本語 / 한국어), Vollbild (der Bildschirm selbst geht ins Vollbild), Einfacher Modus (nur Wand, Fernseher, Tisch und Boden), TV-Größe (öffnet eine Auswahl Groß / Mittel / Klein — der Tisch wächst mit). Spiele: Netplay, Tastenbelegung. Hilfe: Steuerung, und das Gästebuch.',
+    'Drei Gruppen von oben nach unten. Aussehen: Design (Nacht / Tag), Sprache (18 Sprachen), Vollbild (der Bildschirm selbst geht ins Vollbild), Einfacher Modus (nur Wand, Fernseher, Tisch und Boden), TV-Größe (öffnet eine Auswahl Groß / Mittel / Klein — der Tisch wächst mit). Spiele: Netplay, Tastenbelegung. Hilfe: Steuerung, und das Gästebuch.',
 
   'topLinks.label': 'Seiten',
   'topLinks.games': 'Spieleliste',
@@ -606,6 +606,10 @@ export const de: Record<MessageKey, string> = {
   'gamesPage.share': 'Dieses Spiel teilen',
   'gamesPage.shareCopied': 'Link kopiert',
   'gamesPage.shareFailed': 'Kopieren fehlgeschlagen',
+  'gamesPage.shareCopy': 'Link kopieren',
+  'gamesPage.shareText': '{name} — spiele es im Browser auf {site}',
+  'gamesPage.shareEmail': 'E-Mail',
+  'gamesPage.shareClose': 'Schließen',
   'gamesPage.favorite': 'Zu Favoriten hinzufügen',
   'gamesPage.unfavorite': 'Aus Favoriten entfernen',
   'gamesPage.favoriteSignIn':

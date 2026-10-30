@@ -597,7 +597,7 @@ export const vi: Record<MessageKey, string> = {
   'tour.rail.title': 'Dãy công tắc bên phải',
   /* 语言那一项照 `theme` / `tvSize` 的写法把选项念出来 —— 现在多了一档 Tiếng Việt */
   'tour.rail.body':
-    'Ba nhóm, từ trên xuống. Hiển thị: chế độ (ban đêm / ban ngày), ngôn ngữ (中文 / English / 日本語 / 한국어 / Tiếng Việt), toàn màn hình (chỉ màn hình game vào toàn màn hình), chế độ tối giản (chỉ giữ tường, TV, bàn và sàn), cỡ TV (mở bảng chọn lớn / vừa / nhỏ — bàn cũng rộng ra theo). Game: chơi qua mạng, gán phím. Trợ giúp: hướng dẫn phím, sổ lưu bút.',
+    'Ba nhóm, từ trên xuống. Hiển thị: chế độ (ban đêm / ban ngày), ngôn ngữ (18 ngôn ngữ), toàn màn hình (chỉ màn hình game vào toàn màn hình), chế độ tối giản (chỉ giữ tường, TV, bàn và sàn), cỡ TV (mở bảng chọn lớn / vừa / nhỏ — bàn cũng rộng ra theo). Game: chơi qua mạng, gán phím. Trợ giúp: hướng dẫn phím, sổ lưu bút.',
 
   'topLinks.label': 'Các trang của site',
   'topLinks.games': 'Danh sách game',
@@ -640,6 +640,10 @@ export const vi: Record<MessageKey, string> = {
   'gamesPage.share': 'Chia sẻ game này',
   'gamesPage.shareCopied': 'Đã sao chép liên kết',
   'gamesPage.shareFailed': 'Sao chép thất bại',
+  'gamesPage.shareCopy': 'Sao chép liên kết',
+  'gamesPage.shareText': '{name} — chơi trên trình duyệt tại {site}',
+  'gamesPage.shareEmail': 'Email',
+  'gamesPage.shareClose': 'Đóng',
   'gamesPage.favorite': 'Thêm vào yêu thích',
   'gamesPage.unfavorite': 'Bỏ khỏi yêu thích',
   'gamesPage.favoriteSignIn':

@@ -554,7 +554,7 @@ export const ko: Record<MessageKey, string> = {
     'ROM 파일(.nes / .sfc / .gba / .md / .gb 등)이나 아케이드 .zip을 TV에 끌어다 놓으면 즐길 수 있습니다. 화면을 클릭해 파일을 골라도 됩니다.',
   'tour.rail.title': '오른쪽 스위치 줄',
   'tour.rail.body':
-    '위에서부터 세 그룹입니다. 겉모습: 테마(나이트 / 데이), 언어(中文 / English / 日本語 / 한국어), 전체 화면(전체 화면이 되는 것은 화면 자체), 심플 모드(벽, TV, 책상, 바닥만 남김), TV 크기(크게 / 보통 / 작게 3단계, 책상도 함께 길어집니다). 게임: 온라인 대전, 키 설정. 도움말: 키 설명, 방명록.',
+    '위에서부터 세 그룹입니다. 겉모습: 테마(나이트 / 데이), 언어(18개 언어), 전체 화면(전체 화면이 되는 것은 화면 자체), 심플 모드(벽, TV, 책상, 바닥만 남김), TV 크기(크게 / 보통 / 작게 3단계, 책상도 함께 길어집니다). 게임: 온라인 대전, 키 설정. 도움말: 키 설명, 방명록.',
 
   'topLinks.label': '사이트 페이지',
   'topLinks.games': '게임 목록',
@@ -597,6 +597,10 @@ export const ko: Record<MessageKey, string> = {
   'gamesPage.share': '이 게임 공유',
   'gamesPage.shareCopied': '복사했습니다',
   'gamesPage.shareFailed': '복사하지 못했습니다',
+  'gamesPage.shareCopy': '링크 복사',
+  'gamesPage.shareText': '{name} — {site}에서 브라우저로 바로 플레이',
+  'gamesPage.shareEmail': '이메일',
+  'gamesPage.shareClose': '닫기',
   'gamesPage.favorite': '즐겨찾기에 추가',
   'gamesPage.unfavorite': '즐겨찾기됨',
   'gamesPage.favoriteSignIn':

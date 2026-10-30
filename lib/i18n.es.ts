@@ -600,7 +600,7 @@ export const es: Record<MessageKey, string> = {
   'tour.rail.title': 'La columna de interruptores',
   /* 语言那一项照 en 列全名（语言名用各自的语言写，不翻译） */
   'tour.rail.body':
-    'Tres grupos, de arriba abajo. Aspecto: tema (noche / día), idioma (中文 / English / 日本語 / 한국어), pantalla completa (lo que se pone a pantalla completa es la pantalla), modo simple (deja solo la pared, el televisor, la mesa y el suelo), tamaño del televisor (abre un selector grande / mediano / pequeño; la mesa se ensancha con él). Juegos: juego en red, configuración de teclas. Ayuda: controles y libro de visitas.',
+    'Tres grupos, de arriba abajo. Aspecto: tema (noche / día), idioma (18 idiomas), pantalla completa (lo que se pone a pantalla completa es la pantalla), modo simple (deja solo la pared, el televisor, la mesa y el suelo), tamaño del televisor (abre un selector grande / mediano / pequeño; la mesa se ensancha con él). Juegos: juego en red, configuración de teclas. Ayuda: controles y libro de visitas.',
 
   /* 内容页顶栏 / 小屏菜单抽屉 */
   'topLinks.label': 'Páginas del sitio',
@@ -647,6 +647,10 @@ export const es: Record<MessageKey, string> = {
   'gamesPage.share': 'Compartir este juego',
   'gamesPage.shareCopied': 'Enlace copiado',
   'gamesPage.shareFailed': 'No se pudo copiar',
+  'gamesPage.shareCopy': 'Copiar enlace',
+  'gamesPage.shareText': '{name} — juégalo en el navegador en {site}',
+  'gamesPage.shareEmail': 'Correo',
+  'gamesPage.shareClose': 'Cerrar',
   'gamesPage.favorite': 'Añadir a favoritos',
   'gamesPage.unfavorite': 'Quitar de favoritos',
   'gamesPage.favoriteSignIn':

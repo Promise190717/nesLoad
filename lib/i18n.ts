@@ -1438,7 +1438,7 @@ const en = {
    * 和 theme（night / day）、TV size（大 / 中 / 小）那两处「把选项念出来」的写法一致。
    */
   'tour.rail.body':
-    'Three groups, top to bottom. Look: theme (night / day), language (中文 / English / 日本語 / 한국어), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Netplay, Key bindings. Help: Controls help, and the Guestbook.',
+    'Three groups, top to bottom. Look: theme (night / day), language (18 languages), Fullscreen (it is the screen itself that goes fullscreen), Simple mode (keep only the wall, TV, desk and floor), TV size (opens a large / medium / small picker — the desk widens with it). Games: Netplay, Key bindings. Help: Controls help, and the Guestbook.',
 
   /*
    * 游戏列表 / 详情 / 下载三页的**界面文案**（2026-10-12）。
@@ -1551,10 +1551,22 @@ const en = {
   'common.home': 'Home',
   'gamesPage.play': 'Play now',
   'gamesPage.download': 'Download ROM',
-  /* 详情页「分享游戏」：点一下复制这一页的规范地址（见 components/ShareGameButton.tsx） */
+  /*
+   * 详情页「分享游戏」：点开是分享弹窗 —— 三方平台 / 邮件 / 复制链接
+   * （见 components/ShareGameButton.tsx）。
+   */
   'gamesPage.share': 'Share this game',
   'gamesPage.shareCopied': 'Link copied',
   'gamesPage.shareFailed': 'Copy failed',
+  'gamesPage.shareCopy': 'Copy link',
+  /*
+   * 分享到社交平台时带的那句话。`{name}` = 游戏名，`{site}` = 站名
+   * （I18nProvider 统一注入，见它的注释）。别写成完整长句 ——
+   * X 那类平台把地址算进长度，正文只剩几十个字符可用。
+   */
+  'gamesPage.shareText': '{name} — play it in your browser on {site}',
+  'gamesPage.shareEmail': 'Email',
+  'gamesPage.shareClose': 'Close',
   /*
    * 详情页那颗收藏按钮（2026-10-13 加，挨着「开始游戏」）。见 components/FavoriteButton.tsx。
    *
@@ -2335,7 +2347,7 @@ const zh: Record<MessageKey, string> = {
   /* ⚠️ 2026-10-15：去掉了「游戏库」那一项；2026-10-16：语言那一项写成四种语言的全名。
      两处的理由见 en 那份同一处的注释 */
   'tour.rail.body':
-    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（中文 / English / 日本語 / 한국어）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：联机、自定义按键。帮助：按键说明、留言本。',
+    '分三组，从上到下。外观：主题（夜晚 / 白天）、语言（18 种）、全屏（全屏的是屏幕本身）、简洁模式（只留背景墙、电视机、桌子和地面）、电视机大小（点开是 大 / 中 / 小 三档，桌子跟着变长）。游戏：联机、自定义按键。帮助：按键说明、留言本。',
 
   /* 游戏列表 / 详情 / 下载三页的界面文案，见上面英文那份的注释 */
   'topLinks.label': '站点页面',
@@ -2387,6 +2399,10 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.share': '分享游戏',
   'gamesPage.shareCopied': '已复制',
   'gamesPage.shareFailed': '复制失败',
+  'gamesPage.shareCopy': '复制链接',
+  'gamesPage.shareText': '{name} — 在 {site} 上直接开玩',
+  'gamesPage.shareEmail': '电子邮件',
+  'gamesPage.shareClose': '关闭',
   /* 收藏按钮，见英文表里那一段的说明 */
   'gamesPage.favorite': '收藏',
   'gamesPage.unfavorite': '已收藏',

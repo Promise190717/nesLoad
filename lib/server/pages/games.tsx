@@ -241,21 +241,27 @@ function parseQuery(raw: SearchParams): {
  * 本页要的数据。
  *
  * **两层缓存，各管一件事**：
- *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 30 天）——
- *      请求根本没打到 D1。它内部那个 `total` 还另有 `countGamesCached` 一层
+ *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 7 天）——
+ *      请求根本没打到数据库。它内部那个 `total` 还另有 `countGamesCached` 一层
  *      （键里没有 offset，所以翻多少页都只数一次全表）。TTL 与理由见
- *      lib/server/games.ts 那边。
+ *      `lib/server/sb-games.ts` 那三个常量。
+ *      ⚠️ 但**搜索时这两层都不生效**：关键词非空就直接查库（见下面那段）。
  *   ② 外层 `cache()`（React，只在**同一次请求**内有效）—— 让 `generateMetadata`
  *      与页面正文共用同一次查询：两处都要 `total`（一个拼 description 里的条数，
  *      一个算总页数），少了它同一份数据要取两遍（即使内层命中缓存，也得各走一次
  *      键查找 + 反序列化）。
  *
- * ⚠️ 缓存键 = `['games:list', offset, limit, keyword, consoleType, language]`（`unstable_cache`
- * 自动把入参拼进键里）。所以**翻页 / 换关键词 / 换机种各是一份缓存**，不会串味；
- * 命中不了的键照常回源。关键词也进键意味着 `?q=xxx` 会被缓存 —— 那一份本来就被
- * `noindex` 挡在收录之外，键的基数由真实搜索词决定，且每条都有 30 天 TTL、
- * 超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀。机种只有十二个取值 + null，
- * 基数更是定死的。
+ * ⚠️ 缓存键 = offset / limit / keyword / consoleType / language + `locale`（`unstable_cache`
+ * 自动把入参拼进键里）。所以**翻页 / 换机种 / 换语言各是一份缓存**，不会串味；
+ * 命中不了的键照常回源。
+ *
+ * ⚠️ **带关键词的那一份根本不写缓存**（2026-10-30 用户定，见 `listGamesPageCached`）。
+ *    这里原来写的是「关键词也进键意味着 `?q=xxx` 会被缓存，那一份被 `noindex` 挡住，
+ *    每条都有 30 天 TTL、超量时由 Next 自己的缓存 LRU 淘汰，不会无限膨胀」——
+ *    **后面半句是错的**：OpenNext 的 R2 增量缓存没有 LRU、没有容量上限、也不会到期
+ *    删除，过期只是「下次访问时覆盖写同一个 key」。一个再也不会被搜第二次的词，
+ *    它的对象会永久留在桶里，爬虫扫一遍就是几万条常驻对象。
+ *    关键词是**无界**的键，offset（有上界）和 consoleType（十二个取值 + null）才有界。
  *
  * ⚠️ 键末尾那维 `language` **这一页永远传 `null`**：语种筛选是机种专题页
  *    （`/consoles/[id]` 的 `?lang=`）的事，这一页没有那个筛选项。位置留着是为了

@@ -596,7 +596,7 @@ export const it: Record<MessageKey, string> = {
     'Trascina un file ROM (.nes, .sfc, .gba, .md, .gb …) o uno .zip arcade sulla TV, oppure clicca lo schermo per scegliere un file. Nessuna ROM è inclusa nel sito — porta la tua.',
   'tour.rail.title': 'La colonna degli interruttori',
   'tour.rail.body':
-    'Tre gruppi, dall\'alto in basso. Aspetto: tema (notte / giorno), lingua (Italiano / English / 中文 / 日本語 / 한국어), schermo intero (va a schermo intero lo schermo stesso), modalità semplice (lascia solo muro, TV, scrivania e pavimento), dimensione TV (apre un selettore grande / media / piccola — la scrivania si allarga con essa). Giochi: gioco in rete, assegnazione tasti. Aiuto: comandi, libro degli ospiti.',
+    'Tre gruppi, dall\'alto in basso. Aspetto: tema (notte / giorno), lingua (18 lingue), schermo intero (va a schermo intero lo schermo stesso), modalità semplice (lascia solo muro, TV, scrivania e pavimento), dimensione TV (apre un selettore grande / media / piccola — la scrivania si allarga con essa). Giochi: gioco in rete, assegnazione tasti. Aiuto: comandi, libro degli ospiti.',
 
   'topLinks.label': 'Pagine del sito',
   'topLinks.games': 'Elenco giochi',
@@ -642,6 +642,10 @@ export const it: Record<MessageKey, string> = {
   'gamesPage.share': 'Condividi questo gioco',
   'gamesPage.shareCopied': 'Link copiato',
   'gamesPage.shareFailed': 'Copia non riuscita',
+  'gamesPage.shareCopy': 'Copia link',
+  'gamesPage.shareText': '{name} — giocalo nel browser su {site}',
+  'gamesPage.shareEmail': 'Email',
+  'gamesPage.shareClose': 'Chiudi',
   'gamesPage.favorite': 'Aggiungi ai preferiti',
   'gamesPage.unfavorite': 'Rimuovi dai preferiti',
   'gamesPage.favoriteSignIn':

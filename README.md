@@ -260,7 +260,7 @@ pnpm dev
 | `/games/[id]` | 单款游戏的资料页：封面、标题、机种 / 年份 / 开发者 / 系列 / 语言、说明，加**四颗**主按钮（2026-10-14 加的「联机游戏」见下）。带 `VideoGame` + `BreadcrumbList` 结构化数据。 |
 | `/games/[id]/download` | 下载页：点「开始下载」**等 6 秒**才真的开始下（用户要求）。**只有这一颗按钮**，没有别的下载入口。 |
 
-- 详情页动作区：第一层四颗实体钮 —— **开始游戏** → `/room?id=<id>`（回房间，唯一带强调色）、**联机游戏** → `/play?id=<id>`（2026-10-14 加，简洁开局页，见上）、**收藏**、**下载 ROM** → 下载页。第二层两枚无描边「图标 + 文字」链接：**分享游戏**（把这一页的地址复制进剪贴板，`components/ShareGameButton.tsx`）、**反馈问题**。除分享与反馈之外全是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走。
+- 详情页动作区：第一层四颗实体钮 —— **开始游戏** → `/room?id=<id>`（回房间，唯一带强调色）、**联机游戏** → `/play?id=<id>`（2026-10-14 加，简洁开局页，见上）、**收藏**、**下载 ROM** → 下载页。第二层两枚无描边「图标 + 文字」链接：**分享游戏**（弹分享面板：X / Facebook / Reddit / Telegram / WhatsApp + 邮件 + 复制链接，`components/ShareGameButton.tsx`）、**反馈问题**。除分享与反馈之外全是 `<Link>` —— 它们去的是真地址，得能被复制、被新标签打开、被爬虫顺着走。
 - 📌 **列表页有缓存**：`/games` 的取数是 `unstable_cache` 包过的（`lib/server/sb-games.ts` 的 `listGamesPageCached`），**TTL 30 天**（2026-10-14 从 30 分钟拉到 12 小时 —— 用户为压 `rows_read` 额度拍板；2026-10-16 提到 24 小时、2026-10-20 再提到 30 天）。**「总数」另有一层独立缓存**（`countGamesCached`，键里没有 offset）：翻多少页都只数一次全表，这是这次改动的重点。⚠️ **2026-10-20 起所有接口都不吃缓存**：房间的在线库弹窗（`/api/games`）与单条接口（`/api/games/[id]`）都实时查库（在那之前它们走同一套 `unstable_cache`）；**后台列表（`/api/admin/games`）本来就走不缓存的 `listGamesPage`**。副作用：**后台上传的新游戏最多晚 30 天才出现在这一页**（弹窗与后台自己那张列表不受影响，它们实时）。
 - 详情页 / 下载页的 meta description 会**把后台填的那句「说明」放在最前面**（截到 100 字），后面接一句通用的「能玩、能下载」。没填说明就只用通用那句 —— **不编造**剧情 / 发行商那类信息。
 - 游戏不存在时两页都 `notFound()`，落到 `app/[locale]/games/[id]/not-found.tsx`（一页盖住两条路由），带 `noindex`。
@@ -660,7 +660,8 @@ app/
                     （公开页面，见「机种」一节）
   admin/          后台（**不在 [locale] 下**：不做语言前缀，语言由 cookie 定）
   api/            接口（**刻意不挂 middleware**，见 middleware.ts 顶部注释）
-  sitemap.ts      sitemap.xml（每条地址出四份并互指 hreflang）
+  sitemap.ts      sitemap 分片：/sitemap/<locale>.xml（18 份，每条地址互指 hreflang）
+  sitemap-index.xml/  sitemap 索引，对外是 /sitemap.xml（由 next.config.js 的 rewrite 挂过去）
   robots.ts       robots.txt
   llms.txt/       给 AI 的站点政策（自然语言版，正文在 lib/ai-policy.ts）
   ai.txt/         同上，机器可读版（Spawning 的 ai.txt 约定）

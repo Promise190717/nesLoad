@@ -24,6 +24,7 @@ import { assertAdmin } from '@/lib/server/admin-guard';
 import {
   findGameDuplicate,
   insertGame,
+  isPlayerCount,
   listAdminGamesPage,
   MAX_PAGE_SIZE,
   normalizeRomLanguage,
@@ -228,6 +229,16 @@ export async function POST(request: Request) {
   }
 
   /*
+   * 人数（2026-10-30 加）：空 = 未指定（`null`，详情页照画联机钮）。
+   * 上传这条路一般拿不到这个信息，所以缺省就是 `null`，不填不是错。
+   */
+  const playersText = optionalText(form.get('players'));
+  const players = playersText ? Number(playersText) : null;
+  if (players !== null && !isPlayerCount(players)) {
+    return fail('bad-players', '人数只能是 1 / 2 / 4，或留空');
+  }
+
+  /*
    * 文案（2026-10-16 起进 `game_texts` 侧表）。两条来源，优先级从高到低：
    *   ① 表单里的 `texts`（**JSON，四个语言**）—— 爬取那条路（lib/admin-import.ts）带的；
    *   ② 上面那几栏扁平字段（`title` / `title_en` / `title_ja` / `title_ko`，
@@ -314,6 +325,8 @@ export async function POST(request: Request) {
       // 上面已经取好（判重也用它），别再解析一遍
       language,
       year,
+      // 同上：空 = 未指定。只用来决定详情页那颗「联机游戏」钮画不画（见详情页 hostHref）
+      players,
       /*
        * 开发商：表单里是一个下拉框，传上来的是 **developers.slug**（就是它的 id）。
        * 名字不再冗余进文案表 —— `game_texts` 里没有厂名列，读的时候 JOIN

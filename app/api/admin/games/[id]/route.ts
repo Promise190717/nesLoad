@@ -22,6 +22,7 @@ import { assertAdmin } from '@/lib/server/admin-guard';
 import {
   deleteGame,
   findGameDuplicate,
+  isPlayerCount,
   normalizeRomLanguage,
   updateGame,
   type GamePatch,
@@ -68,6 +69,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const year = typeof body.year === 'number' ? body.year : null;
   if (year !== null && !Number.isInteger(year)) {
     return fail('bad-year', '年份必须是整数');
+  }
+
+  /*
+   * 人数（2026-10-30 加）：`null` / 缺省 = 未指定（详情页照画联机钮）。
+   * 只收 1 / 2 / 4 —— 和后台下拉框、`PLAYER_OPTIONS` 三处保持一致。
+   */
+  const players = typeof body.players === 'number' ? body.players : null;
+  if (players !== null && !isPlayerCount(players)) {
+    return fail('bad-players', '人数只能是 1 / 2 / 4，或留空');
   }
 
   /*
@@ -118,6 +128,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // 上面已经取好（判重也用它），别再解析一遍
     language,
     year,
+    // 空 / 缺省 = 未指定。这是唯一影响详情页「联机游戏」钮画不画的字段
+    players,
     // 开发商下拉框给的是 developers.id，名字由数据层反查（见 lib/server/games.ts）
     developerId: optionalText(body.developerId),
   };

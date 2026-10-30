@@ -564,7 +564,7 @@ export const zhTW: Record<MessageKey, string> = {
     '把 ROM 檔案（.nes / .sfc / .gba / .md / .gb 等）或街機 .zip 拖到電視上就能玩，也可以直接點螢幕挑檔案。',
   'tour.rail.title': '右邊這一排開關',
   'tour.rail.body':
-    '分成三組，從上到下。外觀：主題（夜間 / 日間）、語言（中文 / English / 日本語 / 한국어）、全螢幕（全螢幕的是螢幕本身）、簡潔模式（只留背景牆、電視機、桌子和地板）、電視大小（點開是大 / 中 / 小三級，桌子會跟著變長）。遊戲：連線、自訂按鍵。說明：按鍵說明、留言板。',
+    '分成三組，從上到下。外觀：主題（夜間 / 日間）、語言（18 種）、全螢幕（全螢幕的是螢幕本身）、簡潔模式（只留背景牆、電視機、桌子和地板）、電視大小（點開是大 / 中 / 小三級，桌子會跟著變長）。遊戲：連線、自訂按鍵。說明：按鍵說明、留言板。',
 
   'topLinks.label': '站台頁面',
   'topLinks.games': '遊戲列表',
@@ -607,6 +607,10 @@ export const zhTW: Record<MessageKey, string> = {
   'gamesPage.share': '分享遊戲',
   'gamesPage.shareCopied': '已複製',
   'gamesPage.shareFailed': '複製失敗',
+  'gamesPage.shareCopy': '複製連結',
+  'gamesPage.shareText': '{name} — 在 {site} 上直接開玩',
+  'gamesPage.shareEmail': '電子郵件',
+  'gamesPage.shareClose': '關閉',
   'gamesPage.favorite': '收藏',
   'gamesPage.unfavorite': '已收藏',
   'gamesPage.favoriteSignIn': '登入後才能收藏 —— 點右上角頂欄那顆登入鈕。',

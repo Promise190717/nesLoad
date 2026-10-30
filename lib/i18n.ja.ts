@@ -559,7 +559,7 @@ export const ja: Record<MessageKey, string> = {
     'ROM ファイル（.nes / .sfc / .gba / .md / .gb など）かアーケードの .zip をテレビにドロップすると遊べます。画面をクリックしてファイルを選ぶこともできます。',
   'tour.rail.title': '右側のスイッチ列',
   'tour.rail.body':
-    '上から3つのグループです。見た目：テーマ（ナイト / デイ）、言語（中文 / English / 日本語 / 한국어）、全画面（全画面になるのは画面そのもの）、シンプルモード（壁・テレビ・机・床だけを残す）、テレビの大きさ（大 / 中 / 小 の3段、机も一緒に伸びます）。ゲーム：通信対戦、キー設定。ヘルプ：キー説明、伝言板。',
+    '上から3つのグループです。見た目：テーマ（ナイト / デイ）、言語（18 言語）、全画面（全画面になるのは画面そのもの）、シンプルモード（壁・テレビ・机・床だけを残す）、テレビの大きさ（大 / 中 / 小 の3段、机も一緒に伸びます）。ゲーム：通信対戦、キー設定。ヘルプ：キー説明、伝言板。',
 
   'topLinks.label': 'サイトのページ',
   'topLinks.games': 'ゲーム一覧',
@@ -602,6 +602,10 @@ export const ja: Record<MessageKey, string> = {
   'gamesPage.share': 'このゲームを共有',
   'gamesPage.shareCopied': 'コピーしました',
   'gamesPage.shareFailed': 'コピーできませんでした',
+  'gamesPage.shareCopy': 'リンクをコピー',
+  'gamesPage.shareText': '{name} — {site} でブラウザから遊べます',
+  'gamesPage.shareEmail': 'メール',
+  'gamesPage.shareClose': '閉じる',
   'gamesPage.favorite': 'お気に入りに追加',
   'gamesPage.unfavorite': 'お気に入り済み',
   'gamesPage.favoriteSignIn':
