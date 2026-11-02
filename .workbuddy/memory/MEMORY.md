@@ -45,7 +45,7 @@
 
 - 目录页维度全是路径段（分页 `/page/N`、机种、语种，按 console→page / lang→page 嵌套；搜索是动态路由 `?q=`）；链接一律 `next/link`。地址构造唯一出口 `gamesHref`/`consoleHref`/`pageHref`；**别加新查询参数**（middleware 只兜旧外链）。
 - 缓存唯一出口 `lib/server/cache.ts` `cached()`；改数据/查询形态键尾版本 +1；缓存留页侧不下沉。
-- 🔴 2026-10-22 起所有前台页 `dynamic='force-dynamic'`（ISR 全撤），数据缓存统一 7 天；robots/sitemap/llms.txt/ai.txt 路由缓存 86400 保留。后台改数据靠 `revalidateTag('games',{expire:0})`；机种/开发商缓存没挂 tag，改完硬等 7 天。**迁 Vercel 完成前别往 Cloudflare 发这版**（force-dynamic + 免费 10ms = 1102）。
+- 🔴 2026-10-22 数据层 ISR 全撤：`cached()` 统一 7 天；但**页面级 ISR 还在**（2026-11-02 核实：详情 `/games/[id]`、首页、列表页都是 `export const revalidate = 604800` 的整页 app 缓存，桶里 100KB+ 对象就是它们）。只有 search / `/play` / account / catalog 搜索是 `force-dynamic`。robots/sitemap/llms.txt/ai.txt 路由缓存 86400 保留。后台改数据靠 `revalidateTag('games',{expire:0})`；机种/开发商缓存没挂 tag，改完硬等 7 天。
 - 🔴 **列表型 `<Link>` 一律 `prefetch={false}`**：卡片网格 / 机种卡 / 开发商卡一页几十个，开着预取等于每来一个人就额外渲染几十次详情页 RSC（2026-10-23 错误率 54% 的主因）。只有顶栏 / 返回 / 翻页这类每页一两个的链接保留预取。
 - 🔴 **首屏可见的「动作型」`<Link>` 也要 `prefetch={false}`**（详情页三颗主钮 play/联机/下载 + 开发商链接，2026-10-23 补）。全站**没有 `loading.tsx`**，所以 Next 的预取没有边界可停、只能整页渲染 ⇒ 一次详情页访问会拖出 4 个额外整页渲染。判断口径：这是「动作」还是「浏览路径的下一步」；动作一次访问最多点一个，预取却是 100% 触发。页脚（`footer`，首屏视口外）不用管，IntersectionObserver 不触发。
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`；`/login`、`/account` Link `prefetch={false}`。
