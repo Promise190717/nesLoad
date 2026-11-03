@@ -23,7 +23,9 @@
  *
  * 每次命中多一次解压，走 Workers 原生的 `DecompressionStream`，100 KB 量级约 0.2-0.4 ms，
  * 相比条目本身 `JSON.parse` 已经要付的钱是小头；而压缩只发生在**写入**（一条 7 天才写一次），
- * 不进读热路径。要回退：把 `COMPRESS` 改 `false` 重新发版，读侧认魔数，两种格式可共存。
+ * 不进读热路径 —— 2026-11-03 起写入整段（压缩 + R2 put）还挪进了 `ctx.waitUntil`，
+ * 连那 100-400 ms 的 R2 往返都不再压 TTFB，见 `inBackground`。
+ * 要回退：把 `COMPRESS` 改 `false` 重新发版，读侧认魔数，两种格式可共存。
  *
  * ## 否掉的方案
  *
@@ -88,6 +90,33 @@ function isGzip(bytes: Uint8Array): boolean {
   return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
+/**
+ * 把「压缩 + 写 R2」推到响应之后（`ctx.waitUntil`）。
+ *
+ * 为什么不 await：这两步只在**未命中**时发生，而每条未命中本来就要付一整趟渲染的钱，
+ * R2 的往返延迟（国内到 R2 通常 100-400 ms）是纯等待，白白压在 TTFB 上。
+ * 推后之后客户端先拿到 HTML，写缓存在后台完成 —— 语义上没问题，缓存写入本来就是
+ * 尽力而为（open-next 原实现也是 `await`，但它没有「10 ms CPU」这个上限要顾）。
+ *
+ * ⚠️ **object key 必须在同步段算好再传进来**：`getCloudflareContext()` 靠
+ *    async local storage，进了 `waitUntil` 的异步上下文之后可能已经取不到了，
+ *    那样会算出一个 `buildId=undefined` 的 key，症状是「写得进、永远读不到」。
+ *    同理 `bucket()` 也在同步段取。
+ *
+ * ⚠️ 失败只打日志：缓存没写进去顶多下次再渲染一遍，不能让一条写入把已经渲染好的
+ *    页面打成 500。
+ */
+function inBackground(task: Promise<unknown>): void {
+  try {
+    getCloudflareContext().ctx.waitUntil(task.catch((error) => {
+      console.error('[cache] 后台写入失败', error);
+    }));
+  } catch {
+    // 拿不到 ctx（理论上只有非 Workers 环境）—— 退化成不等待，别因为写缓存抛错
+    void task.catch((error) => console.error('[cache] 写入失败', error));
+  }
+}
+
 async function pipeThrough(
   bytes: Uint8Array,
   transform: CompressionStream | DecompressionStream
@@ -132,13 +161,19 @@ async function set(key: string, value: unknown, cacheType: CacheType = 'cache') 
   // `JSON.stringify(undefined)` 返回 undefined —— 那种情况 open-next 走的是 delete，不该到这儿。
   if (!json) return;
 
-  const bytes = new TextEncoder().encode(json);
-  const payload =
-    COMPRESS && bytes.byteLength >= MIN_COMPRESS_BYTES
-      ? await pipeThrough(bytes, new CompressionStream('gzip'))
-      : bytes;
+  // key 与 binding 都在同步段取（见 inBackground 的说明）
+  const objectName = objectKey(key, cacheType);
 
-  await r2.put(objectKey(key, cacheType), payload);
+  inBackground(
+    (async () => {
+      const bytes = new TextEncoder().encode(json);
+      const payload =
+        COMPRESS && bytes.byteLength >= MIN_COMPRESS_BYTES
+          ? await pipeThrough(bytes, new CompressionStream('gzip'))
+          : bytes;
+      await r2.put(objectName, payload);
+    })()
+  );
 }
 
 /** 和 open-next 原实现一致：删除只针对 `cache` 类型，`fetch` 条目留给 revalidate 自然覆盖。 */

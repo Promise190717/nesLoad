@@ -40,6 +40,13 @@
  * ⚠️ 缓存条目**跨发版存活**：发版后最多 10 分钟内可能混着旧版 HTML。
  *    不可接受就在仪表盘 purge 一次；可接受（默认）就不用管。
  *
+ * 🔴 **2026-11-03：这个文件从 10-24 起一直没生效过。** `wrangler.jsonc` 里同时存在
+ *    两个 `main` 键（这个 + `.open-next/worker.js`），JSONC 重复键取最后一个，
+ *    于是入口实际是生成产物，这层边缘缓存一次都没跑过。表现就是「R2 明明 HIT，
+ *    刷新同一页还是 1102」和「API 什么都不做也 503」—— R2 命中只省掉查库，
+ *    整个 Next handler 照样初始化、照样渲染外层，免费版 10ms 还是不够。
+ *    修 main 时顺手把 `Cache.put` 的 TTL 也修了（见 `withEdgeTtl`）。
+ *
  * 参照 https://opennext.js.org/cloudflare/howtos/custom-worker 的官方写法：
  * `DOQueueHandler` / `DOShardedTagCache` 必须从这个入口再导出，否则
  * wrangler.jsonc 里那两个 DO 的迁移会因为「类不在入口 worker 上」而失败。
@@ -88,6 +95,31 @@ function cacheKey(request: Request): Request {
   return new Request(url.toString(), { method: 'GET' });
 }
 
+/**
+ * 把副本的 `Cache-Control` 改成本文件的 TTL，再交给 Cache API。
+ *
+ * ⚠️ **不改写就没用**：`Cache.put()` 只认响应头里的 `Cache-Control`（和 `Expires`），
+ *    它**没有第三个参数** —— `{ cacheTtl }` 是 `fetch()` 的 `cf` 选项，`Cache.put`
+ *    收到也会丢掉。而 Next 的页面响应带的是 `s-maxage=<ISR revalidate>`，实测约
+ *    7 天（`s-maxage=600767`）。原样存进去，边缘就按 7 天陈旧 —— 后台改完数据、
+ *    或者发版换了 HTML 结构，都要等一周才在边缘换掉。
+ *    所以这里必须显式盖成 `TTL_OK` / `TTL_NOT_FOUND`。
+ *
+ * ⚠️ 只能改这条副本，不能改 `response` 本身：那是要返回给浏览器的，
+ *    把 s-maxage=604789（7 天）改成 600（10 分钟）会让下游 CDN 也提前回源。
+ */
+function withEdgeTtl(response: Response, ttl: number): Response {
+  const headers = new Headers(response.headers);
+  // `max-age=0` 是刻意的：浏览器不吃硬缓存，后台改完数据按 F5 立刻能看见；
+  // 但每次请求都会落到边缘这份副本上（10 分钟窗口内不回源渲染）。
+  headers.set('cache-control', `public, max-age=0, s-maxage=${ttl}`);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 const edgeCacheWrapper = {
   async fetch(
     request: Request,
@@ -113,7 +145,12 @@ const edgeCacheWrapper = {
     const ttl = response.status === 200 ? TTL_OK : response.status === 404 ? TTL_NOT_FOUND : 0;
     const contentType = response.headers.get('content-type') ?? '';
     if (ttl > 0 && !response.headers.has('set-cookie') && CACHEABLE_CONTENT_TYPES.test(contentType)) {
-      ctx.waitUntil(cache.put(key, response.clone(), { cacheTtl: ttl }));
+      ctx.waitUntil(
+        cache.put(key, withEdgeTtl(response.clone(), ttl)).catch((error) => {
+          // 存不进去只是这次没缓存，别把已经渲染好的页面打成 500
+          console.error('[edge-cache] 写入失败', url.pathname, error);
+        })
+      );
     }
     return response;
   },

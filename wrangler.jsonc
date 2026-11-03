@@ -5,11 +5,18 @@
   // 入口是根目录的 worker.ts（OpenNext 自定义 Worker）：包了一层 Cache API 边缘
   // 缓存压免费版 10ms CPU，见该文件头注释。⚠️ 它 import 的 `.open-next/worker.js`
   // 由 `pnpm cf:build` 生成 —— 别绕过 cf:build 直接 wrangler deploy。
+  //
+  // 🔴 2026-11-03 线上事故：这里曾经**同时存在两个 `main`** —— 2026-10-24 加
+  //    `"main": "worker.ts"` 时没删下面那行 `"main": ".open-next/worker.js"`，
+  //    而 JSONC 解析重复键取**最后一个**，于是 main 实际指向生成产物，
+  //    `worker.ts` 那层边缘缓存从 10-24 起一直没生效过（注释和代码都是好的，
+  //    只是没被加载）。表现就是「缓存明明 HIT，刷新同一页仍然 1102」：R2 命中
+  //    省掉的只是查库，整个 Next handler 照跑，免费版 10ms 依然不够。
+  //    改动这个键时先 grep 一遍有没有第二个 "main"，wrangler 不会报错。
   "main": "worker.ts",
   // Runtime variables are also maintained in the Cloudflare dashboard.
   // Preserve entries not explicitly listed in vars when publishing new code.
   "keep_vars": true,
-  "main": ".open-next/worker.js",
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
