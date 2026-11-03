@@ -658,6 +658,9 @@ export const ja: Record<MessageKey, string> = {
   'gamesPage.field.language': '言語',
   'gamesPage.controls': '操作方法',
   'gamesPage.about': '{title} について',
+  'gamesPage.tags': 'タグ',
+  'gamesPage.readMore': 'もっと見る',
+  'gamesPage.showLess': '閉じる',
   'gamesPage.selectLanguage': '言語を選択',
 
   'notFound.title': 'ページが見つかりません',

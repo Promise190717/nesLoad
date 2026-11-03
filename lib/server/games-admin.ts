@@ -389,6 +389,12 @@ async function uniqueSeriesSlug(base: string): Promise<string> {
  * ⚠️ `about`（「关于 <游戏名>」长文，2026-11-03 加）同理：只由
  *    `scripts/fill-game-about.mjs` 从上游写入，后台表单也没有这一栏，
  *    所以同样 `COALESCE` —— 后台存一次标题就把整段爬来的长文清空是不可接受的。
+ *
+ * ⚠️ `tags`（按语言的标签，2026-11-03 加）**连列都不写进这条 SQL**。
+ *    理由有两层：① 后台表单没有这一栏，写进去只会是 `null`，靠 `DO UPDATE`
+ *    不提及该列来保留库里那份，比 `COALESCE` 更直白；② **参数层不支持数组** ——
+ *    `lib/server/pg.ts` 的 `literal()` 遇到数组直接抛错（它就是为「别指望这里猜」
+ *    设计的），所以 `[..., tagsArray]` 这条路走不通。真要写就单独一条语句 + 数组字面量。
  */
 async function writeTexts(slug: string, texts: GameTexts): Promise<void> {
   for (const locale of CONTENT_LOCALES) {

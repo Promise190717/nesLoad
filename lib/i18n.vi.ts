@@ -697,6 +697,9 @@ export const vi: Record<MessageKey, string> = {
   'gamesPage.field.language': 'Ngôn ngữ',
   'gamesPage.controls': 'Cách điều khiển',
   'gamesPage.about': 'Giới thiệu về {title}',
+  'gamesPage.tags': 'Thẻ',
+  'gamesPage.readMore': 'Đọc thêm',
+  'gamesPage.showLess': 'Thu gọn',
   'gamesPage.selectLanguage': 'Chọn ngôn ngữ',
 
   'notFound.title': 'Không tìm thấy trang',

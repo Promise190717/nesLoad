@@ -773,6 +773,9 @@ export const id: Record<MessageKey, string> = {
   /* 详情页「操作说明」那块：只有源站模式的数据带这一段 */
   'gamesPage.controls': 'Kontrol',
   'gamesPage.about': 'Tentang {title}',
+  'gamesPage.tags': 'Tag',
+  'gamesPage.readMore': 'Baca selengkapnya',
+  'gamesPage.showLess': 'Sembunyikan',
   /* 点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */
   'gamesPage.selectLanguage': 'Pilih bahasa',
   /* 全站 404：和 `gamesPage.notFoundTitle`（游戏没了）是两件事 */

@@ -677,6 +677,9 @@ export const ru: Record<MessageKey, string> = {
   'gamesPage.field.language': 'Язык',
   'gamesPage.controls': 'Управление',
   'gamesPage.about': 'Об игре {title}',
+  'gamesPage.tags': 'Теги',
+  'gamesPage.readMore': 'Читать далее',
+  'gamesPage.showLess': 'Свернуть',
   'gamesPage.selectLanguage': 'Выберите язык',
   'notFound.title': 'Страница не найдена',
   'notFound.description':

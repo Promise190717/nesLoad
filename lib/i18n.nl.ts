@@ -676,6 +676,9 @@ export const nl: Record<MessageKey, string> = {
   'gamesPage.field.language': 'Taal',
   'gamesPage.controls': 'Besturing',
   'gamesPage.about': 'Over {title}',
+  'gamesPage.tags': 'Tags',
+  'gamesPage.readMore': 'Meer lezen',
+  'gamesPage.showLess': 'Minder tonen',
   'gamesPage.selectLanguage': 'Kies taal',
 
   'notFound.title': 'Pagina niet gevonden',

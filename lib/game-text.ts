@@ -150,6 +150,31 @@ export function normalizeControls(raw: unknown): GameControls | null {
   return description || keys.length > 0 ? { description, keys } : null;
 }
 
+/**
+ * 把**来路不明**的 `tags` 收敛成 `string[] | null`（2026-11-03 加）。
+ *
+ * 和 `normalizeControls` 同一个理由：这一列有三种来路 —— 库里的 `text[]`、
+ * 缓存 JSON 往返、后台表单（压根没有这一栏，恒 `undefined`）。驱动把数组列
+ * 解析成字符串（列建错类型 / 中间层序列化）时，页面直接 `.map` 会当场炸。
+ * 认数组与 JSON 字符串两种形态；空数组收敛成 `null`（详情页据此整块不画）。
+ */
+export function normalizeTags(raw: unknown): string[] | null {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(value)) return null;
+  const tags = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return tags.length > 0 ? tags : null;
+}
+
 /** 一款游戏在**某个语言**下的文案。四个字段都可空 —— 空 = 没翻，逐字段回退。 */
 export interface GameText {
   title: string | null;
@@ -169,6 +194,14 @@ export interface GameText {
    * 这个是长文。同样**不在后台表单里**，由 `scripts/fill-game-about.mjs` 写入。
    */
   about?: string | null;
+  /**
+   * 这一款在**当前语言**下的标签（2026-11-03 加，`game_texts.tags`，text[]）。
+   *
+   * ⚠️ 和 `games.tags` 是两件事：那一列是**中文**那一份（迁移脚本的骨架语言），
+   *    详情页拿它当兜底。这里缺了（后台手填的游戏、或某语言上游没给）就退回去。
+   *    同样**不在后台表单里**，由 `scripts/fill-game-tags.mjs` 写入。
+   */
+  tags?: string[] | null;
 }
 
 /**
@@ -190,6 +223,8 @@ export interface LocalizedGameText {
   controls: GameControls | null;
   /** 「关于 <游戏名>」长文（段落以空行分隔）。没有就是 `null` —— 详情页整块不画。 */
   about: string | null;
+  /** 当前语言的标签（见 `GameText.tags`）。没有就是 `null`，调用方退回 `games.tags`。 */
+  tags: string[] | null;
 }
 
 /**
@@ -203,6 +238,7 @@ export const EMPTY_GAME_TEXT: GameText = {
   description: null,
   controls: null,
   about: null,
+  tags: null,
 };
 
 /** 一份文案里**有没有任何内容** —— 全空的行不建、不写（见 `GameTexts` 那段）。 */
@@ -213,6 +249,7 @@ export function isBlankGameText(text: GameText): boolean {
    *
    * ⚠️ `about` 也算内容（2026-11-03 加）：爬取脚本会往**没有其它字段**的语言行里
    *    单独写 about，`isBlankGameText` 若漏了它，后台每存一次就会把那行删掉。
+   *    `tags` 同理（同一天加的第二列）。
    */
   return (
     !text.title &&
@@ -220,6 +257,7 @@ export function isBlankGameText(text: GameText): boolean {
     !text.developer &&
     !text.description &&
     !text.about &&
+    !normalizeTags(text.tags) &&
     !normalizeControls(text.controls)
   );
 }
@@ -301,6 +339,20 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
   const pick = (key: 'title' | 'series' | 'developer' | 'description' | 'about'): string | null =>
     wanted?.[key] || chain.map((text) => text?.[key]).find(Boolean) || null;
 
+  /*
+   * 标签是**数组**，走不了上面那个字符串 `pick`（`find(Boolean)` 对空数组也成立）。
+   * 单独一支：整组回退，按链找第一组非空的。
+   */
+  const pickTags = (): string[] | null => {
+    const own = normalizeTags(wanted?.tags);
+    if (own) return own;
+    for (const text of chain) {
+      const found = normalizeTags(text?.tags);
+      if (found) return found;
+    }
+    return null;
+  };
+
   return {
     title: pick('title') ?? anyTitle(texts) ?? '',
     series: pick('series'),
@@ -312,6 +364,12 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
      * 「整份」在这里是同一件事。
      */
     about: pick('about'),
+    /*
+     * 标签**整组回退**（2026-11-03 加）：一组标签是「这款游戏的类型画像」，
+     * 混着中英两份（「动作 / Shooter / 街机」）比整组退回英文更难看。
+     * 和 controls 一样按链找第一组非空的。
+     */
+    tags: pickTags(),
     /*
      * 控制说明**整份回退**（不逐字段）：它是「一段话 + 一张键位表」的组合，
      * 拿英文的描述配中文的键位比整份退回中文更糟。按上面的链整份找第一份有的。

@@ -161,12 +161,23 @@ create table if not exists game_texts (
    * 只由爬取脚本写（scripts/fill-game-about.mjs），后台表单没有这一栏。
    */
   about         text,
+  /*
+   * 「游戏标签」的**这个语言**版本（2026-11-03 加）。
+   *
+   * `games.tags` 存的是中文那一份（迁移脚本以 `perLocale.zh` 为骨架），
+   * 英文站直接印出来就是「动作 / 街机」。上游每种语言都给了翻好的标签，
+   * 所以按语言分行存在这里，详情页优先用这一列、取不到再退回 `games.tags`。
+   *
+   * 只由爬取脚本写（scripts/fill-game-tags.mjs），后台表单没有这一栏。
+   */
+  tags          text[],
   updated_at    timestamptz not null default now(),
   primary key (game_slug, locale)
 );
 
 -- 老库补列（理由同上面 games.players 那句）：幂等，重跑安全。
 alter table game_texts add column if not exists about text;
+alter table game_texts add column if not exists tags  text[];
 
 -- 搜索：`where locale='zh' and title ilike '%马里奥%'`
 -- 用表达式索引 + trgm，前缀/中缀都能走；不加表达式就只能全表扫。

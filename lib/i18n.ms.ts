@@ -725,6 +725,9 @@ export const ms: Record<MessageKey, string> = {
   'gamesPage.field.language': 'Bahasa',
   'gamesPage.controls': 'Kawalan',
   'gamesPage.about': 'Tentang {title}',
+  'gamesPage.tags': 'Tag',
+  'gamesPage.readMore': 'Baca lagi',
+  'gamesPage.showLess': 'Sembunyikan',
   'gamesPage.selectLanguage': 'Pilih bahasa',
 
   /* 全站 404，和「这个游戏从库里没了」分开命名 */

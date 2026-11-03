@@ -26,6 +26,7 @@ import {
   CONTENT_LOCALES,
   localizeTexts,
   normalizeControls,
+  normalizeTags,
   textLocalesFor,
   type ContentLocale,
   type GameTexts,
@@ -95,6 +96,17 @@ export interface Game {
   players: number | null;
   /** 这一款有哪几个语言的 ROM（含文件名，播放时要用）。 */
   romLanguages: GameRomLanguage[];
+  /**
+   * 上游给这款游戏打的标签（`games.tags`，text[]，详情页「游戏标签」那块）。
+   *
+   * ⚠️ **只有详情页的取数（`getGame`）会填**，列表 / 搜索 / 后台都用不到 ——
+   *    这一列没进 `BASE_COLUMNS`，就是为了不让一页 15 款各背 6 个标签（列表 payload
+   *    本来就吃紧）。所以类型是**可选**：列表拿到的 `Game` 上它恒为 `undefined`，
+   *    别在列表卡片里读它。
+   * ⚠️ 内容是**单语言**的（迁移脚本抓的上游中文站，「动作」「经典」这种），
+   *    英文站也会照样显示中文标签 —— 这是数据现状，不是渲染问题。
+   */
+  tags?: string[];
 }
 
 /**
@@ -469,6 +481,11 @@ export async function loadGameTexts(
     controls: unknown;
     /** 「关于 <游戏名>」长文（2026-11-03 加）。`content: false` 时为 null。 */
     about: string | null;
+    /**
+     * 当前语言的标签（2026-11-03 加）。**故意写成 `unknown`**，理由同 controls：
+     * 数组列的运行时形态（真数组 / JSON 字符串）不该由这里假设，统一过 `normalizeTags`。
+     */
+    tags: unknown;
     developer: string | null;
     series: string | null;
   }>(
@@ -476,6 +493,7 @@ export async function loadGameTexts(
             ${withContent ? 't.description' : 'NULL::text AS description'},
             ${withContent ? 't.controls' : 'NULL::jsonb AS controls'},
             ${withContent ? 't.about' : 'NULL::text AS about'},
+            ${withContent ? 't.tags' : 'NULL::text[] AS tags'},
             d.name AS developer, s.name AS series
        FROM game_texts t
        JOIN games g ON g.slug = t.game_slug
@@ -495,6 +513,7 @@ export async function loadGameTexts(
       description: row.description,
       controls: normalizeControls(row.controls),
       about: row.about,
+      tags: normalizeTags(row.tags),
     };
     map.set(row.game_slug, bucket);
   }
@@ -883,13 +902,18 @@ export const countConsoleGamesByLanguageCached = cached(
  *    取全量时一款 ≈ 18KB，只为渲染一页时那份是 0.8KB —— 免费版 10ms CPU 下差一倍。
  */
 export async function getGame(id: string, locale?: string): Promise<Game | null> {
-  const rows = await query<GameBaseRow>(
-    `SELECT ${BASE_COLUMNS} FROM games g WHERE g.slug = ?`,
+  /*
+   * `g.tags` 只在这一条查询里多取（详情页「游戏标签」用），故意不进 `BASE_COLUMNS` ——
+   * 列表一页 15 款，每款背 6 个标签纯属白占 payload（见 `Game.tags` 的注释）。
+   */
+  const rows = await query<GameBaseRow & { tags: string[] | null }>(
+    `SELECT ${BASE_COLUMNS}, g.tags FROM games g WHERE g.slug = ?`,
     [id]
   );
   if (!rows[0]) return null;
   const games = await attach(rows, locale ? { locales: textLocalesFor(locale) } : {});
-  return games[0] ?? null;
+  const game = games[0];
+  return game ? { ...game, tags: rows[0].tags ?? [] } : null;
 }
 
 export const getGameCached = cached(
@@ -904,8 +928,14 @@ export const getGameCached = cached(
    *
    * ⚠️ 2026-11-03 v6 → v7：`game_texts` 多了一列 `about`（详情页「关于」长文）。
    *    缓存条目里没有这个字段，不升版本详情页那块就永远不出现。
+   *
+   * ⚠️ 2026-11-03 v7 → v8：`Game` 多了 `tags`（详情页「游戏标签」）。同上的道理 ——
+   *    不升版本会继续读到没有标签的旧条目，新模块等于没上线。
+   *
+   * ⚠️ 2026-11-03 v8 → v9：文案多了 `tags`（按语言的标签，`game_texts.tags`）。
+   *    不升版会继续用「中文标签 + 已本地化的其它字段」的旧条目。
    */
-  ['sb:games:by-id', 'v7'],
+  ['sb:games:by-id', 'v9'],
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
 

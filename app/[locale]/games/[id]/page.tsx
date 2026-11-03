@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
 import { consoleLabel } from '@/lib/consoles';
+import AboutText from '@/components/AboutText';
 import FavoriteButton from '@/components/FavoriteButton';
 import GameLanguageActions from '@/components/GameLanguageActions';
 import GameComments from '@/components/GameComments';
@@ -264,6 +265,13 @@ export default async function GameDetailPage({
    * 文件里**所有**要显示的文案都从 `text` 读，别再直接用 `game.title` 那种 —— 那会绕过语言。
    */
   const text = localizeGame(game, locale);
+  /*
+   * 标签：优先用**当前语言**那份（`game_texts.tags`，爬取脚本按 18 语言回填），
+   * 缺了才退回 `games.tags`（中文那一份 —— 迁移脚本以 `perLocale.zh` 为骨架）。
+   * 上游每种语言都给了翻好的标签，所以正常情况走不到回退；
+   * 后台手填的游戏、或某语言上游没给标签时，回退保证这一块照样画得出来。
+   */
+  const tags = text.tags ?? game.tags ?? null;
   const jsonLd = buildJsonLd(origin, locale, game, text, t);
 
   /*
@@ -373,8 +381,23 @@ export default async function GameDetailPage({
       />
 
       <div className="mt-8 flex flex-col gap-8 sm:flex-row sm:items-start">
-        {/* 封面。这是页面的主图、又不在链接里，所以给 alt（和列表页那些刻意留空的不一样） */}
-        <div className="pixel-edge pxw-2 pxc-700 w-[180px] shrink-0 bg-ink-900 sm:w-[220px]">
+        {/*
+          封面。这是页面的主图、又不在链接里，所以给 alt（和列表页那些刻意留空的不一样）。
+
+          2026-11-03：**滚动时吸顶**（用户要求「左侧图片滚动的能做个 fixed」）。
+          用的是 `sticky` 而不是 `position: fixed`，两者观感一样（滚出视口后就不动了），
+          但 `fixed` 会把这颗封面**拔出文档流**：左栏立刻塌成 0 宽，右栏的正文会横向
+          滑过来盖住图，还得手动给左栏留一条固定宽度的占位；而 `sticky` 仍占着原来的位置，
+          布局一个像素都不用改。
+          ⚠️ `sticky` 只在 `sm` 以上生效：手机上这一栏是 `flex-col`（封面在正文上方），
+            吸顶会变成「半屏被封面占着，正文只能从下半屏开始被压着滚」。
+          ⚠️ 父容器上的 `sm:items-start` 是它能生效的前提之一 —— flex 默认 `stretch`
+            会把这一栏拉到和右栏一样高，那样它**没有可滚动的余量**，`sticky` 等于没写。
+          ⚠️ `top-6`（24px）= `<main>` 的 `py-6`，滚动后封面停在离视口顶 24px 的位置。
+          ⚠️ 吸附范围到父容器底为止（右栏那块内容有多高就吸多久），
+            所以滚到下面的评论区时它会自然跟着走开 —— 这是 `sticky` 的正确行为，别改。
+        */}
+        <div className="pixel-edge pxw-2 pxc-700 w-[180px] shrink-0 bg-ink-900 sm:sticky sm:top-6 sm:w-[220px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={game.imageUrl}
@@ -576,21 +599,49 @@ export default async function GameDetailPage({
             ⚠️ **没有就整块不画**：后台手填的那几款没有这一列（表单里没有这一栏）。
             ⚠️ 位置**只在操作说明下面**（用户明确要求），不要再插到别处、也不要合并进
                「操作说明」那一块 —— 那是两件事：怎么按，和这款游戏是什么。
+            ⚠️ 2026-11-03 起正文交给 `AboutText`：长文默认折到 6 行 + 「查看更多」。
+               折叠只是**视觉**的（`max-height`），整段文字仍然全部在 HTML 里 ——
+               别改成「点开才渲染」，那样搜索引擎只能抓到一个按钮。
           */}
           {text.about ? (
             <section className="mt-6 border-t border-ink-800 pt-5">
               <h2 className="text-[13px] font-semibold text-ink-200">
                 {t('gamesPage.about', { title: text.title })}
               </h2>
-              {text.about
-                .split(/\n{2,}/)
-                .map((paragraph) => paragraph.trim())
-                .filter(Boolean)
-                .map((paragraph, index) => (
-                  <p key={index} className="mt-2 text-[13px] leading-7 text-ink-300">
-                    {paragraph}
-                  </p>
+              <div className="mt-2">
+                <AboutText
+                  text={text.about}
+                  moreLabel={t('gamesPage.readMore')}
+                  lessLabel={t('gamesPage.showLess')}
+                />
+              </div>
+            </section>
+          ) : null}
+
+          {/*
+            「游戏标签」（2026-11-03 加，用户要求「关于下面再增加一个游戏标签的展示」）。
+
+            数据优先 `text.tags`（`game_texts.tags`，**按语言**回填的标签），
+            缺失才退回 `games.tags`（中文那份）。组合见上面的 `tags` 常量。
+
+            ⚠️ **没有标签就整块不画**：库里 1995 款都有，但后台手动加的游戏 tags 是空数组。
+            ⚠️ 位置**紧跟在「关于」下面**（用户明确要求），顺序别调。
+            ⚠️ 纯展示，不做成链接：`?q=标签` 会搜出几百款，而且每多一个链接就多一次
+               预取风险（全站口径见 MEMORY「列表型 Link 一律 prefetch={false}」）。
+          */}
+          {tags && tags.length > 0 ? (
+            <section className="mt-6 border-t border-ink-800 pt-5">
+              <h2 className="text-[13px] font-semibold text-ink-200">{t('gamesPage.tags')}</h2>
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {tags.map((tag, index) => (
+                  <li
+                    key={`${tag}-${index}`}
+                    className="border border-ink-700 bg-ink-850 px-2 py-0.5 text-[11px] leading-5 text-ink-300"
+                  >
+                    {tag}
+                  </li>
                 ))}
+              </ul>
             </section>
           ) : null}
         </div>

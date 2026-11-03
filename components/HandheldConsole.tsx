@@ -589,14 +589,26 @@ function PadBtn({
        * 大小对不齐（根因与画法见 components/PadGlyph.tsx）。
        * ⚠️ 图形是 `1em` 见方，字号仍由下面这个类给（`--pad-font`），别在这颗钮上另设字号。
        */
-      className="pixel-edge pxw-2 flex h-[var(--pad-btn)] w-[var(--pad-btn)] touch-none select-none items-center justify-center bg-ink-600 font-pixel text-[length:var(--pad-font)] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
+      className="pad-key pixel-edge pxw-2 flex h-[var(--pad-btn)] w-[var(--pad-btn)] touch-none select-none items-center justify-center bg-ink-600 font-pixel text-[length:var(--pad-font)] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
     >
       <PadGlyph name={label} />
     </button>
   );
 }
 
-/** SELECT / START。窄长条，和真手柄上那两个一样是「扁的」。 */
+/**
+ * SELECT / START。窄长条，和真手柄上那两个一样是「扁的」。
+ *
+ * ⚠️ 2026-11-03 用户两次要求「这两个小点」：`px-3 py-1.5 text-12` → `px-2 py-1.5 text-10`。
+ * 宽度从 96 收到 76（`font-pixel` 是等宽字，6 个字符 × 10px + 左右各 8 的内边距），
+ * 高度 22 —— 再矮手指就按不住了，别继续压。
+ * `/play` 那边还有一条 `min-height: 34px` 兜着（globals.css `.play-touch-system button`），
+ * 掌机上没有兜底，所以这里的高度就是最终高度。
+ *
+ * ⚠️ `pad-key` 那个类不能去掉：长按 / 连点时浏览器会弹「拷贝 · 共享」菜单、还会
+ * 把键帽上的字母选中（见 globals.css 里 `.pad-key` 那条，`select-none` 一个人压不住
+ * iOS 的 touch-callout）。
+ */
 function PillBtn({
   label,
   button,
@@ -618,7 +630,7 @@ function PillBtn({
       onPointerCancel={() => onPress(button, false)}
       onPointerLeave={() => onPress(button, false)}
       onContextMenu={(e) => e.preventDefault()}
-      className="pixel-edge pxw-2 touch-none select-none bg-ink-600 px-3 py-1.5 font-pixel text-[12px] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
+      className="pad-key pixel-edge pxw-2 touch-none select-none bg-ink-600 px-2 py-1.5 font-pixel text-[10px] leading-none text-ink-100 transition-colors active:bg-ink-500 active:text-accent"
     >
       {label}
     </button>
