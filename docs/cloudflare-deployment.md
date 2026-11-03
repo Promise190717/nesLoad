@@ -50,9 +50,11 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
   307/301 重定向（语言跳转依赖 cookie）、5xx。
 - 缓存键剥掉 `utm_*` / `fbclid` / `gclid` / `msclkid` / **`_rsc`**；
   `/play` 整个查询串都剥掉（那一页 HTML 是空壳，`id` / `room` / `lang` 全由客户端读）。
-- **写入前删掉 `Vary`、读取时 `ignoreVary`**：OpenNext 给页面带的是
-  `vary: RSC, Next-Router-State-Tree, …`，`Cache.match()` 默认按它逐个头比对，
+- **写入前删掉 `Vary`**：OpenNext 给页面带的是
+  `vary: RSC, Next-Router-State-Tree, …`，`Cache.match()` 会按存储时的 `Vary` 逐个头比对，
   而路由树每次导航都不同 —— 不处理的话「存得进、永远读不到」。
+  ⚠️ 别指望 `match(key, { ignoreVary: true })`：Workers 的 `CacheQueryOptions` 没实现这个
+  字段，传了直接抛异常（2026-11-03 全站 1101 事故）。
 - 命中的请求**完全不消耗 CPU**；第 1 层命中还要进 Worker 读一次 R2，这一层连那次都省掉。
 - 静态资产（`assets` 绑定）不进 Worker、不受影响；所以没用 wrangler 的
   `"cache": { "enabled": true }` —— 那会把资产请求也变成计入额度的请求。

@@ -36,11 +36,17 @@
  *   · **缓存键要剥掉 `_rsc`**。Next 客户端会给每条 RSC 请求的地址追加
  *     `?_rsc=<随机>` 来打掉中间层缓存 —— 原样当键用的话，每条 RSC 都是新键，
  *     命中率恒为 0。
- *   · **匹配时必须 `ignoreVary`**。OpenNext 给页面响应带的是
+ *   · **写入前必须把 `Vary` 从副本上删掉**。OpenNext 给页面响应带的是
  *     `vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch, …`，
- *     而 `Cache.match()` 默认会按 `Vary` 逐个头比对 —— `Next-Router-State-Tree`
- *     每次导航都不同，于是同样一条 URL 永远匹配不上。写入前把 `Vary` 从副本上删掉，
- *     读取时再显式 `ignoreVary`，两头一起放手才算数。
+ *     而 `Cache.match()` 会按存储时的 `Vary` 逐个头比对 —— `Next-Router-State-Tree`
+ *     每次导航都不同，于是同样一条 URL 永远匹配不上。存之前删掉 `Vary` 是**唯一**
+ *     可行的办法。
+ *
+ *     🔴 **绝不能改写成 `match(key, { ignoreVary: true })`**：Cloudflare 的
+ *     `CacheQueryOptions` **没有实现**这个字段，传进去不是被忽略，而是直接抛
+ *     `The 'ignoreVary' field on 'CacheQueryOptions' is not implemented.`
+ *     ——2026-11-03 线上事故：这一行让**每一个**请求都在包裹层抛异常，全站 1101。
+ *     同理别传 `ignoreSearch` 之外的任何「Web 标准里有、Workers 里没有」的选项。
  *
  * ---------------------------------------------------------------------------
  * 为什么 RSC 可以按 URL 直接复用（而不是必须按路由树分键）
@@ -210,11 +216,20 @@ const edgeCacheWrapper = {
       : 'html';
     const key = cacheKey(request, variant);
 
-    const hit = await cache.match(key, { ignoreVary: true });
-    if (hit) {
-      const headers = new Headers(hit.headers);
-      headers.set('x-nesload-edge', 'HIT');
-      return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+    /*
+     * 这一段必须包 try/catch：边缘缓存是**附加**的一层，它的任何异常都不该把
+     * 整站打成 1101。2026-11-03 的线上事故就是这里传了一个 Workers 没实现的
+     * 查询选项（`ignoreVary`），`Cache.match()` 直接抛，结果每个请求都 1101。
+     */
+    try {
+      const hit = await cache.match(key);
+      if (hit) {
+        const headers = new Headers(hit.headers);
+        headers.set('x-nesload-edge', 'HIT');
+        return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+      }
+    } catch (error) {
+      console.error('[edge-cache] 命中路径失败，按未命中处理', pathname, error);
     }
 
     const response = await handler.fetch(request, env, ctx);
@@ -229,12 +244,17 @@ const edgeCacheWrapper = {
           : 0;
     const contentType = response.headers.get('content-type') ?? '';
     if (ttl > 0 && !response.headers.has('set-cookie') && CACHEABLE_CONTENT_TYPES.test(contentType)) {
-      ctx.waitUntil(
-        cache.put(key, withEdgeTtl(response.clone(), ttl)).catch((error) => {
-          // 存不进去只是这次没缓存，别把已经渲染好的页面打成 500
-          console.error('[edge-cache] 写入失败', pathname, error);
-        })
-      );
+      try {
+        ctx.waitUntil(
+          cache.put(key, withEdgeTtl(response.clone(), ttl)).catch((error) => {
+            // 存不进去只是这次没缓存，别把已经渲染好的页面打成 500
+            console.error('[edge-cache] 写入失败', pathname, error);
+          })
+        );
+      } catch (error) {
+        // `response.clone()` / `Cache.put()` 也可能同步抛（比如 body 已被消费）
+        console.error('[edge-cache] 入队失败，跳过本次缓存', pathname, error);
+      }
     }
     return response;
   },
