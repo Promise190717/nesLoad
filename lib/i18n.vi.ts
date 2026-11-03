@@ -737,8 +737,6 @@ export const vi: Record<MessageKey, string> = {
   'download.waiting': 'Bắt đầu sau {seconds} giây…',
   'download.started': 'Đã bắt đầu tải — hãy kiểm tra mục tải xuống của trình duyệt.',
   'download.rights': 'Chỉ tải những file ROM mà bạn có quyền sử dụng.',
-  'download.disclaimer':
-    'Miễn trừ trách nhiệm: mọi file ROM trên trang này đều được thu thập từ bên thứ ba, chỉ dành cho mục đích học tập cá nhân và nghiên cứu sao lưu. Bản quyền thuộc về chủ sở hữu gốc; nếu có nội dung xâm phạm quyền của bạn, vui lòng liên hệ để chúng tôi gỡ bỏ.',
 
   /* 房间页那条 `?id=` 深链：从详情页点「开始游戏」过来，但库里已经没有这条了 */
   'deepLink.notFound': 'Không tìm thấy game đó — có thể nó đã bị xóa.',

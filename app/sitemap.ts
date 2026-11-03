@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { DEFAULT_LOCALE, LOCALES, htmlLang, isLocale, localePath, type Locale } from '@/lib/i18n';
+import { DEFAULT_LOCALE, LOCALES, isLocale, localePath, type Locale } from '@/lib/i18n';
 import { listConsoleStubsCached } from '@/lib/server/consoles';
 import { listDeveloperStubsCached } from '@/lib/server/developers';
 import { listGameStubsCached } from '@/lib/server/sb-games';
@@ -11,7 +11,7 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 本站可收录的地址分六类：
  *   · 首页落地页（`/`，2026-10-13 起）—— Hero + 按机种 / 开发商浏览 + FAQ；
  *   · 应用页（`/play`，2026-10-14 加）；
- *   · `/privacy` / `/terms` 两页法务文档；
+ *   · `/privacy` / `/terms` 两页法务文档；`/about` / `/contact` 两页站务说明（2026-11-03 加）；
  *   · `/games` 游戏列表（机种筛选 `/games/console/<机种>` 没列进来：它是同一份列表的子集，
  *     只差一个筛选维度，全列等于把一个库拆成十几份近似重复的地址；分页同理只列第 1 页）；
  *   · 每款游戏的 `/games/<id>`（**从库里现取**）；
@@ -80,22 +80,22 @@ export const revalidate = 86400;
 type ChangeFrequency = NonNullable<MetadataRoute.Sitemap[number]['changeFrequency']>;
 
 /**
- * 一条路径 + 一种语言 → sitemap 里的**一条**，它自带全 18 种语言的 `alternates`。
+ * 一条路径 + 一种语言 → sitemap 里的**一条**。
  *
- * ⚠️ **2026-10-20 从「一条路径出 N 条」改成「一条路径 × 一种语言出一条」**：
- *    语言从 4 种扩到 18 种之后，游戏 2110 款 × 2 个地址 × 18 语言 ≈ 7.6 万条 URL，
- *    直接超过 **sitemap 单文件 5 万条**的上限 —— 超了不是截断，是整份被判无效。
- *    所以拆成**每语言一份 sitemap**（`generateSitemaps`），每份约 4 千多条，留足余量。
- *    ⚠️ 这种形态下 Next **只**产出 `/sitemap/<id>.xml`，**不产 `/sitemap.xml` 索引**
- *    （2026-10-23 线上实测：索引是 404 的 `__next_error__`，18 份分片全 200；
- *    官方 `generate-sitemaps.md` 的 URLs 一节也只承诺分片地址）。所以 `app/robots.ts`
- *    那边是直接列 18 条分片，别改回单条索引 —— 索引要自己写路由，多一个会坏的环节。
+ * ⚠️ **2026-11-03 起不再往 sitemap 里塞 18 条 `hreflang`**（原来每条地址都带一份
+ *    `alternates`）。理由两条，一条是 SEO、一条是 CPU：
  *
- * `alternates` 仍然把**全部 18 种语言**列出来（不管这份 sitemap 是哪种语言的）：
- * hreflang 要求的是「这一组里每条都互相指全」，只列本语言那一条等于没标注。
+ *    · **SEO 上它是纯冗余**：每个页面的 `<head>` 里已经有完整的一组
+ *      `<link rel="alternate" hreflang>`（`alternatesFor()`，首页 / 列表 / 详情 /
+ *      机种 / 开发商 / 四个文档页全都挂了），Google 认任意一种声明方式，
+ *      两种同时存在还要求逐条一致 —— 少写一份反而少一处漂移的机会。
+ *    · **CPU 上它是最大的一块**：一份 sitemap ≈ 2100 款游戏 + 开发商 + 机种 ≈ 4000 条，
+ *      每条再摊 19 个 `xhtml:link` ⇒ 单份 XML 从约 500 KB 涨到约 6 MB。
+ *      这份 XML 是要在 Worker 里拼出来的，免费版 10ms CPU 根本装不下，
+ *      于是「24 小时 ISR 到期 → 后台重新生成」这条链每次都 1102，
+ *      缓存永远停在旧那版。（分片本身也还是 18 份，那是 5 万条上限的硬约束，没动。）
  *
- * `x-default` 和 `en` 指向同一个地址是**对的**，不是笔误：`x-default` 说的是
- * 「不知道用户要哪种语言时给哪个」，而本站的答案就是英文那份。
+ *    要恢复的话，改这一处就够 —— 但先把上面两个代价想清楚。
  */
 function entry(
   origin: string,
@@ -103,14 +103,9 @@ function entry(
   path: string,
   extra: { lastModified?: Date; changeFrequency?: ChangeFrequency; priority?: number } = {}
 ): MetadataRoute.Sitemap[number] {
-  const languages: Record<string, string> = {};
-  for (const item of LOCALES) languages[htmlLang(item)] = `${origin}${localePath(item, path)}`;
-  languages['x-default'] = `${origin}${localePath(DEFAULT_LOCALE, path)}`;
-
   return {
     url: `${origin}${localePath(locale, path)}`,
     ...extra,
-    alternates: { languages },
   };
 }
 
@@ -241,6 +236,13 @@ export default async function sitemap({
         priority: 0.6,
       })
     ),
+    /*
+     * 站务说明两页（2026-11-03 加）。它们是**真路由**，被页脚从每一页链到，
+     * 所以按内容页给一份优先级；`monthly` 是因为站务信息改动频率低于游戏库，
+     * 但比法务两页高（联系方式、处理时间会变）。
+     */
+    entry(origin, locale, '/about', { changeFrequency: 'monthly', priority: 0.4 }),
+    entry(origin, locale, '/contact', { changeFrequency: 'monthly', priority: 0.4 }),
     entry(origin, locale, '/privacy', { changeFrequency: 'yearly', priority: 0.3 }),
     entry(origin, locale, '/terms', { changeFrequency: 'yearly', priority: 0.3 }),
   ];

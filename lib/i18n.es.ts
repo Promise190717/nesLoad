@@ -746,8 +746,6 @@ export const es: Record<MessageKey, string> = {
   'download.waiting': 'Empieza en {seconds} s…',
   'download.started': 'Descarga iniciada: revisa las descargas del navegador.',
   'download.rights': 'Descarga solo archivos ROM que tengas derecho a usar.',
-  'download.disclaimer':
-    'Aviso legal: todos los archivos ROM de esta página se han recopilado de terceros y se ofrecen únicamente para estudio personal y copia de seguridad. Todos los derechos de autor pertenecen a sus titulares originales; si algún contenido vulnera tus derechos, contáctanos y lo retiraremos.',
 
   /* 房间页那条 `?id=` 深链 */
   'deepLink.notFound': 'No se encontró ese juego: puede que se haya eliminado.',

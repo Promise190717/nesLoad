@@ -75,8 +75,13 @@ import { readLocaleParam } from '@/lib/server/locale';
  * 做成**服务端搜索**（关键词进 URL、跟着 D1 一起查）而不是像房间弹窗那样在客户端
  * 过滤一份已拉回来的列表 —— 因为这里一页只有 24 条，客户端过滤只能筛当页那几条，
  * 翻页就换一批结果，等于没搜。搜索本身走 `listGamesPage` 的 `keyword`，
- * 匹配 title / developer / series（**刻意不含 language / description**，理由见
- * lib/server/games.ts 的 SEARCH_CONDITION 注释）。
+ * **只匹配标题**（2026-11-03 起不含 description，为的是让 trgm 索引吃得上，
+ * 理由与实测数字见 `lib/server/sb-games.ts` 的 `KEYWORD_EXISTS` 注释）。
+ *
+ * ⚠️ 搜索框的占位文案写着「标题 / 开发者 / 系列」，但 **developer / series 从来没进过
+ *    WHERE** —— 搜厂商名只能靠标题或描述里碰巧出现的那个词。要么把文案改回「标题」，
+ *    要么在 `KEYWORD_EXISTS` 里补 `developer_texts` / `series_texts` 两个 EXISTS
+ *    （各自都要建 trgm 索引），**别让它继续这样半真半假**。
  *
  * 搜索框是一个**真正的 GET 表单**（`<form action="/games" method="get">`）：
  * 提交后浏览器自己跳到 `?q=…`，所以搜索有真地址 —— 能被分享、能被收藏、能被爬虫

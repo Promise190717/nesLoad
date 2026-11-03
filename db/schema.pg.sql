@@ -159,6 +159,13 @@ create table if not exists game_texts (
 -- 用表达式索引 + trgm，前缀/中缀都能走；不加表达式就只能全表扫。
 create index if not exists idx_game_texts_title_trgm
   on game_texts using gin (title gin_trgm_ops);
+/*
+ * ⚠️ `description` **故意不建索引**：前台搜索只搜标题（2026-11-03 用户定）。
+ *    以前的条件是 `title ILIKE ? OR description ILIKE ?`，而 OR 的两边必须都能走索引
+ *    才能合成 BitmapOr —— 只有 title 有索引 ⇒ 整条退化成全表扫（实测 447 ms，
+ *    只搜标题 5.7 ms）。真要让描述也参与，先建 `gin (description gin_trgm_ops)`
+ *    再把 OR 加回去，理由见 lib/server/sb-games.ts 的 `KEYWORD_EXISTS`。
+ */
 create index if not exists idx_game_texts_locale on game_texts (locale);
 
 -- ROM（一行 = 一款游戏的一个语言版本）

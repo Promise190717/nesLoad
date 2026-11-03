@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import ConsoleCard from '@/components/ConsoleCard';
+import Disclaimer from '@/components/Disclaimer';
 import GameHouseLogo from '@/components/GameHouseLogo';
 import PixelHeroes from '@/components/PixelHeroes';
 import { PlayersIcon } from '@/components/icons';
@@ -13,6 +14,7 @@ import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/develop
 import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { listConsolesCached } from '@/lib/server/consoles';
 import { readLocaleParam } from '@/lib/server/locale';
+import { siteDoc } from '@/lib/site-doc';
 
 /**
  * `/` —— 首页**落地页**（2026-10-13 加）。
@@ -411,6 +413,18 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
               {t('consolesPage.backToConsoles')}
             </Link>
             <Link
+              href={localePath(locale, '/about')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {siteDoc('about', locale).title}
+            </Link>
+            <Link
+              href={localePath(locale, '/contact')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {siteDoc('contact', locale).title}
+            </Link>
+            <Link
               href={localePath(locale, '/privacy')}
               className="text-ink-400 transition-colors hover:text-accent"
             >
@@ -424,6 +438,9 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             </Link>
           </nav>
           <p className="mt-4 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
+
+          {/* 免责声明（2026-11-03 加）：全站页脚最后一行，文案的唯一出处是 lib/site-doc.ts */}
+          <Disclaimer locale={locale} />
         </footer>
       </div>
     </main>

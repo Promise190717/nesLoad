@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import LegalPage from '@/components/LegalPage';
+import DocPage from '@/components/DocPage';
 import { SITE_NAME, alternatesFor, localePath, ogLocale, otherLocales } from '@/lib/i18n';
 import { legalDoc } from '@/lib/legal';
 import { readLocaleParam } from '@/lib/server/locale';
@@ -16,7 +16,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  * `/zh/privacy` 中文），不再是「读 cookie 猜」。`alternates` 两条互指，
  * 收口在 `alternatesFor()`。
  *
- * 版式与文案都不在这里，在 components/LegalPage.tsx 和 lib/legal.ts。
+ * 版式与文案都不在这里，在 components/DocPage.tsx 和 lib/legal.ts。
  *
  * 这个文件**不写 `export const dynamic`**：根布局已经在读请求头决定语言，
  * 整棵树本来就是动态渲染（构建输出里的 ƒ），这里再声明一次是多余的。
@@ -47,12 +47,20 @@ export async function generateMetadata({
 }
 
 /*
- * 文案虽然是死的，但**页面不能预渲染**：预渲染会输出 `s-maxage=31536000`，
- * HTML 在 CDN 上钉一年，而它引用的 chunk 每次发版都会换 —— 发版后用户拿到旧 HTML
- * 就会进「chunk 404 → 自动刷新 → 还是旧 HTML」的循环。
- * 来龙去脉见 `app/[locale]/play/page.tsx` 上面那段。
+ * 按需 ISR（2026-11-03 从 `force-dynamic` 改回）。
+ *
+ * 以前这里的理由是「预渲染会给 HTML 挂 `s-maxage=31536000`，发版后旧 HTML 指向
+ * 已经换掉的 chunk，用户陷进刷新循环」。那个风险**已经在两层上消掉了**：
+ *   · `/_next/static/*` 现在是 `max-age=0, must-revalidate`（见 next.config.js），
+ *     浏览器和 CDN 每次都回源验一次，不会再吃一年前的 chunk；
+ *   · OpenNext 的增量缓存 key 里带 `OPEN_NEXT_BUILD_ID`，新版本上线等于换了一套缓存，
+ *     这份 HTML 会重新生成。
+ *
+ * 而 `force-dynamic` 的代价是实打实的：这四页（privacy / terms / about / contact）
+ * 被每一页的页脚链着，是爬虫最常抓的一批地址，每次抓取都要在免费版 10ms CPU 里
+ * 现场跑一遍 React SSR。文案是死的、语言来自 URL，没有任何理由逐请求渲染。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = 604800;
 
 export default async function PrivacyPolicyPage({
   params,
@@ -60,5 +68,5 @@ export default async function PrivacyPolicyPage({
   params: Promise<{ locale: string }>;
 }) {
   const locale = await readLocaleParam(params);
-  return <LegalPage kind="privacy" locale={locale} />;
+  return <DocPage doc={legalDoc('privacy', locale)} locale={locale} current="/privacy" />;
 }

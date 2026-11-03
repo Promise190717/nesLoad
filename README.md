@@ -175,11 +175,22 @@ pnpm dev
 
 它们是**独立路由**，不是房间里的浮层，理由和后台那几页一样：这两页要能被直接分享、被搜索引擎收录、被第三方（广告平台 / 应用商店审核之类）按一个固定地址检查。所以它们也进了 `sitemap.xml`（`app/sitemap.ts`）。
 
-文案在 `lib/legal.ts`（**中 / 英 / 日 / 韩各一份**，含**游戏 ROM 的版权声明**与侵权通知方式），版式在 `components/LegalPage.tsx`。那边**自成一套 i18n**（不经过 `lib/i18n.ts` 的 `MessageKey`，所以漏译不会报错）——改一节，四份都要动。
+文案在 `lib/legal.ts`（**中 / 英 / 日 / 韩各一份**，含**游戏 ROM 的版权声明**与侵权通知方式），版式在 `components/DocPage.tsx`。那边**自成一套 i18n**（不经过 `lib/i18n.ts` 的 `MessageKey`，所以漏译不会报错）——改一节，四份都要动。
 
 版权 / 隐私的联系邮箱只在 `lib/legal.ts` 的 `SUPPORT_EMAIL` 定义一次，两份文档和页脚都读它。
 
 > 那两页的正文**必须与本站实际行为一致**，别照抄别的站的模板：这里没有账号系统、没有广告、没接第三方统计，也没有服务端记录游玩行为。涉及第三方的那一节（Google Fonts / jsDelivr / Cloudflare / 联机中继）是逐条核对代码写出来的，改那几处要回来同步。
+
+### 关于我们 / 联系我们 / 页脚免责声明（2026-11-03 加）
+
+参考上游站（retrogamesnexus.com）的 about / contact 两页做的：
+
+- **`/about`**：关于本站（是什么 + 无需下载 + 从这儿开始）→ 我们的目标 → 本站的特色（六条要点）→ 支持的机种（**走 `CONSOLE_TYPES` + `consoleLabel()` 现算，不手抄**）。
+- **`/contact`**：邮件支持（邮箱是唯一渠道）、可以帮到你（四条）、回复时间。**没有联系表单** —— 建一个自建表单就要另配防滥用与收件端，而邮箱已经够用。
+- ⚠️ **文体：介绍页，不是说明书**（2026-11-03 用户退回过一版）：第一版逐条写了存档怎么同步、18 种语言各自回退到哪份，被要求「说明得太具体了和口语化了，不够简洁，直接抄参考站稍微改一下」。现在的量级对齐参考站，**别把实现细节写回页面**。
+- 文案在 **`lib/site-doc.ts`**（**18 种语言全覆盖**，`Record<Locale, …>` 在编译期盯着键是否齐全；法务两页仍是四语言 + 英文兜底，那是另一套取舍），版式复用 `components/DocPage.tsx`。⚠️ **不往 18 张文案表里加导航词**：页脚那两条链接的文字直接取各自的 `doc.title`，跟着正文语言走才对得上。
+- **免责声明**（2026-11-03 统一）：**三处页脚**（首页、`GamesShell`、`DocPage`）最后一行都渲染 `components/Disclaimer.tsx`；文案唯一出处是 `lib/disclaimer.ts` 的 `disclaimer()`（单开一个文件，是因为 `Disclaimer.tsx` 会被客户端组件 import，不能连带把 `site-doc.ts` 的两篇长文打进 bundle）。**下载页不出这句** —— 它原先自己带一句 `download.disclaimer`（「收集自第三方、仅供学习备份」），与页脚两套说法；统一后同一页出现两遍，用户让删掉上面那块，只留 `download.rights`（「请只下载你有权使用的 ROM 文件」）。那个 i18n 键连同 18 份翻译已从 `lib/i18n*.ts` 全部删除，**别再手写第二份**。
+  口径四句：不在自有服务器托管 ISO/ROM → 游戏索引自第三方 → 尊重他人知识产权 → 独立网站、与任何组织无关联。⚠️ 这句与实际部署有出入（ROM 除 gba / nds / ps1 外自持在 R2），是用户 2026-11-03 知情后仍明确要求的口径，**别单方面改回「来自第三方公开资源」**；真要改，`lib/legal.ts` 条款第 3 节得一起看。
 
 ### 首页 / 房间 / 联机开局（`/`、`/room` 与 `/play`）
 
@@ -201,7 +212,7 @@ pnpm dev
 - 首页 Hero 里那个搜索框**宽度是 100%**（`w-full`，跟着外层 `max-w-5xl` 走）：它的左右边界和下面几个区块的网格对齐，不再是原来 `max-w-md` 居中窄条。
 - 首页 Hero 的入口（2026-10-15 定）：**「浏览全部游戏」**（`/games`，accent 实底的主按钮）＋**「加载本地 ROM」**（`/room`，描边次按钮）并排。右那颗是 2026-10-15 用户要求加的（键 `home.hero.play`，文案从「进入小屋」改过来），点进去就是屋里拖 / 选自己的 ROM —— 屋里那个**在线游戏库入口同日收掉了**（见 `components/ConsoleScene.tsx` 那颗钮的注释）。⚠️ 这颗钮的文案当天还改过一版：原先写的是「游玩本地 ROM」，动词换成「加载」是为了和屋里点进去第一眼看到的那句同一套说法（`screen.tapLoad` =「点击从本地加载」/ "CLICK TO LOAD A LOCAL ROM"）—— 按钮说什么，落点第一句就说什么。⚠️ 页脚里的「回到房间」全站已删（含首页这条），见下面页脚那一行。
 - ⚠️ **旧地址的 `?id=` / `?room=` 会被 307 透传到 `/room`**：详情页那颗「开始游戏」（`/room?id=<游戏>`）与联机分享出去的房间链接（`?room=<码>`）在拆分之前都挂在 `/` 上，已经分享出去的地址不该因为这次拆分失效。见 `app/[locale]/page.tsx` 里那段重定向（排在所有取数之前）。
-- 内容页（`/games`、`/developers`、`/privacy`…）的页脚那颗**「首页」**（`/`，`common.home`）由 `GamesShell` / `LegalPage` 统一出，别在某一页单独少画一颗。⚠️ **2026-10-15：三处页脚的「回到房间」（`/room`）全删了**（用户要求「其他页面底部的回到房间也去除」，首页那颗同日早些时候先删）—— 页脚里现在只有「首页」这一条回去的路。`gamesPage.backHome` 这个键**只剩 404 页那两颗在用**（左上角那颗真链接 + 正文下面那颗钮；那页刻意不挂顶栏，所以那两颗是唯一的确定去处，别跟着删）。
+- 内容页（`/games`、`/developers`、`/privacy`…）的页脚那颗**「首页」**（`/`，`common.home`）由 `GamesShell` / `DocPage` 统一出，别在某一页单独少画一颗。⚠️ **2026-10-15：三处页脚的「回到房间」（`/room`）全删了**（用户要求「其他页面底部的回到房间也去除」，首页那颗同日早些时候先删）—— 页脚里现在只有「首页」这一条回去的路。`gamesPage.backHome` 这个键**只剩 404 页那两颗在用**（左上角那颗真链接 + 正文下面那颗钮；那页刻意不挂顶栏，所以那两颗是唯一的确定去处，别跟着删）。
 - `/account` 未登录时的落点是 **`/login?next=/account`**（`app/[locale]/account/layout.tsx`，2026-10-13 有独立登录页之后改的；在那之前是弹回 `/room?from=account`，让房间替他开登录浮层）。
 - ⚠️ `app/manifest.ts` 的 `start_url` **仍是 `/`**（本次没跟着改）：装到主屏后打开的是落地页，从那儿点「加载本地 ROM」进屋。想让它直接进屋，改那一处即可。
 
@@ -215,7 +226,7 @@ pnpm dev
 | --- | --- |
 | `/`（落地页） | `app/[locale]/page.tsx` 里直接 `<TopBar />` |
 | `/games`、`/games/[id]`、`/games/[id]/download`、`/developers`、`/developers/[id]`、`/consoles`、`/consoles/[type]` | `GamesShell`（默认就带） |
-| `/privacy`、`/terms` | `LegalPage` |
+| `/privacy`、`/terms`、`/about`、`/contact` | `DocPage` |
 
 - ⚠️ **四个 404 页显式传 `showTopBar={false}`**（`app/not-found.tsx`、`app/[locale]/games/[id]/not-found.tsx`、`app/[locale]/developers/[id]/not-found.tsx`、`app/[locale]/consoles/[id]/not-found.tsx`）—— 用户要求 404 不带顶栏。**加新调用方时先想清楚它是不是 404。**
 - **那四个 404 页同时传 `showHomeLink`**（`GamesShell` 的开关，2026-10-13 加）：不挂顶栏，所以左上角那行右边补一颗「首页」文字链接，让迷路的人有一条回落地页的路。**别的内容页不要传** —— 顶栏里已经有一颗了。（404 页的**页脚**里也有一颗「首页」，那是给爬虫的互链集合，两处并存是有意的。）
@@ -676,7 +687,8 @@ components/
   CartridgeSprite.tsx 卡带贴图：标贴 + 塑料前缘，就是卡带露出来的那一面
   NetplayPanel.tsx   联机面板：创建 / 加入 / 房间码 / 离开
   KeyBindingsPanel.tsx 自定义按键面板：1P / 2P 两组，点一项进入捕获态改绑
-  LegalPage.tsx      隐私政策 / 服务条款两页共用的版式（含顶栏）
+  DocPage.tsx        隐私政策 / 服务条款 / 关于我们 / 联系我们 四页共用的版式（含顶栏与页脚）
+  Disclaimer.tsx     免责声明（三处页脚 + 下载页共用，文案在 lib/site-doc.ts）
   GamesShell.tsx     游戏列表 / 详情 / 下载三页共用的外壳（顶栏 / 页头 / 返回 / 页脚互链）
   TopBar.tsx         内容页顶栏：语言切换 + 账号（未登录去 /login，已登录显示用户名）+ 游戏库
   LocaleSwitcher.tsx 顶栏那个语言下拉（自绘；和房间里那一个共用 .locale-* 样式与 LOCALE_OPTIONS）

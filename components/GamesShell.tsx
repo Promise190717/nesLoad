@@ -1,13 +1,15 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SITE_NAME, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import { siteDoc } from '@/lib/site-doc';
 import BackLink from './BackLink';
+import Disclaimer from './Disclaimer';
 import TopBar from './TopBar';
 
 /**
  * 游戏列表 / 详情 / 下载三页共用的**外壳**（页头、返回链接、页脚）。
  *
- * 为什么做成组件：和 `LegalPage` 一模一样的理由 —— 三页只有正文不同，
+ * 为什么做成组件：和 `DocPage` 一模一样的理由 —— 三页只有正文不同，
  * 版式（标题、说明、页脚那一行互链）完全一样，各写一遍迟早漂成三种版式。
  *
  * 这是**服务端组件**（没有 'use client'）：语言在服务端就读好了（见 lib/server/locale.ts），
@@ -42,7 +44,7 @@ export default function GamesShell({
   locale: Locale;
   /**
    * 左上角那行小标签。**必须全 ASCII** —— `font-pixel`（Press Start 2P）没有中日韩字形，
-   * 写中文只会掉到系统字体上，白用这个字体（和 LegalPage 的 `doc.label` 同一条规矩）。
+   * 写中文只会掉到系统字体上，白用这个字体（和 DocPage 的 `doc.label` 同一条规矩）。
    */
   label: string;
   title: string;
@@ -285,6 +287,25 @@ export default function GamesShell({
             >
               {t('consolesPage.backToConsoles')}
             </Link>
+            {/*
+              「关于我们 / 联系我们」（2026-11-03 加）。文字取各自的 `doc.title`，
+              不往 18 张文案表里加两条导航词 —— 这两页的正文按 18 种语言写好了，
+              链接文字跟着正文的语言走才对得上。
+
+              为什么排在这里：法务两页前面是「站务类」的落点，比法务更常被点。
+            */}
+            <Link
+              href={localePath(locale, '/about')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {siteDoc('about', locale).title}
+            </Link>
+            <Link
+              href={localePath(locale, '/contact')}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {siteDoc('contact', locale).title}
+            </Link>
             <Link
               href={localePath(locale, '/privacy')}
               className="text-ink-400 transition-colors hover:text-accent"
@@ -300,6 +321,9 @@ export default function GamesShell({
           </nav>
 
           <p className="mt-4 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
+
+          {/* 免责声明（2026-11-03 加）：全站页脚最后一行，文案的唯一出处是 lib/site-doc.ts */}
+          <Disclaimer locale={locale} />
         </footer>
       </div>
     </main>

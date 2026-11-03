@@ -102,7 +102,15 @@ export default function GameCardGrid({
                    * 详情页那张大封面不一样，那里它是页面的主图、不在链接里，配了 alt。
                    */
                   alt=""
-                  loading="lazy"
+                  /*
+                   * 首屏那几张（一屏最多两行，手机上 2×2 正好 4 张）**不要 lazy**：
+                   * `loading="lazy"` 会让浏览器把「看起来在首屏」的图也推到布局之后再拉，
+                   * 列表页的 LCP 就是封面，这一下白等一个 RTT。第一张再给 high 优先，
+                   * 其余照旧 lazy —— 15 张卡片全部 eager 等于和首屏抢带宽。
+                   */
+                  loading={index < 5 ? 'eager' : 'lazy'}
+                  fetchPriority={index === 0 ? 'high' : undefined}
+                  decoding="async"
                   className="h-full w-full object-cover"
                 />
               </span>

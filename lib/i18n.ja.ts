@@ -698,8 +698,6 @@ export const ja: Record<MessageKey, string> = {
   'download.waiting': '{seconds} 秒後に開始…',
   'download.started': 'ダウンロードを開始しました — ブラウザのダウンロードをご確認ください。',
   'download.rights': '利用する権利のある ROM ファイルだけをダウンロードしてください。',
-  'download.disclaimer':
-    '免責事項：本ページの ROM ファイルはすべて第三者から収集したもので、個人の学習およびバックアップ研究目的に限られます。著作権はすべて元の権利者に帰属します。権利を侵害する内容がある場合は、お問い合わせいただければ削除いたします。',
 
   'deepLink.notFound': 'そのゲームは見つかりませんでした — 削除された可能性があります。',
   'deepLink.title': 'ゲームを読み込み中',

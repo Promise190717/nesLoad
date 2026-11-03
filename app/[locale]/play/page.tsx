@@ -13,23 +13,22 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
   } };
 }
 /*
- * ⚠️ **必须动态渲染，不能预渲染（2026-10-19）**。
+ * 按需 ISR（2026-11-03 从 `force-dynamic` 改回）。
  *
- * 这一页没有数据、没有 revalidate，Next 于是把它当永久静态页，输出
- * `Cache-Control: s-maxage=31536000, stale-while-revalidate=2592000`
- * —— 也就是 **HTML 在 CDN 上挂一年**，而它引用的 `_next/static/chunks/*.js`
- * 每次发版都会换名字（内容 hash）。
+ * 这一页的 HTML 只是一个空壳（`StaticPlay` 是客户端组件），`id` / `room` / `lang`
+ * 三个参数全由客户端读 —— 服务端渲染结果对同一个语言**逐字节相同**，
+ * 是这条线上最不该逐请求渲染的一页。而它恰恰是访问量最大的一页：
+ * 每个玩家每次开一局都要过一次，`force-dynamic` 等于把最热的请求钉死在
+ * 免费版 10ms CPU 的现场渲染上。
  *
- * 线上踩到的样子：发版后 HTML 还是旧的，指向的 chunk 已经被新部署替换掉，
- * 于是 Next 客户端判定「chunk 加载失败」→ 自动 `location.reload()` → 还是旧 HTML
- * → 再失败，**变成无限刷新**；偶尔还能拿到一个「名字没变、内容偏旧」的 chunk，
- * 表现成 `(0, h.v) is not a function` / `Right-hand side of 'instanceof' is not an object`
- * （新代码调用了旧 chunk 里没有的导出）。
- *
- * 这一页的 HTML 只是一个空壳（`StaticPlay` 是客户端组件），预渲染省不下什么；
- * 换成每次渲染反而几毫秒就出来。别为了这点收益把部署后的页面钉死在一年前的版本上。
+ * 以前写 `force-dynamic` 是为了躲「HTML 在 CDN 上钉一年 → 发版后指向已换掉的 chunk
+ * → 无限刷新」那个循环。现在那个循环有两道保险：
+ *   · `/_next/static/*` 是 `max-age=0, must-revalidate`（next.config.js）；
+ *   · OpenNext 增量缓存的 key 里带 `OPEN_NEXT_BUILD_ID`，新版本上线即换一套缓存。
+ * 另外 `worker.ts` 还会把 `/play` 的查询串整个剥掉再当缓存键 —— 同一份空壳
+ * 不会因为 `?id=` 不同而存几十遍。
  */
-export const dynamic = 'force-dynamic';
+export const revalidate = 604800;
 
 export default function Page() {
   return <Suspense fallback={null}><StaticPlay /></Suspense>;

@@ -692,8 +692,6 @@ export const ko: Record<MessageKey, string> = {
   'download.waiting': '{seconds}초 후 시작…',
   'download.started': '다운로드를 시작했습니다 — 브라우저 다운로드를 확인하세요.',
   'download.rights': '사용할 권리가 있는 ROM 파일만 내려받으세요.',
-  'download.disclaimer':
-    '면책 조항: 이 페이지의 모든 ROM 파일은 제3자로부터 수집한 것이며 개인의 학습 및 백업 연구 목적으로만 사용됩니다. 저작권은 모두 원 권리자에게 있습니다. 권리를 침해하는 내용이 있으면 문의해 주시면 삭제하겠습니다.',
 
   'deepLink.notFound': '그 게임을 찾을 수 없습니다 — 삭제되었을 수 있습니다.',
   'deepLink.title': '게임 불러오는 중',

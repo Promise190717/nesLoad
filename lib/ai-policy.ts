@@ -86,8 +86,8 @@ export const AI_CRAWLER_TOKENS: string[] = [
  */
 export const AI_ALLOW_ITEMS: { zh: string; en: string }[] = [
   {
-    zh: '抓取、索引、快照、缓存本站的公开页面（首页 / 隐私政策 / 服务条款）。',
-    en: 'Crawling, indexing, snapshotting and caching the public pages (home, privacy policy, terms).',
+    zh: '抓取、索引、快照、缓存本站的公开页面（首页 / 关于我们 / 联系我们 / 隐私政策 / 服务条款）。',
+    en: 'Crawling, indexing, snapshotting and caching the public pages (home, about, contact, privacy policy, terms).',
   },
   {
     zh: '在回答中引用、摘要、翻译、链接本站的公开信息（站名、功能、支持的机种、玩法、是否免费）。',
@@ -205,6 +205,8 @@ ${aboutZh(site, origin).join('\n')}
 - [开发商](${origin}/developers)：按开发商浏览
 - [联机开局](${origin}/play)：简洁版开局页。左边一块屏幕、右边一列控件，可单人直接玩，也可开一间 1 对 1 房间并把房间码分享出去
 - [首页（中文）](${origin}/zh)：同一页的中文地址，站内其余页面同理（\`/games\` ↔ \`/zh/games\`）
+- [关于我们](${origin}/about)：站点定位、支持的机种、玩法与版权口径
+- [联系我们](${origin}/contact)：联系邮箱、可以咨询的问题与处理时间
 - [隐私政策](${origin}/privacy)
 - [服务条款](${origin}/terms)
 - [站点地图](${origin}/sitemap.xml)
@@ -278,6 +280,8 @@ index; the 18 per-language shards live under /sitemap/\`<locale>\`.xml).
   on the right. Play solo, or open a 1v1 room and share the room code
 - [Home (Chinese)](${origin}/zh) — same page in Chinese; every other page follows the same pattern
   (\`/games\` ↔ \`/zh/games\`)
+- [About us](${origin}/about) — what the site is, supported consoles, how to play, copyright stance
+- [Contact](${origin}/contact) — email, what you can ask about, response time
 - [Privacy policy](${origin}/privacy)
 - [Terms of service](${origin}/terms)
 - [Sitemap](${origin}/sitemap.xml)

@@ -379,6 +379,9 @@ export default async function GameDetailPage({
           <img
             src={game.imageUrl}
             alt={text.title}
+            /* 这一页的 LCP 就是它：显式给高优先级，别让浏览器排在脚本请求后面 */
+            fetchPriority="high"
+            decoding="async"
             className="block aspect-[3/4] w-full object-cover"
           />
         </div>

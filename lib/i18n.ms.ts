@@ -769,8 +769,6 @@ export const ms: Record<MessageKey, string> = {
   'download.waiting': 'Bermula dalam {seconds} saat…',
   'download.started': 'Muat turun bermula — semak muat turun pelayar anda.',
   'download.rights': 'Muat turun hanya fail ROM yang anda sah berhak gunakan.',
-  'download.disclaimer':
-    'Penafian: semua fail ROM di halaman ini dikumpulkan daripada pihak ketiga dan hanya untuk tujuan pembelajaran peribadi dan sandaran. Semua hak cipta milik penerbit asal masing-masing; jika ada kandungan yang melanggar hak anda, sila hubungi kami untuk pemadaman.',
 
   /* 房间页那条 `?id=` 深链 */
   'deepLink.notFound': 'Permainan itu tidak ditemui — ia mungkin telah dibuang.',

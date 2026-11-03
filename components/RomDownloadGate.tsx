@@ -92,29 +92,38 @@ export default function RomDownloadGate({
     <div className="mt-8">
       <p className="text-[13px] leading-7 text-ink-400">{t('download.hint')}</p>
 
+      {/*
+        语言选择：**标签独占一行，按钮组另起一行**（2026-11-03 排版调整）。
+        原来「语言」和三个按钮挤在同一行，结果按钮组被标签顶到右边，左边缘比
+        下面的主按钮缩进一格，两行看着错位；而且按钮宽度跟着文字走（简体中文比
+        English 宽），三个方块参差。现在左边缘一律对齐容器，按钮给 `min-w` 拉齐，
+        样式（描边 / 底色 / 字号）一个字没动。
+      */}
       {languages.length > 1 && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-[12px] text-ink-500">{languageLabel}</span>
-          {languages.map((item) => {
-            const active = item.code === code;
-            return (
-              <button
-                key={item.code}
-                type="button"
-                onClick={() => setCode(item.code)}
-                aria-pressed={active}
-                className={`pixel-edge pxw-2 pxc-500 px-2.5 py-1 text-[12px] transition-colors ${
-                  active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
-                }`}
-              >
-                {item.label}
-              </button>
-            );
-          })}
+        <div className="mt-4">
+          <p className="text-[12px] text-ink-500">{languageLabel}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {languages.map((item) => {
+              const active = item.code === code;
+              return (
+                <button
+                  key={item.code}
+                  type="button"
+                  onClick={() => setCode(item.code)}
+                  aria-pressed={active}
+                  className={`pixel-edge pxw-2 pxc-500 min-w-[6.5rem] px-3 py-1 text-center text-[12px] transition-colors ${
+                    active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      <div className="mt-5 flex flex-wrap items-center gap-4">
+      <div className="mt-4 flex flex-wrap items-center gap-4">
         {phase === 'idle' && (
           <button
             type="button"
@@ -167,10 +176,14 @@ export default function RomDownloadGate({
       <p className="mt-6 text-[12px] leading-6 text-ink-600">{t('download.rights')}</p>
 
       {/*
-        免责声明（2026-10-14 用户要求）：ROM 来自第三方、仅供学习备份、版权归原权利方。
-        独立一条而不是并进上面那句 —— rights 是「使用者的义务」，这条是「本站的立场」。
+        ⚠️ **这一页不出免责声明**（2026-11-03 用户要求去掉）。历史：
+          · 2026-10-14 加过一句 `download.disclaimer`（「收集自第三方、仅供学习备份」）；
+          · 2026-11-03 那句话和页脚口径不一致，统一成页脚那份之后发现**同一页出现两遍**
+            （上面一块、页脚又一块），用户看到截图后让删掉上面这块。
+        现在这页只留上面那句 `download.rights`（「使用者该怎么做」），
+        「本站的立场」由页脚那句负责 —— 全站仍然只有一处文案（`lib/disclaimer.ts`）。
+        **别再往这里加回来。**
       */}
-      <p className="mt-3 text-[12px] leading-6 text-ink-600">{t('download.disclaimer')}</p>
     </div>
   );
 }

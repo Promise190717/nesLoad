@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { consoleLabel as consoleLabelOf } from '@/lib/consoles';
@@ -114,17 +115,29 @@ export default async function GameDownloadPage({
       back={{ href: localePath(locale, `/games/${id}`), label: 'common.back', mode: 'history' }}
       showAllGamesLink
     >
-      <div className="mt-6 flex items-center gap-4">
+      {/*
+        这块「封面 + 标题 + 文件名」整片可点，回到详情页（2026-11-03 用户要的）。
+        只挂一个链接、不做按钮形态：下载页的主线还是下面那个「开始下载」，
+        这里只是给「点进来才发现下错了版本」的人一条回去的路。
+        prefetch 关掉：详情页是整页渲染，为一个次要入口白渲染一次不划算（同详情页三颗主钮）。
+      */}
+      <Link
+        href={localePath(locale, `/games/${id}`)}
+        prefetch={false}
+        className="group mt-6 flex items-center gap-4"
+      >
         <span className="pixel-edge pxw-2 pxc-700 w-[64px] shrink-0 bg-ink-900">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={game.imageUrl}
             alt={text.title}
-            className="block aspect-[3/4] w-full object-cover"
+            className="block aspect-[3/4] w-full object-cover transition-opacity group-hover:opacity-80"
           />
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-[14px] text-ink-100">{text.title}</span>
+          <span className="block truncate text-[14px] text-ink-100 transition-colors group-hover:text-accent">
+            {text.title}
+          </span>
           {/*
             文件名直接写出来：街机的 ROM 是 romset（名字必须和驱动一致），
             下载前让人确认一下拿到的是什么，比下完再发现对不上强。
@@ -133,7 +146,7 @@ export default async function GameDownloadPage({
             {game.romName}
           </span>
         </span>
-      </div>
+      </Link>
 
       <RomDownloadGate
         romUrl={`/api/games/${id}/rom`}

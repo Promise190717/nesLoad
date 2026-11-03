@@ -702,8 +702,6 @@ export const de: Record<MessageKey, string> = {
   'download.waiting': 'Startet in {seconds} s…',
   'download.started': 'Download gestartet — sieh in den Downloads deines Browsers nach.',
   'download.rights': 'Lade nur ROM-Dateien herunter, die du rechtlich nutzen darfst.',
-  'download.disclaimer':
-    'Haftungsausschluss: Alle ROM-Dateien auf dieser Seite sind von Dritten zusammengetragen und dienen ausschließlich privatem Studium und Backup-Zwecken. Alle Urheberrechte liegen bei den jeweiligen Rechteinhabern. Sollte Inhalt deine Rechte verletzen, kontaktiere uns bitte, wir entfernen ihn.',
 
   'deepLink.notFound': 'Dieses Spiel wurde nicht gefunden — es wurde möglicherweise entfernt.',
   'deepLink.title': 'Spiel wird geladen',

@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import LegalPage from '@/components/LegalPage';
+import DocPage from '@/components/DocPage';
 import { SITE_NAME, alternatesFor, localePath, ogLocale, otherLocales } from '@/lib/i18n';
 import { legalDoc } from '@/lib/legal';
 import { readLocaleParam } from '@/lib/server/locale';
@@ -33,13 +33,8 @@ export async function generateMetadata({
   };
 }
 
-/*
- * 与 `/privacy` 同理：文案是死的，但**页面不能预渲染** —— 预渲染的
- * `s-maxage=31536000` 会让旧 HTML 在 CDN 上挂一年，发版后它引用的 chunk 已经换了，
- * 用户就会陷进「加载失败 → 自动刷新」的循环。
- * 来龙去脉见 `app/[locale]/play/page.tsx` 上面那段。
- */
-export const dynamic = 'force-dynamic';
+/* 同 `/privacy`：按需 ISR。文案是死的，语言来自 URL，没有逐请求渲染的理由。 */
+export const revalidate = 604800;
 
 export default async function TermsOfServicePage({
   params,
@@ -47,5 +42,5 @@ export default async function TermsOfServicePage({
   params: Promise<{ locale: string }>;
 }) {
   const locale = await readLocaleParam(params);
-  return <LegalPage kind="terms" locale={locale} />;
+  return <DocPage doc={legalDoc('terms', locale)} locale={locale} current="/terms" />;
 }

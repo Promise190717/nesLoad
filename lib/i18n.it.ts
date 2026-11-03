@@ -743,8 +743,6 @@ export const it: Record<MessageKey, string> = {
   'download.started': 'Download avviato — controlla i download del browser.',
   'download.rights':
     'Scarica solo file ROM che hai il diritto legale di usare.',
-  'download.disclaimer':
-    'Avvertenza: tutti i file ROM di questa pagina provengono da terzi e sono destinati esclusivamente allo studio personale e al backup. Tutti i diritti d\'autore appartengono ai rispettivi editori; se qualche contenuto lede i tuoi diritti, contattaci per la rimozione.',
 
   'deepLink.notFound': 'Gioco non trovato — potrebbe essere stato rimosso.',
   'deepLink.title': 'Caricamento gioco',

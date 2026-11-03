@@ -1726,12 +1726,6 @@ const en = {
   /* 兜底那条「没有反应？直接下载」2026-10-12 按用户要求去掉了（它绕开 6 秒缓冲），
      所以 `download.manual` / `download.manualLink` 两条文案跟着删了。 */
   'download.rights': 'Only download ROM files you are legally allowed to use.',
-  /*
-   * 免责声明（2026-10-14 用户要求加上）：说明 ROM 来自第三方、本站只做分享，
-   * 版权归原权利人。挂在下载页按钮下方，和 download.rights 是两条、别合并。
-   */
-  'download.disclaimer':
-    'Disclaimer: all ROM files on this page are collected from third parties and are for personal study and backup purposes only. All copyrights belong to their original publishers; if any content infringes your rights, please contact us for removal.',
   /* `?id=` 深链：从详情页点「开始游戏」过来，但库里已经没有这条了 */
   'deepLink.notFound': 'That game could not be found — it may have been removed.',
   /*
@@ -2507,9 +2501,6 @@ const zh: Record<MessageKey, string> = {
   'download.started': '已开始下载，请查看浏览器的下载目录。',
   /* 见上面 en 那份的说明：兜底那条「直接下载」连同它的文案一起删了 */
   'download.rights': '请只下载你有权使用的 ROM 文件。',
-  /* 免责声明，见上面 en 那份的说明 */
-  'download.disclaimer':
-    '免责声明：本页面所有 ROM 文件均收集自第三方，仅供个人学习与备份研究使用，请在下载后 24 小时内自行删除；相关版权归原权利方所有，如有侵权请联系我们删除。',
 
   'deepLink.notFound': '找不到这个游戏，可能已经被移除。',
   /* 深链载入中那颗独立弹窗，见英文表里同一条上面的说明 */
@@ -2815,7 +2806,7 @@ const DATE_LOCALE: Record<Locale, string> = {
  * `Intl.DateTimeFormat` / `toLocaleString` 用的语言标签。
  *
  * 从 `formatTime` 里单独提出来，是因为**页面上还有两处各写了一份**
- * （`LegalPage` 的「最后更新」、`PlaySaveControls` 的存档时间）——
+ * （`DocPage` 的「最后更新」、`PlaySaveControls` 的存档时间）——
  * 它们当年各写一个三元表达式，2026-10-16 加日韩时那种写法只会漏掉新语言。
  * 一律走这里。
  */

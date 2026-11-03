@@ -753,8 +753,6 @@ export const fr: Record<MessageKey, string> = {
   'download.started':
     'Téléchargement lancé — consultez les téléchargements de votre navigateur.',
   'download.rights': 'Ne téléchargez que des fichiers ROM que vous êtes en droit d’utiliser.',
-  'download.disclaimer':
-    'Avertissement : tous les fichiers ROM de cette page proviennent de tiers et sont destinés uniquement à l’étude personnelle et à la sauvegarde. Les droits d’auteur appartiennent à leurs éditeurs d’origine ; si un contenu porte atteinte à vos droits, contactez-nous pour son retrait.',
 
   /* 房间页那条 `?id=` 深链 */
   'deepLink.notFound': 'Ce jeu est introuvable — il a peut-être été retiré.',

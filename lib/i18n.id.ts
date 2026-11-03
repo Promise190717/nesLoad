@@ -817,9 +817,6 @@ export const id: Record<MessageKey, string> = {
   'download.waiting': 'Mulai dalam {seconds} detik…',
   'download.started': 'Unduhan dimulai — periksa unduhan di browser.',
   'download.rights': 'Unduh hanya file ROM yang memang berhak kamu gunakan.',
-  /* 免责声明：和 download.rights 是两条，别合并 */
-  'download.disclaimer':
-    'Penafian: semua file ROM di halaman ini dikumpulkan dari pihak ketiga dan hanya untuk keperluan belajar serta pencadangan pribadi. Seluruh hak cipta milik pemegang haknya; jika ada konten yang melanggar hakmu, hubungi kami untuk menghapusnya.',
 
   /* 房间页那条 `?id=` 深链：从详情页过来，但库里已经没有这条了 */
   'deepLink.notFound': 'Game itu tidak ditemukan — mungkin sudah dihapus.',

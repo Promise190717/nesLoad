@@ -137,7 +137,15 @@ export async function listAdminGamesPage(
   const params: unknown[] = [];
 
   if (needle) {
-    /* 关键词走 EXISTS：一款有四条文案行，JOIN 会把它复制四遍（同 sb-games 的 buildWhere） */
+    /*
+     * 关键词走 EXISTS：一款有四条文案行，JOIN 会把它复制四遍（同 sb-games 的 buildWhere）。
+     *
+     * ⚠️ **这里故意还带着 description，和前台不一致**（前台 2026-11-03 去掉了）。
+     *    前台去掉是为性能：`title OR description` 的 OR 只有一半有 trgm 索引，
+     *    整条会退化成全表扫（实测 447 ms vs 5.7 ms，见 sb-games 的 `KEYWORD_EXISTS`）。
+     *    后台是「人找自己刚传的那条」，一天点不了几次，多搜一列反而更容易命中 ——
+     *    别为了「两边一模一样」把 description 也删掉。
+     */
     conditions.push(
       `EXISTS (SELECT 1 FROM game_texts t WHERE t.game_slug = g.slug
                 AND (t.title ILIKE ? OR t.description ILIKE ?))`

@@ -136,21 +136,42 @@ export function localizeGame(game: Game, locale: Locale): LocalizedGameText {
 
 /* ── WHERE 构造 ────────────────────────────────────────────────────────── */
 
+/**
+ * 关键词条件：**只搜 `title`**（2026-11-03 用户定，去掉 `description`）。
+ *
+ * 为什么必须只搜一列 —— 这不是文案取舍，是索引：
+ *
+ *   · `game_texts.title` 上有 trgm GIN（`idx_game_texts_title_trgm`），
+ *     `ilike '%x%'` 能走 Bitmap Index Scan；
+ *   · `description` **没有索引**，而 `title ILIKE ? OR description ILIKE ?` 的 OR
+ *     两边必须都能走索引才能合成 BitmapOr。只要一边没有，整条就退化成
+ *     「遍历全部游戏 × 每款约 18 行文案」的 Nested Loop Semi Join。
+ *
+ *   2026-11-03 实测（35,909 行 / 70 MB 的 game_texts）：
+ *     带 description → 447 ms、31,454 次 buffer 命中（命中的其实只有 39 条）；
+ *     只搜 title     → 5.7 ms。**80 倍**。
+ *
+ *   代价：标题里没有、只有描述里提到的词搜不到了（「马里奥」39 → 37 条，约 5%）。
+ *   想恢复描述匹配**不要**把 OR 加回来 —— 先给 description 建
+ *   `gin (description gin_trgm_ops)`，两个分支才都能吃上索引。
+ *
+ * 关键词走 EXISTS 而不是 JOIN：一款游戏有 18 条文案行（每种语言一条），
+ * JOIN 会把它复制 18 遍。
+ *
+ * ⚠️ 这一句被**两处**共用（列表 `buildWhere` 与机种页语种计数），
+ *    改判定条件必须一处改、两边同时生效 —— 否则列表说 37 条、语种条加起来 41 条。
+ */
+const KEYWORD_EXISTS = `EXISTS (SELECT 1 FROM game_texts t
+                              WHERE t.game_slug = g.slug AND t.title ILIKE ?)`;
+
 function buildWhere(filter: GamePageQuery): { where: string; params: unknown[] } {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
   const needle = filter.keyword?.trim();
   if (needle) {
-    /*
-     * 关键词走 EXISTS 而不是 JOIN：一款游戏有四条文案行，JOIN 会把它复制四遍。
-     * `game_texts.title` 上有 trgm 的 GIN 索引，`ilike '%x%'` 能吃上。
-     */
-    conditions.push(
-      `EXISTS (SELECT 1 FROM game_texts t WHERE t.game_slug = g.slug
-                AND (t.title ILIKE ? OR t.description ILIKE ?))`
-    );
-    params.push(`%${needle}%`, `%${needle}%`);
+    conditions.push(KEYWORD_EXISTS);
+    params.push(`%${needle}%`);
   }
   if (filter.consoleType) {
     conditions.push('g.console_type = ?');
@@ -667,10 +688,9 @@ export const countConsoleGamesByLanguageCached = cached(
           `SELECT r.language, COUNT(DISTINCT g.slug)::int AS total
              FROM games g JOIN game_roms r ON r.game_slug = g.slug
             WHERE g.console_type = ?
-              AND EXISTS (SELECT 1 FROM game_texts t WHERE t.game_slug = g.slug
-                           AND (t.title ILIKE ? OR t.description ILIKE ?))
+              AND ${KEYWORD_EXISTS}
             GROUP BY r.language`,
-          [consoleType, `%${needle}%`, `%${needle}%`]
+          [consoleType, `%${needle}%`]
         )
       : await query<{ language: string; total: number }>(
           `SELECT r.language, COUNT(DISTINCT g.slug)::int AS total

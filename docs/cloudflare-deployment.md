@@ -27,9 +27,10 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
 返回空数组 = 构建期零预渲染，未知参数运行时首次访问生成并缓存（`fallback: 'blocking'`
 的等价物），正好满足「构建期预渲染不做」的口径。
 
-仍然 `force-dynamic`（刻意保留）：搜索页（`searchParams`）、`/play` 与 `/room`
-（空壳渲染只要几毫秒，不值得把 HTML 钉住——见 play 页注释里 chunk 死循环那段）、
-`/privacy` `/terms`（同上）、`/account` `/login`、`/catalog` 影子路由（旧地址兼容）。
+仍然 `force-dynamic`（刻意保留）：搜索页与机种搜索（读 `searchParams`，键空间无界）、
+`/account` `/login`（读 cookie）、`/catalog` 影子路由（旧地址兼容）。
+2026-11-03 起 `/play` 与 `/privacy` `/terms` `/about` `/contact` 已改回按需 ISR ——
+它们既没有登录态也没有查询参数，逐请求渲染等于白烧 CPU。
 
 ### 第 2 层：worker.ts 的 Cache API 边缘缓存
 
@@ -37,18 +38,29 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
 官方 howto：opennext.js.org/cloudflare/howtos/custom-worker），在 OpenNext handler 外包一层
 `caches.default`：
 
-- **只缓存**匿名（无 `nesload_user` / `nesload_admin` cookie）`GET` 的 **200 / 404** 响应，
-  内容为 HTML / XML / 纯文本；TTL 200 存 **10 分钟**、404 存 2 分钟。
-- **一律放行**：`/api/*`、`/admin/*`、`/_next/*`、带 `RSC` 头的软导航请求、
-  带 session cookie 的请求、307/301 重定向（语言跳转依赖 cookie，不能缓存）、5xx。
-- 缓存键剥掉 `utm_*` / `fbclid` / `gclid` 追踪参数。
+- **缓存** `GET` 的 **200 / 404** 响应，内容为 HTML / XML / 纯文本 / RSC flight；
+  TTL：页面 **30 分钟**、404 **5 分钟**、`/api/games*` **30 秒**。
+- **HTML 和软导航（`RSC` 头）都缓存**，两者用不同的缓存键前缀 —— 2026-11-03 之前
+  RSC 一律放行，等于这层缓存对真实浏览行为（点卡片）完全不存在。
+- **不再因为 session cookie 放行**：公共页面的 HTML 里没有任何登录态（收藏钮 / 评论框 /
+  顶栏账号都是客户端组件自己问接口），登录用户吃的和匿名用户是同一份字节。
+  真正私有的 `/account` `/login` `/admin*` 按路径排除。
+- **一律放行**：`/admin*`、`/account*`、`/login*`（含语言前缀）、`/_next/*`、
+  除 `/api/games` 之外的所有 `/api/*`、`next-router-segment-prefetch` 请求、
+  307/301 重定向（语言跳转依赖 cookie）、5xx。
+- 缓存键剥掉 `utm_*` / `fbclid` / `gclid` / `msclkid` / **`_rsc`**；
+  `/play` 整个查询串都剥掉（那一页 HTML 是空壳，`id` / `room` / `lang` 全由客户端读）。
+- **写入前删掉 `Vary`、读取时 `ignoreVary`**：OpenNext 给页面带的是
+  `vary: RSC, Next-Router-State-Tree, …`，`Cache.match()` 默认按它逐个头比对，
+  而路由树每次导航都不同 —— 不处理的话「存得进、永远读不到」。
 - 命中的请求**完全不消耗 CPU**；第 1 层命中还要进 Worker 读一次 R2，这一层连那次都省掉。
 - 静态资产（`assets` 绑定）不进 Worker、不受影响；所以没用 wrangler 的
   `"cache": { "enabled": true }` —— 那会把资产请求也变成计入额度的请求。
 
-第 1 层的陈旧窗口由 `revalidateTag` 即时清掉；第 2 层固定 10 分钟，发版后条目**跨版本存活**，
+第 1 层的陈旧窗口由 `revalidateTag` 即时清掉；第 2 层固定 30 分钟，发版后条目**跨版本存活**，
 不可接受就在仪表盘（Caching → Purge Everything）刷一次，可接受就不用管。
-边缘 TTL 只在 `worker.ts` 顶部两个常量里。
+边缘 TTL 只在 `worker.ts` 顶部三个常量（`TTL_PAGE` / `TTL_NOT_FOUND` / `TTL_API`）里。
+命中/未命中可以在响应头 `x-nesload-edge: HIT` 里看出来。
 
 sitemap 同步瘦身：**下载页（`/games/<id>/download`）不再进 sitemap**（每语言省约 2100 条，
 抓取邀请面减半）。页面照常可收录 —— 每个详情页都有指过去的链接，只是不再主动推荐。

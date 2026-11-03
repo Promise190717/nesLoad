@@ -700,8 +700,6 @@ export const fil: Record<MessageKey, string> = {
   'download.waiting': 'Magsisimula sa {seconds}s…',
   'download.started': 'Nagsimula ang download — tingnan ang downloads ng browser mo.',
   'download.rights': 'I-download lang ang mga ROM file na legal mong gamitin.',
-  'download.disclaimer':
-    'Disclaimer: ang lahat ng ROM file sa page na ito ay nakolekta mula sa third party at para sa personal na pag-aaral at backup lamang. Pag-aari ng orihinal na publisher ang lahat ng copyright; kung may content na lumalabag sa karapatan mo, kontakin kami para maalis ito.',
   'deepLink.notFound': 'Hindi mahanap ang larong iyon — baka naalis na ito.',
   'deepLink.title': 'Naglo-load ng laro',
   'deepLink.loading': 'Dinodownload ang ROM…',

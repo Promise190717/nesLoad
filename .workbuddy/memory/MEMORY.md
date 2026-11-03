@@ -49,6 +49,7 @@
 - 🔴 **列表型 `<Link>` 一律 `prefetch={false}`**：卡片网格 / 机种卡 / 开发商卡一页几十个，开着预取等于每来一个人就额外渲染几十次详情页 RSC（2026-10-23 错误率 54% 的主因）。只有顶栏 / 返回 / 翻页这类每页一两个的链接保留预取。
 - 🔴 **首屏可见的「动作型」`<Link>` 也要 `prefetch={false}`**（详情页三颗主钮 play/联机/下载 + 开发商链接，2026-10-23 补）。全站**没有 `loading.tsx`**，所以 Next 的预取没有边界可停、只能整页渲染 ⇒ 一次详情页访问会拖出 4 个额外整页渲染。判断口径：这是「动作」还是「浏览路径的下一步」；动作一次访问最多点一个，预取却是 100% 触发。页脚（`footer`，首屏视口外）不用管，IntersectionObserver 不触发。
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`；`/login`、`/account` Link `prefetch={false}`。
+- 长文档页（`/privacy` `/terms` `/about` `/contact`）共用壳 `components/DocPage.tsx`（原 LegalPage，2026-11-03 改名）；文案在 `lib/legal.ts` / `lib/site-doc.ts`（四语言 + 其余回退英文，短文导航词别往 18 张表里加）；页脚免责声明唯一出处 `lib/site-doc.ts` `disclaimer()`，三处页脚都挂。
 - `/play` 唯一开局页（PlayScene + GamesShell）；`?id=` 自动载入、`?room=` 加入者、`?lang=` 选 ROM 版本。
 - 存档 = 电池 `.srm` 一款一份（快照别加回）；读档 = 带存档重插卡（applySave）。
 - 🔴 房间页永久下线（代码在 `app/[locale]/_room`），别加入口、别写 sitemap。

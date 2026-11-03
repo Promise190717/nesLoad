@@ -716,8 +716,6 @@ export const nl: Record<MessageKey, string> = {
   'download.waiting': 'Start over {seconds}s…',
   'download.started': 'Download gestart — kijk bij je browserdownloads.',
   'download.rights': 'Download alleen ROM-bestanden die je wettelijk mag gebruiken.',
-  'download.disclaimer':
-    'Disclaimer: alle ROM-bestanden op deze pagina zijn verzameld bij derden en alleen bedoeld voor persoonlijke studie en back-up. Alle auteursrechten berusten bij de oorspronkelijke uitgevers; als inhoud je rechten schendt, neem dan contact met ons op voor verwijdering.',
 
   'deepLink.notFound': 'Die game kon niet worden gevonden — misschien is hij verwijderd.',
   'deepLink.title': 'Game laden',

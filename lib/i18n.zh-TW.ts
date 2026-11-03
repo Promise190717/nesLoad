@@ -698,8 +698,6 @@ export const zhTW: Record<MessageKey, string> = {
   'download.waiting': '{seconds} 秒後開始…',
   'download.started': '已開始下載，請查看瀏覽器的下載資料夾。',
   'download.rights': '請只下載你有權使用的 ROM 檔案。',
-  'download.disclaimer':
-    '免責聲明：本頁所有 ROM 檔案皆蒐集自第三方，僅供個人學習與備份研究使用，請於下載後 24 小時內自行刪除；相關著作權歸原權利人所有，如有侵權請聯絡我們刪除。',
 
   'deepLink.notFound': '找不到這個遊戲，可能已經被移除。',
   /* 深鏈載入中那顆獨立彈窗 */
