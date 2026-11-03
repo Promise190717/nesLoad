@@ -661,6 +661,7 @@ export const fil: Record<MessageKey, string> = {
   'gamesPage.field.series': 'Series',
   'gamesPage.field.language': 'Wika',
   'gamesPage.controls': 'Controls',
+  'gamesPage.about': 'Tungkol sa {title}',
   'gamesPage.selectLanguage': 'Pumili ng wika',
   'notFound.title': 'Hindi mahanap ang page',
   'notFound.description':

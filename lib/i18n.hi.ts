@@ -704,6 +704,7 @@ export const hi: Record<MessageKey, string> = {
   'gamesPage.field.series': 'सीरीज़',
   'gamesPage.field.language': 'भाषा',
   'gamesPage.controls': 'कंट्रोल्स',
+  'gamesPage.about': '{title} के बारे में',
   'gamesPage.selectLanguage': 'भाषा चुनें',
   'notFound.title': 'पेज नहीं मिला',
   'notFound.description': '{site} पर यह पता नहीं है। लिंक जाँचें, या होम पेज पर वापस जाएँ।',

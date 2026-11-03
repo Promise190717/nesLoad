@@ -1654,6 +1654,11 @@ const en = {
    *    所以 D1 模式下这块整块不渲染，这条文案也就用不到。
    */
   'gamesPage.controls': 'Controls',
+  /*
+   * 详情页「关于 <游戏名>」那块的标题（2026-11-03 加）。
+   * 数据是 `GameText.about`（爬来的多段长文），与 `controls` 一样只有源站数据才有。
+   */
+  'gamesPage.about': 'About {title}',
   /* 详情页点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */
   'gamesPage.selectLanguage': 'Choose language',
   /*
@@ -2454,6 +2459,8 @@ const zh: Record<MessageKey, string> = {
   'gamesPage.field.language': '语言',
   /* 详情页「操作说明」那块，见英文那份的注释 */
   'gamesPage.controls': '操作说明',
+  /* 详情页「关于 <游戏名>」那块，见英文那份的注释 */
+  'gamesPage.about': '关于《{title}》',
   'gamesPage.selectLanguage': '选择语言',
   'notFound.title': '这个页面不存在',
   'notFound.description': '这个地址在 {site} 上不存在。检查一下链接，或者回首页看看。',

@@ -195,8 +195,20 @@ export default function GameLanguageActions({
 
         {children}
 
-        {/* 下载钮**不弹框**（见文件头）：直接按默认版本进下载页，那一页自己有一排语言钮 */}
-        <Link href={withLang(downloadHref, defaultCode)} className={DOWNLOAD_CLASS} prefetch={false}>
+        {/*
+          下载钮**不弹框**（见文件头）：直接进下载页，那一页自己有一排语言钮。
+
+          ⚠️ 这里**不拼 `?lang=`**（2026-11-03 撤掉，原先是 `withLang(downloadHref, defaultCode)`）。
+          下载页 `app/[locale]/games/[id]/download/page.tsx` 只读 `params`，全文没有一处读
+          `searchParams` —— 默认选中哪份语言是它自己用 `defaultRomLanguage` 现算的，规则与
+          这里传的 `defaultCode` **完全一致**（同一个函数、同一份 romLanguages：都是
+          「界面语言 → en → 第一份」）。所以这个参数对 HTML 一个字节都不影响，却干了两件坏事：
+            · 边缘缓存的键翻一倍（`/download` 与 `/download?lang=en` 是两份冷副本）；
+            · 爬虫顺着详情页抓下来，多出同等数量的 URL 要抓。
+          免费版 10ms CPU 下，每一个多出来的冷键都是一次 1102，见 worker.ts 的文件头。
+          worker.ts 的缓存键也对这个路径做了同样的归一化，外链里带的旧参数不会另起一份。
+        */}
+        <Link href={downloadHref} className={DOWNLOAD_CLASS} prefetch={false}>
           <span aria-hidden="true" className="text-[15px] leading-none">
             ↓
           </span>

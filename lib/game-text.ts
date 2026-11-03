@@ -161,6 +161,14 @@ export interface GameText {
    * （`game_texts.controls`，jsonb）。
    */
   controls?: GameControls | null;
+  /**
+   * 「关于 <游戏名>」的整段介绍（2026-11-03 加）。
+   *
+   * 上游详情页「关于 XXX」那块是**多段**的，这里原样存、段落之间用空行 `\n\n` 分隔，
+   * 渲染时再切回来（见详情页那块的注释）。与 `description` 分工不同：那个是一句话简介，
+   * 这个是长文。同样**不在后台表单里**，由 `scripts/fill-game-about.mjs` 写入。
+   */
+  about?: string | null;
 }
 
 /**
@@ -180,6 +188,8 @@ export interface LocalizedGameText {
   description: string | null;
   /** 操作说明（见 `GameControls`）。没有就是 `null` —— 详情页整块不画。 */
   controls: GameControls | null;
+  /** 「关于 <游戏名>」长文（段落以空行分隔）。没有就是 `null` —— 详情页整块不画。 */
+  about: string | null;
 }
 
 /**
@@ -192,6 +202,7 @@ export const EMPTY_GAME_TEXT: GameText = {
   developer: null,
   description: null,
   controls: null,
+  about: null,
 };
 
 /** 一份文案里**有没有任何内容** —— 全空的行不建、不写（见 `GameTexts` 那段）。 */
@@ -199,12 +210,16 @@ export function isBlankGameText(text: GameText): boolean {
   /*
    * `controls` 先过 `normalizeControls` 再判：直接读 `text.controls.keys.length`
    * 会在「只有 description、没有 keys」的行上抛 TypeError（2026-10-20 踩过）。
+   *
+   * ⚠️ `about` 也算内容（2026-11-03 加）：爬取脚本会往**没有其它字段**的语言行里
+   *    单独写 about，`isBlankGameText` 若漏了它，后台每存一次就会把那行删掉。
    */
   return (
     !text.title &&
     !text.series &&
     !text.developer &&
     !text.description &&
+    !text.about &&
     !normalizeControls(text.controls)
   );
 }
@@ -283,7 +298,7 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
    * ⚠️ 不能写成 `keyof GameText` —— 那会把 `controls`（对象）也算进来，
    *    返回类型 `string | null` 当场报 TS2322（2026-10-19 加 controls 时踩过）。
    */
-  const pick = (key: 'title' | 'series' | 'developer' | 'description'): string | null =>
+  const pick = (key: 'title' | 'series' | 'developer' | 'description' | 'about'): string | null =>
     wanted?.[key] || chain.map((text) => text?.[key]).find(Boolean) || null;
 
   return {
@@ -291,6 +306,12 @@ export function localizeTexts(texts: GameTexts, locale: string): LocalizedGameTe
     series: pick('series'),
     developer: pick('developer'),
     description: pick('description'),
+    /*
+     * 「关于」长文（2026-11-03 加）走**同一条逐字段回退链**：它是一种文字，
+     * 缺了就该找下一份语言，而不是整块消失。只有一个字段，所以「逐字段」与
+     * 「整份」在这里是同一件事。
+     */
+    about: pick('about'),
     /*
      * 控制说明**整份回退**（不逐字段）：它是「一段话 + 一张键位表」的组合，
      * 拿英文的描述配中文的键位比整份退回中文更糟。按上面的链整份找第一份有的。

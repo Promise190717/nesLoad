@@ -140,11 +140,11 @@ export async function listAdminGamesPage(
     /*
      * 关键词走 EXISTS：一款有四条文案行，JOIN 会把它复制四遍（同 sb-games 的 buildWhere）。
      *
-     * ⚠️ **这里故意还带着 description，和前台不一致**（前台 2026-11-03 去掉了）。
-     *    前台去掉是为性能：`title OR description` 的 OR 只有一半有 trgm 索引，
-     *    整条会退化成全表扫（实测 447 ms vs 5.7 ms，见 sb-games 的 `KEYWORD_EXISTS`）。
+     * ⚠️ **这里比前台多带 description，也没有 slug / 开发商 / 系列**（2026-11-03 核对过）。
+     *    前台去掉 description 是为性能：`title OR description` 的 OR 只有一半有 trgm 索引，
+     *    整条会退化成全表扫（实测 447 ms vs 5.7 ms，见 sb-games 的 `keywordWhere`）。
      *    后台是「人找自己刚传的那条」，一天点不了几次，多搜一列反而更容易命中 ——
-     *    别为了「两边一模一样」把 description 也删掉。
+     *    别为了「两边一模一样」把 description 也删掉，也别把前台那三列搬过来。
      */
     conditions.push(
       `EXISTS (SELECT 1 FROM game_texts t WHERE t.game_slug = g.slug
@@ -386,6 +386,9 @@ async function uniqueSeriesSlug(base: string): Promise<string> {
  *
  * ⚠️ `controls` 不在后台表单里 ⇒ 写 `COALESCE`：表单没带就保留库里那份，
  *    别把源站爬下来的操作说明顺手清掉。
+ * ⚠️ `about`（「关于 <游戏名>」长文，2026-11-03 加）同理：只由
+ *    `scripts/fill-game-about.mjs` 从上游写入，后台表单也没有这一栏，
+ *    所以同样 `COALESCE` —— 后台存一次标题就把整段爬来的长文清空是不可接受的。
  */
 async function writeTexts(slug: string, texts: GameTexts): Promise<void> {
   for (const locale of CONTENT_LOCALES) {
@@ -399,14 +402,15 @@ async function writeTexts(slug: string, texts: GameTexts): Promise<void> {
     }
 
     await query(
-      `INSERT INTO game_texts (game_slug, locale, title, description, controls)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO game_texts (game_slug, locale, title, description, controls, about)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (game_slug, locale) DO UPDATE SET
          title       = excluded.title,
          description = excluded.description,
          controls    = COALESCE(excluded.controls, game_texts.controls),
+         about       = COALESCE(excluded.about, game_texts.about),
          updated_at  = now()`,
-      [slug, locale, text.title, text.description, text.controls ?? null]
+      [slug, locale, text.title, text.description, text.controls ?? null, text.about ?? null]
     );
   }
 }

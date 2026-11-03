@@ -45,7 +45,8 @@
 
 - 目录页维度全是路径段（分页 `/page/N`、机种、语种，按 console→page / lang→page 嵌套；搜索是动态路由 `?q=`）；链接一律 `next/link`。地址构造唯一出口 `gamesHref`/`consoleHref`/`pageHref`；**别加新查询参数**（middleware 只兜旧外链）。
 - 缓存唯一出口 `lib/server/cache.ts` `cached()`；改数据/查询形态键尾版本 +1；缓存留页侧不下沉。
-- 🔴 2026-10-22 数据层 ISR 全撤：`cached()` 统一 7 天；但**页面级 ISR 还在**（2026-11-02 核实：详情 `/games/[id]`、首页、列表页都是 `export const revalidate = 604800` 的整页 app 缓存，桶里 100KB+ 对象就是它们）。只有 search / `/play` / account / catalog 搜索是 `force-dynamic`。robots/sitemap/llms.txt/ai.txt 路由缓存 86400 保留。后台改数据靠 `revalidateTag('games',{expire:0})`；机种/开发商缓存没挂 tag，改完硬等 7 天。
+- 🔴 **三层缓存**（2026-11-03 起）：⓪ **Workers Caching**（`wrangler.jsonc` 的 `cache.enabled`，在 Worker **外面**，命中不启动 isolate，是免费版 10ms 下唯一真能压住 1102 的一层）→ ① R2 增量缓存（`cached()` 7 天 + 页面级 ISR）→ ② `worker.ts` 的 Cache API（24h，兜底）。第 0 层只认响应头：整页 HTML 走 `withCdnHeaders`（`s-maxage` + **`Vary: RSC`**），其余 `noStore`；`Vary` **不能**像 Cache API 那份删干净（HTML 与 flight 同 URL 靠 `RSC` 头区分）。发版后它自动清空，跑 `pnpm warm:edge` 回填。
+- 🔴 2026-10-22 数据层 ISR 全撤：`cached()` 统一 7 天；但**页面级 ISR 还在**（2026-11-02 核实：详情 `/games/[id]`、首页、列表页都是 `export const revalidate = 604800` 的整页 app 缓存，桶里 100KB+ 对象就是它们）。只剩 search / account / catalog 搜索是 `force-dynamic`（`/play` 与四个文档页 2026-11-03 起已改回按需 ISR）。robots/sitemap/llms.txt/ai.txt 路由缓存 86400 保留。后台改数据靠 `revalidateTag('games',{expire:0})`；机种/开发商缓存没挂 tag，改完硬等 7 天。
 - 🔴 **列表型 `<Link>` 一律 `prefetch={false}`**：卡片网格 / 机种卡 / 开发商卡一页几十个，开着预取等于每来一个人就额外渲染几十次详情页 RSC（2026-10-23 错误率 54% 的主因）。只有顶栏 / 返回 / 翻页这类每页一两个的链接保留预取。
 - 🔴 **首屏可见的「动作型」`<Link>` 也要 `prefetch={false}`**（详情页三颗主钮 play/联机/下载 + 开发商链接，2026-10-23 补）。全站**没有 `loading.tsx`**，所以 Next 的预取没有边界可停、只能整页渲染 ⇒ 一次详情页访问会拖出 4 个额外整页渲染。判断口径：这是「动作」还是「浏览路径的下一步」；动作一次访问最多点一个，预取却是 100% 触发。页脚（`footer`，首屏视口外）不用管，IntersectionObserver 不触发。
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`；`/login`、`/account` Link `prefetch={false}`。
@@ -57,7 +58,7 @@
 ## 部署 / 校验
 
 - `/_next/static/*` 绝不 immutable（next.config.js 已 max-age=0）；`public/sw.js` 对 static 必须 network-first（`VERSION` 改策略要 +1）；发版后 purge CF。
-- 🔴 `open-next.cache.ts` 的 `name` 决定「部署预热」是否发生：`populateCache` 拿它和常量 `cf-r2-incremental-cache` 做字符串相等比较。现在带 `+gzip` 后缀 ⇒ 静默跳过 ⇒ 构建期成品只躺在本地 `.open-next/cache`，每个新 buildId 全站从冷开始（2026-11-03 查明，暂不修）。
+- 🔴 `open-next.cache.ts` 的 `name` 必须**逐字**等于 `cf-r2-incremental-cache`（2026-11-03 已去掉 `+gzip` 后缀）：`populateCache` 拿它和常量做字符串相等比较，不等就静默跳过 ⇒ 构建期成品只躺在本地 `.open-next/cache`，每个新 buildId 全站从冷开始。别再加后缀。
 - 大 ROM 唯一下载路 `lib/http.ts` `fetchRomWithProgress`；R2 无版本控制，删 ROM 永久丢。
 - ROM 自持 = 除 gba/nds/ps1 外全部（R2 ~4.2 GiB）；键 `roms/<机种>/<slug>-<lang><ext>`，脚本 `migrate-roms-to-r2.mjs`（判据分层，`.md` 是真卡带不拒）；上游两 host 不可互换。
 - 展示地址一律 `publicUrlOrNull()`；严格版 `publicUrl()` 只给上传/ROM 代理/存档下载。

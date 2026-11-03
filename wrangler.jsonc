@@ -19,6 +19,28 @@
   "keep_vars": true,
   "compatibility_date": "2026-10-17",
   "compatibility_flags": ["nodejs_compat"],
+  // 🔴 **2026-11-03 加：Workers Caching，把 Cloudflare 的两层缓存放在 Worker 前面。**
+  //
+  //    命中时 **Worker 一次都不执行** —— 不是「跑一遍再返回缓存」，是压根不启动 isolate。
+  //    这正好治本：免费版 10ms CPU 下，连「加载 open-next 的 bundle + 初始化 18 张 i18n 表」
+  //    都装不进去，所以 worker.ts 里那层 Cache API 即使 HIT，也一样要付冷启动的钱，
+  //    照样 1102。日志里每天稳定的那批超时就是这么来的。
+  //
+  //    它默认是**两层**（本数据中心一层 + 全网汇总的上层），所以任意一个地方的一次
+  //    成功填充之后，全球任何节点都能直接命中 —— 不像 `caches.default` 那样
+  //    「每个 colo 各自冷一遍」。这是它能救长尾 URL 的原因。
+  //
+  //    按 RFC 9111 工作：认响应里的 `Cache-Control` / `Vary`。所以 worker.ts 必须
+  //    把 HTML 副本的 `Vary` 收窄（Next 原始那串 `Vary` 含 `Next-Router-State-Tree`，
+  //    每次导航都不同，照原样会被判成永不命中），并且给**不该被缓存的东西**显式
+  //    `no-store`（私有页面、RSC、重定向）—— 详见 worker.ts 的 `withCdnHeaders`。
+  //
+  //    ⚠️ 命中**不计 CPU**，但按普通请求计数；免费版每天 10 万次，够用。
+  //    ⚠️ 需要 Wrangler ≥ 4.69（本项目 4.151.1 ✓）。上传时报「cache 不支持」就是账号
+  //       或版本问题，删掉这个块即可回退，代码不用动。
+  //    ⚠️ 默认 `cross_version_cache: false` = 每次发版缓存命名空间独立，发版后仍会
+  //       从冷开始。用 `scripts/warm-edge.mjs` 在部署后打一遍热门地址填上。
+  "cache": { "enabled": true },
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "nesload" }],
   "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "nesload-next-cache" }],

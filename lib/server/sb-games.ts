@@ -128,6 +128,14 @@ export interface GamePageQuery {
   developerId?: string | null;
   /** 只要**有该语言 ROM** 的游戏（`zh` / `en` / `ja` / `ko`）。 */
   language?: string | null;
+  /**
+   * 关键词只在这些语言的标题里找（2026-11-03 加）。
+   *
+   * **只在短关键词（少于 3 个字符）时生效** —— 原因见 `keywordWhere`。
+   * 调用方一律传 `textLocalesFor(locale)`（当前语言 + 回退链，最多 3 种），
+   * 不传就等于「18 种语言全搜」，短词会退化成扫整张表。
+   */
+  locales?: readonly string[];
 }
 
 export function localizeGame(game: Game, locale: Locale): LocalizedGameText {
@@ -137,32 +145,153 @@ export function localizeGame(game: Game, locale: Locale): LocalizedGameText {
 /* ── WHERE 构造 ────────────────────────────────────────────────────────── */
 
 /**
- * 关键词条件：**只搜 `title`**（2026-11-03 用户定，去掉 `description`）。
+ * 关键词条件：搜 **四列**（2026-11-03 用户定）——
  *
- * 为什么必须只搜一列 —— 这不是文案取舍，是索引：
+ *   1. `game_texts.title`        各语言的标题（唯一有 trgm GIN 的一列）
+ *   2. `games.slug`              上游英文标识（`contra` / `super-mario-bros-nes`）
+ *   3. `developer_texts.name`    开发商名（Capcom / 任天堂）
+ *   4. `series_texts.name`       系列名（Super Mario / 魂斗罗系列）
  *
- *   · `game_texts.title` 上有 trgm GIN（`idx_game_texts_title_trgm`），
- *     `ilike '%x%'` 能走 Bitmap Index Scan；
- *   · `description` **没有索引**，而 `title ILIKE ? OR description ILIKE ?` 的 OR
- *     两边必须都能走索引才能合成 BitmapOr。只要一边没有，整条就退化成
- *     「遍历全部游戏 × 每款约 18 行文案」的 Nested Loop Semi Join。
+ * 四列不是任何关键词都全上：**短词按下面 `keywordWhere` 的分档规则裁剪**
+ * （`a` 这类单字母如果四列全上会命中全站 1,900 / 1,995 款）。
  *
- *   2026-11-03 实测（35,909 行 / 70 MB 的 game_texts）：
- *     带 description → 447 ms、31,454 次 buffer 命中（命中的其实只有 39 条）；
- *     只搜 title     → 5.7 ms。**80 倍**。
+ * ## 为什么后面三列能免费加上
  *
- *   代价：标题里没有、只有描述里提到的词搜不到了（「马里奥」39 → 37 条，约 5%）。
- *   想恢复描述匹配**不要**把 OR 加回来 —— 先给 description 建
- *   `gin (description gin_trgm_ops)`，两个分支才都能吃上索引。
+ * 它们分别在 `games`（1,995 行）、`developer_texts`（4,841 行）、`series_texts`（7,244 行）
+ * 上，顺序扫一遍也就几毫秒；而 `game_texts` 是 35,909 行 / 110 MB。
+ * 2026-11-03 实测（含约 400ms 的 RPC 固定开销）：`contra` 只搜标题 749ms / 9 条，
+ * 四列全搜 382ms / 10 条；`mario` 871ms / 47 条。**成本在噪声里**。
+ *
+ * 顺带补齐的语义：中文站搜 `Contra`（slug 命中）、搜 `Capcom`（开发商命中）
+ * 以前一条都出不来，现在都能出 —— 标题里本来就查不到这些词。
+ *
+ * ## 为什么**仍然不搜** `description` / `about`
+ *
+ * 这两列都在 `game_texts` 里，而且：
+ *
+ *   · `description` **没有索引**，`title ILIKE ? OR description ILIKE ?` 的 OR 要求
+ *     两边都能走索引才能合成 BitmapOr；一边没有，整条退化成
+ *     「遍历 1,995 款 × 每款约 18 行文案」的 Nested Loop Semi Join。
+ *     2026-11-03 实测：带 description 447 ms / 31,454 次 buffer 命中（真正命中的只有 39 条），
+ *     只搜 title 5.7 ms —— **80 倍**。
+ *   · `about` 更狠：48 MB 纯长文（TOAST 解压），扫一遍比 description 还贵一倍。
+ *
+ * 想恢复这两列**不要**直接把 OR 加回来 —— 先建
+ * `gin (description gin_trgm_ops)`（about 同理），两个分支都吃上索引之后再改这里。
  *
  * 关键词走 EXISTS 而不是 JOIN：一款游戏有 18 条文案行（每种语言一条），
  * JOIN 会把它复制 18 遍。
  *
  * ⚠️ 这一句被**两处**共用（列表 `buildWhere` 与机种页语种计数），
  *    改判定条件必须一处改、两边同时生效 —— 否则列表说 37 条、语种条加起来 41 条。
+ *    所以它现在是一个函数（`keywordWhere`），不再是一段字符串模板。
  */
-const KEYWORD_EXISTS = `EXISTS (SELECT 1 FROM game_texts t
-                              WHERE t.game_slug = g.slug AND t.title ILIKE ?)`;
+const SHORT_KEYWORD_CHARS = 3;
+
+/**
+ * 纯 ASCII（英文 / 数字 / 符号）。
+ *
+ * 短关键词要不要去搜开发商名、系列名，就看这个：中文单字（`任`）值得搜名字，
+ * 英文单字母（`a`）会把全站都搜出来（实测 1,900 / 1,995 条）。理由见 `keywordWhere`。
+ */
+const ASCII_ONLY = /^[\x00-\x7F]*$/;
+
+/**
+ * 用户输入里的 LIKE 元字符转义（2026-11-03 加）。
+ *
+ * `%` / `_` 是 LIKE 的通配符，不转义的话搜 `%` 就等于 `LIKE '%%%'` ——
+ * **匹配全部 35,909 行**，一条本该毫秒级的查询直接变成整表扫描
+ * （`game_texts` 含 about 后约 110MB），线上报 57014 statement timeout。
+ * 反斜杠是 PG 的默认转义符（`standard_conforming_strings=on` 下字面量里的 `\` 就是它），
+ * 先把用户输入自己的 `\` 转掉，再转 `%` / `_`。
+ */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/**
+ * 关键词条件 + 它的绑定参数。
+ *
+ * ## 为什么短词要限定语言（2026-11-03 修「搜 97 超时」）
+ *
+ * `idx_game_texts_title_trgm` 是 pg_trgm 的 GIN 索引，而 **pg_trgm 对少于 3 个字符的
+ * 模式提不出任何 trigram**（`show_trgm('97')` = `{}`）⇒ 索引完全用不上 ⇒ 只能顺序扫描
+ * 整张 `game_texts`。18 种语言 × 1,995 款 = 35,909 行、含 about 共约 110MB，
+ * 冷缓存 + 并发时 4~5 秒起步，Supabase 的 statement timeout 一到就是
+ * `57014 canceling statement due to statement timeout`（2026-11-03 用户实测 `?q=97`）。
+ *
+ * 所以：**关键词短于 3 个字符时，标题只在 `textLocalesFor(locale)`（最多 3 种语言）里找**
+ * —— 行数降到 1/18 ~ 1/6，成本跟着掉一个量级。语义上这也是对的：短词模糊匹配本来
+ * 噪声就大，限定在「当前语言 + 回退链」里找，命中的正是用户屏幕上会看到的标题。
+ *
+ * ⚠️ **3 个字符及以上**标题仍搜全部 18 种语言。这条不能省：中文站里搜 `Contra`
+ *    以前要靠英文标题命中（中文标题是「魂斗罗」）。现在 slug 也参与了，理论上能兜住，
+ *    但标题仍然保留全语言 —— ≥3 字符能走 trigram，代价本来就低，不需要裁剪。
+ *
+ * ⚠️ **裁剪只作用于 `title`**。`slug` / 开发商名 / 系列名都是单值列（不按语言分行），
+ *    没有「限定语言」这回事，也就没有额外成本。
+ *
+ * ## 短词为什么要分三档（2026-11-03 实测后补）
+ *
+ * 把四列无脑放进来，单字母 `a` 从 91 条涨到 **1,900 条（几乎全站）** ——
+ * `a` 在 slug 命中 1,618 款、开发商名 1,467 款、系列名 1,067 款，全都是噪声，
+ * 因为英文单字母几乎出现在每个英文标识/名字里。而中文单字恰恰相反：`任` 只搜标题
+ * 命中 12 款、加上开发商名命中 **103 款**（任天堂全家桶），这正是想要的。
+ *
+ * 所以：
+ *   · `slug` 是纯英文标识 ⇒ **短词（少于 3 字符）一律不参与**；
+ *   · 开发商名 / 系列名 ⇒ 短词只在**含非 ASCII 字符**（中文/日文单字）时参与。
+ */
+function keywordWhere(
+  keyword: string,
+  locales: readonly string[]
+): { sql: string; params: unknown[] } {
+  const needle = `%${escapeLike(keyword)}%`;
+  const short = keyword.length < SHORT_KEYWORD_CHARS;
+  const scope = short ? locales : [];
+  /* 短词 + 纯 ASCII ⇒ 只搜标题：单字母放进来就是全站命中。 */
+  const withNames = !short || !ASCII_ONLY.test(keyword);
+
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  clauses.push(
+    scope.length === 0
+      ? `EXISTS (SELECT 1 FROM game_texts t
+                 WHERE t.game_slug = g.slug AND t.title ILIKE ?)`
+      : `EXISTS (SELECT 1 FROM game_texts t
+                 WHERE t.game_slug = g.slug
+                   AND t.locale IN (${scope.map(() => '?').join(', ')})
+                   AND t.title ILIKE ?)`
+  );
+  params.push(...scope, needle);
+
+  if (!short) {
+    clauses.push('g.slug ILIKE ?');
+    params.push(needle);
+  }
+  if (withNames) {
+    clauses.push(
+      `EXISTS (SELECT 1 FROM developer_texts dt
+                WHERE dt.developer_slug = g.developer_slug AND dt.name ILIKE ?)`
+    );
+    params.push(needle);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM series_texts st
+                WHERE st.series_slug = g.series_slug AND st.name ILIKE ?)`
+    );
+    params.push(needle);
+  }
+
+  /*
+   * 外层那对括号不能省：`buildWhere` 用 `AND` 把多条条件拼起来，
+   * 没有括号的话 `a OR b` 会和后面的 `g.console_type = ?` 粘成 `a OR (b AND ...)`。
+   *
+   * `params` 的顺序必须与上面 `clauses` 里 `?` 出现的顺序**完全一致** ——
+   * `pg.ts` 的转换是位置式的（第 n 个 `?` → `$n`），错一个整条查询就错位。
+   */
+  return { sql: `(${clauses.join('\n           OR ')})`, params };
+}
 
 function buildWhere(filter: GamePageQuery): { where: string; params: unknown[] } {
   const conditions: string[] = [];
@@ -170,8 +299,9 @@ function buildWhere(filter: GamePageQuery): { where: string; params: unknown[] }
 
   const needle = filter.keyword?.trim();
   if (needle) {
-    conditions.push(KEYWORD_EXISTS);
-    params.push(`%${needle}%`);
+    const keyword = keywordWhere(needle, filter.locales ?? []);
+    conditions.push(keyword.sql);
+    params.push(...keyword.params);
   }
   if (filter.consoleType) {
     conditions.push('g.console_type = ?');
@@ -337,12 +467,15 @@ export async function loadGameTexts(
      * 一律交给 `normalizeControls` 收口（2026-10-20 线上踩过）。
      */
     controls: unknown;
+    /** 「关于 <游戏名>」长文（2026-11-03 加）。`content: false` 时为 null。 */
+    about: string | null;
     developer: string | null;
     series: string | null;
   }>(
     `SELECT t.game_slug, t.locale, t.title,
             ${withContent ? 't.description' : 'NULL::text AS description'},
             ${withContent ? 't.controls' : 'NULL::jsonb AS controls'},
+            ${withContent ? 't.about' : 'NULL::text AS about'},
             d.name AS developer, s.name AS series
        FROM game_texts t
        JOIN games g ON g.slug = t.game_slug
@@ -361,6 +494,7 @@ export async function loadGameTexts(
       developer: row.developer,
       description: row.description,
       controls: normalizeControls(row.controls),
+      about: row.about,
     };
     map.set(row.game_slug, bucket);
   }
@@ -452,14 +586,18 @@ export async function countGames(filter: GamePageQuery = {}): Promise<number> {
  *
  * ⚠️ 机种专题页搜索（`lib/server/pages/console.tsx`）走的是这个函数，不是列表那个，
  *    所以两条路径都要堵，只改一处等于没改。
+ *
+ * ⚠️ `locales`（2026-11-03 加）只在**短关键词**时有意义（见 `keywordWhere`），
+ *    调用方一律传 `textLocalesFor(locale)`；不传就等于 18 种语言全搜，短词会超时。
  */
 export async function countGamesCached(
   keyword: string,
   consoleType: ConsoleType | null,
   developerId: string | null,
-  language: string | null
+  language: string | null,
+  locales: readonly string[] = []
 ): Promise<number> {
-  if (keyword.trim()) return countGames({ keyword, consoleType, developerId, language });
+  if (keyword.trim()) return countGames({ keyword, consoleType, developerId, language, locales });
   return countGamesCachedRaw(keyword, consoleType, developerId, language);
 }
 
@@ -606,7 +744,11 @@ async function loadGamesPage(
   locale: string
 ) {
   const needle = keyword.trim();
-  const filter = { keyword: needle, consoleType, language };
+  /*
+   * `locales` 决定短关键词的搜索范围（见 `keywordWhere`）。这里不传的话
+   * `?q=97` 会扫 18 种语言的标题，线上就是 57014 超时。
+   */
+  const filter = { keyword: needle, consoleType, language, locales: textLocalesFor(locale) };
   /*
    * 不预先 `countGames`：`listGamesPage` 现在用窗口函数一次拿回「本页 + 总数」，
    * 省掉一次 HTTPS 往返。两者本来就出自同一条 SQL，页码不会和实际条目错位。
@@ -681,16 +823,30 @@ export const countGamesByConsole = countGamesByConsoleCached;
  * 返回**四个键齐全**，没数据的补 0 —— 调用方拿到的形状是固定的。
  */
 export const countConsoleGamesByLanguageCached = cached(
-  async (consoleType: ConsoleType, keyword: string = ''): Promise<Record<string, number>> => {
+  /*
+   * ⚠️ v1 → v2（2026-11-03）：短关键词改成只在 `locales` 里搜（见 `keywordWhere`），
+   *    返回值的口径跟着变（从「18 种语言」变成「当前语言 + 回退链」），所以 `locales`
+   *    进了键、键尾升版。不升版本会继续读到 18 种语言口径的旧条目，筛选条上的数会对不上列表。
+   *
+   * ⚠️ v2 → v3（2026-11-03 同日）：关键词从「只搜标题」扩到「标题 + slug + 开发商 + 系列」，
+   *    带关键词的旧条目口径又变了 —— 不升版的话，同一个词在筛选条上还是旧数（7 天），
+   *    而列表已经按新口径出结果，两个数对不上。不带关键词的分支成本低，重新算一遍无所谓。
+   */
+  async (
+    consoleType: ConsoleType,
+    keyword: string = '',
+    locales: readonly string[] = []
+  ): Promise<Record<string, number>> => {
     const needle = keyword.trim();
-    const rows = needle
+    const keyword_ = needle ? keywordWhere(needle, locales) : null;
+    const rows = keyword_
       ? await query<{ language: string; total: number }>(
           `SELECT r.language, COUNT(DISTINCT g.slug)::int AS total
              FROM games g JOIN game_roms r ON r.game_slug = g.slug
             WHERE g.console_type = ?
-              AND ${KEYWORD_EXISTS}
+              AND ${keyword_.sql}
             GROUP BY r.language`,
-          [consoleType, `%${needle}%`]
+          [consoleType, ...keyword_.params]
         )
       : await query<{ language: string; total: number }>(
           `SELECT r.language, COUNT(DISTINCT g.slug)::int AS total
@@ -713,7 +869,7 @@ export const countConsoleGamesByLanguageCached = cached(
     }
     return counts;
   },
-  ['sb:games:lang-counts', 'v1'],
+  ['sb:games:lang-counts', 'v3'],
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
@@ -745,8 +901,11 @@ export const getGameCached = cached(
    *
    * ⚠️ 2026-10-23 v3 → v4：文案改成按 `locale` 裁剪（18 种 → 最多 3 种），
    *    `locale` 也进了键。不升版本会继续读到 18 种语言的全量条目。
+   *
+   * ⚠️ 2026-11-03 v6 → v7：`game_texts` 多了一列 `about`（详情页「关于」长文）。
+   *    缓存条目里没有这个字段，不升版本详情页那块就永远不出现。
    */
-  ['sb:games:by-id', 'v6'],
+  ['sb:games:by-id', 'v7'],
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
 

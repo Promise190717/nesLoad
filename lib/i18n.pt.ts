@@ -695,6 +695,7 @@ export const pt: Record<MessageKey, string> = {
   'gamesPage.field.series': 'Série',
   'gamesPage.field.language': 'Idioma',
   'gamesPage.controls': 'Controles',
+  'gamesPage.about': 'Sobre {title}',
   'gamesPage.selectLanguage': 'Escolher idioma',
 
   'notFound.title': 'Página não encontrada',

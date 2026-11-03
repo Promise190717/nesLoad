@@ -563,6 +563,36 @@ export default async function GameDetailPage({
               ) : null}
             </section>
           ) : null}
+
+          {/*
+            「关于 <游戏名>」（2026-11-03 加，用户要求「操作说明模块下面只增加一个
+            关于 xxx 的文字介绍模块」）。
+
+            数据是上游详情页「关于 XXX」那块的多段长文（`game_texts.about`，
+            由 scripts/fill-game-about.mjs 抓取写入），段落之间用空行分隔，
+            这里按空行切开逐段画。与上面正文那句 `description` 分工不同：
+            那个是一句话简介，这个是整段介绍。
+
+            ⚠️ **没有就整块不画**：后台手填的那几款没有这一列（表单里没有这一栏）。
+            ⚠️ 位置**只在操作说明下面**（用户明确要求），不要再插到别处、也不要合并进
+               「操作说明」那一块 —— 那是两件事：怎么按，和这款游戏是什么。
+          */}
+          {text.about ? (
+            <section className="mt-6 border-t border-ink-800 pt-5">
+              <h2 className="text-[13px] font-semibold text-ink-200">
+                {t('gamesPage.about', { title: text.title })}
+              </h2>
+              {text.about
+                .split(/\n{2,}/)
+                .map((paragraph) => paragraph.trim())
+                .filter(Boolean)
+                .map((paragraph, index) => (
+                  <p key={index} className="mt-2 text-[13px] leading-7 text-ink-300">
+                    {paragraph}
+                  </p>
+                ))}
+            </section>
+          ) : null}
         </div>
       </div>
 

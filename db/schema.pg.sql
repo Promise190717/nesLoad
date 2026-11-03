@@ -151,20 +151,35 @@ create table if not exists game_texts (
   title         text,
   description   text,
   controls      jsonb,
+  /*
+   * 「关于 <游戏名>」的整段介绍（2026-11-03 加）。
+   *
+   * 与 `description` 不是一回事：`description` 是**一句话**（卡片悬停 / 详情页正文 /
+   * meta description 都用它），这一列是上游详情页「关于 XXX」那块的**多段长文**
+   * （段落之间用空行 `\n\n` 分隔）。详情页在「操作说明」下面单独画一块。
+   *
+   * 只由爬取脚本写（scripts/fill-game-about.mjs），后台表单没有这一栏。
+   */
+  about         text,
   updated_at    timestamptz not null default now(),
   primary key (game_slug, locale)
 );
+
+-- 老库补列（理由同上面 games.players 那句）：幂等，重跑安全。
+alter table game_texts add column if not exists about text;
 
 -- 搜索：`where locale='zh' and title ilike '%马里奥%'`
 -- 用表达式索引 + trgm，前缀/中缀都能走；不加表达式就只能全表扫。
 create index if not exists idx_game_texts_title_trgm
   on game_texts using gin (title gin_trgm_ops);
 /*
- * ⚠️ `description` **故意不建索引**：前台搜索只搜标题（2026-11-03 用户定）。
- *    以前的条件是 `title ILIKE ? OR description ILIKE ?`，而 OR 的两边必须都能走索引
- *    才能合成 BitmapOr —— 只有 title 有索引 ⇒ 整条退化成全表扫（实测 447 ms，
- *    只搜标题 5.7 ms）。真要让描述也参与，先建 `gin (description gin_trgm_ops)`
- *    再把 OR 加回去，理由见 lib/server/sb-games.ts 的 `KEYWORD_EXISTS`。
+ * ⚠️ `description` **故意不建索引**：前台搜索不搜它（2026-11-03）。
+ *    搜索命中的四列是 title / games.slug / developer_texts.name / series_texts.name，
+ *    后三列所在表只有几千行，不值得建索引；而 `title ILIKE ? OR description ILIKE ?`
+ *    的 OR 两边必须都能走索引才能合成 BitmapOr —— 只有 title 有索引 ⇒ 整条退化成
+ *    全表扫（实测 447 ms，只搜标题 5.7 ms）。真要让描述也参与，先建
+ *    `gin (description gin_trgm_ops)` 再把 OR 加回去，
+ *    理由见 lib/server/sb-games.ts 的 `keywordWhere`。
  */
 create index if not exists idx_game_texts_locale on game_texts (locale);
 

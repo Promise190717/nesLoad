@@ -703,6 +703,7 @@ export const es: Record<MessageKey, string> = {
   'gamesPage.field.series': 'Serie',
   'gamesPage.field.language': 'Idioma',
   'gamesPage.controls': 'Controles',
+  'gamesPage.about': 'Acerca de {title}',
   'gamesPage.selectLanguage': 'Elegir idioma',
 
   'notFound.title': 'Página no encontrada',

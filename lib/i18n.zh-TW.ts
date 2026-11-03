@@ -659,6 +659,7 @@ export const zhTW: Record<MessageKey, string> = {
   'gamesPage.field.series': '系列',
   'gamesPage.field.language': '語言',
   'gamesPage.controls': '操作說明',
+  'gamesPage.about': '關於《{title}》',
   'gamesPage.selectLanguage': '選擇語言',
   'notFound.title': '這個頁面不存在',
   'notFound.description': '這個網址在 {site} 上不存在。檢查一下連結，或回首頁看看。',

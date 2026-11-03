@@ -186,9 +186,25 @@ async function remove(key: string) {
 /**
  * 对外形状必须和 `r2IncrementalCache` 实例完全一致 —— 断言成 `typeof` 它，
  * 这样 `defineCloudflareConfig` 那头的类型检查照常生效，也不用去 import 间接依赖的类型。
+ *
+ * 🔴 **`name` 必须逐字等于 `cf-r2-incremental-cache`，不能带任何后缀**（2026-11-03 修）：
+ *    `opennextjs-cloudflare populateCache`（`cf:build` 会自动调）靠
+ *    `resolveCacheName(incrementalCache)` 拿到的这个字符串去 switch，只有**精确相等**
+ *    才走 `populateR2IncrementalCache` —— 认不出就走 `default:` 打一行
+ *    「Incremental cache does not need populating」然后**静默跳过**，构建成功、部署成功，
+ *    但 `.open-next/cache` 里的成品一个都没进 R2。症状是「每个新 buildId 全站从冷开始」，
+ *    而 R2 key 里正好含 buildId，等于每次发版都清零。
+ *
+ *    上一版这里写的是 `cf-r2-incremental-cache+gzip`（想标记「这是压缩版」），
+ *    于是 2026-11-02 上线后一直没预热过。别再加后缀，想标记就写注释。
+ *
+ * ⚠️ **populateCache 写的是明文 JSON，不是 gzip**：它是把构建产物文件原样
+ *    `R2.put(key, stream)`（见 `cli/commands/populate-cache.js` 的 `sendEntryToR2Worker`）。
+ *    读侧本来就按魔数兼容两种格式（`isGzip`），所以不用改——预热写明文、之后被访问到
+ *    再以 gzip 原地覆盖，正是文件头设计的那条路。
  */
 const compressedIncrementalCache = {
-  name: 'cf-r2-incremental-cache+gzip',
+  name: 'cf-r2-incremental-cache',
   get,
   set,
   delete: remove,

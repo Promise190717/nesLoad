@@ -367,9 +367,10 @@ export default async function ConsoleDetailPage({
      * 那个总数。⛔ 别改成「把四个语种加起来」—— 语种为空的脏数据不在那四个键里，
      * 加出来会比真实条数少。
      */
-    keyword ? countGamesCached(keyword, id, null, null) : Promise.resolve(null),
-    /* 各语种的条数：**跟着关键词走**（用户 2026-10-19 报「搜了词标签上的数没变」） */
-    countConsoleGamesByLanguageCached(id, keyword),
+    keyword ? countGamesCached(keyword, id, null, null, textLocalesFor(locale)) : Promise.resolve(null),
+    /* 各语种的条数：**跟着关键词走**（用户 2026-10-19 报「搜了词标签上的数没变」）
+     * ⚠️ 短关键词只在该语言族里搜（见 sb-games 的 keywordWhere），所以 locale 必须传 */
+    countConsoleGamesByLanguageCached(id, keyword, textLocalesFor(locale)),
   ]);
   /* 总页数按这次数据自己报的每页条数算（源站模式下那批一页 18 款，见 games.tsx 同款注释） */
   const pageCount = pageCountOf(data.total, data.limit || PAGE_SIZE);

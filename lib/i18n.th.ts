@@ -664,6 +664,7 @@ export const th: Record<MessageKey, string> = {
   'gamesPage.field.series': 'ซีรีส์',
   'gamesPage.field.language': 'ภาษา',
   'gamesPage.controls': 'วิธีเล่น',
+  'gamesPage.about': 'เกี่ยวกับ {title}',
   'gamesPage.selectLanguage': 'เลือกภาษา',
 
   'notFound.title': 'ไม่พบหน้านี้',

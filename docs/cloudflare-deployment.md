@@ -32,14 +32,38 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
 2026-11-03 起 `/play` 与 `/privacy` `/terms` `/about` `/contact` 已改回按需 ISR ——
 它们既没有登录态也没有查询参数，逐请求渲染等于白烧 CPU。
 
+### 第 0 层：Workers Caching（在 Worker **外面**）
+
+`wrangler.jsonc` 里 `"cache": { "enabled": true }`（2026-11-03 开）。这是 Cloudflare 的两层
+缓存，放在 Worker **前面**：命中时 Worker 完全不执行，**连 isolate 都不启动**。
+
+为什么它是主力：免费版 10ms CPU 连「加载 OpenNext 的 bundle + 初始化 18 张 i18n 表」都
+装不进去，所以 Worker 里那层 Cache API 即使命中也要先付一次冷启动的钱，照样 1102。
+只有在 Worker 外面命中，才真正绕开这个上限。
+
+它按 RFC 9111 读响应头，所以控制手段全在 `worker.ts`：
+
+- 整页 HTML / XML / 纯文本 / 公开 JSON → `withCdnHeaders()`：`s-maxage=<TTL>`
+  + **`Vary: RSC`**（只留这一个维度，甩掉每次导航都不同的 `Next-Router-State-Tree`）。
+- 其他一律 `noStore()`：私有页面、RSC flight、重定向、5xx。**必须显式写** ——
+  9111 的启发式新鲜度会把「没有缓存头」也当成可缓存。
+- `Vary` **不能像 Cache API 那份一样删干净**：它的键是 URL，HTML 和 flight 同一个 URL
+  靠 `RSC` 头区分，删了会把整页 HTML 喂给软导航。Cache API 那份能删是因为键里塞了
+  `__nesload_rsc` 变体标记。
+
+默认不跨版本（`cross_version_cache` 没开），发版即清空 —— 部署后跑 `pnpm warm:edge`
+把热门地址灌一遍。命中不看 `x-nesload-edge`，看 `cf-cache-status`。
+
 ### 第 2 层：worker.ts 的 Cache API 边缘缓存
 
 `wrangler.jsonc` 的 `main` 指向根目录 `worker.ts`（OpenNext 自定义 Worker 入口，
 官方 howto：opennext.js.org/cloudflare/howtos/custom-worker），在 OpenNext handler 外包一层
-`caches.default`：
+`caches.default`。**2026-11-03 起它是第 0 层的兜底**：命中也要先进 Worker，救不了冷 isolate。
 
 - **缓存** `GET` 的 **200 / 404** 响应，内容为 HTML / XML / 纯文本 / RSC flight；
-  TTL：页面 **30 分钟**、404 **5 分钟**、`/api/games*` **30 秒**。
+  TTL：页面 **24 小时**、404 **1 小时**、`/api/games*` **30 秒**。
+  （2026-11-03 从 30 分钟 / 5 分钟拉长：过期就是一次重渲染，而重渲染在免费版大概率
+  超时、也就存不回缓存 —— 长尾地址会永远停在冷状态。详见 `worker.ts` 文件头。）
 - **HTML 和软导航（`RSC` 头）都缓存**，两者用不同的缓存键前缀 —— 2026-11-03 之前
   RSC 一律放行，等于这层缓存对真实浏览行为（点卡片）完全不存在。
 - **不再因为 session cookie 放行**：公共页面的 HTML 里没有任何登录态（收藏钮 / 评论框 /
@@ -49,20 +73,21 @@ Worker 名称为 `nesload`。`wrangler.jsonc` 已包含 OpenNext 的静态资源
   除 `/api/games` 之外的所有 `/api/*`、`next-router-segment-prefetch` 请求、
   307/301 重定向（语言跳转依赖 cookie）、5xx。
 - 缓存键剥掉 `utm_*` / `fbclid` / `gclid` / `msclkid` / **`_rsc`**；
-  `/play` 整个查询串都剥掉（那一页 HTML 是空壳，`id` / `room` / `lang` 全由客户端读）。
+  `/play` 和 `/games/<id>/download` **整个查询串都剥掉** —— 这两页的 HTML 与参数无关：
+  `/play` 的 `id` / `room` / `lang` 全由客户端读，下载页只读 `params`、`?lang=` 它根本不看
+  （2026-11-03 起详情页的下载钮也不再拼这个参数，它纯粹是把缓存键翻倍）。
 - **写入前删掉 `Vary`**：OpenNext 给页面带的是
   `vary: RSC, Next-Router-State-Tree, …`，`Cache.match()` 会按存储时的 `Vary` 逐个头比对，
   而路由树每次导航都不同 —— 不处理的话「存得进、永远读不到」。
   ⚠️ 别指望 `match(key, { ignoreVary: true })`：Workers 的 `CacheQueryOptions` 没实现这个
   字段，传了直接抛异常（2026-11-03 全站 1101 事故）。
 - 命中的请求**完全不消耗 CPU**；第 1 层命中还要进 Worker 读一次 R2，这一层连那次都省掉。
-- 静态资产（`assets` 绑定）不进 Worker、不受影响；所以没用 wrangler 的
-  `"cache": { "enabled": true }` —— 那会把资产请求也变成计入额度的请求。
+- 静态资产（`assets` 绑定）不进 Worker、不受影响。
 
-第 1 层的陈旧窗口由 `revalidateTag` 即时清掉；第 2 层固定 30 分钟，发版后条目**跨版本存活**，
+第 1 层的陈旧窗口由 `revalidateTag` 即时清掉；第 2 层固定 24 小时，发版后条目**跨版本存活**，
 不可接受就在仪表盘（Caching → Purge Everything）刷一次，可接受就不用管。
 边缘 TTL 只在 `worker.ts` 顶部三个常量（`TTL_PAGE` / `TTL_NOT_FOUND` / `TTL_API`）里。
-命中/未命中可以在响应头 `x-nesload-edge: HIT` 里看出来。
+第 2 层命中看响应头 `x-nesload-edge: HIT`，第 0 层命中看 `cf-cache-status`。
 
 sitemap 同步瘦身：**下载页（`/games/<id>/download`）不再进 sitemap**（每语言省约 2100 条，
 抓取邀请面减半）。页面照常可收录 —— 每个详情页都有指过去的链接，只是不再主动推荐。
@@ -103,7 +128,7 @@ DO 使用 SQLite 类，配置未要求升级 Workers Paid；R2、DO 和 Workers 
 ## 页面策略
 
 - 首页、游戏列表首页、机种页、开发商页：按 18 种语言预生成（2026-10-20 从 4 种扩上来），公共内容缓存 30 天。
-- 游戏详情与下载页：默认预生成最新 24 款游戏的 18 种语言，其余首次访问时生成并缓存 30 天。构建变量 `STATIC_GAME_LIMIT` 可提高预生成数量；设为 0 表示全部按需生成，不表示无限数量。⚠️ 语言从 4 种扩到 18 种之后这个乘数是 4.5 倍（24 款 × 18 语言 × 详情/下载两页 = 864 页），游戏数量较多时需权衡构建时间和缓存存储量。
+- 游戏详情与下载页：**构建期零预渲染**（`generateStaticParams() { return [] }` + `dynamicParams = true`），首次访问生成并写进 R2，之后走 `enableCacheInterception`。2026-10-24 起就没有 `STATIC_GAME_LIMIT` 这个构建变量了，别再去配。
 - 分页、搜索和语言筛选：公开 URL 不变；middleware 将有意义的查询参数编码为内部路径，使 Next 的页面缓存按查询隔离。未知追踪参数不会制造新的缓存副本。重复参数交给原有规范化逻辑，超过 2KB 的目录查询返回 414。
 - `/room`、`/play`：静态游戏外壳，游戏 ID、单人/建房/加入参数由客户端处理；游戏资料从公开 API 获取（2026-10-20 起该 API 不缓存，实时读库）。运行前先检查 NDS 单人限制。游戏专属 SEO 和分享图保留在游戏详情页，运行页使用通用 metadata。
 - 公开单款游戏 API `/api/games/[id]`：**不缓存**（2026-10-20 起，此前是预生成 + 30 天缓存），每次请求实时读库，保证与详情页看到的数据一致；列表 API `/api/games` 同样实时。登录、账户、后台和其他业务 API 继续动态鉴权。游戏评论的登录态来自 `private, no-store` API，公共 HTML 不含个人状态。收藏数为缓存快照，点击收藏仍乐观更新。
@@ -114,6 +139,18 @@ DO 使用 SQLite 类，配置未要求升级 Workers Paid；R2、DO 和 Workers 
 
 `pnpm build` 中公共路由及单款游戏 API 应为 `●`/`○`，账户和其他业务 API 为 `ƒ`。运行生产服务器后可设置 `TEST_BASE_URL=http://localhost:3100` 并运行 `pnpm test:static`，检查语言、分页、搜索、HTML/RSC、缓存命中和登录跳转。
 
-部署后在 Workers Logs 比较普通刷新时的 CPU time 和 `exceededCpu`。OpenNext 的缓存拦截让命中的 HTML/RSC 在初始化 Next 渲染器前返回，但**首次生成、过期重建、动态接口仍受免费版 10ms CPU 限制**；这不是绕过套餐限制，也不能保证所有请求永远不出现 1102。若冷门详情仍超限，优先增大 `STATIC_GAME_LIMIT` 并重新构建。查询组合无法全部预生成，必要时进一步将搜索结果改为客户端数据加载。
+部署后按这个顺序看：
+
+1. **Workers Logs 的 `exceededCpu`（1102）** —— 还剩多少、集中在哪些路径。
+2. **`cf-cache-status`** —— 同一地址第二次请求应该是 `HIT`。一直 `MISS` 说明响应头没配对
+   （多半是 `Vary` 没收窄，或者被 `noStore` 了），先查 `worker.ts` 的 `withCdnHeaders`。
+3. **`pnpm warm:edge`** —— 发版后 Workers Caching 全清，跑一遍把热门地址灌上；
+   失败的那批重跑一次，成功率高很多（第一次往往已经把 isolate 焐热了）。
+
+OpenNext 的缓存拦截让命中的 HTML/RSC 在初始化渲染器前返回，但它仍在 Worker **里面**，
+冷 isolate 下照样要付 bundle 初始化的 CPU —— 这正是第 0 层存在的理由。
+**首次生成**（从没被访问过、也不在预热名单里的长尾地址）依然会 1102，这是免费版 10ms 的硬账，
+除升级套餐没有别的解法；能做的只是让「第一次」尽量少发生。查询组合无法全部预生成，
+必要时进一步把搜索结果改为客户端数据加载。
 
 参考：[OpenNext 缓存配置](https://opennext.js.org/cloudflare/caching)、[Cloudflare 资源限制](https://developers.cloudflare.com/workers/platform/limits/)。
