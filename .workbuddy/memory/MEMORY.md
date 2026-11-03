@@ -57,6 +57,7 @@
 ## 部署 / 校验
 
 - `/_next/static/*` 绝不 immutable（next.config.js 已 max-age=0）；`public/sw.js` 对 static 必须 network-first（`VERSION` 改策略要 +1）；发版后 purge CF。
+- 🔴 `open-next.cache.ts` 的 `name` 决定「部署预热」是否发生：`populateCache` 拿它和常量 `cf-r2-incremental-cache` 做字符串相等比较。现在带 `+gzip` 后缀 ⇒ 静默跳过 ⇒ 构建期成品只躺在本地 `.open-next/cache`，每个新 buildId 全站从冷开始（2026-11-03 查明，暂不修）。
 - 大 ROM 唯一下载路 `lib/http.ts` `fetchRomWithProgress`；R2 无版本控制，删 ROM 永久丢。
 - ROM 自持 = 除 gba/nds/ps1 外全部（R2 ~4.2 GiB）；键 `roms/<机种>/<slug>-<lang><ext>`，脚本 `migrate-roms-to-r2.mjs`（判据分层，`.md` 是真卡带不拒）；上游两 host 不可互换。
 - 展示地址一律 `publicUrlOrNull()`；严格版 `publicUrl()` 只给上传/ROM 代理/存档下载。
