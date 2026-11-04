@@ -10,8 +10,9 @@
     "typecheck": "tsc --noEmit",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare deploy && node --env-file-if-exists=.env.local scripts/next-cache-purge.mjs --yes",
+    "cf:deploy": "opennextjs-cloudflare deploy && node --env-file-if-exists=.env.local scripts/next-cache-purge.mjs --yes && node --env-file-if-exists=.env.local scripts/cf-purge.mjs --yes",
     "cache:purge": "node --env-file-if-exists=.env.local scripts/next-cache-purge.mjs",
+    "cache:edge-purge": "node --env-file-if-exists=.env.local scripts/cf-purge.mjs",
     "warm:edge": "node scripts/warm-edge.mjs",
     "test:static": "node scripts/test-static-routing.mjs",
     "test:rom": "node scripts/test-rom-proxy.mjs"
