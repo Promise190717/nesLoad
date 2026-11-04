@@ -3,6 +3,7 @@ import NextTopLoader from 'nextjs-toploader';
 import AdSense from '@/components/AdSense';
 import Analytics from '@/components/Analytics';
 import BootAttributes from '@/components/BootAttributes';
+import ChunkReloadGuard from '@/components/ChunkReloadGuard';
 import { I18nProvider } from '@/components/I18nProvider';
 import LocalePrompt from '@/components/LocalePrompt';
 import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
@@ -427,6 +428,12 @@ export default async function SiteDocument({ children, locale, analytics = true 
           它不渲染任何东西，也不依赖 i18n 上下文。
         */}
         <BootAttributes />
+        {/*
+          发版自愈：HTML 在边缘缓存 24h，旧 HTML 引用的 chunk 已随新部署删掉，
+          客户端 `import()` 会 404。这里捕获后自动整页刷新一次
+          （60 秒内只刷一次，防死循环）。详见组件自己的注释。
+        */}
+        <ChunkReloadGuard />
         {/*
           Google Analytics（GA4，见 components/Analytics.tsx）。
           **`analytics` 默认 true，只有 /admin 传 false** —— 后台是自己的操作台，
