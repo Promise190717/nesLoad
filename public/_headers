@@ -1,5 +1,23 @@
+# Cloudflare 静态资源响应头。
+#
+# ⚠️ 这个文件**优先级高于 next.config.js 的 headers()**：
+#    这些路径由 Workers Static Assets 直接服务，不经过 Next 的路由层，
+#    所以 next.config.js 里对 `/_next/static/:path*` 写的那条 `max-age=0`
+#    对它们**完全不生效**。两处的值必须一致，改一处必须同步另一处。
+#
+# ⚠️ `/_next/static/*` **绝不能 immutable**（2026-10-19 事故 + 2026-11-04 复发）：
+#    Next 给构建产物发 `max-age=31536000, immutable` 的前提是「文件名带内容 hash，
+#    内容一变 URL 就变」。本站在 Turbopack 下这个前提**不成立** —— 改代码后
+#    chunk 名可能不变，于是浏览器缓存里躺着旧 JS 被继续使用，报
+#    `(0, h.v) is not a function` 之类；更常见的是发版后旧 HTML 指向已被替换的
+#    chunk，直接 404 + `ChunkLoadError`（11-04 用户看到的就是这个）。
+#    这里 2026-11-04 之前误写成 `max-age=31536000, immutable`，
+#    把 next.config.js 的正确设置整个盖掉了。
+#
+# 其它几条（cores / bios / compression / sprites）是发版不会变的二进制资源，
+# 缓存一天没问题。
 /_next/static/*
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=0, must-revalidate
 /cores/*
   Cache-Control: public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400
 /bios/*
