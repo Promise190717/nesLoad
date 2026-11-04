@@ -350,8 +350,10 @@ export default async function SiteDocument({ children, locale, analytics = true 
         <link rel="llms-txt" href="/llms.txt" />
         {/*
           Google AdSense（adsbygoogle.js，见 components/AdSense.tsx）。
-          `beforeInteractive` 会在水合前把它插进 <head>，符合 AdSense 官方
-          「尽早用 async 加载」的要求，后续的广告位才能被自动初始化。
+          这是**裸 `<script async>`**，不是 `next/script` —— 必须让它由服务端
+          原样渲染进 HTML 源码，AdSense 的爬虫才看得见。2026-11-04 用
+          `beforeInteractive` 踩过坑：包在组件里 Next 拿不到静态信息，
+          退化成了客户端插入，校验报「找不到代码」。
         */}
         <AdSense enabled={analytics} />
         <script dangerouslySetInnerHTML={{ __html: BOOT_INIT }} />
