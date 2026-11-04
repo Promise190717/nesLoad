@@ -215,6 +215,34 @@ function isPrivatePath(pathname: string): boolean {
 }
 
 /**
+ * 当前部署的版本号，用来给 Cache API 的键加一个「只属于这次部署」的标记。
+ *
+ * ## 为什么必须有它（2026-11-04）
+ *
+ * `cacheKey()` 原本是**纯 URL**。而 Cache API 这一层（`caches.default`）不跟 Worker
+ * 版本绑定，条目 **TTL 24 小时内跨发版存活** —— 于是发版后请求进来：
+ *
+ *   Workers Caching 已经清空（`cross_version_cache: false`）→ 进 Worker →
+ *   `cache.match(纯 URL)` → **命中上一版 HTML** → 直接返回。
+ *
+ * 表现就是用户拿到一份引用着**已被删除的 chunk** 的旧页面，`import()` 全部 404、
+ * 抛 `ChunkLoadError`。R2 那层的键里本来就有 buildId（会正确 MISS），但请求根本
+ * 走不到那儿，在 Cache API 就被截胡了。
+ *
+ * 把部署 id 拼进键之后，这一层也获得了「发版即全部失效」的性质 ——
+ * 三层（Workers Caching / Cache API / R2）就都对齐了，不再需要发版后手动 purge。
+ *
+ * `CF_VERSION_METADATA` 是 Cloudflare 的保留 binding（见 wrangler.jsonc），
+ * 每次部署 id 都不同。**取不到就返回空串，键保持原样** —— 本地 `wrangler dev`
+ * 或者有人把 binding 删了，行为退回改动之前，不会因为读不到就整站不缓存。
+ */
+function cacheVersion(env: unknown): string {
+  const meta = (env as { CF_VERSION_METADATA?: { id?: unknown } } | null | undefined)
+    ?.CF_VERSION_METADATA;
+  return typeof meta?.id === 'string' ? meta.id : '';
+}
+
+/**
  * 缓存键。`variant` 区分三种副本：
  *   · `html`     —— 整页 HTML；
  *   · `rsc`      —— 软导航用的整页 flight；
@@ -223,8 +251,15 @@ function isPrivatePath(pathname: string): boolean {
  *
  * 不直接用原 request：键要和「分享链接上带了追踪参数」「Next 给 RSC 地址
  * 追加了 `_rsc`」这两种情况对齐。
+ *
+ * `version` 见 `cacheVersion()`：**必须加在最后**，因为 `/play` 和下载页那两处会
+ * 把整个查询串清空，早加就被一起清掉了。
  */
-function cacheKey(request: Request, variant: 'html' | 'rsc' | 'prefetch'): Request {
+function cacheKey(
+  request: Request,
+  variant: 'html' | 'rsc' | 'prefetch',
+  version: string
+): Request {
   const url = new URL(request.url);
   for (const name of [...url.searchParams.keys()]) {
     if (TRACKING_PARAM.test(name) || name === '_rsc') url.searchParams.delete(name);
@@ -241,6 +276,7 @@ function cacheKey(request: Request, variant: 'html' | 'rsc' | 'prefetch'): Reque
     if (variant === 'html') url.pathname = downloadKeyPath(download[1]);
   }
   if (variant !== 'html') url.searchParams.set('__nesload_rsc', variant === 'prefetch' ? '2' : '1');
+  if (version) url.searchParams.set('__v', version);
   return new Request(url.toString(), { method: 'GET' });
 }
 
@@ -372,7 +408,7 @@ const edgeCacheWrapper = {
         ? 'prefetch'
         : 'rsc'
       : 'html';
-    const key = cacheKey(request, variant);
+    const key = cacheKey(request, variant, cacheVersion(env));
 
     /*
      * 这一段必须包 try/catch：边缘缓存是**附加**的一层，它的任何异常都不该把

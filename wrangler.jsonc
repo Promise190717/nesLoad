@@ -41,6 +41,18 @@
   //    ⚠️ 默认 `cross_version_cache: false` = 每次发版缓存命名空间独立，发版后仍会
   //       从冷开始。用 `scripts/warm-edge.mjs` 在部署后打一遍热门地址填上。
   "cache": { "enabled": true },
+  // 部署版本号（2026-11-04）。worker.ts 的 `cacheVersion()` 把它拼进 Cache API 的键，
+  // 让 `caches.default` 那一层也「发版即全部失效」。
+  //
+  // 为什么需要：`cross_version_cache: false` 只让上面那个 Workers Caching 发版清空，
+  // 管不到 `caches.default` —— 那层的键原本是纯 URL，条目 TTL 24 小时**跨发版存活**，
+  // 发版后依然返回上一版 HTML，而它引用的 chunk 已经随部署删了 ⇒ 全部 404。
+  // 加了这个 binding 之后三层缓存（Workers Caching / Cache API / R2）都对齐了，
+  // 发版后不再需要手动 purge 边缘缓存。
+  //
+  // ⚠️ `CF_VERSION_METADATA` 是 Cloudflare 的**保留名**，不能改成别的。
+  // ⚠️ 取不到时 `cacheVersion()` 返回空串、键退回纯 URL（本地 dev 就是这种情形）。
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "nesload" }],
   "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "nesload-next-cache" }],
