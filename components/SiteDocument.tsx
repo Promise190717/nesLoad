@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import NextTopLoader from 'nextjs-toploader';
+import AdSense from '@/components/AdSense';
 import Analytics from '@/components/Analytics';
 import BootAttributes from '@/components/BootAttributes';
 import { I18nProvider } from '@/components/I18nProvider';
@@ -347,6 +348,12 @@ export default async function SiteDocument({ children, locale, analytics = true 
           这个 <link> 只是让「顺着 HTML 找」的那类抓取器也能发现它。
         */}
         <link rel="llms-txt" href="/llms.txt" />
+        {/*
+          Google AdSense（adsbygoogle.js，见 components/AdSense.tsx）。
+          `beforeInteractive` 会在水合前把它插进 <head>，符合 AdSense 官方
+          「尽早用 async 加载」的要求，后续的广告位才能被自动初始化。
+        */}
+        <AdSense enabled={analytics} />
         <script dangerouslySetInnerHTML={{ __html: BOOT_INIT }} />
         <script
           type="application/ld+json"
