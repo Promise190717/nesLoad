@@ -128,7 +128,9 @@ DO 使用 SQLite 类，配置未要求升级 Workers Paid；R2、DO 和 Workers 
 ## 页面策略
 
 - 首页、游戏列表首页、机种页、开发商页：按 18 种语言预生成（2026-10-20 从 4 种扩上来），公共内容缓存 30 天。
-- 游戏详情与下载页：**构建期零预渲染**（`generateStaticParams() { return [] }` + `dynamicParams = true`），首次访问生成并写进 R2，之后走 `enableCacheInterception`。2026-10-24 起就没有 `STATIC_GAME_LIMIT` 这个构建变量了，别再去配。
+- 游戏详情：**构建期零预渲染**（`generateStaticParams() { return [] }` + `dynamicParams = true`），首次访问生成并写进 R2，之后走 `enableCacheInterception`。2026-10-24 起就没有 `STATIC_GAME_LIMIT` 这个构建变量了，别再去配。
+- 下载页（`/games/<id>/download`，2026-11-04 改）：页面 HTML **与 id 无关**（正文由客户端组件 `GameDownloadPanel` 从 `/api/games/<id>` 取），`worker.ts` 把整族 URL 的边缘缓存键折叠成**每语言一条**（`/<locale>/__nesload_download`）。2110 款 × 18 语言 ≈ 3.8 万条地址共用 18 份副本，冷渲染从「每个 URL 一次」降到「每种语言一次」。代价：这一页没有逐页 `<title>` / OG，因此挂 `noindex, follow`（它本来就不进 sitemap）。⚠️ 别把任何 id 相关字段加回服务端渲染，否则折叠缓存会把 A 游戏的页面发给 B。
+  - **整条下载链路可一键关掉**：`lib/features.ts` 的 `ROM_DOWNLOAD_ENABLED`（2026-11-04 起为 `false`，AdSense 送审期间）。关掉后详情页不画下载钮、这条路由 `notFound()`、首页 FAQ 里那条一起收起。编译期常量，改完必须重新构建部署。
 - 分页、搜索和语言筛选：公开 URL 不变；middleware 将有意义的查询参数编码为内部路径，使 Next 的页面缓存按查询隔离。未知追踪参数不会制造新的缓存副本。重复参数交给原有规范化逻辑，超过 2KB 的目录查询返回 414。
 - `/room`、`/play`：静态游戏外壳，游戏 ID、单人/建房/加入参数由客户端处理；游戏资料从公开 API 获取（2026-10-20 起该 API 不缓存，实时读库）。运行前先检查 NDS 单人限制。游戏专属 SEO 和分享图保留在游戏详情页，运行页使用通用 metadata。
 - 公开单款游戏 API `/api/games/[id]`：**不缓存**（2026-10-20 起，此前是预生成 + 30 天缓存），每次请求实时读库，保证与详情页看到的数据一致；列表 API `/api/games` 同样实时。登录、账户、后台和其他业务 API 继续动态鉴权。游戏评论的登录态来自 `private, no-store` API，公共 HTML 不含个人状态。收藏数为缓存快照，点击收藏仍乐观更新。

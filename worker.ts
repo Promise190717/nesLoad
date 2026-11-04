@@ -114,6 +114,12 @@
  *   而在「免费版 10ms 装不下一次 SSR」—— 解法只有一个：让请求**不要进 Worker**，
  *   也就是 `wrangler.jsonc` 里的 Workers Caching（见上面「两层缓存」那段）。
  *
+ *   ✅ **2026-11-04 补：下载页那一族已经从死循环里摘出来了**。那一族 3.8 万条 URL
+ *   是这毛病的重灾区（线上 1102 日志清一色 `/games/<slug>/download`），做法是把它
+ *   的服务端输出改成**与 id 无关**，缓存键按语言折叠成一条（`downloadKeyPath`）——
+ *   冷的只剩 18 条，`pnpm warm:edge` 一把就能焐热。详情页那一族**没有**这么处理
+ *   （它的 HTML 里全是这一款的内容，折叠不了），仍靠「热门 + 预热 + 重复访问」慢慢暖。
+ *
  * ⚠️ **静态资产不走这里**：`assets` 绑定的文件（`/_next/static`、`/cores`、
  *    `/sprites`…）由 Cloudflare 直接服务、不进 Worker，免费额度也不计入请求。
  *
@@ -176,14 +182,28 @@ const PUBLIC_API = /^\/api\/games(?:\/[^/]+)?$/;
 const PLAY_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?play$/;
 
 /**
- * 下载页：`/games/<id>/download`，允许一层语言前缀。
+ * 下载页：`/<locale>/games/<id>/download`，语言前缀可省。
  *
- * 它的 HTML 同样与查询串无关 —— 页面只读 `params`，默认选中的 ROM 语言是它自己用
- * `defaultRomLanguage` 算的，**不读 `?lang=`**（见 `GameLanguageActions.tsx` 里下载钮那段）。
- * 2026-11-03 之前详情页的下载钮会拼一个 `?lang=en` 上去，于是同一份 HTML 在边缘缓存里
- * 占两份键；这里统一剥掉，旧外链 / 已收录地址也不会另起一份。
+ * 只用来识别路径；**它带一个捕获组**，因为缓存键要把中间那段 `<id>` 整个吃掉
+ * （见 `cacheKey` 与 2026-11-04 那段说明）。
  */
-const DOWNLOAD_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?games\/[^/]+\/download$/;
+const DOWNLOAD_PATH = /^(\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?))?\/games\/[^/]+\/download$/;
+
+/**
+ * 下载页折叠后的缓存键路径（每语言一份）。
+ *
+ * 2026-11-04：下载页的服务端输出**故意与 id 无关**（正文在
+ * `components/GameDownloadPanel.tsx` 里客户端取数，理由见下载页 page.tsx 的文件头）。
+ * 于是 2110 款 × 18 语言 ≈ 3.8 万条 URL 可以共用 18 份副本 —— 这是唯一能在
+ * 免费版 10ms CPU 下把这一族从「永远冷」里救出来的办法。
+ *
+ * ⚠️ 只对**整页 HTML** 折叠（`variant === 'html'`）。flight 是逐 URL 的
+ * （载荷里带着这次导航的路由树），把 A 游戏的 flight 喂给 B 游戏属于拿不准的事，
+ * 而软导航这条缝已经被详情页改硬导航（`<a>`）堵住了。
+ */
+function downloadKeyPath(localePrefix: string | undefined): string {
+  return `${localePrefix ?? ''}/__nesload_download`;
+}
 
 function isPrivatePath(pathname: string): boolean {
   return (
@@ -210,7 +230,16 @@ function cacheKey(request: Request, variant: 'html' | 'rsc' | 'prefetch'): Reque
     if (TRACKING_PARAM.test(name) || name === '_rsc') url.searchParams.delete(name);
   }
   if (PLAY_PATH.test(url.pathname)) url.search = '';
-  if (DOWNLOAD_PATH.test(url.pathname)) url.search = '';
+  /*
+   * 下载页：查询串整个不要（它是死参数，见 `GameLanguageActions` 里下载钮那段），
+   * 整页 HTML 再把 `<id>` 那段折叠掉 —— 一套语言一份副本服务这一族的全部 URL。
+   * flight 不折叠，理由见 `downloadKeyPath`。
+   */
+  const download = DOWNLOAD_PATH.exec(url.pathname);
+  if (download) {
+    url.search = '';
+    if (variant === 'html') url.pathname = downloadKeyPath(download[1]);
+  }
   if (variant !== 'html') url.searchParams.set('__nesload_rsc', variant === 'prefetch' ? '2' : '1');
   return new Request(url.toString(), { method: 'GET' });
 }
@@ -318,6 +347,8 @@ const edgeCacheWrapper = {
 
     const url = new URL(request.url);
     const { pathname } = url;
+    /** 下载页整族共用一份副本（见 `downloadKeyPath`）—— 下面存副本时要按它区别对待。 */
+    const isDownload = DOWNLOAD_PATH.test(pathname);
 
     if (isPrivatePath(pathname)) return noStore(await handler.fetch(request, env, ctx));
 
@@ -371,6 +402,14 @@ const edgeCacheWrapper = {
     }
 
     const response = await handler.fetch(request, env, ctx);
+
+    /*
+     * 下载页那一族的副本是**整族共用的**（`downloadKeyPath`）⇒ 非 200 一律不能存：
+     * 一条 404 会被当成这一族所有游戏的结果发出去。这里连 Cache API 一起跳过后
+     * 直接 `noStore`，别让 Workers Caching 按原 URL 再单独存一份坏的。
+     * （正文已经不查库判存在性了，正常不该再出 404；这条守的是语言段非法之类的边界。）
+     */
+    if (isDownload && response.status !== 200) return noStore(response);
 
     const ttl =
       response.status === 200

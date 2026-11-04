@@ -39,7 +39,13 @@ export default function RomDownloadGate({
 }: {
   /** 同源的 ROM 代理地址（`/api/games/<id>/rom`） */
   romUrl: string;
-  /** 存进下载目录的文件名。用库里存的原始文件名算 R2 对象名（见下载页注释） */
+  /**
+   * 存进下载目录的文件名（库里那份原始文件名）。
+   *
+   * ⚠️ **允许空串**（2026-11-04）：下载页正文在客户端取数，数据没回来之前不知道原名，
+   * 这时把空串交给 `downloadFile()` = 不设 `download` 属性，让 ROM 代理的
+   * `Content-Disposition` 决定文件名。倒计时 6 秒通常够数据到达，兜底只是防极端情况。
+   */
   romName: string;
   /**
    * 可选的 ROM 语言版本（2026-10-19 加，只在源站模式下非空）。

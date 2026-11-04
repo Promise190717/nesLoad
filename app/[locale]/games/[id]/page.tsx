@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
 import { consoleLabel } from '@/lib/consoles';
+import { ROM_DOWNLOAD_ENABLED } from '@/lib/features';
 import AboutText from '@/components/AboutText';
 import FavoriteButton from '@/components/FavoriteButton';
 import GameLanguageActions from '@/components/GameLanguageActions';
@@ -488,7 +489,16 @@ export default async function GameDetailPage({
                 ? localePath(locale, `/play?id=${game.id}&mode=host`)
                 : null
             }
-            downloadHref={localePath(locale, `/games/${game.id}/download`)}
+            /*
+             * 下载钮画不画看 `lib/features.ts` 的 `ROM_DOWNLOAD_ENABLED`（2026-11-04 关）。
+             * 关着的时候**连地址都不算**：传 `null`，组件那边整颗不画。
+             * 别改成传空串 —— 空 `href` 会跳回当前页，是个坏掉的钮。
+             */
+            downloadHref={
+              ROM_DOWNLOAD_ENABLED
+                ? localePath(locale, `/games/${game.id}/download`)
+                : null
+            }
             languages={romLanguageOptions}
             defaultCode={defaultRomLanguage}
             languageTitle={t('gamesPage.selectLanguage')}

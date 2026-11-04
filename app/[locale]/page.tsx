@@ -9,6 +9,7 @@ import { PlayersIcon } from '@/components/icons';
 import TopBar from '@/components/TopBar';
 import { cardDelayMs } from '@/lib/card-stagger';
 import { entityInitial } from '@/lib/entity-text';
+import { ROM_DOWNLOAD_ENABLED } from '@/lib/features';
 import { SITE_NAME, localePath, translate, type MessageKey } from '@/lib/i18n';
 import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/developers';
 import { countGamesByConsoleCached } from '@/lib/server/sb-games';
@@ -59,7 +60,7 @@ const HOME_CONSOLE_COUNT = 8;
  * `t(\`home.faq.q${n}\`)` 拼出来的键在类型上是 `string`，得强转，而强转之后
  * 「文案表里少一条」这件事就没人拦了 —— 这里用 `satisfies` 让它在编译期就报错。
  */
-const FAQS = [
+const FAQS_ALL = [
   { q: 'home.faq.q1', a: 'home.faq.a1' },
   { q: 'home.faq.q2', a: 'home.faq.a2' },
   { q: 'home.faq.q3', a: 'home.faq.a3' },
@@ -67,6 +68,17 @@ const FAQS = [
   { q: 'home.faq.q5', a: 'home.faq.a5' },
   { q: 'home.faq.q6', a: 'home.faq.a6' },
 ] as const satisfies readonly { q: MessageKey; a: MessageKey }[];
+
+/**
+ * 「能不能下载 ROM」那条（q4）跟着 `ROM_DOWNLOAD_ENABLED` 一起收起。
+ *
+ * 为什么不是改文案：那句话正面回答「每个游戏页都有下载按钮」，而按钮已经没了 ——
+ * 留在页面上就是一句与事实相反的话。关掉期间它也不该出现在任何给人看的介绍里。
+ * 开关打开，这条自动回来，文案一个字都不用动。
+ */
+const FAQS = ROM_DOWNLOAD_ENABLED
+  ? FAQS_ALL
+  : FAQS_ALL.filter((item) => item.q !== 'home.faq.q4');
 
 /**
  * 首页每个区块的外壳：一条分隔线 + 标题 + 一行说明 + 右上角那个「看全部」。

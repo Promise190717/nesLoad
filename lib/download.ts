@@ -37,15 +37,20 @@
  *
  * @param source 同源地址（流式下载，不占内存）或一份已经攒好的 Blob
  * @param filename 存进下载目录的文件名。传地址时它会**顶掉**服务端 Content-Disposition
- *                 给的名字（`download` 属性对同源地址才生效，全站下载都走同源）
+ *                 给的名字（`download` 属性对同源地址才生效，全站下载都走同源）。
+ *                 **传空串 = 不设 `download`，让服务端那一份说了算** ——
+ *                 下载页的正文是客户端组件（`GameDownloadPanel`），数据没回来之前
+ *                 还不知道 ROM 的原名，而 `/api/games/<id>/rom` 总会带
+ *                 `Content-Disposition`（见那个路由的 `relayEgress`）。
+ *                 没有这条兜底，那一刻点下去存下来的文件会叫 `rom`。
  */
-export function downloadFile(source: string | Blob, filename: string) {
+export function downloadFile(source: string | Blob, filename?: string) {
   const isBlob = typeof source !== 'string';
   const href = isBlob ? URL.createObjectURL(source) : source;
 
   const anchor = document.createElement('a');
   anchor.href = href;
-  anchor.download = filename;
+  if (filename) anchor.download = filename;
   anchor.rel = 'noopener';
   // 见文件头：让这一下点击在链上就停住，别惊动 document 上那个顶栏进度条
   anchor.addEventListener('click', (e) => e.stopPropagation());

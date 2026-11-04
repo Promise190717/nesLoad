@@ -45,6 +45,8 @@ import { PlayersIcon } from './icons';
  *    **进入视口的 `<Link>`** 全部预取 —— 于是每访问一个详情页，浏览器就额外渲染
  *    `/play?id=…&mode=solo`、`/play?id=…&mode=host`、`/games/<id>/download` **三个页面**
  *    （下载页 40 KB、`/play` 是模拟器外壳，都不比详情页轻）。
+ *    🔴 2026-11-04 起下载那颗已换成裸 `<a>`（连预取这回事都不存在了），
+ *    理由见下面下载钮上方那段；剩下的两颗仍然是 `prefetch={false}` 的 `<Link>`。
  *
  *    实测这一页只有 169 个 body 元素、55 KB，本身很轻；**贵的是它顺带拖出来的这三页**。
  *    列表页的卡片早就关了预取（见 `GameCardGrid`），这里当初漏了。
@@ -56,6 +58,9 @@ import { PlayersIcon } from './icons';
  *    预取拿不到完整结果，只会白渲染一遍。
  * ⚠️ 收藏钮走 `children` 插进来：它自己是客户端组件、还要拿服务端算好的初值，
  *    在这一层重新实现一遍只会多一条要同步的逻辑。
+ *
+ * ⚠️ 2026-11-04：**下载钮可以整颗不画** —— `downloadHref` 传 `null` 即可，
+ *    开关在 `lib/features.ts`（`ROM_DOWNLOAD_ENABLED`）。其余三颗不受影响。
  */
 
 /** 两颗主钮共用的样式（`<Link>` 与 `<button>` 两种形态必须长得一模一样） */
@@ -93,8 +98,12 @@ export default function GameLanguageActions({
   playHref: string;
   /** 联机游戏的地址；null = 这一款不支持联机（`players === 1` 的单人游戏），整颗不画 */
   hostHref: string | null;
-  /** 下载页地址 */
-  downloadHref: string;
+  /**
+   * 下载页地址。**`null` = 这一款不给下载，整颗钮不画** ——
+   * 现在由 `lib/features.ts` 的 `ROM_DOWNLOAD_ENABLED` 决定（调用处传 `null`）。
+   * 传空串不算「不画」：空 `href` 会跳回当前页，那是个坏掉的钮。
+   */
+  downloadHref: string | null;
   /** 可选的 ROM 语言版本；空 / 只有一个时**不弹框**（数据库那条路永远是空） */
   languages: { code: string; label: string }[];
   /** 只有一个版本时用哪一份（下载钮 / 单语言直达都用它） */
@@ -207,13 +216,26 @@ export default function GameLanguageActions({
             · 爬虫顺着详情页抓下来，多出同等数量的 URL 要抓。
           免费版 10ms CPU 下，每一个多出来的冷键都是一次 1102，见 worker.ts 的文件头。
           worker.ts 的缓存键也对这个路径做了同样的归一化，外链里带的旧参数不会另起一份。
+
+          🔴 2026-11-04：这一颗是**裸 `<a>`，故意不用 `<Link>`**。
+          `<Link>` 点下去走的是 RSC flight，而 flight 载荷是**逐 URL** 的
+          （`?_rsc=` 每次不同，且 `worker.ts` 不给 flight 折叠缓存）⇒ 每点一次下载
+          就是一次无人分担的冷渲染，照旧 1102。下载页现在整族共用一份 HTML
+          （见 page.tsx 文件头），硬导航才能吃到那份副本。
+          观感不变：`DOWNLOAD_CLASS` 与旁边两颗钮同一档，顶栏进度条对真跳转本来就该起条。
+
+          ⚠️ 2026-11-04：整颗钮挂在 `downloadHref` 上（`null` 就不画）。
+          开关是 `lib/features.ts` 的 `ROM_DOWNLOAD_ENABLED`，调用处据此传地址或 `null`。
+          别在这儿直接读那个常量：画不画是**页面**的决定，这一层只负责「给了地址就画」。
         */}
-        <Link href={downloadHref} className={DOWNLOAD_CLASS} prefetch={false}>
-          <span aria-hidden="true" className="text-[15px] leading-none">
-            ↓
-          </span>
-          {downloadLabel}
-        </Link>
+        {downloadHref && (
+          <a href={downloadHref} className={DOWNLOAD_CLASS}>
+            <span aria-hidden="true" className="text-[15px] leading-none">
+              ↓
+            </span>
+            {downloadLabel}
+          </a>
+        )}
       </div>
 
       {pendingHref && (

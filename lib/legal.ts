@@ -50,13 +50,18 @@
  * 判断标准：**这句话对读者的决定有没有用**。
  *
  * ⚠️ **内容必须与本站实际行为一致**，别照抄别的站的模板：
- * 本站**没有广告、没有服务端记录游玩行为** ——
- * 抄一段「我们使用 cookie 分析你的浏览行为」就是不实陈述。
+ * 本站**没有服务端记录游玩行为**，别抄一段「我们使用 cookie 分析你的浏览行为」；
  * 但**访问统计是真的接了**（`components/Analytics.tsx` 的 GA4，2026-10-30 起全站生效），
  * 所以 2026-10-30 把原来那句「未接入第三方统计分析工具」改成了正面披露 —— 这条别再删，
- * 删了就是隐私政策与实现相反。涉及第三方的那一节（Google Fonts / Google Analytics /
+ * 删了就是隐私政策与实现相反。
+ * **广告也是真的接了**（`components/AdSense.tsx` 的 AdSense，2026-11-04 起全站生效，
+ * /admin 除外）：原来那句「本站不使用广告 cookie」从那天起就是假话，第 6、7 节
+ * 一并改成正面披露（含个性化广告的关闭入口）—— 这条同样别删，AdSense 审核
+ * 第一个看的就是隐私政策有没有披露广告 cookie。
+ * 涉及第三方的那一节（Google Fonts / Google Analytics / Google AdSense /
  * Cloudflare / 联机中继）是**逐条核对过代码**才写的：字体在 SiteDocument 的 <link>、
- * 统计在 components/Analytics.tsx、人机验证在 lib/server/turnstile.ts、
+ * 统计在 components/Analytics.tsx、广告在 components/AdSense.tsx、
+ * 人机验证在 lib/server/turnstile.ts、
  * 联机链路在 lib/netplay.ts。改那几处要回来同步。
  * （jsDelivr 那条 2026-10-30 删掉了：2026-10-19 起 14 台机种的核心全在本站 `/cores/`。）
  *
@@ -177,7 +182,7 @@ function privacy(locale: Locale): LegalDoc {
           heading: '6. Cookie',
           body: [
             '本站自己的 cookie 只记录界面语言与登录状态，不影响其他网站，也不向第三方开放；访问统计用的 cookie 见下一条与第 7 节。',
-            '本站**不使用广告 cookie**。访问统计使用 Google Analytics，只用于了解访问量与常用页面，不用于广告投放；它会在你的浏览器里设置统计 cookie，并把访问数据传给 Google。',
+            '本站通过 Google AdSense 展示广告。Google 及其合作伙伴会使用广告 cookie，根据你此前对本站及其他网站的访问记录投放广告；个性化广告可在 Google 广告设置中关闭。访问统计使用 Google Analytics，只用于了解访问量与常用页面；它会在你的浏览器里设置统计 cookie，并把访问数据传给 Google。',
           ],
         },
         {
@@ -188,6 +193,7 @@ function privacy(locale: Locale): LegalDoc {
           bullets: [
             'Google Fonts：页面使用的像素字体。',
             'Google Analytics：访问统计，会设置统计 cookie 并获取你的 IP 地址。',
+            'Google AdSense：广告投放，会设置广告 cookie 并获取你的 IP 地址。',
             'Cloudflare：本站的托管与存储服务，以及注册、登录时的人机验证。',
             '联机功能：通过公共中继服务器建立点对点连接，**对方可获取你的 IP 地址**。请仅与信任的人联机。',
             '上述第三方的隐私做法不受本站控制，建议查阅其各自的隐私政策。',
@@ -284,7 +290,7 @@ function privacy(locale: Locale): LegalDoc {
           heading: '6. Cookie',
           body: [
             'cookie はインターフェースの言語とログイン状態の記録に使用します。他のサイトには影響せず、第三者にも提供しません。アクセス解析用の cookie は次の項目と第 7 節に記載します。',
-            '**広告 cookie は使用しません**。アクセス解析には Google Analytics を使用し、訪問数とよく見られるページの把握だけに用い、広告配信には使いません。同サービスはブラウザに統計用 cookie を設定し、アクセスデータを Google に送信します。',
+            '本サイトは Google AdSense による広告を掲載します。Google およびそのパートナーは広告 cookie を使用し、本サイトおよび他サイトへの過去のアクセスに基づいて広告を配信します。パーソナライズ広告は Google の広告設定で無効にできます。アクセス解析には Google Analytics を使用し、訪問数とよく見られるページの把握だけに用います。同サービスはブラウザに統計用 cookie を設定し、アクセスデータを Google に送信します。',
           ],
         },
         {
@@ -295,6 +301,7 @@ function privacy(locale: Locale): LegalDoc {
           bullets: [
             'Google Fonts：ページが使用するピクセルフォント。',
             'Google Analytics：アクセス解析。統計用 cookie を設定し、IP アドレスを取得します。',
+            'Google AdSense：広告配信。広告 cookie を設定し、IP アドレスを取得します。',
             'Cloudflare：本サービスのホスティングとストレージ、および登録・ログイン時の人間確認。',
             '通信対戦：公共の中継サーバーを介して端末間を直接接続するため、**相手はあなたの IP アドレスを取得できます**。信頼できる相手とのみ対戦してください。',
             'これらの第三者の取り扱いは本サービスの管理外です。各社のポリシーを確認してください。',
@@ -385,7 +392,7 @@ function privacy(locale: Locale): LegalDoc {
           heading: '6. Cookie',
           body: [
             'cookie는 인터페이스 언어와 로그인 상태를 기록하는 데 사용합니다. 다른 사이트에 영향을 주지 않으며 제3자에게 제공하지 않습니다. 접속 분석용 cookie는 다음 항목과 제7조에 적습니다.',
-            '**광고 cookie는 쓰지 않습니다**. 접속 분석에는 Google Analytics를 사용하며, 방문 수와 자주 보는 페이지를 파악하는 데만 쓰고 광고 집행에는 쓰지 않습니다. 이 서비스는 브라우저에 통계용 cookie를 설정하고 접속 데이터를 Google로 보냅니다.',
+            '본 사이트는 Google AdSense로 광고를 게재합니다. Google과 그 파트너는 광고 cookie를 사용해 본 사이트와 다른 사이트의 이전 방문 기록을 바탕으로 광고를 게재합니다. 맞춤 광고는 Google 광고 설정에서 끌 수 있습니다. 접속 분석에는 Google Analytics를 사용하며, 방문 수와 자주 보는 페이지를 파악하는 데만 씁니다. 이 서비스는 브라우저에 통계용 cookie를 설정하고 접속 데이터를 Google로 보냅니다.',
           ],
         },
         {
@@ -396,6 +403,7 @@ function privacy(locale: Locale): LegalDoc {
           bullets: [
             'Google Fonts: 페이지가 쓰는 픽셀 글꼴.',
             'Google Analytics: 접속 분석. 통계용 cookie를 설정하고 IP 주소를 얻습니다.',
+            'Google AdSense: 광고 게재. 광고 cookie를 설정하고 IP 주소를 얻습니다.',
             'Cloudflare: 이 서비스의 호스팅과 저장, 그리고 가입·로그인 시의 사람 확인.',
             '온라인 대전: 공용 중계 서버를 거쳐 기기 간 직접 연결을 맺으므로 **상대가 여러분의 IP 주소를 얻을 수 있습니다**. 신뢰하는 상대와만 대전하세요.',
             '이들 제3자의 처리 방식은 이 서비스의 통제 밖입니다. 각자의 방침을 확인하세요.',
@@ -485,7 +493,7 @@ function privacy(locale: Locale): LegalDoc {
         heading: '6. Cookies',
         body: [
           'Cookies are used to remember the interface language and to keep you signed in. They do not affect other sites and are not shared with third parties. The analytics cookie is described in the next item and in section 7.',
-          'We run **no advertising cookies**. For traffic statistics we use Google Analytics, solely to see visitor numbers and which pages are read, never for ad targeting; it sets a statistics cookie in your browser and sends usage data to Google.',
+          'This site shows ads through Google AdSense. Google and its partners use advertising cookies to serve ads based on your prior visits to this and other websites; personalised advertising can be turned off in Google Ads Settings. For traffic statistics we use Google Analytics, solely to see visitor numbers and which pages are read; it sets a statistics cookie in your browser and sends usage data to Google.',
         ],
       },
       {
@@ -496,6 +504,7 @@ function privacy(locale: Locale): LegalDoc {
         bullets: [
           'Google Fonts: the pixel typeface used by the page.',
           'Google Analytics: traffic statistics; it sets a statistics cookie and obtains your IP address.',
+          'Google AdSense: ad delivery; it sets advertising cookies and obtains your IP address.',
           'Cloudflare: hosting and storage, and the human check at registration and sign-in.',
           'Netplay: a public relay server sets up a peer-to-peer connection, and the other player **can obtain your IP address**. Play only with people you trust.',
           'Those third parties’ privacy practices are outside our control; consult their own policies.',

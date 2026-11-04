@@ -1,24 +1,9 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { cache } from 'react';
-import { consoleLabel as consoleLabelOf } from '@/lib/consoles';
+import GameDownloadPanel from '@/components/GameDownloadPanel';
 import GamesShell from '@/components/GamesShell';
-import RomDownloadGate from '@/components/RomDownloadGate';
-import {
-  SITE_NAME,
-  alternatesFor,
-  localePath,
-  ogLocale,
-  otherLocales,
-  translate,
-  type MessageKey,
-} from '@/lib/i18n';
-import {
-  defaultRomLanguage as defaultRomLanguageOf,
-  romLanguageOptions as romLanguageChoices,
-} from '@/lib/rom-lang';
-import { getGameCached, localizeGame } from '@/lib/server/sb-games';
+import { ROM_DOWNLOAD_ENABLED } from '@/lib/features';
+import { localePath, translate, type MessageKey } from '@/lib/i18n';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -26,60 +11,72 @@ import { readLocaleParam } from '@/lib/server/locale';
  *
  * 为什么要**单独一页**、而不是在详情页上直接挂个下载链接：用户要的是
  * 「下载 ROM 点击进入下载页面，点击下载 6 秒后开始下载」——
- * 也就是说下载这件事本身要有一个**自己的地址**，能被单独收录、单独分享。
- * 详情页那两个按钮因此是并列的：一个是「现在就在浏览器里玩」，一个是「把文件拿走」。
+ * 也就是说下载这件事本身要有一个**自己的地址**，能被单独分享。
  *
  * ⚠️ 真正把字节吐出去的是 `/api/games/<id>/rom`（同源代理，见那个文件的注释）。
  * 这一页只负责「说清楚要下什么、给一个按下去要等 6 秒的按钮」。
  *
- * 这一页读库 + 读 cookie 语言（cookie 语言走路径，页面只读库），渲染本身很轻；
- * 真正贵的是取数（`getGameCached`，7 天）。页面级按需缓存 2026-10-24 恢复
- * （见详情页那段注释），渲染结果也照常进增量缓存。
+ * ---------------------------------------------------------------------------
+ * 🔴 2026-11-04：**这一页的服务端输出刻意与 `id` 无关**
+ *
+ * 线上错误日志里 1102（`Worker exceeded CPU time limit`）清一色是
+ * `GET /<locale>/games/<slug>/download`：2110 款 × 18 语言 ≈ 3.8 万个独立 URL，
+ * 免费版 10ms CPU 装不下一次 React SSR，而冷渲染失败就拿不到响应、也就存不进缓存
+ * ⇒ 每条 URL 永远停在冷状态，每被访问一次（爬虫顺着详情页的下载钮来）就一条 1102。
+ *
+ * 解法是把「逐 URL 渲染」变成「一份副本服务一族 URL」：
+ *   · 页面不再查库、不再往服务端结果里放任何这一款的数据（封面 / 标题 / 文件名
+ *     全在客户端组件 `GameDownloadPanel` 里从 `/api/games/<id>` 取）；
+ *   · `worker.ts` 的缓存键把 `/<locale>/games/<任意 id>/download` 折叠成
+ *     `/<locale>/__nesload_download` ⇒ 3.8 万条 URL 共用 18 份 HTML。
+ *
+ * ⚠️ **别在这里加回 `getGameCached` / 逐页 `generateMetadata`**：任何一个 id 相关字段
+ *    进了 HTML，折叠缓存就会把 A 游戏的页面发给 B 游戏，只能再把键拆回逐 URL
+ *    —— 那等于把 1102 原样请回来。
+ *
+ * 代价与取舍（已确认）：这一页失去逐页 `<title>` / OG，因此挂 **`noindex, follow`**。
+ * 它和详情页内容重复、本来也不在 sitemap 里（见 app/sitemap.ts 顶部那段），
+ * 收录价值近乎为零；分享链接照常可用，只是预览卡片是站点默认那张。
+ *
+ * ⚠️ 详情页的下载钮因此改成了**硬导航**（`<a>`，见 `GameLanguageActions.tsx`）：
+ *    软导航走的是 RSC flight，那份载荷是逐 URL 的，折叠缓存接不住它。
+ *
+ * ---------------------------------------------------------------------------
+ * 🔴 2026-11-04：**整页可以关掉**（`lib/features.ts` 的 `ROM_DOWNLOAD_ENABLED`）。
+ *
+ * 关着的时候这条路由 `notFound()` —— 详情页那颗钮已经不画了，这里是第二道闸：
+ * 旧外链、搜索引擎里已经收录的地址、别人贴过的链接，一条都不许再吐页面。
+ * 两道闸都留着，别只关其中一道（只关按钮 = 地址还能直接打开）。
+ *
+ * ⚠️ 开关是**编译期常量**，改完要重新构建部署才生效。
+ * ⚠️ 关掉期间这条路由**不进 sitemap**（本来也不进，见 `app/sitemap.ts`），无需额外处理。
  */
-const loadGame = cache(async (id: string, locale: string) => getGameCached(id, locale));
-
-/*
- * 这里**不重复 getGame 的查询**：`generateMetadata` 和页面正文都用 `loadGame`，
- * `cache()` 保证同一次请求里只查一遍（和列表页 / 详情页同一个写法）。
- */
-
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ locale: string; id: string }>;
 }): Promise<Metadata> {
-  const { id } = await params;
+  /* 关掉时这条路由根本不存在 —— 元数据也不该算（见文件头「整页可以关掉」那段） */
+  if (!ROM_DOWNLOAD_ENABLED) notFound();
+
   const locale = await readLocaleParam(params);
-  const game = await loadGame(id, locale);
-  if (!game) notFound();
 
-  /* 机种标签按语言取（中文站 FC、英文站 NES），见 lib/consoles.ts 的 `consoleLabel` */
-  const tag = consoleLabelOf(game.consoleType, locale);
-  /* 按语言选定的那一份文案（中英都从库里取出来了，这里挑一份）—— 见 lib/server/games.ts */
-  const text = localizeGame(game, locale);
-  const title = translate(locale, 'seo.gameDownload.title', {
-    title: text.title,
-    console: tag,
-  });
-  const description = translate(locale, 'seo.gameDownload.description', {
-    title: text.title,
-    console: tag,
-  });
-
+  /*
+   * 标题与说明只按语言取，**不读 id**（理由见文件头）。
+   * 页面级 noindex 是必须的：3.8 万条同标题、正文靠客户端填的地址，
+   * 收进索引只会是重复内容。
+   *
+   * ⚠️ 这里**不写 `alternates` / `openGraph`**：
+   *   · canonical / hreflang 一旦按 id 现算，HTML 就又变回逐 URL 一份，折叠缓存立刻失效；
+   *   · `openGraph` 整块写出来会**顶掉**布局里那份（Next 对这类对象是整体替换，
+   *     不是深合并），把默认的 1200×630 分享图一起弄丢。
+   *   于是这一页沿用布局给的站点级 canonical / OG —— 对 noindex 的页面没有副作用，
+   *   分享出去仍是站点默认那张卡片。
+   */
   return {
-    title,
-    description,
-    alternates: alternatesFor(locale, `/games/${id}/download`),
-    openGraph: {
-      type: 'website',
-      url: localePath(locale, `/games/${id}/download`),
-      siteName: SITE_NAME[locale],
-      title,
-      description,
-      images: [{ url: game.imageUrl, alt: text.title }],
-      locale: ogLocale(locale),
-      alternateLocale: otherLocales(locale).map(ogLocale),
-    },
+    title: translate(locale, 'download.heading'),
+    description: translate(locale, 'download.hint'),
+    robots: { index: false, follow: true },
   };
 }
 
@@ -88,73 +85,26 @@ export default async function GameDownloadPage({
 }: {
   params: Promise<{ locale: string; id: string }>;
 }) {
-  const { id } = await params;
+  if (!ROM_DOWNLOAD_ENABLED) notFound();
+
   const locale = await readLocaleParam(params);
-  const game = await loadGame(id, locale);
-  if (!game) notFound();
 
   const t = (key: MessageKey, vars?: Record<string, string | number>) =>
     translate(locale, key, vars);
-  const tag = consoleLabelOf(game.consoleType, locale);
-  /* 页面正文用同一份按语言选定的文案（和 generateMetadata 里那份同源） */
-  const text = localizeGame(game, locale);
-
-  /*
-   * 源站那一款才有多个语言版本（`Game.romLanguages`，见 lib/server/games.ts）。
-   * 数据库那条路是空数组 ⇒ 不画语言选择条，按钮行为和以前一字不差。
-   */
-  const romLanguages = game.romLanguages ?? [];
 
   return (
     <GamesShell
       locale={locale}
       label="DOWNLOAD"
       title={t('download.heading')}
-      /* 副标题写清「下的是哪一款」—— 从搜索结果直接落到这一页的人得马上确认没走错 */
-      intro={`${text.title} · ${tag}`}
-      back={{ href: localePath(locale, `/games/${id}`), label: 'common.back', mode: 'history' }}
+      /*
+       * `back.href` 只是兜底：这一页走 `mode: 'history'`，返回键是浏览器回退
+       * （人是从详情页点进来的，回退比「回某个写死的地址」更贴意图）。
+       */
+      back={{ href: localePath(locale, '/games'), label: 'common.back', mode: 'history' }}
       showAllGamesLink
     >
-      {/*
-        这块「封面 + 标题 + 文件名」整片可点，回到详情页（2026-11-03 用户要的）。
-        只挂一个链接、不做按钮形态：下载页的主线还是下面那个「开始下载」，
-        这里只是给「点进来才发现下错了版本」的人一条回去的路。
-        prefetch 关掉：详情页是整页渲染，为一个次要入口白渲染一次不划算（同详情页三颗主钮）。
-      */}
-      <Link
-        href={localePath(locale, `/games/${id}`)}
-        prefetch={false}
-        className="group mt-6 flex items-center gap-4"
-      >
-        <span className="pixel-edge pxw-2 pxc-700 w-[64px] shrink-0 bg-ink-900">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={game.imageUrl}
-            alt={text.title}
-            className="block aspect-[3/4] w-full object-cover transition-opacity group-hover:opacity-80"
-          />
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-[14px] text-ink-100 transition-colors group-hover:text-accent">
-            {text.title}
-          </span>
-          {/*
-            文件名直接写出来：街机的 ROM 是 romset（名字必须和驱动一致），
-            下载前让人确认一下拿到的是什么，比下完再发现对不上强。
-          */}
-          <span className="mt-1 block truncate font-mono text-[12px] text-ink-500">
-            {game.romName}
-          </span>
-        </span>
-      </Link>
-
-      <RomDownloadGate
-        romUrl={`/api/games/${id}/rom`}
-        romName={game.romName}
-        languages={romLanguageChoices(romLanguages.map((item) => item.code))}
-        defaultCode={defaultRomLanguageOf(romLanguages.map((item) => item.code), locale)}
-        languageLabel={t('gamesPage.field.language')}
-      />
+      <GameDownloadPanel />
     </GamesShell>
   );
 }
@@ -165,7 +115,7 @@ export default async function GameDownloadPage({
  * 历史：这里曾和详情页一起加过 `generateStaticParams` 做构建期预渲染，2026-10-22
  * 迁 Vercel 时一并撤掉、全站 `force-dynamic`；回到 CF 免费版后每个请求现场渲染
  * 会撞 10ms CPU，于是恢复「首次访问渲染、之后走增量缓存」的按需形态。
- * 内容只是「封面 + 文件名 + 一个 6 秒后开始下载的按钮」，取数走 `getGameCached`（7 天）。
+ * 现在正文是客户端组件，这一页的渲染成本只剩外壳，18 种语言各一份。
  */
 export const revalidate = 604800; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 

@@ -47,6 +47,7 @@
 - 缓存唯一出口 `lib/server/cache.ts` `cached()`；改数据/查询形态键尾版本 +1；缓存留页侧不下沉。
 - 🔴 **三层缓存**（2026-11-03 起）：⓪ **Workers Caching**（`wrangler.jsonc` 的 `cache.enabled`，在 Worker **外面**，命中不启动 isolate，是免费版 10ms 下唯一真能压住 1102 的一层）→ ① R2 增量缓存（`cached()` 7 天 + 页面级 ISR）→ ② `worker.ts` 的 Cache API（24h，兜底）。第 0 层只认响应头：整页 HTML 走 `withCdnHeaders`（`s-maxage` + **`Vary: RSC`**），其余 `noStore`；`Vary` **不能**像 Cache API 那份删干净（HTML 与 flight 同 URL 靠 `RSC` 头区分）。发版后它自动清空，跑 `pnpm warm:edge` 回填。
 - 🔴 2026-10-22 数据层 ISR 全撤：`cached()` 统一 7 天；但**页面级 ISR 还在**（2026-11-02 核实：详情 `/games/[id]`、首页、列表页都是 `export const revalidate = 604800` 的整页 app 缓存，桶里 100KB+ 对象就是它们）。只剩 search / account / catalog 搜索是 `force-dynamic`（`/play` 与四个文档页 2026-11-03 起已改回按需 ISR）。robots/sitemap/llms.txt/ai.txt 路由缓存 86400 保留。后台改数据靠 `revalidateTag('games',{expire:0})`；机种/开发商缓存没挂 tag，改完硬等 7 天。
+- 🔴 **下载页 HTML 与 id 无关**（2026-11-04）：正文在 `components/GameDownloadPanel.tsx` 客户端从 `/api/games/<id>` 取，`worker.ts` 把整族 URL 的边缘缓存键折叠成 `/<locale>/__nesload_download`（只折 HTML，flight 不折）⇒ 3.8 万条下载地址共用 18 份副本，这是把这一族从「永远冷 = 每次 1102」里救出来的唯一办法。**别把 id / 逐页 title / canonical 加回服务端渲染**；详情页那颗下载钮**必须是裸 `<a>`**（`<Link>` 走 flight，吃不到折叠）。代价：该页 `noindex, follow`、无逐页 OG。
 - 🔴 **列表型 `<Link>` 一律 `prefetch={false}`**：卡片网格 / 机种卡 / 开发商卡一页几十个，开着预取等于每来一个人就额外渲染几十次详情页 RSC（2026-10-23 错误率 54% 的主因）。只有顶栏 / 返回 / 翻页这类每页一两个的链接保留预取。
 - 🔴 **首屏可见的「动作型」`<Link>` 也要 `prefetch={false}`**（详情页三颗主钮 play/联机/下载 + 开发商链接，2026-10-23 补）。全站**没有 `loading.tsx`**，所以 Next 的预取没有边界可停、只能整页渲染 ⇒ 一次详情页访问会拖出 4 个额外整页渲染。判断口径：这是「动作」还是「浏览路径的下一步」；动作一次访问最多点一个，预取却是 100% 触发。页脚（`footer`，首屏视口外）不用管，IntersectionObserver 不触发。
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`；`/login`、`/account` Link `prefetch={false}`。
@@ -54,6 +55,7 @@
 - `/play` 唯一开局页（PlayScene + GamesShell）；`?id=` 自动载入、`?room=` 加入者、`?lang=` 选 ROM 版本。
 - 存档 = 电池 `.srm` 一款一份（快照别加回）；读档 = 带存档重插卡（applySave）。
 - 🔴 房间页永久下线（代码在 `app/[locale]/_room`），别加入口、别写 sitemap。
+- 🔴 功能开关唯一出口 `lib/features.ts`。`ROM_DOWNLOAD_ENABLED`（2026-11-04 起 `false`，AdSense 送审）关掉时：详情页下载钮不画（`downloadHref` 传 `null`）、`/games/[id]/download` 直接 `notFound()`、首页 FAQ q4 收起。**`/api/games/[id]/rom` 不归它管**（关掉等于关站）。编译期常量，改完必须重新构建部署。
 
 ## 部署 / 校验
 
