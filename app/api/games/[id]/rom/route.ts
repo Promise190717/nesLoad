@@ -66,6 +66,14 @@ const UPSTREAM_TIMEOUT_MS = 25_000;
 const HTML_LIKE = /^text\/|application\/xhtml|application\/json/i;
 
 /**
+ * 「上游把 Range 忽略了」时值得补要一次的体积门槛（8 MiB，2026-11-05 加）。
+ *
+ * 为什么要有门槛：小 ROM 一次整包反而更快 —— 前端 `lib/http.ts` 的探针拿到 200
+ * 就直接把它当整包读，刻意省掉第二次往返。补要一次是给大文件止损，不是给所有文件提速。
+ */
+const RANGE_RETRY_MIN_BYTES = 8 * 1024 * 1024;
+
+/**
  * 整份 ROM 的缓存时长（7 天，2026-10-20 加）。
  *
  * ⚠️ **只有「响应体就是整个文件」时才用它**（见下面的 `servesWholeFile`）。
@@ -261,20 +269,26 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     if (viaEgress) return relayEgress(viaEgress, fileName);
   }
 
+  /*
+   * 回源参数抽成变量，是为了下面「Range 被忽略时补要一次」能原样复用 ——
+   * 两跳必须完全同构，否则补要那一跳可能又走成另一个分支。
+   */
+  const upstreamOptions = {
+    timeoutMs: UPSTREAM_TIMEOUT_MS,
+    /*
+     * 回源上游时带上访客那组「像浏览器」的头（白名单在 `rom-upstream.ts` 的
+     * `CLIENT_HINT_HEADERS`）—— 目的只是别让每片请求都顶着同一个 `nesLoad/1.0`。
+     *
+     * ⚠️ R2 那条**不带**：对象是我们自己的，不需要伪装；而 UA 一多样，
+     *    同一个 key 在边缘就会被缓存成好几份，命中率白掉。
+     */
+    clientHints: fromUpstream,
+    compatibility: fromUpstream ? { userAgent: UPSTREAM_USER_AGENT, referer: `${UPSTREAM_SITE}/` } : undefined,
+  };
+
   let upstream: Response;
   try {
-    upstream = await fetchRomUpstream(target, request, {
-      timeoutMs: UPSTREAM_TIMEOUT_MS,
-      /*
-       * 回源上游时带上访客那组「像浏览器」的头（白名单在 `rom-upstream.ts` 的
-       * `CLIENT_HINT_HEADERS`）—— 目的只是别让每片请求都顶着同一个 `nesLoad/1.0`。
-       *
-       * ⚠️ R2 那条**不带**：对象是我们自己的，不需要伪装；而 UA 一多样，
-       *    同一个 key 在边缘就会被缓存成好几份，命中率白掉。
-       */
-      clientHints: fromUpstream,
-      compatibility: fromUpstream ? { userAgent: UPSTREAM_USER_AGENT, referer: `${UPSTREAM_SITE}/` } : undefined,
-    });
+    upstream = await fetchRomUpstream(target, request, upstreamOptions);
   } catch (error) {
     /*
      * 超时和「连不上」分开报：前者是上游慢（多半是被限流 / 源站过载），
@@ -289,6 +303,43 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       { status: 504 }
     );
   }
+  /*
+   * ⚠️ **上游会把 `Range` 整个忽略掉，回 200 + 整个文件**（2026-11-05 实测确认）。
+   *
+   * 触发条件是「这个对象在那台边缘节点上还是冷的」：R2 公网域名（`files.…`）前面
+   * 那层 Cloudflare 缓存遇到冷对象 + Range 请求时走的是「全量回源」，回 200 而不是
+   * 206。同一个对象紧接着再请求一次就正常了 —— 实测 25 MB / 26 MB / 53 MB 三份
+   * 冷对象第一次全部 200 无 `Content-Range`，第二次全部 206。
+   *
+   * 不处理的话，下面 `servesWholeFile` 会因为 `status === 200` 判成「整份」，
+   * 于是**客户端只要 1 个字节（前端的 `bytes=0-0` 探针），Worker 也要把几十 MB
+   * 原样流一遍** —— 免费版 10 ms CPU / 128 MB 内存下，这就是线上 503（Worker 1102）
+   * 最像的来源：本地 `next dev` 没有这套限制，永远复现不出来。
+   *
+   * 处理方式是补要一次：第一跳已经把对象拉进了 CF 缓存，第二跳通常就回 206。
+   *
+   * ⚠️ 顺序刻意写成「先拿到新响应、确认是 206 再放掉旧的」。反过来先 cancel 更省
+   *    一点内存，但补要一旦失败，手里就空了，只能凭空造一个 504 出来。
+   */
+  if (range && upstream.status === 200) {
+    const declared = Number(upstream.headers.get('content-length') ?? 0);
+    if (declared >= RANGE_RETRY_MIN_BYTES) {
+      try {
+        const retried = await fetchRomUpstream(target, request, upstreamOptions);
+        if (retried.status === 206) {
+          await upstream.body?.cancel();
+          upstream = retried;
+        } else {
+          // 还是 200（缓存没填上）或别的状态 —— 放掉它，继续用手里这份全量
+          await retried.body?.cancel();
+        }
+      } catch (error) {
+        // 补要失败就当没发生：手里这个 200 全量仍然可用，不要因此把请求打成 5xx
+        console.warn('[games] 补要 Range 失败，退回整包转发', id, error);
+      }
+    }
+  }
+
   if (range && upstream.status === 416) {
     const contentRange = upstream.headers.get('content-range');
     await upstream.body?.cancel();
