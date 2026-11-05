@@ -20,6 +20,7 @@ import { getGameRoms } from '@/lib/server/sb-games';
 import { publicUrl } from '@/lib/server/r2';
 import { sourceFileUrl, UPSTREAM_SITE, UPSTREAM_USER_AGENT } from '@/lib/server/upstream';
 import { fetchRomUpstream, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
+import type { RomFetchOptions } from '@/lib/server/rom-upstream';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,12 +67,39 @@ const UPSTREAM_TIMEOUT_MS = 25_000;
 const HTML_LIKE = /^text\/|application\/xhtml|application\/json/i;
 
 /**
- * 「上游把 Range 忽略了」时值得补要一次的体积门槛（8 MiB，2026-11-05 加）。
+ * 「上游把 Range 忽略了」时值得去等它预热的体积门槛（8 MiB）。
  *
  * 为什么要有门槛：小 ROM 一次整包反而更快 —— 前端 `lib/http.ts` 的探针拿到 200
- * 就直接把它当整包读，刻意省掉第二次往返。补要一次是给大文件止损，不是给所有文件提速。
+ * 就直接把它当整包读，刻意省掉第二次往返（`ROM_DIRECT_MAX_BYTES` 也是 8 MiB）。
+ * 这个门槛以上才值得在服务端等一轮缓存填充。
  */
 const RANGE_RETRY_MIN_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 等冷对象预热的时间预算（2026-11-05 加）。
+ *
+ * ## 为什么需要「等」
+ *
+ * 上游那个域名前面也是一层 Cloudflare。对象在某台边缘节点上是冷的时候，它会
+ * **忽略 `Range`、回 200 + 整个文件**；几百 MB 的东西转发给浏览器，免费版 Worker
+ * 必然半路被掐（要么 503 空 body，要么 HTTP 仍是 200 但字节被截断，后者更毒）。
+ *
+ * 但实测发现一件关键的事：**只要请求打到上游，它就会在后台把对象填进缓存**。
+ * 对一个 314 MB 的冷对象，让客户端 3 秒就断开、一个字节都不收，10 秒后再要同一段
+ * 已经是 `206`。所以正确做法不是把整包转出去，而是**放掉它、等它暖**。
+ *
+ * ## 为什么探针等 12 秒、分片只等 6 秒
+ *
+ * 探针（`bytes=0-0`）是整条下载路的入口，它多等一会儿能省掉后面几十片的集体失败；
+ * 分片有自己的 3 次重试 + 二分（见 `lib/http.ts` 的 `fetchSpan`），服务端再压 12 秒
+ * 只会让用户多盯 12 秒无意义的载入条。
+ */
+const WARMUP_PROBE_WAIT_MS = 12_000;
+const WARMUP_CHUNK_WAIT_MS = 6_000;
+/** 轮询间隔。比上游填缓存的速度快没意义，慢了又浪费预算。 */
+const WARMUP_POLL_MS = 2_000;
+/** 分片等不到时回给前端的 `Retry-After`（秒）。 */
+const WARMUP_RETRY_AFTER = '4';
 
 /**
  * 整份 ROM 的缓存时长（7 天，2026-10-20 加）。
@@ -91,6 +119,59 @@ const ROM_CACHE_SECONDS = 7 * 24 * 60 * 60;
 function contentDisposition(name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
   return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/**
+ * `bytes=4194304-8388607` → `{ start, end }`；`bytes=0-`（开放式）→ `end: null`。
+ *
+ * 只处理「有起点」的写法：`bytes=-500`（后缀范围）拿不到 start，调用方按「认不出」
+ * 处理 —— 前端 `lib/http.ts` 从来不发那种，用不上。
+ */
+function parseRangeHeader(value: string): { start: number; end: number | null } | null {
+  const match = /^bytes=(\d+)-(\d*)$/.exec(value);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : null;
+  if (!Number.isSafeInteger(start)) return null;
+  if (end !== null && !Number.isSafeInteger(end)) return null;
+  return { start, end };
+}
+
+/**
+ * 等上游把「刚被要过的这一段」放进边缘缓存（见 `WARMUP_PROBE_WAIT_MS` 顶上那段）。
+ *
+ * 返回 `null` 表示预算内没等到，由调用方决定回什么。
+ *
+ * ⚠️ 调用前必须先把手里那个 200 整包 `cancel()` 掉。不取消的话，上游会继续把几十
+ *    上百 MB 往这条连接里塞，白占带宽不说，Worker 还是会在半路被杀 —— 等于什么
+ *    都没解决。
+ */
+async function waitForRange(
+  target: string,
+  request: Request,
+  options: RomFetchOptions,
+  budgetMs: number
+): Promise<Response | null> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    if (request.signal.aborted) return null;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    // 先等一轮再问：刚才那次请求已经触发了回源，立刻重发只会再触发一次
+    await new Promise((resolve) => setTimeout(resolve, Math.min(WARMUP_POLL_MS, remaining)));
+    if (request.signal.aborted) return null;
+    try {
+      // 单次轮询不能比剩余预算还久，否则这个函数就不再是「等 12 秒」了
+      const perCall = Math.max(1_000, Math.min(options.timeoutMs ?? 25_000, deadline - Date.now()));
+      const response = await fetchRomUpstream(target, request, { ...options, timeoutMs: perCall });
+      if (response.status === 206) return response;
+      await response.body?.cancel();
+      // 200 = 还在回源，继续等；403 / 404 / 5xx 等下去也不会变，早点交回去
+      if (response.status !== 200) return null;
+    } catch {
+      // 单次连接失败不改变结论（下一个轮次上游可能就暖了），继续等
+    }
+  }
 }
 
 /** 走「上行出口」时盖的标记头，防止两份部署互相指来指去转成死循环。 */
@@ -306,36 +387,84 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   /*
    * ⚠️ **上游会把 `Range` 整个忽略掉，回 200 + 整个文件**（2026-11-05 实测确认）。
    *
-   * 触发条件是「这个对象在那台边缘节点上还是冷的」：R2 公网域名（`files.…`）前面
-   * 那层 Cloudflare 缓存遇到冷对象 + Range 请求时走的是「全量回源」，回 200 而不是
-   * 206。同一个对象紧接着再请求一次就正常了 —— 实测 25 MB / 26 MB / 53 MB 三份
-   * 冷对象第一次全部 200 无 `Content-Range`，第二次全部 206。
+   * 触发条件是「这个对象在那台边缘节点上还是冷的」：上游那一跳前面也有 Cloudflare，
+   * 冷对象 + Range 请求走的是「全量回源」，回 200 而不是 206。R2 公网域名同样如此。
    *
-   * 不处理的话，下面 `servesWholeFile` 会因为 `status === 200` 判成「整份」，
-   * 于是**客户端只要 1 个字节（前端的 `bytes=0-0` 探针），Worker 也要把几十 MB
-   * 原样流一遍** —— 免费版 10 ms CPU / 128 MB 内存下，这就是线上 503（Worker 1102）
-   * 最像的来源：本地 `next dev` 没有这套限制，永远复现不出来。
+   * ## 不处理会怎样
    *
-   * 处理方式是补要一次：第一跳已经把对象拉进了 CF 缓存，第二跳通常就回 206。
+   * 下面 `servesWholeFile` 会因为 `status === 200` 判成「整份」，于是**客户端只要
+   * 1 个字节（前端的 `bytes=0-0` 探针），Worker 也要把几十上百 MB 原样流一遍**。
+   * 免费版 Worker 在第 100 秒左右会被掐：
+   *   · 还没吐出响应头就被杀 → `503` + 空 body；
+   *   · 已经开始转、中途断掉但 HTTP 仍是 `200` 且干净收尾 → **静默截断**。
+   * 后者最毒：`200` 没有 `Content-Range`、没有总长可校验，前端会把 572 KB 的残包
+   * 当成 265 MB 的完整 ROM 交给 7z（实测就是 `rival-schools-united-by-fate`）。
    *
-   * ⚠️ 顺序刻意写成「先拿到新响应、确认是 206 再放掉旧的」。反过来先 cancel 更省
-   *    一点内存，但补要一旦失败，手里就空了，只能凭空造一个 504 出来。
+   * ## 现在怎么处理
+   *
+   * 放掉这份整包 —— **请求已经打到上游，它会在后台把对象填进边缘缓存**（实测：
+   * 客户端 3 秒就断、一个字节都不收，10 秒后再要同一段已经是 206）。然后轮询等它
+   * 暖（见 `waitForRange`）：
+   *   · 暖了就换成那份 206 继续走；
+   *   · 探针还没暖 → 用 `content-length` 造一个 `206 bytes 0-0/T` 回给前端，
+   *     至少让前端拿到总长，不至于把残包当整包；
+   *   · 分片还没暖 → `503 + Retry-After`，让前端按自己的重试节奏再来。
+   *
+   * ⚠️ 三种情况的共同点是「绝不把带 Range 的请求接到一个 200 整包上」。
+   *    `wholeFileRequest` 那一支是例外：请求区间本来就覆盖整个文件（前端对小 ROM
+   *    的 `bytes=0-<total-1>`），200 正是它要的东西。
    */
   if (range && upstream.status === 200) {
     const declared = Number(upstream.headers.get('content-length') ?? 0);
-    if (declared >= RANGE_RETRY_MIN_BYTES) {
-      try {
-        const retried = await fetchRomUpstream(target, request, upstreamOptions);
-        if (retried.status === 206) {
-          await upstream.body?.cancel();
-          upstream = retried;
-        } else {
-          // 还是 200（缓存没填上）或别的状态 —— 放掉它，继续用手里这份全量
-          await retried.body?.cancel();
-        }
-      } catch (error) {
-        // 补要失败就当没发生：手里这个 200 全量仍然可用，不要因此把请求打成 5xx
-        console.warn('[games] 补要 Range 失败，退回整包转发', id, error);
+    const span = parseRangeHeader(range);
+    const wholeFileRequest =
+      span !== null && span.start === 0 && declared > 0 && (span.end === null || span.end >= declared - 1);
+
+    /*
+     * `declared === 0` 也要进：那是「200 但没有 Content-Length」（分块传输）。
+     * 这种响应连总长都拿不到，转发出去前端同样校验不了，只能按冷对象处理。
+     */
+    if (!wholeFileRequest && (declared === 0 || declared >= RANGE_RETRY_MIN_BYTES)) {
+      const probeOnly = span !== null && span.start === 0 && span.end === 0;
+
+      // 先放掉这份整包，让上游把带宽用在「填缓存」上，而不是往这条必死的连接里塞
+      await upstream.body?.cancel();
+
+      const warmed = await waitForRange(
+        target,
+        request,
+        upstreamOptions,
+        probeOnly ? WARMUP_PROBE_WAIT_MS : WARMUP_CHUNK_WAIT_MS
+      );
+
+      if (warmed) {
+        upstream = warmed;
+      } else if (probeOnly && declared > 0) {
+        /*
+         * 探针等不到了，但它只需要「总长」这一件事 —— 刚拿到的 `content-length`
+         * 就是整个文件的大小，据此造一个单字节 206。
+         * 前端 `lib/http.ts` 只校验 `start === 0 && end === 0 && total > 0`，够用。
+         */
+        return new Response(new Uint8Array(1), {
+          status: 206,
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Range': `bytes 0-0/${declared}`,
+            'Content-Length': '1',
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-store',
+            'Content-Disposition': contentDisposition(fileName),
+          },
+        });
+      } else {
+        /*
+         * 分片没等到暖：明确说「等一下再要」。
+         * 回 200 是重复上面的灾难，回一个空 206 会让前端拼进缺字节的块 —— 都不行。
+         */
+        return new Response('upstream warming', {
+          status: 503,
+          headers: { 'Cache-Control': 'no-store', 'Retry-After': WARMUP_RETRY_AFTER },
+        });
       }
     }
   }
