@@ -404,8 +404,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   /*
    * 整份一律回 **200**（哪怕上游是 206）：
    *   · 206 在 Cloudflare 默认不进缓存，留着它等于没缓存；
-   *   · 前端收到 200 会退回 `readBodyWithProgress` 走整包流式读 —— 见 `lib/http.ts`
-   *     里 `first.status !== 206 || !probe` 那一支，进度条照常，行为正确。
+   *   · 前端 2026-11-04 起用 1 字节探针（`bytes=0-0`）问总长，再按 4 MiB 切片；
+   *     只有「这一段覆盖整个文件」的请求才会走到这里，回 200 正好对应「整份」。
+   *     真分片（`servesWholeFile === false`）仍旧 206 + no-store。
    */
   return new Response(upstream.body, { status: servesWholeFile ? 200 : upstream.status, headers });
 }

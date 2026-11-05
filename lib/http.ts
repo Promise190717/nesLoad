@@ -4,8 +4,21 @@
  * 原来都写在 `ConsoleScene` 里（private），2026-10-14 加 `/play` 那页时抽出来 ——
  * 两边都要「带进度的下载」和「认不认得出这是用户自己取消的」，抄一份迟早会漂。
  *
- * 现在有两套下法：**整包流式**（`readBodyWithProgress`，存档这类小文件用）
- * 和**分片 Range**（`fetchRomWithProgress`，ROM 走这条，原因见它上面那段）。
+ * ===== ROM 下载：探针 + 并发分片（2026-11-04 二次改）=====
+ *
+ * 当天先改成整包直下，实测速度不可接受（单流 0.25–0.5 MB/s，83 MiB 要几分钟），
+ * 所以分片又加回来了 —— 但这次**修掉「拼出来的文件不完整」那个根**：
+ *
+ *   1. 探针只要 **1 字节**（`bytes=0-0`），只为问出总长度和支持不支持 Range。
+ *      旧版探针一开口就是 8 MiB，小文件等于白下一次。
+ *   2. 每一片都**同时核对三件事**：状态 206、`Content-Range` 的 start/end/total
+ *      与请求完全一致、`blob.size` 等于区间长度。少一样就重试，重试不过就对半切。
+ *      只核字节数是旧版最大的漏洞：同长度但起点错位的响应能拼出一个
+ *      **字节数完全正确、内容全错**的文件，核心只会静默失败。
+ *   3. 拼完再核对一次总长度（`parts` 一个不缺 + `blob.size === total`）。
+ *   4. 服务器不认 Range（回 200 整包）时，**直接用这一个响应**，不再发第二次请求 ——
+ *      上游那批 PS1 / NDS / GBA 盘都是这种，它们的整包路仍然靠 `Content-Length`
+ *      和空响应兜底，这是已知缺口，见 `readBodyWithProgress`。
  */
 
 /**
@@ -34,9 +47,25 @@ export class IncompleteBodyError extends Error {
 }
 
 /**
+ * 响应体一个字节都没有。
+ *
+ * 线上代理偶尔会回 `200` + 空 body（R2 那一段被提前关掉），这种响应连
+ * `Content-Length` 都没有，`readBodyWithProgress` 无从核对。继承
+ * `IncompleteBodyError` 是为了让调用方那句「文件不完整，请重试」照常生效 ——
+ * 它确实是同一类失败，只是判定依据不同（空 vs 少）。
+ */
+class EmptyBodyError extends IncompleteBodyError {
+  constructor() {
+    super(1, 0);
+    this.name = 'EmptyBodyError';
+    this.message = 'empty body: no bytes received';
+  }
+}
+
+/**
  * 流式读一个响应体，边读边报下载进度。
  *
- * 从游戏库载入时 ROM 是整包拉下来的，几 MB 的街机 romset 不给进度就像卡死了 ——
+ * 从游戏库载入时 ROM 是整包拉下来的，几 MB 的 romset 不给进度就像卡死了 ——
  * `res.blob()` 要等全部下完才 resolve，中途什么都看不到，所以这里手动读流。
  *
  * 拿不到 Content-Length（响应被压缩 / 分块传输）时进度一律报 null，
@@ -98,82 +127,28 @@ export async function readBodyWithProgress(
 }
 
 /*
- * ===== 大 ROM：分片 Range 下载 =====
+ * ===== 分片参数 =====
  *
- * 背景（2026-10-19，线上 PS1 几乎全部打不开）：**一个请求搬不动几百 MB**。
- * `/api/games/<id>/rom` 是本站 Worker 的流式代理，而 Cloudflare 对**单次调用**有资源上限：
- * 实测同一个 383 MiB 的 `.chd`，整包 GET 反复只回 **1–3 MB** 就被截断
- * （`Transfer-Encoding: chunked`、没有 `Content-Length`，客户端看不出是截断）；
- * 请求 5 MB 那一段直接 **503 `error code: 1102`**（Worker 超限）。
- * 上游直连同一个文件是 296 MiB / 383 MiB 全量正常的（2.5–4 MB/s），
- * 所以问题不在源站、不在格式、不在核心 —— 就是「一次性搬太多」。
- *
- * 判据很干净：**同一段字节，拆成 8 MiB 一片逐片要，每片都完整；4 片并行 19 秒走完 32 MiB。**
- * 于是这里把整包 GET 换成分片 Range：
- *   · 切片小 ⇒ 每次 Worker 调用都很轻，撞不到那个上限；
- *   · 并行几路 ⇒ 吞吐补回来（单路只有 0.7–1.5 MB/s）；
- *   · 每片都核对字节数 ⇒ 短读能当场发现并重试，不再静默拿到一个截断的文件。
- *
- * ⚠️ 代价是**慢**：PS1 一张 300 MiB 的盘大约 1–3 分钟。这是兜底，不是终局 ——
- *    真正的解法是把 ROM 放到 R2、让浏览器直连（不经过 Worker 就没有这个上限）。
- *
- * ⚠️ 为什么不直接 `fetch` + `arrayBuffer` 一把梭：那是「一个请求搬整包」的另一半问题，
- *    而且会把整个文件压进 JS 堆（见 `readBodyWithProgress` 的注释）。
+ * 4 MiB 一片：线上实测 8 MiB 的段在并发时更容易断，2 MiB 又让请求数翻倍。
+ * 4 路并发：单流实测 0.25–0.5 MB/s，4 路大约能把 83 MiB 压到一分钟以内。
  */
-
+const ROM_CHUNK_BYTES = 4 * 1024 * 1024;
+const ROM_CHUNK_CONCURRENCY = 4;
+/** 一段失败重试几次（不含首次）。 */
+const ROM_CHUNK_RETRIES = 2;
+/** 对半切的下限，再小只剩请求开销。 */
+const ROM_CHUNK_MIN_BYTES = 1024 * 1024;
+/** 最多切几层：4 MiB → 2 → 1 MiB。 */
+const ROM_CHUNK_SPLIT_DEPTH = 2;
 /**
- * 网格粒度：**所有分片都对齐到它**，档位只能按「格数」升降。
+ * 小文件走「一次 Range 拿整份」的阈值。
  *
- * 2026-10-19 从「固定 8 MiB 片 + 失败就对半切」改成这一套。原因在浏览器 Network 面板里
- * 看得最清楚：线上实测**一半的 8 MiB 都在断**（`206` 却只回 169 KB / 283 KB），
- * 而每一片都要先失败 4 次（1 次 + 3 次重试 + 退避）才肯切半 —— 一张 300 MiB 的盘
- * 能发出 128 个请求，总量却只够 40 片，白付了一倍的时间和带宽。
- *
- * 所以片大小改成**自适应**：某一段切过，接下来就从 4 MiB 起要；再切就 2 MiB。
- * 干净六次再升回去。2 MiB 是格子，也是最小档 —— 再往下只增加请求数，没有收益。
+ * 这个尺寸以下的包一次就要得完，多发几个请求只是多几次 RTT；
+ * 而且整份响应会被服务端归一成 200（可缓存），对回访也友好。
  */
-const ROM_GRID_BYTES = 2 * 1024 * 1024;
+const ROM_DIRECT_MAX_BYTES = 8 * 1024 * 1024;
 
-/** 一次最多要几格（4 格 = 8 MiB）。健康时就用它，吞吐最好。 */
-const ROM_MAX_RUN = 4;
-
-/** 同时在飞几批。3 路实测比单路快 2 倍左右，再多对上游不礼貌。 */
-const ROM_CHUNK_CONCURRENCY = 3;
-
-/**
- * 一段最多试几次（不含第一次）。
- *
- * ⚠️ 这个数**不是按「偶发一次」拍的**：线上实测同一条 8 MiB 的 Range 连打 15 次，
- * 6 次是坏的（`503 error code: 1102` 只回 17 字节，或者 206 却只给 100 KB / 7 KB）。
- * 也就是说失败率四成上下，靠「试一次」撑不住。
- *
- * ⚠️ 但**只给小块用满**：段越大越容易在搬到一半时断，这时候再试一次不如直接切半
- *    （切半的成功率提升是立竿见影的）。所以 4 MiB 以上的段只试一次，见 `retriesFor`。
- */
-const ROM_SPAN_RETRIES = 3;
-
-/** 超过这个大小的段不恋战：失败一次就切半，别把 3 次退避都耗在「注定要切」的段上。 */
-const ROM_RETRY_FULL_BELOW = 4 * 1024 * 1024;
-
-/**
- * 对半切的**下限**。
- *
- * 降档解决的是「这一批整体搬不动」，但单格（2 MiB）偶尔还是会断 —— 那时继续硬试
- * 同一段没用，切成两半分别要才过得去（截断的本质是「搬到一半就断」）。
- * 512 KiB 是底线：再碎下去只有请求开销，没有收益。
- */
-const ROM_SPLIT_MIN_BYTES = 512 * 1024;
-
-/** 最多切几层：8 MiB → 4 → 2 → 1 → 512 KiB。**档位降到 2 MiB 时也留够余量**。 */
-const ROM_SPLIT_DEPTH = 4;
-
-/** 连续几次「切过」就把档位降一档。**一次就降**：每多等一轮，就多付一整段的重试。 */
-const ROM_DOWNGRADE_AFTER = 1;
-
-/** 连续几次「一次拿到」才升回一档。比降档保守得多：来回抖比一直用小块更糟。 */
-const ROM_UPGRADE_AFTER = 8;
-
-/** `bytes 0-1048575/94371840` → `{ start, end, total }`。 */
+/** `bytes 0-1048575/94371840` → `{ start, end, total }`；`bytes * /N` 之类返回 null。 */
 function parseContentRange(value: string | null): { start: number; end: number; total: number } | null {
   const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(value ?? '');
   if (!match) return null;
@@ -182,42 +157,23 @@ function parseContentRange(value: string | null): { start: number; end: number; 
   return { start, end, total };
 }
 
-/**
- * 重试前歇多久。指数退避，封顶 5 秒。
- *
- * ⚠️ 封顶从 2 秒提到 5 秒（2026-10-19 实测）：线上的 503 是**成片**来的 ——
- * 一张 300 MiB 的盘能连续好几段一起挂（`41943040-50331647` 和 `50331648-58720255`
- * 这种相邻段一起 503），说明是 Worker 被限流一段时间，不是单个段有问题。
- * 歇 300ms 就又撞进窗口里，只会把失败率抬高。
- */
-function spanBackoffMs(attempt: number): number {
-  return Math.min(750 * 2 ** attempt, 5000);
-}
-
 /** 用户取消要立刻停：抛一个和浏览器一致的 AbortError，调用方按 `isAbortError` 认。 */
 function abortError(): Error {
   return new DOMException('aborted', 'AbortError');
 }
 
-/** `fetchSpan` 的结果。`split` 说明这一段没能一次拿到，是切过之后拼起来的。 */
-interface SpanResult {
-  blobs: Blob[];
-  split: boolean;
-}
-
 /**
- * 分片下完一个 ROM，返回**拼好的 Blob**。
+ * 下一个 ROM，返回整包 Blob。
  *
- * 和 `readBodyWithProgress` 的接口长得一样（给进度、认 abort、短读抛错），
- * 调用方换个函数名就行。
+ * 三部曲：
+ *   1. 探针 `bytes=0-0`，问出总长度；
+ *   2. 总长 ≤ 8 MiB → 一次 Range 拿整份；
+ *   3. 否则 4 MiB 一片、4 路并发，每片核对状态 / Content-Range / 字节数。
  *
- * 服务器不认 `Range`（回 200 或者没有 `Content-Range`）时**原样退回**整包流式读法
- * —— 那条路对小文件本来是好的，别为了大文件把正常路径也改坏。
+ * 服务器不认 Range 时（探针直接回 200 整包），**就用探针那个响应体**当整包读 ——
+ * 那批上游盘（PS1 / NDS / GBA）本来就只有这一条路，多打一次请求纯属浪费。
  *
- * ⚠️ 还有第三种情况会落进那条「整包」分支：**服务端把整份响应归一成了 200**。
- *    `app/api/games/[id]/rom` 只在「body 就是整个文件」时才给可缓存头，并把状态从
- *    206 改成 200（206 进不了 CDN 缓存）。所以小 ROM 现在走的就是这条：
- *    一个带 Range 的请求 → 200 + 整份 body → `readBodyWithProgress`，进度照常。
+ * 接口和调用方约定不变（给进度、认 abort、短读抛 `IncompleteBodyError`）。
  */
 export async function fetchRomWithProgress(
   url: string,
@@ -225,40 +181,101 @@ export async function fetchRomWithProgress(
 ): Promise<Blob> {
   const { signal, onProgress } = options;
 
-  // 第一片兼当探针：既拿到了开头 8 MiB，也问出了总长度
-  const first = await fetch(url, {
-    signal,
-    headers: { Range: `bytes=0-${ROM_MAX_RUN * ROM_GRID_BYTES - 1}` },
-  });
-  if (!first.ok) throw new Error(`HTTP ${first.status}`);
+  // ---------- 1. 探针：只要 1 字节 ----------
+  const probe = await fetch(url, { signal, headers: { Range: 'bytes=0-0' } });
+  if (!probe.ok) throw new Error(`HTTP ${probe.status}`);
 
-  const probe = parseContentRange(first.headers.get('content-range'));
-  if (first.status !== 206 || !probe) {
-    return readBodyWithProgress(first, onProgress);
+  /*
+   * 服务器忽略了 Range（回 200 就是整个文件）：直接把这个响应读完。
+   * ⚠️ 不要 cancel 了再发一次 —— 字节已经在流里了，重发等于白下一遍。
+   */
+  if (probe.status === 200) {
+    const blob = await readBodyWithProgress(probe, onProgress);
+    if (blob.size === 0) throw new EmptyBodyError();
+    onProgress(1);
+    return blob;
   }
 
-  const { total } = probe;
+  const probeRange = parseContentRange(probe.headers.get('content-range'));
+  const supported =
+    probe.status === 206 &&
+    probeRange !== null &&
+    probeRange.start === 0 &&
+    probeRange.end === 0 &&
+    probeRange.total > 0;
+
+  if (!supported) {
+    // 206 但范围长得不对（代理改写 / 中间层塞了别的东西）：别拿这 1 字节当文件
+    await probe.body?.cancel().catch(() => {});
+    throw new Error(`unexpected range response: ${probe.status}`);
+  }
+
+  const total = probeRange.total;
+  // 这 1 字节用不上，早点把连接还回去；cancel 失败不影响后面（响应已经拿到了）
+  await probe.body?.cancel().catch(() => {});
   onProgress(0);
 
-  // 一片就装下了（小 ROM 的常态）：不用再发第二次请求
-  const firstBlob = await first.blob();
-  if (firstBlob.size >= total) {
+  // ---------- 2. 小文件：一次拿整份 ----------
+  if (total <= ROM_DIRECT_MAX_BYTES) {
+    const blob = await fetchWholeRange(url, total, signal);
     onProgress(1);
-    return firstBlob;
+    return blob;
   }
 
-  /** 第 `g` 格的起始字节。 */
-  const gridStart = (g: number) => g * ROM_GRID_BYTES;
-  /** 第 `g` 格的结束字节（含）；最后一格可能不满。 */
-  const gridEnd = (g: number) => Math.min((g + 1) * ROM_GRID_BYTES, total) - 1;
+  // ---------- 3. 大文件：并发分片 ----------
+  return fetchInChunks(url, total, signal, onProgress);
+}
 
-  const gridCount = Math.ceil(total / ROM_GRID_BYTES);
-  /** 每格一个 Blob。切片的合并在最后那次 `new Blob(parts)` 里一次做完。 */
-  const parts: Blob[] = new Array(gridCount);
+/**
+ * 用一次 Range 拿 `0..total-1`，核对长度。
+ *
+ * 服务端会把「覆盖整份的 206」改写成 200（为了能进缓存），所以这里**不要求 206**，
+ * 只要求字节数对得上 —— 200 和 206 都接受。
+ */
+async function fetchWholeRange(
+  url: string,
+  total: number,
+  signal: AbortSignal | undefined
+): Promise<Blob> {
+  const res = await fetch(url, { signal, headers: { Range: `bytes=0-${total - 1}` } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  if (blob.size === 0) throw new EmptyBodyError();
+  if (blob.size !== total) throw new IncompleteBodyError(total, blob.size);
+  return blob;
+}
+
+/**
+ * 按 4 MiB 切片、4 路并发下完，每片严格核对 `Content-Range` 与长度。
+ *
+ * 任何一片连续失败就二分重试（4 → 2 → 1 MiB），还不行就整单失败 ——
+ * 绝不会把「少一段」或「错一段」的字节拼进结果里。
+ */
+async function fetchInChunks(
+  url: string,
+  total: number,
+  outerSignal: AbortSignal | undefined,
+  onProgress: (ratio: number | null) => void
+): Promise<Blob> {
+  const chunkCount = Math.ceil(total / ROM_CHUNK_BYTES);
+  const parts: (Blob | undefined)[] = new Array(chunkCount);
   let loaded = 0;
   let lastPct = 0;
 
-  /** 读完一段就报一次进度，按 1% 节流（和 `readBodyWithProgress` 同一套口径）。 */
+  /*
+   * 内部 controller：用户取消、或者某一片彻底失败时，把**其余在飞的请求一起掐掉**。
+   * 不然一片报错之后另外三路还在搬几十 MB，纯属浪费。
+   */
+  const aborter = new AbortController();
+  const forwardAbort = () => aborter.abort();
+  if (outerSignal) {
+    if (outerSignal.aborted) throw abortError();
+    outerSignal.addEventListener('abort', forwardAbort, { once: true });
+  }
+
+  const chunkStart = (index: number) => index * ROM_CHUNK_BYTES;
+  const chunkEnd = (index: number) => Math.min((index + 1) * ROM_CHUNK_BYTES, total) - 1;
+
   const report = (size: number) => {
     loaded += size;
     const pct = Math.floor((loaded / total) * 100);
@@ -268,166 +285,114 @@ export async function fetchRomWithProgress(
   };
 
   /**
-   * 要 `[start, end]` 这段，返回按顺序排好的若干 Blob。
+   * 要 `[start, end]` 这段，返回按顺序排好的若干 Blob（切过就是多块）。
    *
-   * 先带重试地整段要；**整段反复失败就一刀切两半**分别要（见 `ROM_SPLIT_MIN_BYTES`），
-   * 递归到下限为止 —— 截断是「搬到一半就断」，段越短越容易过。
-   *
-   * `split` 是给外面调档位用的信号：这一段要是切过，说明当前档位在这一带不健康。
+   * ⚠️ 这里的校验是「文件不完整」的正解，别为了省一次判断删掉任何一条：
+   *   · `status === 206` —— 200 说明服务器把整份塞回来了，长度对不上；
+   *   · `start/end` 与请求一致 —— 防「同长度、不同起点」的错位响应被拼进去；
+   *   · `total` 与探针一致 —— 防下载途中对象被换掉；
+   *   · `blob.size === expected` —— 防短读。
    */
-  async function fetchSpan(start: number, end: number, depth = 0): Promise<SpanResult> {
+  async function fetchSpan(start: number, end: number, depth = 0): Promise<Blob[]> {
     const expected = end - start + 1;
-    // 大段失败一次就切（见 `ROM_RETRY_FULL_BELOW`），小块才值得多试几次
-    const retries = expected > ROM_RETRY_FULL_BELOW ? 1 : ROM_SPAN_RETRIES;
     let failure: unknown = null;
 
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-      if (signal?.aborted) throw abortError();
+    for (let attempt = 0; attempt <= ROM_CHUNK_RETRIES; attempt += 1) {
+      if (outerSignal?.aborted) throw abortError();
+      // 兄弟片已经失败了，别再白搬
+      if (aborter.signal.aborted) throw failure ?? abortError();
       try {
-        const res = await fetch(url, { signal, headers: { Range: `bytes=${start}-${end}` } });
+        const res = await fetch(url, {
+          signal: aborter.signal,
+          headers: { Range: `bytes=${start}-${end}` },
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
-        // 短读在这里就掐掉：绝不能把缺角的字节拼进 ROM（核心侧只会静默退回主菜单）
-        if (blob.size !== expected) throw new IncompleteBodyError(expected, blob.size);
-        return { blobs: [blob], split: false };
+        const range = parseContentRange(res.headers.get('content-range'));
+        const matches =
+          res.status === 206 &&
+          range !== null &&
+          range.start === start &&
+          range.end === end &&
+          range.total === total &&
+          blob.size === expected;
+        // 逐条见函数头：少判一条就可能拼进错位或缺失的字节
+        if (!matches) throw new IncompleteBodyError(expected, blob.size);
+        return [blob];
       } catch (error) {
-        // 用户取消要立刻停，重试没意义
-        if (signal?.aborted || isAbortError(error)) throw error;
+        // 只有**用户取消**才当 abort 报；兄弟片失败也会抛 AbortError，那不是取消
+        if (outerSignal?.aborted) throw abortError();
+        if (aborter.signal.aborted) throw error;
         failure = error;
-        // 最后一次失败就别再等了，直接走「对半切」
-        if (attempt < retries) {
-          await new Promise((resolve) => setTimeout(resolve, spanBackoffMs(attempt)));
+        if (attempt < ROM_CHUNK_RETRIES) {
+          await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
         }
       }
     }
 
-    if (expected > ROM_SPLIT_MIN_BYTES && depth < ROM_SPLIT_DEPTH) {
+    if (expected > ROM_CHUNK_MIN_BYTES && depth < ROM_CHUNK_SPLIT_DEPTH) {
       const mid = start + Math.floor(expected / 2);
       const left = await fetchSpan(start, mid - 1, depth + 1);
       const right = await fetchSpan(mid, end, depth + 1);
-      return { blobs: [...left.blobs, ...right.blobs], split: true };
+      return [...left, ...right];
     }
     throw failure ?? new Error(`span ${start}-${end} failed`);
   }
 
-  /**
-   * 当前档位：一次要几格。
-   *
-   * 起始 4 格（8 MiB）。一批切过就降一档（`ROM_DOWNGRADE_AFTER = 1`），
-   * 干净 8 批再升回去 —— 详见 `ROM_GRID_BYTES` 的注释
-   * （线上失败率一半，每片都从 8 MiB 重试纯属白付）。
-   *
-   * ⚠️ 不要改成「每次失败就地降档并重试」：`fetchSpan` 内部已经保证最后能拼出整段
-   *    （重试 + 对半切），这里只负责**下一批**从哪一档起手，改得越多越容易让游标乱掉。
-   */
-  let run = ROM_MAX_RUN;
-  let splitStreak = 0;
-  let cleanStreak = 0;
-
-  function adapt(split: boolean) {
-    if (split) {
-      cleanStreak = 0;
-      splitStreak += 1;
-      if (splitStreak >= ROM_DOWNGRADE_AFTER && run > 1) {
-        run = Math.max(1, run >> 1);
-        splitStreak = 0;
-      }
-      return;
-    }
-    splitStreak = 0;
-    cleanStreak += 1;
-    if (cleanStreak >= ROM_UPGRADE_AFTER && run < ROM_MAX_RUN) {
-      run = Math.min(ROM_MAX_RUN, run * 2);
-      cleanStreak = 0;
-    }
-  }
-
-  /** 把一段连续字节按格填进 `parts`。`gridEnd` 保证最后一格不会越界。 */
-  function fill(blob: Blob, startGrid: number, count: number) {
-    let offset = 0;
-    for (let k = 0; k < count; k += 1) {
-      const g = startGrid + k;
-      const size = gridEnd(g) - gridStart(g) + 1;
-      // `Blob.slice` 只建视图不复制字节，所以这里切开是零成本的
-      parts[g] = blob.slice(offset, offset + size);
-      offset += size;
-    }
-  }
-
-  /** 要 `[startGrid, startGrid + count)` 这几格，填进 `parts`。 */
-  async function takeRun(startGrid: number, count: number): Promise<void> {
-    const start = gridStart(startGrid);
-    const end = gridEnd(startGrid + count - 1);
-    const result = await fetchSpan(start, end);
-    const merged = result.blobs.length === 1 ? result.blobs[0] : new Blob(result.blobs);
+  async function takeChunk(index: number): Promise<void> {
+    const start = chunkStart(index);
+    const end = chunkEnd(index);
+    const pieces = await fetchSpan(start, end);
+    // 切过就是多块；拼引用不复制字节
+    const merged = pieces.length === 1 ? pieces[0] : new Blob(pieces);
     if (merged.size !== end - start + 1) {
       throw new IncompleteBodyError(end - start + 1, merged.size);
     }
-    fill(merged, startGrid, count);
+    parts[index] = merged;
     report(merged.size);
-    adapt(result.split);
   }
 
-  /*
-   * 探针那 8 MiB 已经到手：只要字节齐、且它确实覆盖满 4 格，就按格切开直接用。
-   *
-   * ⚠️ 两个条件缺一不可：
-   *   · `firstBlob.size === probeBytes` —— 没短读，字节是完整的；
-   *   · `probeBytes >= 4 格` —— 服务器真按我们要的 8 MiB 回了（万一它只回了 3 MiB，
-   *     直接 `fill(..., 4)` 会切出空的 Blob，还会把 3–4 MiB 那一段跳过）。
-   * 不满足就退回 `nextGrid = 0`，让 worker 重新要 —— 多一次请求，但不会错位。
-   */
-  const probeBytes = probe.end + 1;
-  let nextGrid = 0;
-  if (firstBlob.size === probeBytes && probeBytes >= ROM_MAX_RUN * ROM_GRID_BYTES) {
-    nextGrid = Math.min(ROM_MAX_RUN, gridCount);
-    fill(firstBlob, 0, nextGrid);
-    loaded += firstBlob.size;
-  }
-
-  // 固定几个「工人」从同一个游标取下一批 —— 比「按 index 取模预先分组」更均匀
-  // （每一批的耗时本来就不一样，谁先空出来谁接着拿）。
-  let cursor = nextGrid;
+  let cursor = 0;
   async function worker(): Promise<void> {
     for (;;) {
-      const startGrid = cursor;
-      if (startGrid >= gridCount) return;
-      const count = Math.min(run, gridCount - startGrid);
-      // 先占位再要：`run` 随时可能被别的 worker 改小，占位保证没人抢同一段
-      cursor = startGrid + count;
+      const index = cursor;
+      if (index >= chunkCount) return;
+      cursor = index + 1;
       try {
-        await takeRun(startGrid, count);
+        await takeChunk(index);
       } catch (error) {
-        if (signal?.aborted || isAbortError(error)) throw error;
-        /*
-         * 一段彻底失败**不立刻判死**：先歇三秒，再把这一段原样走一遍。
-         * 线上代理的 503 有一半是瞬时的（同一段隔几秒再要往往就过），而一次
-         * 失败就丢掉整张 300 MiB 的盘，代价太大 —— 用户得从零重下。
-         * 第二遍内部照样会重试、降档、切半，所以这里只加一次，不无限循环。
-         */
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        if (signal?.aborted) throw abortError();
-        await takeRun(startGrid, count);
+        // 一片倒了就把别的也掐掉，别让它们在后台继续搬
+        aborter.abort();
+        throw error;
       }
     }
   }
 
   try {
     await Promise.all(
-      Array.from({ length: Math.min(ROM_CHUNK_CONCURRENCY, gridCount) }, () => worker())
+      Array.from({ length: Math.min(ROM_CHUNK_CONCURRENCY, chunkCount) }, () => worker())
     );
   } catch (error) {
-    if (signal?.aborted || isAbortError(error)) throw error;
-    // 有片彻底失败了：报「下载不完整」而不是一句笼统的网络错误 —— 前者能让人重试
+    // 用户取消照实抛；一片失败连累出来的 AbortError 要按「没下完」报
+    if (outerSignal?.aborted) throw abortError();
+    // 具体是哪一片坏了不重要，调用方只需要知道「没拼成，重来」
+    if (error instanceof IncompleteBodyError) throw error;
     throw new IncompleteBodyError(total, loaded);
+  } finally {
+    outerSignal?.removeEventListener('abort', forwardAbort);
   }
 
   /*
-   * 按格顺序拼。`new Blob([...])` 只**串引用**，不复制字节 —— 所以这一步
-   * 不会把几百 MB 再拷一遍（和 `readBodyWithProgress` 末尾那句同一个道理）。
+   * 最后一道闸：每一片都必须有，且总长必须对上。
+   * 走到这里还能对不上，说明切片逻辑本身有 bug —— 宁可报错也不交出坏文件。
    */
+  const missing = parts.findIndex((part) => !(part instanceof Blob));
+  if (missing >= 0) throw new IncompleteBodyError(total, loaded);
+  const blob = new Blob(parts as Blob[], { type: 'application/octet-stream' });
+  if (blob.size !== total) throw new IncompleteBodyError(total, blob.size);
+
   onProgress(1);
-  return new Blob(parts, { type: 'application/octet-stream' });
+  return blob;
 }
 
 /**

@@ -724,8 +724,8 @@ export default function PlayScene({
             /* 单碟，以及 zip 形态的多碟（只加载第一碟）—— 都没有换碟这回事。 */
             setDiscInfo(null);
             /*
-             * 走**分片**那条（见 `lib/http.ts` 的 `fetchRomWithProgress`）：
-             * 一个请求搬不动几百 MB，PS1 的盘动辄 300 MiB，整包 GET 会被截断在几 MB 上。
+             * 先 1 字节探针问总长：小包一次拿完，大包走 4 MiB × 4 路并发分片
+             * （见 `lib/http.ts` 的 `fetchRomWithProgress`，每片都核对 Content-Range 与长度）。
              */
             const romUrl = romLang
               ? `/api/games/${game!.id}/rom?lang=${encodeURIComponent(romLang)}`

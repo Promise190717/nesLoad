@@ -1710,8 +1710,8 @@ export default function ConsoleScene({
       setLibraryProgress(null);
 
       /*
-       * 一笔下载一个 controller。abort 它 = 同时掐掉所有在飞的请求和响应体流，
-       * 分片下载里正在读的那几片随即抛 AbortError ——
+       * 一笔下载一个 controller。abort 它 = 掐掉在飞的那个请求和它的响应体流，
+       * 读取随即抛 AbortError ——
        * 整条路径自然收场，不需要额外的「已取消」标志位。
        */
       const controller = new AbortController();
@@ -1719,9 +1719,9 @@ export default function ConsoleScene({
 
       try {
         /*
-         * 分片下载（`lib/http.ts` 的 `fetchRomWithProgress`）：Worker 代理一个请求搬不动
-         * 几百 MB，PS1 的盘会被截断在几 MB 上。abort 依然有效 —— 每一片的 fetch 都挂同一个
-         * signal，取消时在飞的那几片立刻抛 AbortError，循环跟着收场。
+         * `lib/http.ts` 的 `fetchRomWithProgress`：先 1 字节探针问总长，
+         * 小包一次拿完，大包 4 MiB × 4 路并发分片（每片核对 Content-Range 与长度）。
+         * abort 依然有效 —— 所有在飞的请求和响应体流都挂在同一个 signal 上。
          */
         const blob = await fetchRomWithProgress(rom.romUrl, {
           signal: controller.signal,
