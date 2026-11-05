@@ -17,7 +17,8 @@
  */
 
 import { getGameRoms } from '@/lib/server/sb-games';
-import { publicUrl } from '@/lib/server/r2';
+import { gamesBucket, publicUrl } from '@/lib/server/r2';
+import type { R2ObjectLike } from '@/lib/server/r2';
 import { sourceFileUrl, UPSTREAM_SITE, UPSTREAM_USER_AGENT } from '@/lib/server/upstream';
 import { fetchRomUpstream, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
 import type { RomFetchOptions } from '@/lib/server/rom-upstream';
@@ -115,6 +116,37 @@ const WARMUP_RETRY_AFTER = '4';
  */
 const ROM_CACHE_SECONDS = 7 * 24 * 60 * 60;
 
+/*
+ * 一次大 ROM 下载会发几十个 4 MiB 分片请求。每个分片都查一遍 Supabase 不只是慢，
+ * 还要重复做 SQL 参数绑定与 JSON 解码；四个首发分片甚至会同时发出四条相同查询。
+ * 在当前 isolate 里短存 60 秒并复用进行中的 Promise，既合并冷启动查询，也避免热分片
+ * 反复查库。失败立即剔除，不会把一次数据库故障缓存一分钟；后台换来源最多晚 60 秒。
+ */
+const ROM_LOOKUP_TTL_MS = 60_000;
+const ROM_LOOKUP_MAX_ENTRIES = 128;
+type RomLookupEntry = {
+  expiresAt: number;
+  value: Promise<Awaited<ReturnType<typeof getGameRoms>>>;
+};
+const romLookups = new Map<string, RomLookupEntry>();
+
+function lookupGameRoms(id: string): Promise<Awaited<ReturnType<typeof getGameRoms>>> {
+  const now = Date.now();
+  const hit = romLookups.get(id);
+  if (hit && hit.expiresAt > now) return hit.value;
+
+  if (romLookups.size >= ROM_LOOKUP_MAX_ENTRIES) {
+    const oldest = romLookups.keys().next().value;
+    if (typeof oldest === 'string') romLookups.delete(oldest);
+  }
+  const entry: RomLookupEntry = { expiresAt: now + ROM_LOOKUP_TTL_MS, value: getGameRoms(id) };
+  romLookups.set(id, entry);
+  return entry.value.catch((error) => {
+    if (romLookups.get(id) === entry) romLookups.delete(id);
+    throw error;
+  });
+}
+
 /** 非 ASCII 文件名要用 RFC 5987 的 filename*，同时给一个 ASCII 回退。 */
 function contentDisposition(name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
@@ -176,6 +208,95 @@ async function waitForRange(
 
 /** 走「上行出口」时盖的标记头，防止两份部署互相指来指去转成死循环。 */
 const EGRESS_HEADER = 'x-nl-rom-egress';
+
+/**
+ * 从自己的 R2 桶里取一段字节 —— **binding 通道**（2026-11-05 加，见 `lib/server/r2.ts`
+ * 的 `gamesBucket()` 顶上那段）。
+ *
+ * 返回 `null` 只有一个含义：**这条通道不可用**（本地 dev、没配 binding、binding 调用抛错）。
+ * 调用方据此回落到公网域名，行为与加这个函数之前一致。
+ * 对象确实不在桶里（404）或区间越界（416）**不返回 null** —— 那不是「通道坏了」，
+ * 回落到公网只会把同一个错误再犯一遍。
+ *
+ * ⚠️ 这条路径是「本站自持的 ROM 永远 206」的全部保证：binding 没有边缘缓存那一层，
+ *    `range` 要多少给多少，不会出现「冷对象回 200 + 整个文件」。
+ */
+async function serveFromBinding(
+  key: string,
+  rangeHeader: string | null,
+  fileName: string
+): Promise<Response | null> {
+  const bucket = gamesBucket();
+  if (!bucket) return null;
+
+  const span = rangeHeader ? parseRangeHeader(rangeHeader) : null;
+  // 认不出的 Range 写法交给下面原有的整条链路（它会回 416 / 走常规分支）
+  if (rangeHeader && !span) return null;
+
+  let object: R2ObjectLike | null;
+  try {
+    object = await bucket.get(
+      key,
+      span
+        ? {
+            range: {
+              offset: span.start,
+              // 开放式 `bytes=N-` 不给 length，让 R2 一直取到结尾
+              ...(span.end === null ? {} : { length: span.end - span.start + 1 }),
+            },
+          }
+        : undefined
+    );
+  } catch (error) {
+    // 读自家桶失败（极少见）不该让整个接口挂掉：退回公网域名，至少还能出内容
+    console.error('[games] R2 binding 读取失败，退回公网域名', key, error);
+    return null;
+  }
+
+  if (!object) {
+    return new Response('not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  const total = object.size;
+  const start = span?.start ?? 0;
+  if (span && start >= total) {
+    await object.body?.cancel();
+    return new Response(null, {
+      status: 416,
+      headers: { 'Cache-Control': 'no-store', 'Content-Range': `bytes */${total}` },
+    });
+  }
+
+  /*
+   * 本次真正拿到多少：`range.length` 是 R2 实际返回的那一段（请求越界时会被截短），
+   * 没带 range 时就是整个对象。**Content-Length 必须按这个数写**，写错前端拼出来的
+   * Blob 就少字节，而且不会报错。
+   */
+  const length = object.range?.length ?? Math.max(0, total - start);
+  if (!object.body || length <= 0) {
+    await object.body?.cancel();
+    return new Response('empty object', { status: 502, headers: { 'Cache-Control': 'no-store' } });
+  }
+  const end = start + length - 1;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': contentDisposition(fileName),
+    'Content-Length': String(length),
+    'Accept-Ranges': 'bytes',
+    /*
+     * 整份 ⇒ 允许进 CDN（和公网那条路同一套 TTL）；
+     * 真分片 ⇒ `no-store`。半截字节一旦被 CDN 当成完整对象存下来，之后所有访客拿到的
+     * 都是坏 ROM，而且 `Content-Length` 对得上、核心静默失败 —— 线上查不出来。
+     */
+    'Cache-Control': span
+      ? 'private, no-store'
+      : `public, max-age=${ROM_CACHE_SECONDS}, s-maxage=${ROM_CACHE_SECONDS}`,
+  };
+  if (span) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+
+  return new Response(object.body, { status: span ? 206 : 200, headers });
+}
 
 /**
  * 把响应原样转给浏览器：只留这几个头，别把 `age` / `cf-*` / `server` 也抄过来
@@ -291,7 +412,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    */
   let roms: Awaited<ReturnType<typeof getGameRoms>>;
   try {
-    roms = await getGameRoms(id);
+    roms = await lookupGameRoms(id);
   } catch (error) {
     console.error('[games] ROM 查询失败', error);
     return new Response('lookup failed', { status: 500 });
@@ -319,8 +440,28 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!picked) return new Response('disc not found', { status: 404 });
   const fileName = picked.romName || 'rom';
   const selfHosted = picked.sourceUrl?.startsWith('r2:') ?? false;
-  const target = selfHosted
-    ? publicUrl((picked.sourceUrl as string).slice(3))
+  const selfHostedKey = selfHosted ? (picked.sourceUrl as string).slice(3) : null;
+
+  /*
+   * 本站自持的那批：**先走 R2 binding**（2026-11-05 加）。
+   *
+   * 走通就完全不经公网域名 ⇒ 没有 `files.retrogamesbox.com` 前面那层缓存，
+   * 也就没有「冷对象忽略 Range、回 200 + 整个文件」。探针拿到的一定是
+   * `206 + Content-Range: bytes 0-0/<total>`，前端因此永远走 4 MiB 分片。
+   *
+   * 返回 null 只表示这条通道不可用（本地 `next dev` 没有 binding），
+   * 此时照旧走下面的公网地址 —— 与加这段之前一字不差。
+   *
+   * ⚠️ 这一支**排在 `publicUrl()` 之前**：binding 通了就不需要那个环境变量，
+   *    而 `publicUrl()` 缺配置是会抛的（它只适合当兜底）。
+   */
+  if (selfHostedKey) {
+    const served = await serveFromBinding(selfHostedKey, range, fileName);
+    if (served) return served;
+  }
+
+  const target = selfHostedKey
+    ? publicUrl(selfHostedKey)
     : sourceFileUrl(picked.sourceUrl);
   if (!target) {
     console.error('[games] 这一份 ROM 没有可用的来源地址', id, picked.language);

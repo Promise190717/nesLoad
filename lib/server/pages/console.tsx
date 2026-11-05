@@ -7,6 +7,7 @@ import { consoleLabel, isConsoleType } from '@/lib/consoles';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
 import GamesSearchForm from '@/components/GamesSearchForm';
+import Pager from '@/components/Pager';
 import Paragraphs from '@/components/Paragraphs';
 import {
   SITE_NAME,
@@ -513,8 +514,11 @@ export default async function ConsoleDetailPage({
                 /* 语种 tab 是十几颗一排，全预取等于每开一次机种页就多渲染十几条路由 */
                 prefetch={false}
                 aria-current={active ? 'true' : undefined}
-                className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[12px] transition-colors ${
-                  active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
+                /* 未选中压一档描边（理由见 games.tsx 同一个 chip 那段） */
+                className={`pixel-edge pxw-2 px-3 py-1.5 text-[12px] transition-colors ${
+                  active
+                    ? 'pxc-500 bg-accent text-ink-950'
+                    : 'pxc-600 bg-ink-800 text-ink-200 hover:text-accent'
                 }`}
               >
                 {/* 语言名用它自己的语言写（简体中文 / English / 日本語 / 한국어），不进文案表 */}
@@ -551,40 +555,20 @@ export default async function ConsoleDetailPage({
         )}
 
         {pageCount > 1 && (
-          <nav className="mt-10 flex items-center justify-center gap-4">
-            {/*
-              ⚠️ 翻页链接必须带上**关键词和语种**（`consoleHref` 一起拼）：
-              少了语种，筛着「日本語」翻一页就变回全部了 —— 用户会以为筛选坏了。
-            */}
-            {page > 1 ? (
-              <Link
-                href={consoleHref(locale, id, page - 1, keyword, lang.param)}
-                rel="prev"
-                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
-              >
-                {t('gamesPage.prev')}
-              </Link>
-            ) : (
-              // 首页那个「上一页」整块不画而不是渲染成灰按钮：指向自己的死链比少一个链接更糟
-              <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.prev')}</span>
-            )}
-
-            <span className="font-pixel text-[12px] text-ink-500">
-              {page} / {pageCount}
-            </span>
-
-            {page < pageCount ? (
-              <Link
-                href={consoleHref(locale, id, page + 1, keyword, lang.param)}
-                rel="next"
-                className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
-              >
-                {t('gamesPage.next')}
-              </Link>
-            ) : (
-              <span className="px-3 py-1.5 text-[12px] text-ink-700">{t('gamesPage.next')}</span>
-            )}
-          </nav>
+          /*
+           * 翻页条（2026-11-05 起是客户端组件，与 `/games` 共用）：地址在这里算好，
+           * 组件负责软导航 + 等待反馈。见 `components/Pager.tsx`。
+           *
+           * ⚠️ 两个地址必须带上**关键词和语种**（`consoleHref` 一起拼）：
+           *    少了语种，筛着「日本語」翻一页就变回全部了 —— 用户会以为筛选坏了。
+           */
+          <Pager
+            locale={locale}
+            page={page}
+            pageCount={pageCount}
+            prevHref={page > 1 ? consoleHref(locale, id, page - 1, keyword, lang.param) : null}
+            nextHref={page < pageCount ? consoleHref(locale, id, page + 1, keyword, lang.param) : null}
+          />
         )}
       </section>
     </GamesShell>

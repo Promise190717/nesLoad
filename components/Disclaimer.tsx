@@ -28,10 +28,15 @@ import type { Locale } from '@/lib/i18n';
 export default function Disclaimer({ locale, className = '' }: { locale: Locale; className?: string }) {
   const { label, text } = disclaimer(locale);
 
+  /*
+   * 两档颜色各提一层（2026-11-05）：原来是 11px 的 `ink-600` 压 `ink-500`，
+   * 浅色主题下前者对页脚底约 1.8:1 —— 法律表述读不清就不是「低调」而是「没有」。
+   * 提一档之后仍是页脚里最弱的一行（正文 500 / 标签 400），但两个主题都读得出来。
+   */
   return (
     <div className={`mt-4 border-t border-ink-800 pt-4 ${className}`.trim()}>
-      <p className="text-[11px] leading-6 text-ink-600">
-        <span className="text-ink-500">{label}</span> {text}
+      <p className="text-[11px] leading-6 text-ink-500">
+        <span className="text-ink-400">{label}</span> {text}
       </p>
     </div>
   );

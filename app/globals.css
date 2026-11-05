@@ -113,7 +113,7 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   --side-soft: var(--color-ink-850);    /* 按钮、键值块的底 */
   --side-text: var(--color-ink-100);    /* 主文字 */
   --side-dim: var(--color-ink-400);     /* 说明文字 */
-  --px-c: var(--color-ink-700);         /* pixel-edge 描边色，整栏一个 */
+  --px-c: var(--edge-700);              /* pixel-edge 描边色，整栏一个 */
   display: flex;
   min-width: 0;
   width: 100%;
@@ -173,9 +173,18 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-key-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 3px; }
 /* 行之间只靠间距分开，不画线 —— 十几行全挂发丝线会糊成一片（截图里那种「格子感」） */
 .play-key { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; }
-.play-key dt { flex-shrink: 0; font-size: 11px; letter-spacing: .04em; color: var(--side-dim); }
+/*
+ * 动作名（↑ ← 投币 这些）2026-11-05 从 11px/dim 提到 12px/text。
+ * 用户原话「按钮映射这个文字太细了」—— 11px 的系统字体在 Windows 上笔画本来就发虚，
+ * 再压成 ink-400 就只剩一排灰点。12px 正好是这张卡控制段的字号（.play-row-label），
+ * 两段对齐之后整栏才是一套字。字距同时从 .04em 收到 .02em：小字号再加字距只显散。
+ * 颜色用 `--side-text` 不会和键值撞 —— 键值还有底块和描边包着，层级仍然在。
+ */
+.play-key dt { flex-shrink: 0; font-size: 12px; letter-spacing: .02em; color: var(--side-text); }
 .play-key dd { min-width: 0; text-align: right; }
-.play-kbd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; letter-spacing: .04em; color: var(--side-text); background: var(--side-soft); border: 1px solid var(--side-line); }
+/* 键值 10 → 11px（同日）：10px 的 mono 在 Windows 上比旁边的中文还小一圈，
+   跟 12px 的动作名放一起会失衡。宽的键名（`Enter`）由 max-width + anywhere 兜住。 */
+.play-kbd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: .04em; color: var(--side-text); background: var(--side-soft); border: 1px solid var(--side-line); }
 /* P1 / P2 = 分段选择器：一整条，中间一道竖线，选中的那半铺强调色 */
 .play-seg { display: flex; margin-bottom: 10px; border: 1px solid var(--side-line); }
 .play-seg > button { flex: 1; min-height: 24px; padding: 0; font-size: 11px; letter-spacing: .06em; color: var(--side-dim); background: var(--side-soft); transition: color .15s, background .15s; }
@@ -410,8 +419,36 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .home-faq[open] {
   border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-ink-700));
 }
+/*
+ * 展开指示器（2026-11-05）。原生 marker 是一颗实心小三角，和这套硬边像素风不搭，
+ * 而且它自带缩进，标题会从第二行开始对不齐。换成像素字体的 + / −、accent 上色：
+ * 一眼看出「这条能点」，展开之后也顺手交代了状态。
+ *
+ * ⚠️ `list-style: none` 与 `::-webkit-details-marker` 是两代写法，**两条都留**：
+ * 只有较新的 Chrome 认前者，旧内核只认后者。
+ */
 .home-faq summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  list-style: none;
   line-height: 1.7;
+}
+.home-faq summary::-webkit-details-marker {
+  display: none;
+}
+.home-faq summary::before {
+  content: '+';
+  flex-shrink: 0;
+  width: 10px;
+  /* Press Start 2P 的字符高度和 13px 正文差很多，靠行高把 + 压回第一行的中线上 */
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  line-height: 2.2;
+  color: var(--color-accent);
+}
+.home-faq[open] summary::before {
+  content: '-';
 }
 .home-page a:focus-visible,
 .home-page summary:focus-visible {
@@ -517,6 +554,22 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   --vignette: rgba(0, 0, 0, 0.65);
 
   /*
+   * 像素描边专用阶梯（2026-11-05）。
+   *
+   * **为什么不直接吃 ink 灰阶**：浅色主题把整条 ink 反相之后，`pxc-700`（= ink-700
+   * = #cacaca）压在卡片底（#eeeeee）上只有约 1.4:1 —— 卡片之间的分界基本靠猜，
+   * 而四向描边正是这套像素风的骨架，骨架一糊，浅色主题就只剩「一堆浅灰方块」。
+   *
+   * 所以单独留一层：深色下**原样等于 ink 对应档**（一个像素都不变），浅色下在
+   * `[data-theme='light']` 里整体压深一档。改描边只动这一组，别去动 ink ——
+   * 那条灰阶还背着面板底色和正文色。
+   */
+  --edge-500: var(--color-ink-500);
+  --edge-600: var(--color-ink-600);
+  --edge-700: var(--color-ink-700);
+  --edge-800: var(--color-ink-800);
+
+  /*
    * 墙面（.wall）。深色下比房间底色（ink-950）略亮一点点 —— 整面死黑会像个洞，
    * 但也不能亮过地板（--color-floor），不然墙和地会糊成一片。
    */
@@ -560,6 +613,16 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 
   --shadow-ground: rgba(0, 0, 0, 0.16);
   --vignette: rgba(0, 0, 0, 0.08);
+
+  /*
+   * 描边阶梯（见 :root 里那段注释）。深色那套在浅色底上普遍偏淡，这里整体下压一档：
+   * 对卡片底 #eeeeee 的对比约 3.35 / 2.35 / 1.95 / 1.55 : 1 —— 每一档之间都还差得出来
+   * （500→600 最明显，那是「选中 / 未选中」那一对），最重的 500 仍是中灰、不是黑框。
+   */
+  --edge-500: #828282;
+  --edge-600: #959595;
+  --edge-700: #adadad;
+  --edge-800: #c0c0c0;
 
   /* 墙面使用中性白，减弱暖黄色和板缝对比。 */
   --wall-top: #fafafa;
@@ -769,10 +832,10 @@ body {
  * ------------------------------------------------------------------ */
 .pixel-edge {
   box-shadow:
-    0 calc(-1 * var(--px-w, 3px)) 0 0 var(--px-c, var(--color-ink-700)),
-    0 var(--px-w, 3px) 0 0 var(--px-c, var(--color-ink-700)),
-    calc(-1 * var(--px-w, 3px)) 0 0 0 var(--px-c, var(--color-ink-700)),
-    var(--px-w, 3px) 0 0 0 var(--px-c, var(--color-ink-700));
+    0 calc(-1 * var(--px-w, 3px)) 0 0 var(--px-c, var(--edge-700)),
+    0 var(--px-w, 3px) 0 0 var(--px-c, var(--edge-700)),
+    calc(-1 * var(--px-w, 3px)) 0 0 0 var(--px-c, var(--edge-700)),
+    var(--px-w, 3px) 0 0 0 var(--px-c, var(--edge-700));
 }
 
 /*
@@ -798,17 +861,19 @@ body {
 .pxw-6 {
   --px-w: 6px;
 }
+/* 四档灰描边都走 `--edge-*`（定义见上面的 :root / light 段），别再指回 ink ——
+   浅色主题需要单独压深，指回 ink 就等于把那层覆盖绕过去了。 */
 .pxc-500 {
-  --px-c: var(--color-ink-500);
+  --px-c: var(--edge-500);
 }
 .pxc-600 {
-  --px-c: var(--color-ink-600);
+  --px-c: var(--edge-600);
 }
 .pxc-700 {
-  --px-c: var(--color-ink-700);
+  --px-c: var(--edge-700);
 }
 .pxc-800 {
-  --px-c: var(--color-ink-800);
+  --px-c: var(--edge-800);
 }
 .pxc-accent {
   --px-c: var(--color-accent);
@@ -2377,10 +2442,10 @@ body {
     --px-w: 2px;
     background: var(--color-ink-800);
     box-shadow:
-      0 calc(-1 * var(--px-w)) 0 0 var(--px-c, var(--color-ink-700)),
-      0 var(--px-w) 0 0 var(--px-c, var(--color-ink-700)),
-      calc(-1 * var(--px-w)) 0 0 0 var(--px-c, var(--color-ink-700)),
-      var(--px-w) 0 0 0 var(--px-c, var(--color-ink-700));
+      0 calc(-1 * var(--px-w)) 0 0 var(--px-c, var(--edge-700)),
+      0 var(--px-w) 0 0 var(--px-c, var(--edge-700)),
+      calc(-1 * var(--px-w)) 0 0 0 var(--px-c, var(--edge-700)),
+      var(--px-w) 0 0 0 var(--px-c, var(--edge-700));
   }
 
   /*

@@ -2,12 +2,14 @@
  * Cloudflare R2 的对象存储封装（S3 兼容接口）。
  *
  * 上传走 S3 SDK + SigV4 签名（手写签名太容易出错），只在服务端使用；
- * 读取不走 SDK，而是走 R2_PUBLIC_BASE 公网域名（图片直接给前台、ROM 由
- * /api/games/[id]/rom 回源代理），因为读是公开的，没必要带签名。
+ * 读取有**两条**路：
+ *   · 公网域名 `R2_PUBLIC_BASE` —— 图片直接给前台、`node scripts/*.mjs` 也用这条；
+ *   · **R2 binding**（`gamesBucket()`，2026-11-05 加）—— ROM 代理专用，见下面那段注释。
  */
 
 import http from 'node:http';
 import https from 'node:https';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { parseProxyUrl, withProxy } from './proxy-agent';
 
@@ -120,6 +122,69 @@ export function publicUrlOrNull(key: string | null | undefined): string | null {
   const base = process.env.R2_PUBLIC_BASE?.replace(/\/+$/, '');
   if (!base) return null;
   return joinPublicUrl(base, key);
+}
+
+/* ---------------------------------------------------------------------------
+ * R2 binding —— ROM 代理读自己桶里那批对象时用（2026-11-05 加）
+ *
+ * ## 为什么不能只靠公网域名
+ *
+ * `publicUrl()` 拼出来的 `files.retrogamesbox.com/...` 前面还有一层 Cloudflare 缓存。
+ * 对象在某台边缘节点上是**冷**的时候，那层缓存会**忽略 `Range`、回 200 + 整个文件**
+ * （2026-11-05 实测：`sengoku-3` 53 MB / `art-of-fighting-3` 26 MB 第一次全是 200 无
+ * `Content-Range`，第二次才 206）。于是客户端只要 1 个字节，Worker 也要把几十 MB
+ * 原样流一遍 —— 免费版 10ms CPU 下这就是线上 503（1102）。
+ *
+ * binding 是 Worker 与桶之间的**内部调用**：没有公网、没有那层缓存，`range` 要多少
+ * 给多少，永远 206。探针那一步还能只读 1 个字节就拿到总长。
+ *
+ * ## 两个必须记住的限制
+ *
+ * ⚠️ **只在 Worker 运行时里可用**。`next dev` / `node scripts/*.mjs` 没有 `env`，
+ *    `gamesBucket()` 返回 null，调用方**必须**回落到 `publicUrl()`。
+ *    所以这里不抛异常、不写日志 —— 「取不到」是本地开发的正常状态。
+ * ⚠️ **它只覆盖本站自持的那批**（`source_url` 以 `r2:` 开头，约 4.2 GB 街机）。
+ *    上游那批（PS1 / NDS 等 300+ GB）在别人的桶里，binding 读不到，也不该读。
+ *
+ * ⚠️ 绑定名 `GAMES_R2` 必须和 `wrangler.jsonc` 的 `r2_buckets` 逐字一致 ——
+ *    对不上就是静默拿到 undefined（不报错），然后静默退回公网域名。
+ */
+
+/** R2 binding 的最小形状（不引 `@cloudflare/workers-types`：那套类型在 Node 侧用不上）。 */
+export type R2ObjectLike = {
+  body: ReadableStream<Uint8Array> | null;
+  /** 对象的**总**大小，不是本次 range 的长度。 */
+  size: number;
+  /** 本次实际返回的那一段（没带 range 时没有这个字段）。 */
+  range?: { offset: number; length: number };
+};
+
+export type R2BucketLike = {
+  head(key: string): Promise<{ size: number } | null>;
+  get(
+    key: string,
+    options?: { range?: { offset: number; length?: number } }
+  ): Promise<R2ObjectLike | null>;
+};
+
+/** 装着 ROM 的那个桶的 binding 名（见 `wrangler.jsonc`）。 */
+const GAMES_BUCKET_BINDING = 'GAMES_R2';
+
+/**
+ * 取 ROM 桶的 binding。**取不到就返回 null**（本地 dev / 忘了配 binding），
+ * 由调用方回落到公网域名 —— 这条路径绝不因为「拿不到 binding」而失败。
+ */
+export function gamesBucket(): R2BucketLike | null {
+  let env: unknown;
+  try {
+    // 必须在请求内调用：`getCloudflareContext()` 依赖 async local storage
+    env = getCloudflareContext().env;
+  } catch {
+    // `next dev` / 构建期 / 静态生成时没有 Cloudflare context，这是正常情形
+    return null;
+  }
+  const bucket = (env as Record<string, R2BucketLike | undefined>)?.[GAMES_BUCKET_BINDING];
+  return bucket ?? null;
 }
 
 /** 删除一个对象。删游戏时用来清理附件，属尽力而为，失败应被调用方忽略。 */

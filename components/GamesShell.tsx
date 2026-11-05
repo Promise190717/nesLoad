@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SITE_NAME, localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
+import { SUPPORT_EMAIL } from '@/lib/legal';
 import { siteDoc } from '@/lib/site-doc';
 import BackLink from './BackLink';
 import Disclaimer from './Disclaimer';
@@ -320,7 +321,19 @@ export default function GamesShell({
             </Link>
           </nav>
 
-          <p className="mt-4 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
+          {/* 「联系我们：邮箱」这一行（2026-11-05 加）。和 DocPage 页脚同一条，
+              放在站名上面 —— 内容页没有联系页的入口可点，邮箱是唯一的联系通道。 */}
+          <p className="mt-4 text-[12px] text-ink-500">
+            {t('legal.contact')}{' '}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {SUPPORT_EMAIL}
+            </a>
+          </p>
+
+          <p className="mt-2 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
 
           {/* 免责声明（2026-11-03 加）：全站页脚最后一行，文案的唯一出处是 lib/site-doc.ts */}
           <Disclaimer locale={locale} />

@@ -55,7 +55,16 @@
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "nesload" }],
-  "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "nesload-next-cache" }],
+  // ROM 桶的 binding（2026-11-05 加）。见 `lib/server/r2.ts` 的 `gamesBucket()`：
+  // 走 binding 读，就不经过 `files.retrogamesbox.com` 前面那层 Cloudflare 缓存，
+  // 也就不存在「冷对象忽略 Range、回 200 + 整个文件」这件事。
+  // ⚠️ 绑定名 `GAMES_R2` 与 `lib/server/r2.ts` 的 `GAMES_BUCKET_BINDING` 必须逐字一致。
+  // ⚠️ 桶名写死成 `games` 是刻意的：它和 `R2_BUCKET` 环境变量本来就是同一个桶，
+  //    而 binding 只认部署配置里的字面量（读不到 `process.env`）。
+  "r2_buckets": [
+    { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "nesload-next-cache" },
+    { "binding": "GAMES_R2", "bucket_name": "games" }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "NEXT_CACHE_DO_QUEUE", "class_name": "DOQueueHandler" },

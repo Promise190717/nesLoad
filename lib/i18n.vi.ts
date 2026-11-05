@@ -73,6 +73,8 @@ export const vi: Record<MessageKey, string> = {
   'home.search.label': 'Tìm trong thư viện game',
   'home.search.placeholder': 'Tìm theo tên / nhà phát triển / dòng game',
   'home.search.submit': 'Tìm kiếm',
+  'home.featured.title': 'Tuyển chọn kinh điển',
+  'home.featured.lead': 'Những tựa game kinh điển một thời, xếp theo thể loại.',
   'home.consoles.title': 'Tìm theo hệ máy',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Mega Drive, arcade và nhiều hệ máy khác — chọn một hệ để xem game của hệ đó.',

@@ -54,7 +54,7 @@
 - 长文档页（`/privacy` `/terms` `/about` `/contact`）共用壳 `components/DocPage.tsx`（原 LegalPage，2026-11-03 改名）；文案在 `lib/legal.ts` / `lib/site-doc.ts`（四语言 + 其余回退英文，短文导航词别往 18 张表里加）；页脚免责声明唯一出处 `lib/site-doc.ts` `disclaimer()`，三处页脚都挂。
 - `/play` 唯一开局页（PlayScene + GamesShell）；`?id=` 自动载入、`?room=` 加入者、`?lang=` 选 ROM 版本。
 - 存档 = 电池 `.srm` 一款一份（快照别加回）；读档 = 带存档重插卡（applySave）。
-- 🔴 房间页永久下线（代码在 `app/[locale]/_room`），别加入口、别写 sitemap。
+- 🔴 房间页永久下线（代码在 `app/[locale]/_room`），别加入口、别写 sitemap；**看/评整体页面风格、盘点页面时也别读它、别算进去**（2026-11-05 用户：「不要看 room 页面」）。
 - 🔴 功能开关唯一出口 `lib/features.ts`。`ROM_DOWNLOAD_ENABLED`（2026-11-04 起 `false`，AdSense 送审）关掉时：详情页下载钮不画（`downloadHref` 传 `null`）、`/games/[id]/download` 直接 `notFound()`、首页 FAQ q4 收起。**`/api/games/[id]/rom` 不归它管**（关掉等于关站）。编译期常量，改完必须重新构建部署。
 
 ## 部署 / 校验

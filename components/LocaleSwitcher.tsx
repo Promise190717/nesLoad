@@ -78,6 +78,18 @@ export default function LocaleSwitcher() {
 
   const current = LOCALE_OPTIONS.find((option) => option.value === locale)?.label ?? locale;
 
+  /*
+   * 当前语言排到下拉第一位（2026-11-05 用户要求），其余保持 `LOCALE_OPTIONS` 原顺序。
+   *
+   * 不动 `LOCALE_OPTIONS` 本身：那份是「加语言只改一处」的唯一出口（见文件头注释），
+   * 而且房间右上角那个下拉也用它 —— 这里只是在下拉里把当前项提到最前，
+   * 别的消费方看到的顺序不变。用 `filter` + 展开而不是原地 `sort`：原数组是 readonly。
+   */
+  const sortedOptions = [
+    ...LOCALE_OPTIONS.filter((option) => option.value === locale),
+    ...LOCALE_OPTIONS.filter((option) => option.value !== locale),
+  ];
+
   return (
     <div ref={ref} className="locale-menu" data-open={open ? 'on' : 'off'}>
       <button
@@ -98,7 +110,7 @@ export default function LocaleSwitcher() {
 
       {open && (
         <ul role="listbox" aria-label={t('locale.label')} className="locale-options">
-          {LOCALE_OPTIONS.map((option) => (
+          {sortedOptions.map((option) => (
             <li key={option.value} role="presentation">
               <button
                 type="button"

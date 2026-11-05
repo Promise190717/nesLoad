@@ -73,6 +73,8 @@ export const ms: Record<MessageKey, string> = {
   'home.search.label': 'Cari dalam pustaka permainan',
   'home.search.placeholder': 'Cari tajuk / pembangun / siri',
   'home.search.submit': 'Cari',
+  'home.featured.title': 'Pilihan klasik',
+  'home.featured.lead': 'Permainan klasik legenda, disusun mengikut genre.',
   'home.consoles.title': 'Layari mengikut konsol',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade dan banyak lagi — pilih satu untuk melihat permainannya.',

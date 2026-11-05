@@ -66,6 +66,8 @@ export const nl: Record<MessageKey, string> = {
   'home.search.label': 'Zoek in de gamebibliotheek',
   'home.search.placeholder': 'Zoek op titel / ontwikkelaar / serie',
   'home.search.submit': 'Zoeken',
+  'home.featured.title': 'Uitgelichte klassiekers',
+  'home.featured.lead': 'De klassiekers uit het arcadetijdperk, per genre.',
   'home.consoles.title': 'Blader per console',
   'home.consoles.lead':
     'NES, SNES, Game Boy, GBA, Mega Drive, arcade en meer — kies er een om de games te zien.',

@@ -72,6 +72,8 @@ export const hi: Record<MessageKey, string> = {
   'home.search.label': 'गेम लाइब्रेरी में खोजें',
   'home.search.placeholder': 'टाइटल / डेवलपर / सीरीज़ खोजें',
   'home.search.submit': 'खोजें',
+  'home.featured.title': 'चुनिंदा क्लासिक',
+  'home.featured.lead': 'क्लासिक दौर के मशहूर गेम, शैली के हिसाब से।',
   'home.consoles.title': 'कंसोल के हिसाब से देखें',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, Arcade और बहुत कुछ — किसी एक को चुनकर उसके गेम देखें।',

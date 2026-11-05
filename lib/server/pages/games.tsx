@@ -7,6 +7,7 @@ import { consoleLabel } from '@/lib/consoles';
 import GamesShell from '@/components/GamesShell';
 import GameCardGrid from '@/components/GameCardGrid';
 import GamesSearchForm from '@/components/GamesSearchForm';
+import Pager from '@/components/Pager';
 import {
   SITE_NAME,
   alternatesFor,
@@ -455,8 +456,15 @@ export default async function GamesPage({
               /* 十几颗 tab 全预取等于每开一次列表页就多渲染十几条路由，不值 */
               prefetch={false}
               aria-current={active ? 'true' : undefined}
-              className={`pixel-edge pxw-2 pxc-500 px-3 py-1.5 text-[12px] transition-colors ${
-                active ? 'bg-accent text-ink-950' : 'bg-ink-800 text-ink-200 hover:text-accent'
+              /*
+               * 未选中的那颗描边压到 `pxc-600`（2026-11-05）：十几颗 chip 全是同一档中灰边时，
+               * 它们读起来是一堵**等重的方块墙**，选中的那颗只靠红底区分；压一档之后
+               * 「现在筛的是哪个」一眼可见，整条也不那么吵。别把两档调成同一级。
+               */
+              className={`pixel-edge pxw-2 px-3 py-1.5 text-[12px] transition-colors ${
+                active
+                  ? 'pxc-500 bg-accent text-ink-950'
+                  : 'pxc-600 bg-ink-800 text-ink-200 hover:text-accent'
               }`}
             >
               {type ? consoleLabel(type, locale) : t('gamesPage.filterAll')}
@@ -487,46 +495,20 @@ export default async function GamesPage({
       )}
 
       {pageCount > 1 && (
-        <nav className="mt-10 flex items-center justify-center gap-4">
-          {/*
-            ⚠️ 翻页链接**必须带上关键词**（`gamesHref` 一起拼），否则搜完再翻页
-            就掉回「全部游戏」了 —— 用户会以为搜索坏了。
-          */}
-          {page > 1 ? (
-            <Link
-              href={gamesHref(locale, page - 1, keyword, consoleType)}
-              rel="prev"
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
-            >
-              {t('gamesPage.prev')}
-            </Link>
-          ) : (
-            // 首页那个「上一页」不渲染成灰按钮而是**整块不画**：爬虫顺着链接走，
-            // 一个指向自己的死链比少一个链接更糟
-            <span className="px-3 py-1.5 text-[12px] text-ink-700">
-              {t('gamesPage.prev')}
-            </span>
-          )}
-
-          {/* 纯数字，和别处一样不进文案表（见 README「多语言」那条） */}
-          <span className="font-pixel text-[12px] text-ink-500">
-            {page} / {pageCount}
-          </span>
-
-          {page < pageCount ? (
-            <Link
-              href={gamesHref(locale, page + 1, keyword, consoleType)}
-              rel="next"
-              className="pixel-edge pxw-2 pxc-500 bg-ink-800 px-3 py-1.5 text-[12px] text-ink-200 transition-colors hover:text-accent"
-            >
-              {t('gamesPage.next')}
-            </Link>
-          ) : (
-            <span className="px-3 py-1.5 text-[12px] text-ink-700">
-              {t('gamesPage.next')}
-            </span>
-          )}
-        </nav>
+        /*
+         * 翻页条（2026-11-05 起是客户端组件）：`gamesHref` 照旧在服务端算好，
+         * 组件只负责「点下去走软导航 + 等的时候给个反馈」。见 `components/Pager.tsx`。
+         *
+         * ⚠️ 两个地址**必须带上关键词和机种**，否则搜完再翻页就掉回「全部游戏」了 ——
+         *    用户会以为搜索坏了。
+         */
+        <Pager
+          locale={locale}
+          page={page}
+          pageCount={pageCount}
+          prevHref={page > 1 ? gamesHref(locale, page - 1, keyword, consoleType) : null}
+          nextHref={page < pageCount ? gamesHref(locale, page + 1, keyword, consoleType) : null}
+        />
       )}
     </GamesShell>
   );

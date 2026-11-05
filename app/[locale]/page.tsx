@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { CONSOLE_TYPES } from '@/components/CartridgeSprite';
 import ConsoleCard from '@/components/ConsoleCard';
 import Disclaimer from '@/components/Disclaimer';
+import FeaturedTabs from '@/components/FeaturedTabs';
 import GameHouseLogo from '@/components/GameHouseLogo';
 import PixelHeroes from '@/components/PixelHeroes';
 import { PlayersIcon } from '@/components/icons';
@@ -11,9 +12,11 @@ import { cardDelayMs } from '@/lib/card-stagger';
 import { entityInitial } from '@/lib/entity-text';
 import { ROM_DOWNLOAD_ENABLED } from '@/lib/features';
 import { SITE_NAME, localePath, translate, type MessageKey } from '@/lib/i18n';
+import { SUPPORT_EMAIL } from '@/lib/legal';
 import { listTopDevelopersCached, localizeDeveloper } from '@/lib/server/developers';
 import { countGamesByConsoleCached } from '@/lib/server/sb-games';
 import { listConsolesCached } from '@/lib/server/consoles';
+import { publicBase } from '@/lib/server/media';
 import { readLocaleParam } from '@/lib/server/locale';
 import { siteDoc } from '@/lib/site-doc';
 
@@ -21,7 +24,7 @@ import { siteDoc } from '@/lib/site-doc';
  * `/` —— 首页**落地页**（2026-10-13 加）。
  *
  * 参考 retrogamesnexus.com 那种「内容型首页」的骨架做的：Hero（标题 + 搜索 + 两个入口）
- * → 按机种浏览 → 按开发商浏览 → 折叠问答 → 页脚。
+ * → 精选（按类型分 tab，2026-11-05 加）→ 按机种浏览 → 按开发商浏览 → 折叠问答 → 页脚。
  *
  * **为什么要它**：首页原来是整页 canvas 和 CSS 画的像素场景，**没有一个字是能索引的正文**
  * （只有 `seo.heading` 那三句 sr-only）—— 一个没有正文的站在搜索结果里等于不存在。
@@ -246,9 +249,23 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
               placeholder={t('netplay.codePlaceholder')}
               className="h-11 w-full min-w-0 border border-ink-600 bg-ink-950 px-4 text-center font-pixel text-[14px] tracking-[0.3em] text-ink-100 uppercase placeholder:text-ink-500 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:flex-1"
             />
+            {/*
+              提交钮**不是实底**（2026-11-05）。
+              首屏原来有两颗一模一样的 accent 实底钮：左边「浏览游戏」和这里。
+              两颗同亮度 = 没有主次，而「房间号」是已经知道这个站、手上有码的人才有的东西
+              —— 新访客第一眼看到的是两张同样重的红块，会以为这站是「先输房间号再玩」。
+              改成描边 + accent 文字、悬停才铺满：静止时明显弱于那颗主 CTA，
+              按下去仍有明确的确认感。别顺手改回 `bg-accent`。
+
+              ⚠️ **描边走真实的 `border`，不是 `pixel-edge`**（2026-11-05 用户截图指出
+                 「按钮比输入框高」）：`pixel-edge` 是 box-shadow 往盒子**外面**画的，
+                 1px 描边会让 44px 的钮看起来有 46px，和旁边同样 `h-11` 的输入框错开一截。
+                 border 是 border-box 内的，两边正好齐平。这颗钮和输入框并排，
+                 几何一致比「四角留缺口」重要。
+            */}
             <button
               type="submit"
-              className="flex h-11 shrink-0 items-center justify-center gap-2 bg-accent px-5 text-[13px] font-semibold text-ink-950 transition-colors hover:bg-accent/80 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
+              className="flex h-11 shrink-0 items-center justify-center gap-2 border border-accent bg-accent/10 px-5 text-[13px] font-semibold text-accent transition-colors hover:bg-accent hover:text-ink-950 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent"
             >
               {t('home.join.submit')}
               <span aria-hidden="true">→</span>
@@ -303,6 +320,26 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           </form>
           </div>
         </header>
+
+        {/*
+          精选（2026-11-05 用户要求）：按类型分 tab，每个类型放几款当年的代表作。
+          **数据是静态的**（`lib/featured.ts`），不查库、不调接口 —— 这一块是编辑挑选，
+          不是能从某个字段算出来的东西；做成查询要么多一张表，要么在 SQL 里写死一堆 slug。
+
+          ⚠️ tab 的切换是纯客户端的显隐（`FeaturedTabs`），**不触发任何请求**；
+          而且所有面板都渲染进 HTML（未激活的挂 `hidden`），所以爬虫照样能顺着这 33 条
+          内链走到详情页 —— 别改成「只渲染当前那一块」。
+          ⚠️ 放在「按机种浏览」**上面**：它是首页最像「内容」的一块，也是最快让人找到
+          想玩的那一款的入口；机种那一片是给「我想找某台机器」的人用的。
+        */}
+        <Section
+          title={t('home.featured.title')}
+          lead={t('home.featured.lead')}
+          href={localePath(locale, '/games')}
+          linkLabel={t('home.latest.viewAll')}
+        >
+          <FeaturedTabs locale={locale} coverBase={publicBase() ?? ''} />
+        </Section>
 
         {/*
           按机种浏览（2026-10-14 起每张卡片指向**机种专题页** `/consoles/<机种>`，
@@ -449,7 +486,19 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
               {t('legal.terms')}
             </Link>
           </nav>
-          <p className="mt-4 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
+          {/* 「联系我们：邮箱」这一行（2026-11-05 加）。和 GamesShell / DocPage 页脚同一条，
+              放在站名上面。首页自己就是 `/`，同样没有联系页的入口可点。 */}
+          <p className="mt-4 text-[12px] text-ink-500">
+            {t('legal.contact')}{' '}
+            <a
+              href={`mailto:${SUPPORT_EMAIL}`}
+              className="text-ink-400 transition-colors hover:text-accent"
+            >
+              {SUPPORT_EMAIL}
+            </a>
+          </p>
+
+          <p className="mt-2 text-[12px] text-ink-600">{SITE_NAME[locale]}</p>
 
           {/* 免责声明（2026-11-03 加）：全站页脚最后一行，文案的唯一出处是 lib/site-doc.ts */}
           <Disclaimer locale={locale} />

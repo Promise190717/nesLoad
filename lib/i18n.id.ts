@@ -76,6 +76,8 @@ export const id: Record<MessageKey, string> = {
   'home.search.label': 'Cari di pustaka game',
   'home.search.placeholder': 'Cari judul / pengembang / seri',
   'home.search.submit': 'Cari',
+  'home.featured.title': 'Pilihan klasik',
+  'home.featured.lead': 'Game klasik legendaris, dikelompokkan per genre.',
   'home.consoles.title': 'Jelajahi per konsol',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Mega Drive, arcade, dan lainnya — pilih satu untuk melihat game-nya.',

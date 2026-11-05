@@ -71,6 +71,8 @@ export const fil: Record<MessageKey, string> = {
   'home.search.label': 'Maghanap sa game library',
   'home.search.placeholder': 'Maghanap ng title / developer / series',
   'home.search.submit': 'Maghanap',
+  'home.featured.title': 'Mga piniling klasiko',
+  'home.featured.lead': 'Ang mga klasikong laro noong araw, hinati ayon sa genre.',
   'home.consoles.title': 'Tingnan ayon sa console',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade at iba pa — pumili ng isa para makita ang mga laro nito.',

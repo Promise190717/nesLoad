@@ -68,6 +68,8 @@ export const fr: Record<MessageKey, string> = {
   'home.search.label': 'Rechercher dans la bibliothèque de jeux',
   'home.search.placeholder': 'Titre / développeur / série',
   'home.search.submit': 'Rechercher',
+  'home.featured.title': 'Sélection de classiques',
+  'home.featured.lead': 'Les classiques de la grande époque, classés par genre.',
   'home.consoles.title': 'Parcourir par console',
   'home.consoles.lead':
     'NES, Super Nintendo (SNES), Game Boy, GBA, Mega Drive, arcade et bien d’autres — choisissez une console pour voir ses jeux.',

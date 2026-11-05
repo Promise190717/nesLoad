@@ -50,7 +50,7 @@ const UPSTREAM_HOSTS = ['retrogamesnexus.com', 'files.retrogamesnexus.com'];
 const LEGACY_PUBLIC_HOSTS = ['games.retrogamesonline.fun'];
 
 /** 本站 R2 公网域名的 host（`R2_PUBLIC_BASE` 可能带路径前缀，取 host 比较）。 */
-function publicBase(): string | null {
+export function publicBase(): string | null {
   const raw = process.env.R2_PUBLIC_BASE?.trim();
   return raw ? raw.replace(/\/+$/, '') : null;
 }

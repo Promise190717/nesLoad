@@ -411,6 +411,8 @@ const en = {
   'home.search.label': 'Search the game library',
   'home.search.placeholder': 'Search title / developer / series',
   'home.search.submit': 'Search',
+  'home.featured.title': 'Featured classics',
+  'home.featured.lead': 'The games that defined the arcade era, picked by genre.',
   'home.consoles.title': 'Browse by console',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, arcade and more — pick one to see its games.',
@@ -1757,7 +1759,7 @@ const zh: Record<MessageKey, string> = {
   /* 下线页面的 meta，见上面英文那份的注释（标题不写 {site}，模板会补） */
   'seo.room.title': '像素小屋 —— 在浏览器里玩复古游戏',
   'seo.room.description':
-    '走进像素小屋：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机游戏都跑在电视机上。从在线游戏库挑一盘，或把自己的 ROM 文件拖到屏幕上。',
+    '走进像素小屋：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机游戏均可在浏览器里运行。从在线游戏库挑选，或加载本地 ROM 文件。',
 
   /* 登录页（`/login`），见上面英文那份的注释 */
   'seo.login.title': '登录',
@@ -1766,13 +1768,17 @@ const zh: Record<MessageKey, string> = {
   /* 首页落地页，见上面英文那份的注释 */
   'home.hero.title': '在浏览器里在线玩经典复古游戏',
   /*
-   * ⚠️「支持联机对战」这半句（2026-10-13 用户要求加）和下面的 `home.faq.a6`、联机面板那颗
+   * ⚠️「联机对战」这半句（2026-10-13 用户要求加）和下面的 `home.faq.a6`、联机面板那颗
    *    `netplay.open`（「联机对战」）说的是同一件事，**措辞对齐** —— 三处都只说「能一起对战」。
    *    **不在这儿展开「谁开房 / 公网那一档要不要 TURN」**：那类前提由联机面板里的
    *    `netplay.wanDev` 兜着（没配 TURN 时公网档进不去），落地页不背这个包袱。
    */
+  /*
+   * 2026-11-05：先重写成口语（拆三句），用户看过觉得太口语、不够简洁，又收回一句书面版。
+   * 一句讲清：有哪些机种 + 免安装 + 联机。机种名、联机这三点都是真实现的功能，别删。
+   */
   'home.hero.lead':
-    '{site}上在线玩 FC（红白机）、SFC（超级任天堂）、GBA、世嘉 MD、Game Boy 和街机等十余款机种的游戏，支持联机对战。',
+    '{site}提供红白机、超级任天堂、Game Boy、GBA、世嘉 MD、街机等机种的在线游戏，支持双人联机。',
   /*
    * ⚠️ 2026-10-15：改成「加载本地 ROM」并挂回首屏右侧（原来叫「进入小屋」、已从首屏撤掉）。
    *    「加载」这个动词和房间里点进去第一句是同一个词（`screen.tapLoad`「点击从本地加载」），
@@ -1781,54 +1787,56 @@ const zh: Record<MessageKey, string> = {
   'home.hero.play': '加载本地 ROM',
   'home.hero.browse': '浏览全部游戏',
   'home.join.title': '和朋友一起玩',
-  'home.join.hint': '输入朋友分享的 4 位房间码，即可加入联机。',
+  'home.join.hint': '朋友给了你一个 4 位房间码？填进去就能进他的房间。',
   'home.join.submit': '加入房间',
   'home.hero.or': '或',
   'home.search.label': '搜索游戏库',
-  'home.search.placeholder': '搜索标题 / 开发者 / 系列',
+  'home.search.placeholder': '搜游戏名、开发商或系列',
   'home.search.submit': '搜索',
+  'home.featured.title': '精选',
+  /* 2026-11-05 起这几段 section 说明改简洁：别用「说人话」式口语，也别用「整理好了 / 十余款机种」式书面腔 */
+  'home.featured.lead': '按类型精选的经典之作。',
   'home.consoles.title': '按机种浏览',
-  'home.consoles.lead':
-    'FC、SFC、GBA、世嘉 MD、Game Boy、街机等十余款机种 —— 点一个看它有哪些游戏。',
+  'home.consoles.lead': '从红白机到街机，挑一个机种查看它的游戏。',
   'home.consoles.count': '{count} 款游戏',
   /* 2026-10-14 改：原来写「查看全部游戏」（指向 /games），现在机种有了自己的专题页，这里指向 /consoles */
   'home.consoles.all': '全部机种',
   'home.latest.title': '最新收录',
-  'home.latest.lead': '最近新上的几款。',
+  'home.latest.lead': '最近收录的几款。',
   'home.latest.viewAll': '全部游戏',
   'home.developers.title': '按开发商浏览',
-  'home.developers.lead': '这几家开发商在库里的游戏最多。',
+  'home.developers.lead': '库内游戏最多的几家开发商。',
   'home.developers.viewAll': '全部开发商',
-  'home.empty': '游戏库现在还是空的 —— 进小屋把 ROM 拖到电视上就能开玩。',
+  'home.empty': '游戏库还是空的。进小屋，把 ROM 拖到电视上就能开玩。',
   /* 折叠问答六条，见上面英文那份的注释（只写真的实现了的事） */
   'home.faq.title': '常见问题',
   'home.faq.q1': '免费吗？',
   'home.faq.a1':
-    '完全免费，任何游戏都可以随便玩。登录之后可以云端保存游戏记录和存档。',
+    '全部免费。登录后可将游戏进度与存档保存到云端。',
   'home.faq.q2': '要装什么东西吗？',
   'home.faq.a2':
-    '不用，点击游戏即可在网页在线玩。',
+    '不用，点开就能玩。',
   'home.faq.q3': '手机上能玩吗？',
   'home.faq.a3':
-    '支持，手机和平板上直接在浏览器里玩。',
+    '能，手机和平板打开浏览器就能玩。',
   'home.faq.q4': '能下载 ROM 吗？',
-  'home.faq.a4': '能，每个游戏页上都有下载按钮。请只下载你有权使用的 ROM 文件。',
+  'home.faq.a4': '能，每个游戏页上都有下载按钮。不过请只下载你有权使用的 ROM 文件。',
   'home.faq.q5': '能和朋友一起玩吗？',
   'home.faq.a5':
-    '当然！快喊上小伙伴，开个房间一起联机对战吧。',
+    '可以，创建房间即可联机对战。',
   'home.faq.q6': '支持手柄吗？',
   'home.faq.a6':
-    '支持。用 USB 或蓝牙连上手柄，浏览器识别后模拟器核心会直接读到；按键映射以各核心默认为准。手机上用屏幕上的虚拟按键。',
+    '支持。USB 或蓝牙手柄连上电脑，浏览器认出来就能直接用，按键按各机型的默认设置来；手机上用屏幕上的虚拟按键。',
 
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':
-    '{site}是一个在线复古游戏厅。FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机等十余款机种的游戏直接跑在浏览器里 —— 由本机模拟，内核是编译成 WebAssembly 的 RetroArch。',
+    '{site}是一个在线复古游戏厅。FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD 和街机等十余款机种的游戏直接跑在浏览器里，由本机模拟。',
   'seo.howTo': '从在线游戏库挑一盘，或把自己的 ROM 文件拖到电视机上。无需安装。',
 
   /* 游戏列表 / 详情 / 下载三页的 SEO 文案，见上面英文那份的注释 */
   'seo.games.title': '全部游戏 —— 在线玩 FC / SFC / GBA / 街机',
   'seo.games.description':
-    '在线游戏库共 {count} 款复古游戏，全部可以直接在浏览器里玩：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点开任意一款看详情、直接开玩，或者下载 ROM 文件。',
+    '在线游戏库共 {count} 款复古游戏，全部可直接在浏览器里玩：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种，也可下载 ROM 文件。',
   /* 搜索结果两条，见上面英文那份的注释（人不索引、只给人看） */
   'seo.games.search.title': '「{keyword}」的搜索结果',
   'seo.games.search.description':
@@ -1846,7 +1854,7 @@ const zh: Record<MessageKey, string> = {
   /* 开发商两页，见上面英文那份的注释 */
   'seo.developers.title': '游戏开发商 —— 在线玩他们做的 FC / SFC / GBA / 街机游戏',
   'seo.developers.description':
-    '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
+    '在线游戏库背后的 {count} 家开发商。点开查看其全部游戏。',
   'seo.developer.title': '{name} —— 这家开发商的游戏',
   'seo.developer.description':
     '{name} 在在线游戏库里的全部游戏（{count} 款），可以直接在浏览器里玩，也可以下载 ROM 文件。',
@@ -1857,7 +1865,7 @@ const zh: Record<MessageKey, string> = {
    */
   'seo.consoles.title': '按机种浏览 —— 在线玩 FC / SFC / GBA / 街机游戏',
   'seo.consoles.description':
-    '在线游戏库里的每个机种（共 {count} 款游戏）。挑一个机种，看它名下的全部游戏，直接在浏览器里开玩。',
+    '在线游戏库中的全部机种（共 {count} 款游戏）。挑一个查看其名下游戏，直接在浏览器里开玩。',
   'seo.console.title': '{name} 游戏 —— 在线玩',
   'seo.console.description':
     '{name} 在在线游戏库里的全部游戏（{count} 款），可以直接在浏览器里玩，也可以下载 ROM 文件。',
@@ -2372,16 +2380,16 @@ const zh: Record<MessageKey, string> = {
 
   'gamesPage.heading': '全部游戏',
   'gamesPage.intro':
-    '在线游戏库共 {count} 款：FC（红白机）、SFC（超级任天堂）、GBA、Game Boy、世嘉 MD、街机等十余款机种。点封面看详情，也可以直接开玩。',
-  'gamesPage.empty': '游戏库现在还是空的。',
+    '库内 {count} 款游戏，覆盖红白机、超级任天堂、GBA、世嘉 MD、街机等十几种机型。',
+  'gamesPage.empty': '游戏库还是空的。',
   /* 机种筛选三条，见上面英文那份的注释 */
-  'gamesPage.introConsole': '游戏库里共 {count} 款 {console} 游戏。点封面看详情，也可以直接开玩。',
+  'gamesPage.introConsole': '库内共 {count} 款 {console} 游戏。',
   'gamesPage.filterLabel': '按机种筛选',
   'gamesPage.filterAll': '全部',
   'gamesPage.consoleEmpty': '库里还没有 {console} 游戏。',
   /* 列表页的搜索框，见上面英文那份的注释（和房间弹窗那组 `games.search*` 各写一份） */
   'gamesPage.searchLabel': '搜索游戏库',
-  'gamesPage.searchPlaceholder': '搜索标题 / 开发者 / 系列',
+  'gamesPage.searchPlaceholder': '搜游戏名、开发商或系列',
   'gamesPage.searchSubmit': '搜索',
   'gamesPage.searchLoading': '搜索中…',
   'gamesPage.searchClear': '清除搜索',
@@ -2477,7 +2485,7 @@ const zh: Record<MessageKey, string> = {
   /* 开发商两页，见上面英文那份的注释 */
   'developersPage.heading': '开发商',
   'developersPage.intro':
-    '在线游戏库背后的 {count} 家开发商。点进去看这家公司在我们库里的全部游戏。',
+    '共 {count} 家开发商，点开查看其游戏。',
   'developersPage.empty': '还没有登记任何开发商。',
   'developersPage.gameCount': '{count} 款游戏',
   'developersPage.gamesHeading': '{name} 的游戏',
@@ -2494,7 +2502,7 @@ const zh: Record<MessageKey, string> = {
    *    列表页**永远**有四张卡可画，不存在「一条都没有」的空态。
    */
   'consolesPage.heading': '机种',
-  'consolesPage.intro': '游戏库里的机种 —— 共收录 {count} 款游戏。点一个看它名下的全部游戏。',
+  'consolesPage.intro': '全库 {count} 款游戏，按机型分类。',
   'consolesPage.gameCount': '{count} 款游戏',
   'consolesPage.gamesHeading': '{name} 上的游戏',
   'consolesPage.gamesEmpty': '库里还没有这个机种的游戏。',

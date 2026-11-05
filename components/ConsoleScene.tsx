@@ -458,6 +458,16 @@ export default function ConsoleScene({
    */
   const router = useRouter();
 
+  /*
+   * 当前语言排到语言下拉第一位（2026-11-05 用户要求），其余保持 `LOCALE_OPTIONS` 原顺序。
+   * 和 `LocaleSwitcher` 那份同一个排序 —— 两份下拉要一致。用 filter + 展开而不是原地
+   * sort：`LOCALE_OPTIONS` 是 readonly。
+   */
+  const sortedLocaleOptions = [
+    ...LOCALE_OPTIONS.filter((option) => option.value === locale),
+    ...LOCALE_OPTIONS.filter((option) => option.value !== locale),
+  ];
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const screenRef = useRef<HTMLDivElement>(null);
   const romInputRef = useRef<HTMLInputElement>(null);
@@ -3399,7 +3409,7 @@ export default function ConsoleScene({
 
           {localeMenuOpen && (
             <ul role="listbox" aria-label={t('locale.label')} className="locale-options">
-              {LOCALE_OPTIONS.map((option) => (
+              {sortedLocaleOptions.map((option) => (
                 <li key={option.value} role="presentation">
                   <button
                     type="button"

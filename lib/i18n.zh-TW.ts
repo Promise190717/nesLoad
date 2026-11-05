@@ -68,6 +68,8 @@ export const zhTW: Record<MessageKey, string> = {
   'home.search.label': '搜尋遊戲庫',
   'home.search.placeholder': '搜尋標題 / 開發商 / 系列',
   'home.search.submit': '搜尋',
+  'home.featured.title': '精選',
+  'home.featured.lead': '那些年最紅的幾款，按類型整理好了。',
   'home.consoles.title': '依機種瀏覽',
   'home.consoles.lead':
     'FC、SFC、GBA、Mega Drive、Game Boy、街機等十幾種機種 —— 點一個看看它有哪些遊戲。',

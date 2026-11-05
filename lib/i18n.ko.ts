@@ -54,6 +54,8 @@ export const ko: Record<MessageKey, string> = {
   'home.search.label': '게임 라이브러리 검색',
   'home.search.placeholder': '제목 / 개발사 / 시리즈로 검색',
   'home.search.submit': '검색',
+  'home.featured.title': '명작 셀렉션',
+  'home.featured.lead': '그 시절 최고 인기작을 장르별로 모았습니다.',
   'home.consoles.title': '기종으로 찾기',
   'home.consoles.lead':
     'FC, SFC, 게임보이, GBA, 메가드라이브, 아케이드 등 십여 종 — 하나를 고르면 그 기종의 게임이 나옵니다.',

@@ -120,8 +120,13 @@ export interface LegalDoc {
  * 旧陈述 —— 统计口径（实际接了 GA4，原文写着「未接入第三方统计分析」）、
  * 第三方清单（jsDelivr 早就不再加载，14 台机种的核心全在本站 `/cores/`）、
  * 以及条款里漏掉的「按用户要求下载」。改正文就必须改这个日期（页面第 10 节承诺过）。
+ *
+ * 2026-11-05：用户要求「最小化合规」，删掉隐私政策第 2 节里那条与第 8 节重复的
+ * 「清除浏览器数据即可删除」bullet（四语言同步）。技术路线类表述此前已删净
+ * （不写 cookie 名、hash 算法、存储/数据库产品、具体域名），本次未再新增，
+ * 第三方名单与广告 cookie 披露是合规底线，保留。
  */
-const UPDATED = '2026-10-30';
+const UPDATED = '2026-11-05';
 
 function privacy(locale: Locale): LegalDoc {
   const site = SITE_NAME[locale];
@@ -147,7 +152,6 @@ function privacy(locale: Locale): LegalDoc {
           bullets: [
             '界面偏好设置与自定义按键。',
             '本机存档、街机 BIOS 文件与游戏库载入记录。',
-            '清除浏览器数据或使用无痕窗口即可删除，且无法恢复。',
           ],
         },
         {
@@ -255,7 +259,6 @@ function privacy(locale: Locale): LegalDoc {
           bullets: [
             'インターフェースの設定とカスタムキー割り当て。',
             '本体のセーブ、アーケードの BIOS ファイル、ライブラリの読み込み履歴。',
-            'ブラウザのデータを消去するかプライベートウィンドウを使うと削除され、復元できません。',
           ],
         },
         {
@@ -357,7 +360,6 @@ function privacy(locale: Locale): LegalDoc {
           bullets: [
             '인터페이스 설정과 사용자 지정 키 배치.',
             '본체 세이브, 아케이드 BIOS 파일, 라이브러리 불러오기 기록.',
-            '브라우저 데이터를 지우거나 시크릿 창을 쓰면 삭제되며 복구할 수 없습니다.',
           ],
         },
         {
@@ -458,7 +460,6 @@ function privacy(locale: Locale): LegalDoc {
         bullets: [
           'Interface preferences and custom key bindings.',
           'Local save states, an arcade BIOS file, and the library load history.',
-          'Removed by clearing browser data or using a private window; deleted data cannot be recovered.',
         ],
       },
       {

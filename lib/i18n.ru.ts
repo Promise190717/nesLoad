@@ -62,6 +62,8 @@ export const ru: Record<MessageKey, string> = {
   'home.search.label': 'Поиск по библиотеке игр',
   'home.search.placeholder': 'Название / разработчик / серия',
   'home.search.submit': 'Найти',
+  'home.featured.title': 'Избранная классика',
+  'home.featured.lead': 'Классика аркадной эпохи, подобранная по жанрам.',
   'home.consoles.title': 'Выбор по платформе',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, аркады и другое — выберите платформу, чтобы увидеть её игры.',

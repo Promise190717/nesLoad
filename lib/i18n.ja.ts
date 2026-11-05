@@ -54,6 +54,8 @@ export const ja: Record<MessageKey, string> = {
   'home.search.label': 'ゲームライブラリを検索',
   'home.search.placeholder': 'タイトル / 開発元 / シリーズで検索',
   'home.search.submit': '検索',
+  'home.featured.title': '名作セレクション',
+  'home.featured.lead': 'あの頃の定番タイトルを、ジャンル別に集めました。',
   'home.consoles.title': '機種から探す',
   'home.consoles.lead':
     'FC、SFC、ゲームボーイ、GBA、メガドライブ、アーケードなど十数機種 — 選ぶとその機種のゲームが並びます。',

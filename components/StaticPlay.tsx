@@ -51,7 +51,8 @@ function PlayGameInfo({ game, locale, to }: { game: LibraryGame; locale: Locale;
       <img src={game.imageUrl} alt="" className="h-8 w-6 shrink-0 object-cover" />
       <div className="min-w-0">
         <p className="truncate text-[12px] leading-tight text-ink-100 group-hover:text-accent">{text.title}</p>
-        <p className="mt-0.5 truncate text-[11px] leading-tight text-ink-500">{meta}</p>
+        {/* 元信息用 ink-400：理由同 GameCardGrid 那条（11px 在 ink-500 上读不清） */}
+        <p className="mt-0.5 truncate text-[11px] leading-tight text-ink-400">{meta}</p>
       </div>
     </Link>
   );

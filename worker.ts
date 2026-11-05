@@ -178,6 +178,9 @@ const PRIVATE_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?(?:account|login)(?
 /** 可以短缓存一次的公开接口：在线游戏库弹窗（列表 / 单款）。评论接口不在此列。 */
 const PUBLIC_API = /^\/api\/games(?:\/[^/]+)?$/;
 
+/** ROM 只能走外层 Workers Caching，不能进 Cache API（后者会缓冲整份大文件）。 */
+const ROM_API = /^\/api\/games\/[^/]+\/rom$/;
+
 /** `/play` 的 HTML 与查询串无关（见文件头那段）。允许带一层语言前缀：`/play`、`/zh/play`。 */
 const PLAY_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?play$/;
 
@@ -398,6 +401,16 @@ const edgeCacheWrapper = {
     }
 
     const isApi = pathname.startsWith('/api/');
+    /*
+     * ROM 路由自己区分响应体：整份 200 带 7 天公共缓存头，分片 206 与错误均
+     * no-store。这里必须把那份 200 原样交给 Workers Caching；统一套 noStore
+     * 会让路由里的公共缓存头失效。不要放进下面的 Cache API：cache.put 会缓冲
+     * 整个响应，大 ROM 会耗光 Worker 内存与 CPU。
+     */
+    if (ROM_API.test(pathname)) {
+      const response = await handler.fetch(request, env, ctx);
+      return response.status === 200 ? response : noStore(response);
+    }
     if (isApi && !PUBLIC_API.test(pathname)) {
       return noStore(await handler.fetch(request, env, ctx));
     }

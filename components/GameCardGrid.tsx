@@ -116,7 +116,13 @@ export default function GameCardGrid({
               </span>
               <span className="mt-2 block px-1">
                 <span className="block truncate text-[12px] text-ink-100">{text.title}</span>
-                <span className="mt-0.5 block truncate text-[11px] text-ink-500">{meta}</span>
+                {/*
+                  元信息这一行用 `ink-400` 而不是 `ink-500`（2026-11-05）：11px + ink-500
+                  在浅色主题下是 #909090 压在 #eeeeee 上（约 2.7:1），卡片底下一行几乎
+                  读不清；深色下 #707070 也只有 3 出头。`ink-400` 两个主题都够（4.0 / 5.4），
+                  仍然明显弱于标题的 ink-100 —— 层级还在，只是从「勉强看见」变成「读得出」。
+                */}
+                <span className="mt-0.5 block truncate text-[11px] text-ink-400">{meta}</span>
               </span>
             </Link>
           </li>

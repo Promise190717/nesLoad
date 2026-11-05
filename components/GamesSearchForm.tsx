@@ -1,26 +1,33 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState, useTransition, type FormEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { localePath, translate, type Locale, type MessageKey } from '@/lib/i18n';
 import type { ConsoleType } from '@/lib/emulator';
 
 /**
  * `/games` 与机种专题页共用的搜索框。
  *
- * **为什么是一个客户端组件**：要有「搜索中…」这个状态 —— 查询那一两秒里按钮得动一下，
- * 不然用户会以为点了没反应（2026-10-13 加）。
+ * **为什么是一个客户端组件**：① 要有「搜索中…」这个状态；② 提交要走**客户端路由**。
  *
- * ⚠️ **提交走原生 GET 表单**：`action` + `method="get"` 就是这个组件的本体，不是无 JS 的
- *    回退 —— 「搜索有真地址、零 JS 也成立」是底线。`onSubmit` **只负责把按钮切成
- *    「搜索中…」，不拦这次导航**：拦下来就得自己 `router.push`，而搜索地址一旦还是
- *    `/games?q=`（被 `catalogRewrite` 改写成 `/catalog/...` 影子路由）就会「地址变了内容
- *    不动」（2026-10-19 线上事故）。
+ * ## 2026-11-05：从「整页提交」改成「软导航」
+ *
+ * 之前这里是**原生 GET 表单提交**（`action` + `method="get"`），一次文档请求 ——
+ * 零 JS 也能用，但**整页刷新**：白屏一下、滚动回顶部、Service Worker 还要重新过一遍。
+ * 用户要求「搜索也应该是 SPA」。
+ *
+ * 现在 `onSubmit` 拦下来，用 `router.push` 走客户端路由。`action` / `method` **保留着**：
+ * 它们是关掉 JS 时唯一的出路，也是这个组件「不依赖 JS 也能用」的底线。
+ * 所以两条路必须拼出**同一个地址**（规范顺序 `q` → `console` → `lang`，见下面 `onSubmit`）：
+ * 顺序错了会多吃一跳 307，而在 JS 这条路上那一跳是整页加载。
  *
  * ⚠️ **落点 2026-10-20 起是 `/games/search`（机种页是 `/consoles/<id>/search`）**，
  *    不再是 `/games?q=`。这是一条**动态路由**（它本来就按 query 渲染），同一路由上改
  *    query 是软导航 ⇒ 搜完再翻页 / 换机种都不再整页刷新。老地址仍能打开
  *    （`catalogRewrite` 那条兼容分支还在），只是不推荐再往外发。
+ * ⚠️ **空关键词等同于「清除」**：落到 `clearHref`（浏览器态的地址，保留机种 / 语种）。
+ *    别在这里 push 一个 `?q=` 的空搜索 —— 服务端会 307 收敛掉，等于白跑一趟。
  */
 
 /** 搜索路由 = 浏览页路径 + `/search`（`/games` → `/games/search`）。 */
@@ -63,12 +70,13 @@ export default function GamesSearchForm({
    */
   clearHref: string;
 }) {
-  const [pending, setPending] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   /*
    * 受控输入，初值 = URL 里的关键词。`keyword` prop 变了就回写一次 ——
-   * 提交是整页跳转（见文件头），正常情况下用不上这条；留着是为了「同一份组件实例上
-   * 关键词被换掉」的任何情形（比如在搜索页里点「清除」走的是软导航）。
+   * 软导航之后组件实例可能被复用（比如从搜「魂斗」点进「清除」再搜别的），
+   * 那时输入框里还留着上一轮的词，得跟着地址回到真相。
    * 用户正在打字时 prop 不变，那段分支不跑，打字不受干扰。
    */
   const [value, setValue] = useState(keyword);
@@ -81,22 +89,42 @@ export default function GamesSearchForm({
   const t = (key: MessageKey) => translate(locale, key);
 
   /**
-   * ⚠️ **这里刻意不 `preventDefault`**：整页提交是唯一的路径（理由见文件头）。
-   * 拦一下只是因为上一次提交还没走掉（连点两下），别让它把按钮状态来回切。
+   * 提交：**拦下来走客户端路由**（见文件头）。同时保留表单本身的 `action` / `method`，
+   * 那是关掉 JS 时唯一的出路 —— 两条路拼出来的地址必须一致。
    */
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    // 上一次导航还没落地 —— 连点第二下只会排第二次导航，直接吞掉
     if (pending) {
       event.preventDefault();
       return;
     }
-    setPending(true);
+
+    const query = value.trim();
+    event.preventDefault();
+
+    // 空关键词 = 「清除」：落到页面给的浏览态地址（保留机种 / 语种），不产生 `?q=`
+    if (!query) {
+      startTransition(() => router.push(clearHref));
+      return;
+    }
+
+    /* 规范顺序 `q` → `console` → `lang`，和 `gamesHref` / `consoleHref` 一字不差 */
+    const params = new URLSearchParams({ q: query });
+    if (consoleType) params.set('console', consoleType);
+    if (languageParam) params.set('lang', languageParam);
+
+    startTransition(() =>
+      router.push(`${localePath(locale, searchPathOf(actionPath))}?${params.toString()}`)
+    );
   };
 
   return (
     <form
       /*
        * ⚠️ `action` 必须带语言前缀 —— 写死 `/games/search` 的话，中文用户在 `/zh/games`
-       * 搜一下就被送到英文列表页。这个表单**就是靠它提交的**，`method="get"` 不是装饰。
+       * 搜一下就被送到英文列表页。
+       * ⚠️ 2026-11-05 起 JS 那条路是 `onSubmit` 里的 `router.push`（见文件头），
+       *    `action` / `method` 只剩「关掉 JS 时也能搜」这一个作用 —— **别删**。
        */
       action={localePath(locale, searchPathOf(actionPath))}
       method="get"

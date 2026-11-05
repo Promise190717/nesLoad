@@ -62,6 +62,8 @@ export const th: Record<MessageKey, string> = {
   'home.search.label': 'ค้นหาในคลังเกม',
   'home.search.placeholder': 'ค้นหาชื่อเกม / ผู้พัฒนา / ซีรีส์',
   'home.search.submit': 'ค้นหา',
+  'home.featured.title': 'คลาสสิกคัดสรร',
+  'home.featured.lead': 'เกมในตำนานที่ทุกคนรู้จัก จัดแบ่งตามแนว',
   'home.consoles.title': 'เลือกตามเครื่องเล่น',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, Arcade และอื่น ๆ — เลือกเครื่องเพื่อดูเกมของเครื่องนั้น',

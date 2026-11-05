@@ -59,6 +59,8 @@ export const de: Record<MessageKey, string> = {
   'home.search.label': 'Spielebibliothek durchsuchen',
   'home.search.placeholder': 'Titel / Entwickler / Reihe suchen',
   'home.search.submit': 'Suchen',
+  'home.featured.title': 'Ausgewählte Klassiker',
+  'home.featured.lead': 'Die Klassiker der Arcade-Ära, nach Genre sortiert.',
   'home.consoles.title': 'Nach Konsole stöbern',
   'home.consoles.lead':
     'NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive, Arcade und mehr — wähle eine Konsole und sieh ihre Spiele.',
