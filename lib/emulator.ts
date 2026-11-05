@@ -1904,7 +1904,9 @@ export class EmulatorController {
     let starting: Nostalgist | null = null;
     const audio = trackEmulatorAudio();
     const releaseCanvas = trackCanvasRuntime(canvas);
-    let listeners: ReturnType<typeof trackRuntimeListeners> | null = null;
+    // Core setup can install Browser.init listeners before beforeLaunch runs.
+    // Track from launch entry so those closures cannot retain the WASM runtime.
+    let listeners: ReturnType<typeof trackRuntimeListeners> | null = trackRuntimeListeners([window, document, canvas]);
     const stopListening = () => listeners?.stop();
     const releaseResources = async () => {
       listeners?.dispose();
@@ -1944,7 +1946,6 @@ export class EmulatorController {
          */
         beforeLaunch: async (instance) => {
           starting = instance;
-          listeners = trackRuntimeListeners([window, document, canvas]);
           if (stagedRoms.length === 0) return;
           const fs = instance.getEmscriptenFS() as WritableEmscriptenFs;
           /*

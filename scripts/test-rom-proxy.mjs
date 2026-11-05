@@ -98,9 +98,9 @@ function routeWith(upstream) {
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const testModule = { exports: {} };
   runInNewContext(output, {
-    module: testModule, exports: testModule.exports, Request, Response, Headers, console: { error() {}, warn() {} },
+    module: testModule, exports: testModule.exports, Request, Response, Headers, URL, AbortController, AbortSignal, setTimeout, clearTimeout, process: { env: {} }, console: { error() {}, warn() {} },
     require(name) {
-      if (name.endsWith('/games')) return { getGameRowCached: async () => ({ source_url: 'files:/game.zip', rom_url: '', rom_name: 'game.zip' }) };
+      if (name.endsWith('/sb-games')) return { getGameRoms: async () => [{ sourceUrl: 'files:/game.zip', romName: 'game.zip', language: 'en', disc: 1 }] };
       if (name.endsWith('/r2')) return { publicUrl: () => 'https://owned.example.com/game.zip' };
       if (name.endsWith('/upstream')) return { sourceFileUrl: () => target, UPSTREAM_SITE: compatibility.referer, UPSTREAM_USER_AGENT: compatibility.userAgent };
       if (name.endsWith('/rom-upstream')) return { ...helper, fetchRomUpstream: async () => upstream };

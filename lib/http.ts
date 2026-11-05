@@ -162,6 +162,48 @@ function abortError(): Error {
   return new DOMException('aborted', 'AbortError');
 }
 
+/** HTTP failures keep their status so permanent errors are not split and retried. */
+class RomHttpError extends Error {
+  readonly retryMs: number;
+  constructor(readonly status: number, retryAfter: string | null) {
+    super('HTTP ' + status);
+    const seconds = Number(retryAfter);
+    const date = Date.parse(retryAfter ?? '');
+    this.retryMs = retryAfter ? Math.max(0,
+      Number.isFinite(seconds) ? seconds * 1000 : Number.isFinite(date) ? date - Date.now() : 0) : 0;
+  }
+  get transient() { return [408, 429, 500, 502, 503, 504].includes(this.status); }
+}
+
+async function checkRomResponse(response: Response): Promise<Response> {
+  if (response.ok) return response;
+  const error = new RomHttpError(response.status, response.headers.get('retry-after'));
+  await response.body?.cancel().catch(() => {});
+  throw error;
+}
+
+function waitForRomRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(abortError()); return; }
+    const abort = () => { clearTimeout(timer); reject(abortError()); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+async function retryRom<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) throw abortError();
+    try { return await operation(); }
+    catch (error) {
+      if (signal?.aborted) throw abortError();
+      if (attempt >= ROM_CHUNK_RETRIES || (error instanceof RomHttpError && (!error.transient || error.retryMs > 30_000))) throw error;
+      await waitForRomRetry(Math.max(error instanceof RomHttpError ? error.retryMs : 0,
+        500 * 2 ** attempt), signal);
+    }
+  }
+}
+
 /**
  * 下一个 ROM，返回整包 Blob。
  *
@@ -182,18 +224,18 @@ export async function fetchRomWithProgress(
   const { signal, onProgress } = options;
 
   // ---------- 1. 探针：只要 1 字节 ----------
-  const probe = await fetch(url, { signal, headers: { Range: 'bytes=0-0' } });
-  if (!probe.ok) throw new Error(`HTTP ${probe.status}`);
-
-  /*
-   * 服务器忽略了 Range（回 200 就是整个文件）：直接把这个响应读完。
-   * ⚠️ 不要 cancel 了再发一次 —— 字节已经在流里了，重发等于白下一遍。
-   */
-  if (probe.status === 200) {
-    const blob = await readBodyWithProgress(probe, onProgress);
+  const initial = await retryRom(async () => {
+    const response = await checkRomResponse(await fetch(url, { signal, headers: { Range: 'bytes=0-0' } }));
+    if (response.status !== 200) return { response, blob: null };
+    // Include body reads in the retry: a 200 can still be truncated mid-stream.
+    const blob = await readBodyWithProgress(response, onProgress);
     if (blob.size === 0) throw new EmptyBodyError();
+    return { response, blob };
+  }, signal);
+  const probe = initial.response;
+  if (initial.blob) {
     onProgress(1);
-    return blob;
+    return initial.blob;
   }
 
   const probeRange = parseContentRange(probe.headers.get('content-range'));
@@ -217,7 +259,7 @@ export async function fetchRomWithProgress(
 
   // ---------- 2. 小文件：一次拿整份 ----------
   if (total <= ROM_DIRECT_MAX_BYTES) {
-    const blob = await fetchWholeRange(url, total, signal);
+    const blob = await retryRom(() => fetchWholeRange(url, total, signal), signal);
     onProgress(1);
     return blob;
   }
@@ -238,7 +280,7 @@ async function fetchWholeRange(
   signal: AbortSignal | undefined
 ): Promise<Blob> {
   const res = await fetch(url, { signal, headers: { Range: `bytes=0-${total - 1}` } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  await checkRomResponse(res);
   const blob = await res.blob();
   if (blob.size === 0) throw new EmptyBodyError();
   if (blob.size !== total) throw new IncompleteBodyError(total, blob.size);
@@ -306,7 +348,7 @@ async function fetchInChunks(
           signal: aborter.signal,
           headers: { Range: `bytes=${start}-${end}` },
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await checkRomResponse(res);
         const blob = await res.blob();
         const range = parseContentRange(res.headers.get('content-range'));
         const matches =
@@ -323,13 +365,16 @@ async function fetchInChunks(
         // 只有**用户取消**才当 abort 报；兄弟片失败也会抛 AbortError，那不是取消
         if (outerSignal?.aborted) throw abortError();
         if (aborter.signal.aborted) throw error;
+        if (error instanceof RomHttpError && (!error.transient || error.retryMs > 30_000)) throw error;
         failure = error;
         if (attempt < ROM_CHUNK_RETRIES) {
-          await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+          await waitForRomRetry(Math.max(error instanceof RomHttpError ? error.retryMs : 0,
+            500 * 2 ** attempt), aborter.signal);
         }
       }
     }
 
+    if (failure instanceof RomHttpError) throw failure;
     if (expected > ROM_CHUNK_MIN_BYTES && depth < ROM_CHUNK_SPLIT_DEPTH) {
       const mid = start + Math.floor(expected / 2);
       const left = await fetchSpan(start, mid - 1, depth + 1);
