@@ -19,6 +19,10 @@
  *
  * ⚠️ 响应里**不含 user_id**（理由见 lib/server/comments.ts 里 `Comment.userId` 的注释）。
  *
+ * ⚠️ 用户名出网前一律过 `maskUserName`（`lib/mask.ts`）：用户名**就是注册邮箱**，
+ *    原样给出去等于把每个评论者的邮箱摆在页面上（2026-11-06 用户要求遮掉）。
+ *    数据层那侧保留真名，只有这里（`publicItem`）是唯一出口。
+ *
  * 星级（`rating`，1..5）和正文是**同一次提交、同一条记录**（2026-10-13 用户要求
  * 「评论有星星 1-5」）：这一版没有「只打分不写字」的通道，两个字段都必填，校验就写在这里
  * （唯一写入入口，数据库那层没有 CHECK —— 老库那列是 ALTER 补的，加不了约束，见 db/schema.sql）。
@@ -29,6 +33,7 @@
 
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { maskUserName } from '@/lib/mask';
 import { assertUser } from '@/lib/server/app-guard';
 import { USER_SESSION_COOKIE, verifyUserSession } from '@/lib/server/app-session';
 import {
@@ -50,11 +55,17 @@ function fail(error: string, detail: string, status = 400) {
   return NextResponse.json({ error, detail }, { status });
 }
 
-/** 摘掉 user_id，换成前端能用的 `mine` 标记。 */
+/**
+ * 摘掉 user_id，换成前端能用的 `mine` 标记；用户名同时**脱敏**。
+ *
+ * ⚠️ 脱敏只在这一处（列表 + 发表两条路都从这儿出去）：用户名就是注册邮箱，
+ *    原样出网等于把每个评论者的邮箱公开在页面上（2026-11-06 用户要求）。
+ *    数据层（`lib/server/comments.ts`）刻意保留真名 —— 后台要看真的。
+ */
 function publicItem(comment: Comment, viewerId: string | null) {
   return {
     id: comment.id,
-    username: comment.username,
+    username: maskUserName(comment.username),
     avatarUrl: comment.avatarUrl,
     content: comment.content,
     rating: comment.rating,

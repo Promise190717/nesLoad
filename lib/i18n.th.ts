@@ -56,7 +56,7 @@ export const th: Record<MessageKey, string> = {
   'home.hero.play': 'โหลด ROM จากเครื่อง',
   'home.hero.browse': 'ดูเกมทั้งหมด',
   'home.join.title': 'เล่นกับเพื่อน',
-  'home.join.hint': 'ใส่รหัสห้อง 4 ตัวอักษรที่เพื่อนส่งมาให้',
+  'home.join.hint': 'ใส่รหัสห้อง 4 ตัวอักษร แล้วเข้าห้องไปเล่นด้วยกัน',
   'home.join.submit': 'เข้าห้อง',
   'home.hero.or': 'หรือ',
   'home.search.label': 'ค้นหาในคลังเกม',
@@ -446,6 +446,7 @@ export const th: Record<MessageKey, string> = {
   'account.historyHint':
     'ประวัติจะเก็บ {max} เกมที่เล่นล่าสุด — เล่นเกมเก่าอีกครั้งจะถูกดันกลับขึ้นบนสุด',
   'account.savesEmpty': 'ยังไม่มีเซฟบนคลาวด์',
+  'account.commentsEmpty': 'คุณยังไม่ได้แสดงความคิดเห็นเลย',
   'account.savesCount': 'เซฟทั้งหมด {count} รายการ',
   'account.savesGroupCount': '{count} เซฟ',
   'account.viewGame': 'ดู {name}',

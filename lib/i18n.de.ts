@@ -53,7 +53,7 @@ export const de: Record<MessageKey, string> = {
   'home.hero.play': 'Lokale ROM laden',
   'home.hero.browse': 'Alle Spiele ansehen',
   'home.join.title': 'Mit einem Freund spielen',
-  'home.join.hint': 'Gib den 4-stelligen Raumcode ein, den dein Freund geteilt hat.',
+  'home.join.hint': 'Gib den 4-stelligen Raumcode ein und spiel direkt mit.',
   'home.join.submit': 'Raum beitreten',
   'home.hero.or': 'ODER',
   'home.search.label': 'Spielebibliothek durchsuchen',
@@ -444,6 +444,7 @@ export const de: Record<MessageKey, string> = {
   'account.historyHint':
     'Der Verlauf behält deine {max} zuletzt gespielten Spiele — spielst du ein älteres erneut, rückt es wieder nach oben.',
   'account.savesEmpty': 'Noch kein Cloud-Spielstand.',
+  'account.commentsEmpty': 'Du hast noch keine Kommentare geschrieben.',
   'account.savesCount': '{count} Spielstände insgesamt',
   'account.savesGroupCount': '{count} Spielstand',
   'account.viewGame': '{name} ansehen',

@@ -85,6 +85,21 @@ export default function DocPage({
   const home = localePath(locale, '/');
 
   /*
+   * 「返回」那颗（2026-11-06 提出来成变量）：窄屏要把它传进 `TopBar`、放在语言左边，
+   * 宽屏仍摆在顶栏下面那一行。**两处渲染的是同一个节点定义**，`sm` 上下各显一份
+   * （顶栏那份自带 `sm:hidden`，下面那份套了 `hidden sm:block`）。
+   */
+  const backLink = (
+    <BackLink
+      href={home}
+      className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
+    >
+      <span aria-hidden="true">←</span>
+      <span>{t('common.back')}</span>
+    </BackLink>
+  );
+
+  /*
    * 页脚那一排互链。**对爬虫比对人有用**：这几页在 sitemap 之外就是靠它互相发现的，
    * 顶栏那行链接在窄窗口下是 `display: none`（见 globals.css），而搜索引擎用移动优先索引。
    *
@@ -104,9 +119,15 @@ export default function DocPage({
   return (
     <main className="wall min-h-screen px-6 py-6 sm:py-12">
       <div className="mx-auto w-full max-w-3xl">
-        {/* 顶栏：语言切换 / 账号 / 游戏库。版式同 GamesShell，给它一个下边距 */}
+        {/*
+          顶栏：语言切换 / 账号 / 游戏库。版式同 GamesShell，给它一个下边距。
+
+          ⚠️ **窄屏那颗「返回」交给顶栏带走**（2026-11-06，同 GamesShell）：
+          顶栏只在 `sm` 以下渲染 `left`，下面那一份用 `hidden sm:block` 藏掉自己。
+          于是窄屏是「返回 …… 语言 / 四个入口」，桌面仍是「顶栏一行 + 返回一行」。
+        */}
         <div className="mb-6">
-          <TopBar />
+          <TopBar left={backLink} />
         </div>
 
         {/*
@@ -122,13 +143,7 @@ export default function DocPage({
           **不用 target="_blank"**：这里是文档页，点回去就是回到上一站，当前标签页往前走一步
           最自然。
         */}
-        <BackLink
-          href={home}
-          className="inline-flex items-center gap-2 text-[12px] text-ink-400 transition-colors hover:text-accent"
-        >
-          <span aria-hidden="true">←</span>
-          <span>{t('common.back')}</span>
-        </BackLink>
+        <div className="hidden sm:block">{backLink}</div>
 
         <header className="mt-4 border-b border-ink-800 pb-6 sm:mt-8">
           <span className="font-pixel text-[12px] tracking-wider text-accent">{doc.label}</span>

@@ -1,7 +1,8 @@
 /*
  * 删一条评论（`/api/comments/<id>`）。
  *
- * 这是评论这一版**唯一的「管理」手段**：站方没有后台评论 tab，能删的只有**作者本人**
+ * 这是**作者**删自己评论的入口：站方另有后台「评论」tab（`adminDeleteComment`），
+ * 但那条路不判 user_id，两者刻意分开。前台这一条则只认作者本人
  * （`deleteComment` 的 WHERE 里带着 user_id，见 lib/server/comments.ts）。
  * 所以「自己写错字了 / 说错话了」不用求人，点一下就撤。
  *

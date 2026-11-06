@@ -67,7 +67,7 @@ export const es: Record<MessageKey, string> = {
   'home.hero.play': 'Cargar una ROM local',
   'home.hero.browse': 'Ver todos los juegos',
   'home.join.title': 'Juega con un amigo',
-  'home.join.hint': 'Escribe el código de sala de 4 caracteres que te haya pasado tu amigo.',
+  'home.join.hint': 'Escribe el código de sala de 4 caracteres y entra a jugar.',
   'home.join.submit': 'Entrar en la sala',
   'home.hero.or': 'O',
   'home.search.label': 'Buscar en la biblioteca de juegos',
@@ -475,6 +475,7 @@ export const es: Record<MessageKey, string> = {
   'account.historyHint':
     'El historial guarda tus {max} juegos más recientes: si vuelves a jugar uno antiguo, pasa otra vez al principio.',
   'account.savesEmpty': 'Aún no hay partidas en la nube.',
+  'account.commentsEmpty': 'Todavía no has publicado ningún comentario.',
   'account.savesCount': '{count} partidas en total',
   'account.savesGroupCount': '{count} partidas',
   'account.viewGame': 'Ver {name}',

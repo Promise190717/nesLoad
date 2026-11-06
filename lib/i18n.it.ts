@@ -54,7 +54,7 @@ export const it: Record<MessageKey, string> = {
   'home.hero.browse': 'Sfoglia tutti i giochi',
   'home.join.title': 'Gioca con un amico',
   'home.join.hint':
-    'Inserisci il codice stanza di 4 caratteri condiviso dal tuo amico.',
+    'Inserisci il codice stanza di 4 caratteri ed entra a giocare.',
   'home.join.submit': 'Entra nella stanza',
   'home.hero.or': 'OPPURE',
   'home.search.label': 'Cerca nella libreria dei giochi',
@@ -468,6 +468,7 @@ export const it: Record<MessageKey, string> = {
   'account.historyHint':
     'La cronologia conserva i {max} giochi giocati più di recente — rigiocando a uno più vecchio torna in cima.',
   'account.savesEmpty': 'Nessun salvataggio cloud.',
+  'account.commentsEmpty': 'Nessun commento pubblicato.',
   'account.savesCount': '{count} salvataggi in tutto',
   'account.savesGroupCount': '{count} salvataggio',
   'account.viewGame': 'Vedi {name}',

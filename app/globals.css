@@ -2170,6 +2170,13 @@ body {
   font-size: 12px;
   line-height: 1;
   transition: color 0.15s ease;
+  /*
+   * 不许断行（2026-11-06）。没有它的时候，内容页顶栏在窄窗口里被压窄，
+   * 「简体中文」会断成「简体中 / 文」—— 顶栏那一排现在改成整项换行了，
+   * 这里必须配合着写死，否则 flex 项自己还是会从中间折。
+   * 抽屉里那一份也吃这条，18 种语言的标签都远短于抽屉宽度，没有副作用。
+   */
+  white-space: nowrap;
 }
 
 .locale-trigger:hover {

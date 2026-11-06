@@ -183,10 +183,16 @@ export default function GamesShell({
           顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库。它自己占一行、靠右；
           下面那颗返回链接紧跟着，所以这里给它一个下边距
           （不这么写的话返回会贴到顶栏上，看着像一行里的两块）。
+
+          ⚠️ **窄屏那颗「返回」交给顶栏带走**（2026-11-06，用户要求「小屏把语言和
+             左上角那颗放一行，其它入口放下面一行」）：`left={backLink}` 传进去，
+             顶栏只在 `sm` 以下渲染它；下面那一行同时用 `hidden sm:flex` 藏掉自己。
+             桌面版一点没变（顶栏一行 → 返回一行），窄屏变成
+             「返回 …… 语言 / 首页・游戏库・账号・主题」。
         */}
         {showTopBar && !wide && (
           <div className="mb-6">
-            <TopBar showTheme={showTheme} />
+            <TopBar showTheme={showTheme} left={backLink} />
           </div>
         )}
 
@@ -221,7 +227,16 @@ export default function GamesShell({
           盖住的余地留了 `max-w-[42%]`，超长名字自己截断。
           不传 `navExtra` 时仍然直接渲染返回本身，DOM 结构一层都不多。
         */}
-        <div className={wide ? 'play-navigation relative mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-ink-700 pb-4' : 'flex items-center justify-between gap-4'}>
+        <div
+          className={
+            wide
+              ? 'play-navigation relative mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-ink-700 pb-4'
+              : showTopBar
+                ? // 窄屏这颗「返回」已经挪进顶栏第一行（见上面那段），这一行只在 sm 以上出现
+                  'hidden items-center justify-between gap-4 sm:flex'
+                : 'flex items-center justify-between gap-4'
+          }
+        >
           {navExtra ? (
             <div className="flex min-w-0 flex-wrap items-center gap-3">
               {backLink}

@@ -82,7 +82,13 @@ export interface Comment {
    *    没有任何一个公开页面需要它，而给出去就等于把「同一个人的所有评论」串成了一张网。
    */
   userId: string;
-  /** 作者名。JOIN 得到的就是现名（用户名本来也不能改），账号没了才退回快照。 */
+  /**
+   * 作者名。JOIN 得到的就是现名（用户名本来也不能改），账号没了才退回快照。
+   *
+   * ⚠️ 这里是**真名**，而站上的用户名就是注册邮箱 ⇒ 出网前必须过 `maskUserName`
+   *    （`lib/mask.ts`，目前唯一出口是 `app/api/games/[id]/comments/route.ts` 的
+   *    `publicItem`）。别为了省事在这一层遮 —— 后台要看真的。
+   */
   username: string;
   /** 头像公网地址；没设过 / 账号没了就是 null（前端画默认头像）。 */
   avatarUrl: string | null;
@@ -271,6 +277,153 @@ export async function deleteComment(id: string, userId: string): Promise<boolean
   const rows = await query<{ id: string }>(
     'DELETE FROM game_comments WHERE id = ? AND user_id = ? RETURNING id',
     [id, userId]
+  );
+  return rows.length > 0;
+}
+
+/* ============================================================================
+ * 带游戏名的列表（2026-11-06：后台「评论」tab + 个人中心「我的评论」）
+ *
+ * 和上面两个函数的三处区别，都是为了「不在某一款游戏的详情页上」：
+ *
+ * ① **不带 gameId 条件**。后台要看全站（发现「同一个人在几十款下面刷同样的话」）；
+ *    个人中心只要自己的（`WHERE c.user_id = ?`）—— 两处共用下面那个
+ *    `listWithGame()`，条件由调用方给，**只传静态 SQL 片段**，用户数据一律走占位符。
+ *
+ * ② **多带一个 `gameTitle`**。评论表本身没有游戏名快照（前台就在那一页上，
+ *    不需要；见 `Comment.gameId` 上面那段 ②）—— 所以这里现查 `game_texts`。
+ *    标题取「有哪个语言就用哪个」：中文优先、英文其次，其余按 locale 排，
+ *    一款游戏连标题都没有时给 null（前端退回显示 slug，链接照样能点）。
+ *    用相关子查询而不是 JOIN：那是个 (game_slug, locale) 主键上的点查，
+ *    每行一次；JOIN 到三四种语言会先把行数乘起来再挑，反而要 DISTINCT。
+ *
+ * ③ **没有缓存**（同 reports.ts 的 ①）：两处都是「点进去看一眼」，加缓存只会多
+ *    一份「刚删完是不是还看得到」的心智负担。
+ * ========================================================================== */
+
+/** 列表的一行：前台那份 + 游戏名（现查，不是快照）。 */
+export interface CommentWithGame extends Comment {
+  /** 游戏名；游戏已下架 / 一条文案都没有时为 null */
+  gameTitle: string | null;
+}
+
+/** 一页结果。`nextCursor` 为 null 表示到底了。 */
+export interface CommentWithGamePage {
+  items: CommentWithGame[];
+  nextCursor: string | null;
+}
+
+interface CommentWithGameRow extends CommentRow {
+  game_title: string | null;
+}
+
+function toCommentWithGame(row: CommentWithGameRow): CommentWithGame {
+  return { ...toComment(row), gameTitle: row.game_title };
+}
+
+/*
+ * 这份 SELECT **刻意不并进上面那个 SELECT** —— 那个每行都被前台评论列表
+ * 跑一遍，标题子查询对前台是纯浪费（它压根不显示游戏名）。
+ */
+const LISTED_SELECT = `
+  SELECT
+    c.id, c.game_slug, c.user_id, c.username, c.content, c.rating,
+    (EXTRACT(EPOCH FROM c.created_at) * 1000)::float8 AS created_at,
+    a.username   AS live_username,
+    a.avatar_key AS avatar_key,
+    (
+      SELECT t.title
+        FROM game_texts t
+       WHERE t.game_slug = c.game_slug
+         AND t.title IS NOT NULL AND t.title <> ''
+       ORDER BY CASE t.locale WHEN 'zh' THEN 0 WHEN 'en' THEN 1 ELSE 2 END,
+                t.locale
+       LIMIT 1
+    ) AS game_title
+  FROM game_comments c
+  LEFT JOIN app_users a ON a.id = c.user_id`;
+
+/**
+ * 两处列表共用的翻页查询。
+ *
+ * `filter.sql` 只放**静态条件**（`'1=1'` / `'c.user_id = ?'`），用户数据一律走
+ * `filter.params` 占位符 —— 别把 id 拼进 SQL 字符串。
+ *
+ * 翻页口径和 `listGameComments` 完全一致（`created_at:id` 两级游标，
+ * 同一毫秒两条也不会跳段）。
+ */
+async function listWithGame(
+  filter: { sql: string; params: unknown[] },
+  options: { cursor?: string | null; limit?: number }
+): Promise<CommentWithGamePage> {
+  const limit = clampLimit(options.limit);
+  const cursor = decodeCursor(options.cursor);
+
+  /*
+   * 多取一条：拿得到第 limit+1 条就说明后面还有，用它反过来推 nextCursor。
+   * 比再发一条 COUNT 查询便宜，也不用把总数透给前台。
+   */
+  const rows = cursor
+    ? await query<CommentWithGameRow>(
+        `${LISTED_SELECT}
+          WHERE ${filter.sql}
+            AND ((c.created_at < to_timestamp(?::float8 / 1000))
+              OR (c.created_at = to_timestamp(?::float8 / 1000) AND c.id < ?))
+          ORDER BY c.created_at DESC, c.id DESC
+          LIMIT ?`,
+        [...filter.params, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1]
+      )
+    : await query<CommentWithGameRow>(
+        `${LISTED_SELECT}
+          WHERE ${filter.sql}
+          ORDER BY c.created_at DESC, c.id DESC
+          LIMIT ?`,
+        [...filter.params, limit + 1]
+      );
+
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit).map(toCommentWithGame);
+  const last = items[items.length - 1];
+
+  return { items, nextCursor: hasMore && last ? encodeCursor(last) : null };
+}
+
+/** 全站评论，新的在前（后台「评论」tab）。 */
+export async function listAllComments(
+  options: { cursor?: string | null; limit?: number } = {}
+): Promise<CommentWithGamePage> {
+  return listWithGame({ sql: '1=1', params: [] }, options);
+}
+
+/**
+ * 某个用户自己写的评论，新的在前（同一毫秒的两条按 id 兜底排序）。
+ *
+ * `WHERE c.user_id = ?` 是「只能看到自己的」的全部保证 —— 别改成先拉全站再在
+ * 内存里过滤（那样将来一分页就会把别人的评论也读出来）。
+ *
+ * 删除**不在这个文件里**：作者删自己的走 `deleteComment`（带 user_id）与
+ * `DELETE /api/comments/<id>`，个人中心直接复用那条路。
+ */
+export async function listUserComments(
+  userId: string,
+  options: { cursor?: string | null; limit?: number } = {}
+): Promise<CommentWithGamePage> {
+  return listWithGame({ sql: 'c.user_id = ?', params: [userId] }, options);
+}
+
+/**
+ * 后台删一条 —— **不判作者**（这正是它和 `deleteComment` 的区别）。
+ *
+ * 把「谁都能删」收在这一个函数里，而不是给 `deleteComment` 的 `userId`
+ * 加个可空口子：那个函数的全部价值就是「作者才能删」，一旦允许省略，
+ * 前台那条路就随时可能被误用成管理员权限。两条路两个名字。
+ *
+ * 返回是否真删到了（不存在回 false，调用方据此回 404）。
+ */
+export async function adminDeleteComment(id: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    'DELETE FROM game_comments WHERE id = ? RETURNING id',
+    [id]
   );
   return rows.length > 0;
 }

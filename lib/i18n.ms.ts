@@ -66,7 +66,7 @@ export const ms: Record<MessageKey, string> = {
   'home.hero.play': 'Muatkan ROM setempat',
   'home.hero.browse': 'Lihat semua permainan',
   'home.join.title': 'Main bersama rakan',
-  'home.join.hint': 'Masukkan kod bilik 4 aksara yang dikongsi oleh rakan anda.',
+  'home.join.hint': 'Masukkan kod bilik 4 aksara, kemudian masuk dan main bersama.',
   'home.join.submit': 'Sertai bilik',
   /* 「两颗钮」与「搜索框」之间的分隔词 */
   'home.hero.or': 'ATAU',
@@ -490,6 +490,7 @@ export const ms: Record<MessageKey, string> = {
   'account.historyHint':
     'Sejarah menyimpan {max} permainan yang paling baru dimainkan — bermain yang lama semula akan mengalihkannya ke atas.',
   'account.savesEmpty': 'Belum ada simpanan awan.',
+  'account.commentsEmpty': 'Anda belum menghantar sebarang komen.',
   'account.savesCount': '{count} simpanan kesemuanya',
   'account.savesGroupCount': '{count} simpanan',
   'account.viewGame': 'Lihat {name}',

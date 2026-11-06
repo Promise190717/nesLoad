@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { fetchCurrentUser, type AuthUser } from '@/lib/current-user';
 import { splitLocalePath } from '@/lib/i18n';
@@ -39,8 +39,20 @@ import LocaleSwitcher from './LocaleSwitcher';
  *
  * 已登录时这一格变成**用户名**（点进 `/account`）：
  * `max-w-[9rem] truncate` 截断，全名留在 `title` 里。
+ *
+ * ---
+ *
+ * **窄屏两行版式（2026-11-06 用户指定）**：小屏上这一排不再是「一行硬塞」——
+ * **第一行 = 左上角那颗（logo / 返回，由 `left` 传进来）+ 语言**，
+ * **第二行 = 首页 / 游戏库 / 账号 / 主题**（右对齐，仍然带分隔竖线）。
+ * `sm` 以上还是原来那一整行，桌面版式一个字都没动。
+ *
+ * `left` 只在 `sm` 以下渲染：桌面版那两颗仍由各自的页面摆在原来的位置
+ * （`/` 的品牌标在 `.home-nav` 里，内容页的「返回」在顶栏下面那一行），
+ * 宿主那边用 `hidden sm:flex` 把移动端那份藏掉，所以同一个节点在 DOM 里会出现两次
+ * —— 一次给窄屏、一次给宽屏，**同一时刻只有一份可见**。
  */
-function TopBarContent({ showTheme }: { showTheme: boolean }) {
+function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNode }) {
   const { t, href: localeHref } = useI18n();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -116,125 +128,168 @@ function TopBarContent({ showTheme }: { showTheme: boolean }) {
   const next = path + (query ? `?${query}` : '');
   const signInHref = `${localeHref('/login')}?next=${encodeURIComponent(next)}`;
 
+  /*
+   * ⚠️ **窄屏分两行**（2026-11-06）：外层这一组只负责「第一行放哪两颗」。
+   * 顺序刻意是「左上角那颗 → 语言」，和桌面版那一行（语言在最前）不冲突：
+   * `sm` 以上 `left` 不渲染，这一组就只剩语言，自然接在四个入口前面。
+   *
+   * ⚠️ 语言**不在 `<nav>` 里**：它是站点级设置，不是导航链接；拆出来之后
+   * `<nav>` 只剩「首页 / 游戏库 / 账号 / 主题」，读屏软件念出来的目录也更干净。
+   *
+   * ⚠️ 入口之间那几条竖线**一律保留**（别为了换行好看去 `hidden sm:block` 藏掉 ——
+   * 当天试过，用户立刻问「怎么没有分割线了」）。窄屏第二行放不下时它可能落在行首/行尾，
+   * 那是换行的自然结果，可接受。唯一例外是「语言 ↔ 首页」那一条（见下面），它跟着语言走、
+   * 只在桌面出现。
+   */
   return (
-    <nav aria-label={t('topLinks.label')} className="flex items-center justify-end gap-3">
-      <LocaleSwitcher />
-
+    <div className="flex w-full flex-col items-stretch gap-y-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-3">
       {/*
-        首页（2026-10-13 加）。用户要求「除首页外，每个页面都有一颗回首页的入口」——
-        顶栏是内容页唯一常驻的导航，放这一处就覆盖了 `/games*`、`/developers*`、
-        `/privacy`、`/terms`（首页自己不需要）。
-
-        排在语言之后：语言切换和它都是「站点级」的东西，再往后才是游戏库 / 账号。
+        第一行：左边那颗（窄屏专供）+ 语言。
+        `mr-auto` 把语言顶到最右；`sm:hidden` 让桌面版继续用宿主页自己那份
+        （`/` 的品牌标、内容页下面那一行的「返回」）。
       */}
-      <span aria-hidden className="h-[10px] w-px bg-ink-500" />
-      <Link
-        href={localeHref('/')}
-        className="text-[12px] text-ink-300 transition-colors hover:text-accent"
+      <div className="flex items-center gap-x-3">
+        {left && <div className="mr-auto min-w-0 sm:hidden">{left}</div>}
+        <div className="ml-auto shrink-0">
+          <LocaleSwitcher />
+        </div>
+        {/*
+          语言和「首页」之间那条竖线：**桌面才有**。窄屏下这一行到语言就结束了，
+          留它会变成行尾一截孤零零的短竖杠（第一版就踩了这个，用户截图上明摆着）。
+          所以它挂在这一组的末尾（跟着语言走），而不是 `<nav>` 的开头 ——
+          挂在 nav 开头的话，桌面下它前面会多出一段组间距，左右不对称。
+        */}
+        <span aria-hidden className="hidden h-[10px] w-px shrink-0 bg-ink-500 sm:block" />
+      </div>
+
+      <nav
+        aria-label={t('topLinks.label')}
+        className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2"
       >
-        {t('common.home')}
-      </Link>
+        {/* 首页（2026-10-13 加）。用户要求「除首页外，每个页面都有一颗回首页的入口」——
+            顶栏是内容页唯一常驻的导航，放这一处就覆盖了 `/games*`、`/developers*`、
+            `/privacy`、`/terms`（首页自己不需要）。
 
-      <span aria-hidden className="h-[10px] w-px bg-ink-500" />
-      {/*
-        游戏库。文案借 `topLinks.games`（法务页页脚用的是同一个键）——
-        同一个落点（`/games`）在站里只该有一个名字。
+            排在语言之后：语言切换和它都是「站点级」的东西，再往后才是游戏库 / 账号。
+        */}
+        <Link
+          href={localeHref('/')}
+          className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+        >
+          {t('common.home')}
+        </Link>
 
-        ⚠️ 文字前面那个**手柄图标是 2026-10-14 用户要求加的**（「游戏列表文字前面加一个
-        游戏手柄的图标」）—— 只加在**这个顶栏**（首页 `/` 与 `/games*`、`/developers*`、
-        `/privacy`、`/terms` 共用），法务页页脚不加。
+        <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+        {/*
+          游戏库。文案借 `topLinks.games`（法务页页脚用的是同一个键）——
+          同一个落点（`/games`）在站里只该有一个名字。
 
-        ⚠️ **这里刻意不复用 `.row-icon`**：那个类在小屏抽屉里是「左边图标、右边文案」用的，
-        但它**大屏默认 `display: none`**（见 globals.css 那段注释 —— 大屏右上角那一行
-        照规矩是纯文字）。这个顶栏不是抽屉，直接用一个 inline-flex 的 `<span>` 包住图标
-        即可，不碰那套开关。
+          ⚠️ 文字前面那个**手柄图标是 2026-10-14 用户要求加的**（「游戏列表文字前面加一个
+          游戏手柄的图标」）—— 只加在**这个顶栏**（首页 `/` 与 `/games*`、`/developers*`、
+          `/privacy`、`/terms` 共用），法务页页脚不加。
 
-        ⚠️ 2026-10-14 曾给这一处另画过一个实心手柄剪影（`JoystickIcon`），用户看过之后
-        **当天就要求换回 `GamepadIcon`**，那个图标已删；别再加第二个手柄图标。
-      */}
-      <Link
-        href={localeHref('/games')}
-        className="inline-flex items-center gap-1.5 text-[12px] text-ink-300 transition-colors hover:text-accent"
-      >
-        <span className="inline-flex items-center">
-          <GamepadIcon size={16} />
-        </span>
-        {t('topLinks.games')}
-      </Link>
+          ⚠️ **这里刻意不复用 `.row-icon`**：那个类在小屏抽屉里是「左边图标、右边文案」用的，
+          但它**大屏默认 `display: none`**（见 globals.css 那段注释 —— 大屏右上角那一行
+          照规矩是纯文字）。这个顶栏不是抽屉，直接用一个 inline-flex 的 `<span>` 包住图标
+          即可，不碰那套开关。
 
-      {/*
-        账号那一格（2026-10-14 用户要求挪到「游戏库」**后面**：组顺序为
-        语言 → 首页 → 游戏库 → 账号）。原先它排在首页和游戏库之间。
+          ⚠️ 2026-10-14 曾给这一处另画过一个实心手柄剪影（`JoystickIcon`），用户看过之后
+          **当天就要求换回 `GamepadIcon`**，那个图标已删；别再加第二个手柄图标。
+        */}
+        <Link
+          href={localeHref('/games')}
+          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+        >
+          <span className="inline-flex items-center">
+            <GamepadIcon size={16} />
+          </span>
+          {t('topLinks.games')}
+        </Link>
 
-        ⚠️ **`loading` 期间整格不渲染**（连分隔线一起）—— 首屏还不知道「我是谁」，
-           先画成未登录的话，已登录用户会看见它先写「登录」再「啪」地换成自己的名字。
-           那几十毫秒宁可空着，比闪一下好。
-      */}
-      {!loading && (
-        <>
-          <span aria-hidden className="h-[10px] w-px bg-ink-500" />
-          {user ? (
-            /*
-             * ⚠️ **这两颗（个人中心 / 登录页）都关掉了预取**（`prefetch={false}`，2026-10-19）。
-             *
-             * 本站的 `/account` 与 `/login` 都读 cookie（动态渲染），预取拿不到页面数据 ——
-             * Next 只会去取一份「纯布局壳」（实测 373 / 426 字节，`__PAGE__` 里是空的），
-             * 而**每次页面切换**这排顶栏重新挂载时它都会再发一遍，一次两条（带 query 的
-             * 加上不带 query 的壳）。也就是说：未登录的人每翻一页，Worker 上就多两个
-             * 只能扔掉的请求，登录页打开速度却一点没快（那一次往返无论如何都要发生）。
-             * 省掉它的代价只是点下去之后多等一个 RSC 往返 —— 和点「游戏库」那种静态页
-             * 不一样，这两页本来就没有「秒开」可省。
-             */
-            <Link
-              href={localeHref('/account')}
-              prefetch={false}
-              title={t('user.openSignedIn', { name: user.username })}
-              className="max-w-[9rem] truncate text-[12px] text-ink-300 transition-colors hover:text-accent"
+        {/*
+          账号那一格（2026-10-14 用户要求挪到「游戏库」**后面**：组顺序为
+          语言 → 首页 → 游戏库 → 账号）。原先它排在首页和游戏库之间。
+
+          ⚠️ **`loading` 期间整格不渲染**（连分隔线一起）—— 首屏还不知道「我是谁」，
+             先画成未登录的话，已登录用户会看见它先写「登录」再「啪」地换成自己的名字。
+             那几十毫秒宁可空着，比闪一下好。
+        */}
+        {!loading && (
+          <>
+            <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+            {user ? (
+              /*
+               * ⚠️ **这两颗（个人中心 / 登录页）都关掉了预取**（`prefetch={false}`，2026-10-19）。
+               *
+               * 本站的 `/account` 与 `/login` 都读 cookie（动态渲染），预取拿不到页面数据 ——
+               * Next 只会去取一份「纯布局壳」（实测 373 / 426 字节，`__PAGE__` 里是空的），
+               * 而**每次页面切换**这排顶栏重新挂载时它都会再发一遍，一次两条（带 query 的
+               * 加上不带 query 的壳）。也就是说：未登录的人每翻一页，Worker 上就多两个
+               * 只能扔掉的请求，登录页打开速度却一点没快（那一次往返无论如何都要发生）。
+               * 省掉它的代价只是点下去之后多等一个 RSC 往返 —— 和点「游戏库」那种静态页
+               * 不一样，这两页本来就没有「秒开」可省。
+               */
+              <Link
+                href={localeHref('/account')}
+                prefetch={false}
+                title={t('user.openSignedIn', { name: user.username })}
+                className="max-w-[9rem] shrink-0 truncate text-[12px] text-ink-300 transition-colors hover:text-accent"
+              >
+                {user.username}
+              </Link>
+            ) : (
+              <Link
+                href={signInHref}
+                prefetch={false}
+                className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+              >
+                {t('user.signIn')}
+              </Link>
+            )}
+          </>
+        )}
+        {/*
+          主题（2026-10-19 加）。用户要求「首页及列表那些页面右上入口最后边也加白天 /
+          黑夜模式的切换钮」—— 所以排在**账号之后**，是这一排的最后一格。
+
+          `showTheme={false}` 目前只有 `/play` 传：那一页右栏的「显示」那一行已经有一颗
+          同一功能的钮（见 PlayScene），顶栏再放一颗就是同一件事说两遍。
+        */}
+        {showTheme && (
+          <>
+            <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+              aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+              className="theme-toggle shrink-0 p-1 text-ink-300 transition-colors hover:text-accent"
             >
-              {user.username}
-            </Link>
-          ) : (
-            <Link
-              href={signInHref}
-              prefetch={false}
-              className="text-[12px] text-ink-300 transition-colors hover:text-accent"
-            >
-              {t('user.signIn')}
-            </Link>
-          )}
-        </>
-      )}
-      {/*
-        主题（2026-10-19 加）。用户要求「首页及列表那些页面右上入口最后边也加白天 /
-        黑夜模式的切换钮」—— 所以排在**账号之后**，是这一排的最后一格。
-
-        `showTheme={false}` 目前只有 `/play` 传：那一页右栏的「显示」那一行已经有一颗
-        同一功能的钮（见 PlayScene），顶栏再放一颗就是同一件事说两遍。
-      */}
-      {showTheme && (
-        <>
-          <span aria-hidden className="h-[10px] w-px bg-ink-500" />
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
-            aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
-            className="theme-toggle p-1 text-ink-300 transition-colors hover:text-accent"
-          >
-            {/* 图标画的是**切过去之后**的那一颗，和 title 同方向 */}
-            <span className="theme-icon-light">
-              <SunIcon size={16} />
-            </span>
-            <span className="theme-icon-dark">
-              <MoonIcon size={16} />
-            </span>
-          </button>
-        </>
-      )}
-    </nav>
+              {/* 图标画的是**切过去之后**的那一颗，和 title 同方向 */}
+              <span className="theme-icon-light">
+                <SunIcon size={16} />
+              </span>
+              <span className="theme-icon-dark">
+                <MoonIcon size={16} />
+              </span>
+            </button>
+          </>
+        )}
+      </nav>
+    </div>
   );
 }
 
-export default function TopBar({ showTheme = true }: { showTheme?: boolean }) {
-  return <Suspense fallback={null}><TopBarContent showTheme={showTheme} /></Suspense>;
+export default function TopBar({
+  showTheme = true,
+  left,
+}: {
+  showTheme?: boolean;
+  left?: ReactNode;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <TopBarContent showTheme={showTheme} left={left} />
+    </Suspense>
+  );
 }

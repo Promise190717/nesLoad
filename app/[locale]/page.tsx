@@ -161,6 +161,22 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
   const chip =
     'pixel-edge pxw-2 pxc-700 flex h-full flex-col items-center justify-center gap-2 bg-ink-900 p-4 text-center transition-colors hover:bg-ink-800';
 
+  /*
+   * 品牌标（机台图标 + 站名）。**同一份节点渲染两次**（2026-11-06）：
+   * 宽屏摆在 `.home-nav` 左边那颗，窄屏则由 `TopBar` 的 `left` 摆到第一行、
+   * 和语言同一行（用户要求「小屏把语言和 logo 放一行」）。
+   * 两处靠 `hidden sm:block` / TopBar 内的 `sm:hidden` 各显一份，同一时刻只有一份可见。
+   */
+  const brandLink = (
+    <Link
+      href={localePath(locale, '/')}
+      className="flex items-center gap-3 text-[16px] font-semibold text-ink-100"
+    >
+      <GameHouseLogo />
+      {SITE_NAME[locale]}
+    </Link>
+  );
+
   return (
     <main className="home-page min-h-screen px-4 pb-8 pt-4 sm:px-8 sm:pt-6">
       <div className="mx-auto w-full max-w-5xl">
@@ -168,8 +184,14 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           顶栏（2026-10-13 加）：语言切换 / 账号 / 游戏库，靠右。
           首页的 Hero 是居中的，所以它不跟 Hero 抢中间那条竖线 —— 单独占顶上一行。
           和 `/games` 那几个内容页共用同一个 `TopBar`（口径一致）。
+
+          ⚠️ **窄屏（2026-11-06 用户要求）**：品牌标和语言同一行，四个入口另起一行。
+             所以窄屏那份品牌标由 `TopBar` 的 `left` 接管，这里这份只从 `sm` 起显示。
         */}
-        <div className="home-nav flex flex-wrap items-center justify-between gap-4 border-b border-ink-700/70 pb-5"><Link href={localePath(locale, "/")} className="flex items-center gap-3 text-[16px] font-semibold text-ink-100"><GameHouseLogo />{SITE_NAME[locale]}</Link><TopBar /></div>
+        <div className="home-nav flex flex-wrap items-center justify-between gap-4 border-b border-ink-700/70 pb-5">
+          <div className="hidden sm:block">{brandLink}</div>
+          <TopBar left={brandLink} />
+        </div>
 
         {/*
           Hero。居中的大字 + 一句说明 + 两个入口 + 搜索框 —— 参考站的骨架。

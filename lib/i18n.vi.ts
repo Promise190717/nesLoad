@@ -67,7 +67,7 @@ export const vi: Record<MessageKey, string> = {
   'home.hero.play': 'Nạp ROM từ máy',
   'home.hero.browse': 'Xem tất cả game',
   'home.join.title': 'Chơi cùng bạn bè',
-  'home.join.hint': 'Nhập mã phòng 4 ký tự mà bạn của bạn chia sẻ.',
+  'home.join.hint': 'Nhập mã phòng 4 ký tự để vào phòng và chơi cùng nhau.',
   'home.join.submit': 'Vào phòng',
   'home.hero.or': 'HOẶC',
   'home.search.label': 'Tìm trong thư viện game',
@@ -469,6 +469,7 @@ export const vi: Record<MessageKey, string> = {
   'account.historyHint':
     'Lịch sử giữ {max} game chơi gần nhất — chơi lại một game cũ sẽ đưa nó lên đầu.',
   'account.savesEmpty': 'Chưa có bản lưu đám mây.',
+  'account.commentsEmpty': 'Bạn chưa đăng bình luận nào.',
   'account.savesCount': 'Tổng cộng {count} bản lưu',
   'account.savesGroupCount': '{count} bản lưu',
   'account.viewGame': 'Xem {name}',

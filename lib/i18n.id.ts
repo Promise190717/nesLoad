@@ -69,7 +69,7 @@ export const id: Record<MessageKey, string> = {
   'home.hero.play': 'Muat ROM lokal',
   'home.hero.browse': 'Jelajahi semua game',
   'home.join.title': 'Main bareng teman',
-  'home.join.hint': 'Masukkan kode ruang 4 karakter yang dibagikan temanmu.',
+  'home.join.hint': 'Masukkan kode ruang 4 karakter, lalu masuk dan main bersama.',
   'home.join.submit': 'Gabung ruang',
   /* 「两颗钮」与「搜索框」之间的分隔词，单独一行 */
   'home.hero.or': 'ATAU',
@@ -519,6 +519,7 @@ export const id: Record<MessageKey, string> = {
     'Riwayat menyimpan {max} game terakhir yang kamu mainkan — memainkan yang lama lagi akan memindahkannya ke atas.',
 
   'account.savesEmpty': 'Belum ada simpanan cloud.',
+  'account.commentsEmpty': 'Kamu belum pernah memposting komentar.',
   'account.savesCount': 'Total {count} simpanan',
   'account.savesGroupCount': '{count} simpanan',
   'account.viewGame': 'Lihat {name}',

@@ -60,7 +60,7 @@ export const nl: Record<MessageKey, string> = {
   'home.hero.play': 'Lokale ROM laden',
   'home.hero.browse': 'Alle games bekijken',
   'home.join.title': 'Speel met een vriend',
-  'home.join.hint': 'Voer de kamercode van 4 tekens in die je vriend met je deelde.',
+  'home.join.hint': 'Voer de kamercode van 4 tekens in en speel meteen mee.',
   'home.join.submit': 'Deelnemen',
   'home.hero.or': 'OF',
   'home.search.label': 'Zoek in de gamebibliotheek',
@@ -452,6 +452,7 @@ export const nl: Record<MessageKey, string> = {
   'account.historyHint':
     'De geschiedenis bewaart je {max} laatst gespeelde games — speel je een oudere opnieuw, dan gaat die weer naar boven.',
   'account.savesEmpty': 'Nog geen cloudsave.',
+  'account.commentsEmpty': 'Je hebt nog geen reacties geplaatst.',
   'account.savesCount': '{count} saves in totaal',
   'account.savesGroupCount': '{count} save',
   'account.viewGame': '{name} bekijken',

@@ -23,8 +23,14 @@ import { useI18n } from './I18nProvider';
  *   · 历史 —— 云端游戏历史（最近玩过的 N 款），可逐条删、可一键清空
  *   · 存档 —— 树视图（2026-10-14 从平铺改过来）：一层游戏、点开才见该游戏下的具体存档，
  *            可逐份删、可一键清空
- *   · 资料 —— 换头像 / 改性别（2026-10-13 把密码从这里拆出去了）
- *   · 密码 —— 改密码单独一页（原先挤在资料里，是那一页最长的一段）
+ *   · 评论 —— 自己写过的评论（2026-11-06 加），新的在前，可逐条删
+ *   · 密码 —— 改密码（原先是「资料」里最长的一段，2026-10-13 拆成单独一页）
+ *
+ * ⚠️ **「资料」tab 2026-11-06 撤掉**（用户要求「隐藏资料 tab，点击顶部的头像可以上传图片」）：
+ *    换头像改由**页头那颗头像**直接点 —— 它现在是一颗 `<button>`，点开就是选文件对话框，
+ *    选完立刻上传。原来那一屏里的「性别」按用户的原话「暂时不展示」一起收了
+ *    （接口还在：`PATCH /api/user/profile` 的 `gender`，数据层照旧），
+ *    **要恢复就把那块表单放回页头或另起一屏，别把 tab 加回清单**。
  *
  * ⚠️ **tab 走 URL**（2026-10-14 加，用户要求「刷新别永远回到收藏」）：当前 tab 写在
  *    `?tab=` 上（`/account?tab=saves`），服务端解析后当 `initialTab` 传进来；
@@ -122,33 +128,79 @@ interface SaveOverviewItem {
   consoleType: ConsoleType;
 }
 
+/**
+ * `/api/user/comments` 的条目（对齐 `listUserComments` 出网后的形状）。
+ *
+ * 没有 `username` / `avatarUrl` —— 看的是自己的评论，头像名字页头已经有了。
+ * `gameTitle` 是服务端现查的；游戏下架 / 没文案时为 null，前端退回显示 slug。
+ */
+interface MyCommentItem {
+  id: string;
+  gameId: string;
+  gameTitle: string | null;
+  content: string;
+  rating: number;
+  createdAt: number;
+}
+
+/**
+ * 星级上限。和 `lib/server/comments.ts` 的 `RATING_MAX` **手抄一致**
+ * —— 客户端不能 import 那个模块（里面引了 node:crypto 和数据库客户端）。
+ * 组件里改区间时**两处一起改**（同 GameComments 那份的注释）。
+ */
+const RATING_MAX = 5;
+
+/** 个人中心「评论」tab 的页大小。和服务端 `COMMENT_PAGE_SIZE` 一致（10）。 */
+const MY_COMMENTS_PAGE_SIZE = 10;
+
 /** tab id 的出处 / `?tab=` 解析在 lib/account-tabs.ts（page.tsx 服务端也要用）。 */
 type Tab = AccountTab;
 type LoadState = 'loading' | 'ready' | 'error';
 type Notice = { tone: 'ok' | 'error'; text: string };
 
+/**
+ * 同一时刻只发一次**相同 URL** 的 GET（2026-11-06 加）。
+ *
+ * 起因：开发模式开着 `reactStrictMode`，React 会把 effect 故意跑两遍
+ * （挂载 → 卸载 → 再挂载）来暴露漏写的清理。切 tab 时那一对 effect 几乎同毫秒
+ * 触发，于是网络面板里同一个接口**同时飞两条**、服务端也多跑一次库查询。
+ * 生产构建只跑一遍，本来就只有一条 —— 这不是接口写重了。
+ *
+ * 只复用**还在飞**的那个 Promise：一落地就从表里删掉，所以重新进这一屏照样拿最新一份，
+ * 不会引入过期数据。页头资料和四个 tab 共用它，别在各自 effect 里再各写一份。
+ */
+const inFlightJson = new Map<string, Promise<unknown>>();
+
+function getJsonOnce<T>(url: string): Promise<T> {
+  const running = inFlightJson.get(url);
+  if (running) return running as Promise<T>;
+
+  const request = fetch(url).then((res) => {
+    if (!res.ok) throw new Error(String(res.status));
+    return res.json() as Promise<T>;
+  });
+
+  // 成功失败都要把位子腾出来，否则下一次进来会永远拿到这个旧结果
+  request.then(
+    () => inFlightJson.delete(url),
+    () => inFlightJson.delete(url)
+  );
+  inFlightJson.set(url, request);
+  return request;
+}
+
 const TABS: { value: Tab; label: MessageKey }[] = [
   { value: 'favorites', label: 'account.tabFavorites' },
   { value: 'history', label: 'account.tabHistory' },
   { value: 'saves', label: 'account.tabSaves' },
-  { value: 'profile', label: 'account.tabProfile' },
+  /* 标签借 `comments.heading`（「评论」/「Comments」）—— 那 18 份文案里本来就有，
+     不必为一个 tab 名新增一条键。 */
+  { value: 'comments', label: 'comments.heading' },
   { value: 'password', label: 'account.tabPassword' },
 ];
 
 const FIELD_CLASS =
   'pixel-edge pxw-2 pxc-500 w-full bg-ink-900 px-2 py-2 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none';
-
-/**
- * 性别三档。空串 = **未知**（默认态，库里存 NULL）。
- *
- * ⚠️ 原先这里是四档（多一个 `'other'`「其他」），2026-10-13 取消 —— 「其他」和「未知」
- *    在界面上指同一件事，库里 NULL 已经承担了「未知」。见 lib/server/app-users.ts 的 Gender。
- */
-const GENDERS: { value: 'male' | 'female' | ''; label: MessageKey }[] = [
-  { value: '', label: 'account.genderNone' },
-  { value: 'male', label: 'account.genderMale' },
-  { value: 'female', label: 'account.genderFemale' },
-];
 
 /** 把字节数写成人能读的大小。B / KB / MB，一位小数（够用，不引单位换算库）。 */
 function formatBytes(bytes: number): string {
@@ -186,11 +238,7 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/user/profile')
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.json() as Promise<{ user: AccountUser }>;
-      })
+    getJsonOnce<{ user: AccountUser }>('/api/user/profile')
       .then((data) => {
         if (cancelled) return;
         setUser(data.user);
@@ -203,6 +251,59 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * 换头像（2026-11-06 从「资料」tab 搬到页头）。
+   *
+   * 页头那颗头像现在是一颗 `<button>`，点它 = 点下面那个隐藏的 file input ——
+   * 原生 input 在像素风里突兀且不可控，所以照原来的做法藏起来，
+   * 但**仍然是真 input**：键盘可达性和无障碍都还在（按钮本身可 Tab 到）。
+   *
+   * 成功时换的是 `user`（`/api/user/avatar` 回完整用户），页头头像立刻变；
+   * 失败按服务端给的错误码翻文案，认不出的退回通用那句。
+   *
+   * ⚠️ 原来「资料」里那颗「移除头像」随着那一屏一起撤了。`DELETE /api/user/avatar`
+   *    还在（接口没动），只是这一版没有入口 —— 要恢复就挂在页头（比如头像右上角
+   *    一颗 `×`），别再为它把 tab 加回来。
+   */
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarNotice, setAvatarNotice] = useState<Notice | null>(null);
+
+  /** 服务端回来的错误码 → 文案键。认不出的退回通用那句（同原来资料页里那份）。 */
+  const avatarMessageOf = (code: string) => {
+    const keys: Record<string, MessageKey> = {
+      'avatar-too-large': 'account.error.avatarTooLarge',
+      'unsupported-type': 'account.error.avatarType',
+      'missing-avatar': 'account.error.avatarMissing',
+    };
+    const key = keys[code];
+    return key ? t(key) : t('account.failed');
+  };
+
+  const uploadAvatar = async (file: File) => {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    setAvatarNotice(null);
+    try {
+      const form = new FormData();
+      form.append('avatar', file);
+      const res = await fetch('/api/user/avatar', { method: 'POST', body: form });
+      const data = (await res.json().catch(() => ({}))) as { user?: AccountUser; error?: string };
+      if (!res.ok || !data.user) throw new Error(data.error ?? '');
+      setUser(data.user);
+      setAvatarNotice({ tone: 'ok', text: t('account.avatarSaved') });
+    } catch (error) {
+      setAvatarNotice({
+        tone: 'error',
+        text: avatarMessageOf(error instanceof Error ? error.message : ''),
+      });
+    } finally {
+      setAvatarBusy(false);
+      // 清掉 input 的 value —— 不然连选同一个文件不会触发 change
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
 
   /**
    * 页头那颗「退出登录」（2026-10-13 加）。
@@ -268,7 +369,49 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
 
         {/* ---------------- 页头：头像 + 名字 + 注册时间 + 退出 ---------------- */}
         <header className="mt-4 flex items-center gap-4 border-b border-ink-800 pb-6 sm:mt-8">
-          <AccountAvatar size={56} url={user?.avatarUrl ?? null} />
+          {/*
+            头像即上传入口（2026-11-06 用户要求「点击顶部的头像可以上传图片」）。
+            整颗头像是 `<button>`：点开就是选文件对话框，选完立刻传。
+            悬停 / 键盘聚焦时压一层半透明黑 + 一句「选择图片」，否则没人知道它能点
+            （`pointer-events-none` 是必须的，不然那层会吃掉这次点击）。
+            资料还没拉到时禁用 —— 那时候连自己有没有头像都不知道，点它没有意义。
+          */}
+          <div className="relative shrink-0">
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void uploadAvatar(file);
+              }}
+            />
+            <button
+              type="button"
+              disabled={!user || avatarBusy}
+              onClick={() => avatarInputRef.current?.click()}
+              aria-label={t('account.chooseImage')}
+              title={user ? t('account.chooseImage') : undefined}
+              className="group relative block disabled:cursor-not-allowed"
+            >
+              <AccountAvatar size={56} url={user?.avatarUrl ?? null} />
+              {/*
+                `overflow-hidden` 挂在这层而不是按钮上：`.pixel-edge` 的四向描边是
+                **画在元素外面的** box-shadow，按钮自己一裁就把那圈框裁掉了。
+              */}
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden bg-ink-950/70 p-1 text-center text-[10px] leading-tight text-ink-100 transition-opacity ${
+                  avatarBusy
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'
+                }`}
+              >
+                {avatarBusy ? t('account.uploading') : t('account.chooseImage')}
+              </span>
+            </button>
+          </div>
           <div className="min-w-0">
             {/*
               名字 + VIP 徽章（2026-10-13 加）。**两种徽章都画**：VIP 是金色（accent），
@@ -291,8 +434,13 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
                   </span>
                 ))}
             </div>
-            {/* 用户名本身在资料 tab 里也有，但页头这一份是「我现在登的是哪个号」的确认。
+            {/* 名字本身是「我现在登的是哪个号」的确认。
                 VIP 在第二行补一句有效期 / 过期时间 —— 没开过会员的只写注册时间 */}
+            {/*
+              名字下面这一行原本只讲「注册时间 / VIP」。**资料 tab 撤掉之后**它还要
+              兜住「资料拉取失败」—— 原来那句错误提示长在 ProfileTab 里，现在那一屏
+              没了，不说的话页头会永远停在「载入中…」，看起来像卡死。
+            */}
             <p className="mt-1 text-[12px] text-ink-400">
               {user
                 ? t('account.since', { time: formatTime(user.createdAt, locale) }) +
@@ -305,8 +453,20 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
                       ? ' · ' +
                         t('account.vipExpired', { time: formatTime(user.vipExpiresAt, locale) })
                       : '')
-                : t('account.loading')}
+                : userState === 'error'
+                  ? t('account.failed')
+                  : t('account.loading')}
             </p>
+            {/* 换头像的结果就报在名字下面 —— 头像本身没有地方放文案 */}
+            {avatarNotice && (
+              <p
+                className={`mt-1 text-[12px] ${
+                  avatarNotice.tone === 'ok' ? 'text-ok' : 'text-danger'
+                }`}
+              >
+                {avatarNotice.text}
+              </p>
+            )}
           </div>
 
           {/*
@@ -374,12 +534,8 @@ export default function AccountCenter({ initialTab }: { initialTab?: Tab }) {
             <HistoryTab />
           ) : tab === 'saves' ? (
             <SavesTab />
-          ) : tab === 'profile' ? (
-            <ProfileTab
-              user={user}
-              state={userState}
-              onUserChange={setUser}
-            />
+          ) : tab === 'comments' ? (
+            <CommentsTab />
           ) : (
             <PasswordTab />
           )}
@@ -543,11 +699,7 @@ function FavoritesTab() {
    */
   useEffect(() => {
     const id = ++requestId.current;
-    fetch('/api/user/favorites')
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.json() as Promise<{ items: FavoriteItem[] }>;
-      })
+    getJsonOnce<{ items: FavoriteItem[] }>('/api/user/favorites')
       .then((data) => {
         if (requestId.current !== id) return;
         setItems(data.items);
@@ -697,11 +849,7 @@ function HistoryTab() {
   /* 首屏拉一次。setState 一律放 .then/.catch（理由同 FavoritesTab 那个 effect）。 */
   useEffect(() => {
     const id = ++requestId.current;
-    fetch('/api/user/history')
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.json() as Promise<{ items: HistoryItem[] }>;
-      })
+    getJsonOnce<{ items: HistoryItem[] }>('/api/user/history')
       .then((data) => {
         if (requestId.current !== id) return;
         setItems(data.items);
@@ -891,11 +1039,7 @@ function SavesTab() {
   /* 首屏拉一次。setState 一律放 .then/.catch（理由同 FavoritesTab 那个 effect）。 */
   useEffect(() => {
     const id = ++requestId.current;
-    fetch('/api/user/saves/all')
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.json() as Promise<{ items: SaveOverviewItem[] }>;
-      })
+    getJsonOnce<{ items: SaveOverviewItem[] }>('/api/user/saves/all')
       .then((data) => {
         if (requestId.current !== id) return;
         setItems(data.items);
@@ -1056,224 +1200,208 @@ function SavesTab() {
 }
 
 /* ================================================================== *
- * tab 4：资料（头像 + 性别）
+ * tab 4：评论（自己写的）
  * ================================================================== */
 
+/** 拉一页「我的评论」。游标口径和服务端一致（`created_at:id`，不透明地传回去就行）。 */
+async function fetchMyComments(
+  cursor: string | null
+): Promise<{ items: MyCommentItem[]; nextCursor: string | null }> {
+  const query = cursor
+    ? `?cursor=${encodeURIComponent(cursor)}&limit=${MY_COMMENTS_PAGE_SIZE}`
+    : `?limit=${MY_COMMENTS_PAGE_SIZE}`;
+  return getJsonOnce<{ items: MyCommentItem[]; nextCursor: string | null }>(
+    `/api/user/comments${query}`
+  );
+}
+
 /**
- * 资料页 —— 只放**展示性**的资料项：头像、性别。
+ * 「我的评论」—— 2026-11-06 加（用户要求「个人中心也加一个评论 tab 看自己的评论」）。
  *
- * ⚠️ 密码 2026-10-13 从这里拆出去了，单独一个 tab（见 PasswordTab）。理由：改密码那张
- *    表单（三个输入框 + 提示 + 说明）比头像和性别加起来还长，塞在同一个滚动条里
- *    会让「我就想改个性别」变成翻页。拆开之后这一页短、那一页只讲一件事。
+ * 数据源 `/api/user/comments`（只有 GET）。**删除直接复用作者那条路**
+ * （`DELETE /api/comments/<id>`，数据层的 WHERE 带 `user_id`）—— 不另开一个
+ * 「我的删除」接口：同一条规则只该有一个出口，两处判权迟早会漏一处。
+ *
+ * 版式照「历史」那套：一列行、`divide-y`、行右侧一颗两步删除钮。差别是这里没有
+ * 封面缩略图（评论的重点是文字），游戏名本身是链接，点进去能看上下文。
+ *
+ * 翻页是**按钮触发**（同历史 / 存档）：这一屏的操作是「一条条回看、看不顺眼删掉」，
+ * 滚着滚着自动续一屏反而让人分不清自己看到哪了。
+ *
+ * ⚠️ 列表里那条 `<Link>` 必须 `prefetch={false}`：一页十条，开着预取等于每次进这一屏
+ *    都额外渲染十个详情页的 RSC（项目里列表型链接一律如此，见 MEMORY.md）。
  */
-function ProfileTab({
-  user,
-  state,
-  onUserChange,
-}: {
-  user: AccountUser | null;
-  state: LoadState;
-  onUserChange: (user: AccountUser) => void;
-}) {
-  const { t } = useI18n();
+function CommentsTab() {
+  const { t, locale, href: localeHref } = useI18n();
+  const [items, setItems] = useState<MyCommentItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [state, setState] = useState<LoadState>('loading');
+  const [moreState, setMoreState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  /** 正处于「等待第二次确认」的那条 id。同历史 / 存档的两步删除。 */
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const requestId = useRef(0);
+
+  /* 首屏拉一次。setState 一律放 .then/.catch（理由同 FavoritesTab 那个 effect）。 */
+  useEffect(() => {
+    const id = ++requestId.current;
+    fetchMyComments(null)
+      .then((page) => {
+        if (requestId.current !== id) return;
+        setItems(page.items);
+        setNextCursor(page.nextCursor);
+        setState('ready');
+      })
+      .catch(() => {
+        if (requestId.current !== id) return;
+        setState('error');
+      });
+  }, []);
+
+  const loadMore = () => {
+    if (!nextCursor || moreState === 'loading') return;
+    setMoreState('loading');
+    fetchMyComments(nextCursor)
+      .then((page) => {
+        setItems((prev) => [...prev, ...page.items]);
+        setNextCursor(page.nextCursor);
+        setMoreState('idle');
+      })
+      .catch(() => setMoreState('error'));
+  };
+
+  /** 第一次点只是标成待确认。 */
+  const requestDelete = (item: MyCommentItem) => {
+    if (busyId) return;
+    setNotice(null);
+    setConfirmingId(item.id);
+  };
+
+  /** 第二下才真删。 */
+  const confirmDelete = async (item: MyCommentItem) => {
+    if (busyId) return;
+    setBusyId(item.id);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/comments/${encodeURIComponent(item.id)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setItems((prev) => prev.filter((it) => it.id !== item.id));
+      setNotice({ tone: 'ok', text: t('comments.deleted') });
+    } catch {
+      setNotice({ tone: 'error', text: t('comments.deleteFailed') });
+    } finally {
+      setBusyId(null);
+      setConfirmingId(null);
+    }
+  };
 
   if (state === 'loading') {
-    return <p className="text-[12px] text-ink-400">{t('account.loading')}</p>;
+    return <ListRowSkeleton label={t('comments.loading')} />;
   }
-  if (state === 'error' || !user) {
+  if (state === 'error') {
     return <p className="text-[12px] text-danger">{t('account.failed')}</p>;
   }
+  if (items.length === 0) {
+    return (
+      <>
+        {notice && (
+          <p className={`mb-3 text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+            {notice.text}
+          </p>
+        )}
+        <p className="text-[12px] text-ink-400">{t('account.commentsEmpty')}</p>
+      </>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-8">
-      <AvatarForm user={user} onUserChange={onUserChange} />
-      <div className="border-t border-ink-800" />
-      <GenderForm user={user} onUserChange={onUserChange} />
-    </div>
-  );
-}
+    <div className="flex flex-col gap-3">
+      {notice && (
+        <p className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
+          {notice.text}
+        </p>
+      )}
 
-/** 换头像：选文件 → 传 → 更新头像地址。也能清掉回默认图。 */
-function AvatarForm({
-  user,
-  onUserChange,
-}: {
-  user: AccountUser;
-  onUserChange: (user: AccountUser) => void;
-}) {
-  const { t } = useI18n();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
-
-  /** 服务端回来的错误码 → 文案键。认不出的退回通用那句。 */
-  const messageOf = (code: string) => {
-    const keys: Record<string, MessageKey> = {
-      'avatar-too-large': 'account.error.avatarTooLarge',
-      'unsupported-type': 'account.error.avatarType',
-      'missing-avatar': 'account.error.avatarMissing',
-    };
-    const key = keys[code];
-    return key ? t(key) : t('account.failed');
-  };
-
-  const upload = async (file: File) => {
-    if (busy) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const form = new FormData();
-      form.append('avatar', file);
-      const res = await fetch('/api/user/avatar', { method: 'POST', body: form });
-      const data = (await res.json().catch(() => ({}))) as { user?: AccountUser; error?: string };
-      if (!res.ok || !data.user) throw new Error(data.error ?? '');
-      onUserChange(data.user);
-      setNotice({ tone: 'ok', text: t('account.avatarSaved') });
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        text: messageOf(error instanceof Error ? error.message : ''),
-      });
-    } finally {
-      setBusy(false);
-      // 清掉 input 的 value —— 不然连选同一个文件不会触发 change
-      if (inputRef.current) inputRef.current.value = '';
-    }
-  };
-
-  const clear = async () => {
-    if (busy) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const res = await fetch('/api/user/avatar', { method: 'DELETE' });
-      const data = (await res.json().catch(() => ({}))) as { user?: AccountUser; error?: string };
-      if (!res.ok || !data.user) throw new Error(data.error ?? '');
-      onUserChange(data.user);
-      setNotice({ tone: 'ok', text: t('account.avatarCleared') });
-    } catch {
-      setNotice({ tone: 'error', text: t('account.failed') });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-[13px] text-ink-200">{t('account.avatar')}</h2>
-      <div className="flex items-center gap-4">
-        <AccountAvatar size={64} url={user.avatarUrl} />
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            {/*
-              选文件那颗钮：**藏掉原生 input**（它在像素风里突兀且不可控），
-              用一颗样式钮去 `inputRef.current.click()`。仍然是真 input ——
-              键盘可达性和无障碍都还在。
-            */}
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void upload(file);
-              }}
-            />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => inputRef.current?.click()}
-              className="pixel-edge pxw-2 pxc-500 bg-ink-700 px-3 py-1.5 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+      <ul className="flex flex-col divide-y-2 divide-ink-800">
+        {items.map((item) => {
+          const confirming = confirmingId === item.id;
+          return (
+            <li
+              key={item.id}
+              className="-mx-2 flex items-start gap-3 px-2 py-2.5 transition-colors hover:bg-ink-850"
             >
-              {busy ? t('account.uploading') : t('account.chooseImage')}
-            </button>
-            {user.avatarUrl && (
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  {/* 游戏名可能是中文 —— 走系统字体，不套 font-pixel（像素字模没有 CJK） */}
+                  <Link
+                    href={localeHref(`/games/${item.gameId}`)}
+                    prefetch={false}
+                    className="block truncate text-[12px] text-ink-100 transition-colors hover:text-accent"
+                  >
+                    {item.gameTitle ?? item.gameId}
+                  </Link>
+                  {/*
+                    这一条的星。`repeat` 夹一下上下界，脏数据（理论上进不来）也不会
+                    把那一行撑破。实心走强调色、空心走灰 —— 两端分开画所以是两层。
+                    图形本身 `aria-hidden`，真正的分数由后面那句 `sr-only` 念出来。
+                  */}
+                  <span
+                    className="star-glyph text-[13px] leading-none text-accent"
+                    aria-hidden="true"
+                  >
+                    {'★'.repeat(Math.min(item.rating, RATING_MAX))}
+                    <span className="text-ink-600">
+                      {'☆'.repeat(Math.max(0, RATING_MAX - item.rating))}
+                    </span>
+                  </span>
+                  <span className="sr-only">
+                    {t('comments.ratingValue', { n: item.rating })}
+                  </span>
+                </div>
+                {/* 正文可能多行 —— 系统字体 + 换行，不做 truncate */}
+                <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-ink-300">
+                  {item.content}
+                </p>
+                <span className="mt-1 block text-[12px] text-ink-500">
+                  {formatTime(item.createdAt, locale)}
+                </span>
+              </div>
+
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => void clear()}
-                className="pixel-edge pxw-1 pxc-500 bg-ink-700 px-1.5 py-0.5 text-[10px] text-ink-200 transition-colors enabled:hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={busyId !== null}
+                onClick={() => (confirming ? void confirmDelete(item) : requestDelete(item))}
+                className={`pixel-edge pxw-1 pxc-500 shrink-0 px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  confirming
+                    ? 'bg-danger text-ink-950 hover:bg-danger/80'
+                    : 'bg-ink-700 text-ink-200 enabled:hover:text-danger'
+                }`}
               >
-                {t('account.clearAvatar')}
+                {t(confirming ? 'comments.deleteConfirm' : 'comments.delete')}
               </button>
-            )}
-          </div>
-          <p className="text-[12px] leading-relaxed text-ink-500">{t('account.avatarHint')}</p>
-          {notice && (
-            <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
-              {notice.text}
-            </span>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
+            </li>
+          );
+        })}
+      </ul>
 
-/** 改性别。'none' 是「不填」（清空），服务端 normalizeGender 会把它变成 null。 */
-function GenderForm({
-  user,
-  onUserChange,
-}: {
-  user: AccountUser;
-  onUserChange: (user: AccountUser) => void;
-}) {
-  const { t } = useI18n();
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const current = user.gender ?? '';
-
-  const save = async (gender: 'male' | 'female' | 'other' | '') => {
-    if (busy || gender === current) return;
-    setBusy(true);
-    setNotice(null);
-    try {
-      const res = await fetch('/api/user/profile', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        // 空串交给服务端 normalizeGender 归一成 null（清空）
-        body: JSON.stringify({ gender: gender || null }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { user?: AccountUser };
-      if (!res.ok || !data.user) throw new Error('');
-      onUserChange(data.user);
-      setNotice({ tone: 'ok', text: t('account.genderSaved') });
-    } catch {
-      setNotice({ tone: 'error', text: t('account.failed') });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-[13px] text-ink-200">{t('account.gender')}</h2>
-      <div className="flex flex-wrap items-center gap-2">
-        {GENDERS.map(({ value, label }) => (
-          <button
-            key={value || 'none'}
-            type="button"
-            disabled={busy}
-            aria-pressed={current === value}
-            onClick={() => void save(value)}
-            className={`pixel-edge pxw-2 pxc-500 flex h-[26px] items-center px-3 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              current === value
-                ? 'bg-accent text-ink-950'
-                : 'bg-ink-800 text-ink-300 enabled:hover:bg-ink-700 enabled:hover:text-ink-100'
-            }`}
-          >
-            {t(label)}
-          </button>
-        ))}
-        {notice && (
-          <span className={`text-[12px] ${notice.tone === 'ok' ? 'text-ok' : 'text-danger'}`}>
-            {notice.text}
-          </span>
-        )}
-      </div>
-      <p className="text-[12px] leading-relaxed text-ink-500">{t('account.genderHint')}</p>
-    </section>
+      {nextCursor && (
+        <button
+          type="button"
+          disabled={moreState === 'loading'}
+          onClick={loadMore}
+          className="pixel-edge pxw-1 pxc-500 self-start px-2 py-1 text-[12px] text-ink-200 transition-colors enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {moreState === 'loading'
+            ? t('account.loading')
+            : moreState === 'error'
+              ? t('account.failed')
+              : t('comments.loadMore')}
+        </button>
+      )}
+    </div>
   );
 }
 

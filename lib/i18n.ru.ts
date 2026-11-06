@@ -56,7 +56,7 @@ export const ru: Record<MessageKey, string> = {
   'home.hero.play': 'Загрузить свой ROM',
   'home.hero.browse': 'Все игры',
   'home.join.title': 'Играйте с другом',
-  'home.join.hint': 'Введите 4-значный код комнаты, который прислал друг.',
+  'home.join.hint': 'Введите 4-значный код комнаты и играйте вместе.',
   'home.join.submit': 'Войти в комнату',
   'home.hero.or': 'ИЛИ',
   'home.search.label': 'Поиск по библиотеке игр',
@@ -459,6 +459,7 @@ export const ru: Record<MessageKey, string> = {
     'В истории хранятся {max} последних игр — если сыграть в старую снова, она вернётся наверх.',
 
   'account.savesEmpty': 'Облачных сохранений пока нет.',
+  'account.commentsEmpty': 'Вы ещё не оставляли комментариев.',
   'account.savesCount': 'Всего сохранений: {count}',
   'account.savesGroupCount': 'Сохранений: {count}',
   'account.viewGame': 'Открыть {name}',

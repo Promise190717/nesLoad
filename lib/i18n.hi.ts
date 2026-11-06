@@ -66,7 +66,7 @@ export const hi: Record<MessageKey, string> = {
   'home.hero.play': 'अपनी ROM लोड करें',
   'home.hero.browse': 'सभी गेम देखें',
   'home.join.title': 'दोस्त के साथ खेलें',
-  'home.join.hint': 'दोस्त से मिला 4 अक्षरों का रूम कोड डालें।',
+  'home.join.hint': '4 अक्षरों का रूम कोड डालें और कमरे में जाकर साथ खेलें।',
   'home.join.submit': 'रूम जॉइन करें',
   'home.hero.or': 'या',
   'home.search.label': 'गेम लाइब्रेरी में खोजें',
@@ -469,6 +469,7 @@ export const hi: Record<MessageKey, string> = {
     'हिस्ट्री आपके सबसे हाल में खेले {max} गेम रखती है — कोई पुराना गेम फिर खेलें तो वह ऊपर आ जाता है।',
 
   'account.savesEmpty': 'अभी कोई क्लाउड सेव नहीं।',
+  'account.commentsEmpty': 'आपने अभी तक कोई टिप्पणी पोस्ट नहीं की है।',
   'account.savesCount': 'कुल {count} सेव',
   'account.savesGroupCount': '{count} सेव',
   'account.viewGame': '{name} देखें',

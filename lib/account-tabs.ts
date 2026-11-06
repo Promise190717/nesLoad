@@ -7,16 +7,21 @@
  * 直接当函数调会抛「Attempted to call parseAccountTab() from the server」
  * （2026-10-14 实际踩过）。放 lib 里两侧共用，AccountCenter 只留渲染用的
  * label 清单。
+ *
+ * ⚠️ **2026-11-06 撤掉 `profile`**（用户要求「隐藏资料 tab，点头像上传图片」）：
+ *    换头像改由页头那颗头像直接点，性别入口暂时不展示。旧链接 `?tab=profile`
+ *    现在会**回落到收藏** —— `parseAccountTab` 不认识的 id 一律这样处理，别为它留特例。
+ *    同日补了 `comments`（个人中心看自己写过的评论）。
  */
 
-export type AccountTab = 'favorites' | 'history' | 'saves' | 'profile' | 'password';
+export type AccountTab = 'favorites' | 'history' | 'saves' | 'comments' | 'password';
 
 /** 与 AccountCenter 里 TABS 的 value 一一对应（那边多带 label，用于渲染）。 */
 export const ACCOUNT_TAB_IDS: readonly AccountTab[] = [
   'favorites',
   'history',
   'saves',
-  'profile',
+  'comments',
   'password',
 ];
 

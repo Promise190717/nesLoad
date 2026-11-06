@@ -62,7 +62,7 @@ export const zhTW: Record<MessageKey, string> = {
   'home.hero.play': '載入本機 ROM',
   'home.hero.browse': '瀏覽全部遊戲',
   'home.join.title': '和朋友一起玩',
-  'home.join.hint': '輸入朋友分享的 4 位數房間代碼，就能加入連線。',
+  'home.join.hint': '輸入 4 位房間代碼，進房間一起玩。',
   'home.join.submit': '加入房間',
   'home.hero.or': '或',
   'home.search.label': '搜尋遊戲庫',
@@ -441,6 +441,7 @@ export const zhTW: Record<MessageKey, string> = {
   'account.historyHint': '歷史保留最近玩過的 {max} 款，重玩較早的一款會把它推回最前面。',
 
   'account.savesEmpty': '還沒有雲端存檔。',
+  'account.commentsEmpty': '你還沒有發表過評論。',
   'account.savesCount': '共 {count} 份存檔',
   'account.savesGroupCount': '{count} 份存檔',
   'account.viewGame': '查看《{name}》',

@@ -48,7 +48,7 @@ export const ko: Record<MessageKey, string> = {
   'home.hero.play': '내 ROM 불러오기',
   'home.hero.browse': '모든 게임 보기',
   'home.join.title': '친구와 함께 즐기기',
-  'home.join.hint': '친구가 공유한 4자리 방 코드를 입력하면 온라인 대전에 참여할 수 있습니다.',
+  'home.join.hint': '4자리 방 코드를 입력하고 방에 들어가 함께 즐기세요.',
   'home.join.submit': '방 참여',
   'home.hero.or': '또는',
   'home.search.label': '게임 라이브러리 검색',
@@ -434,6 +434,7 @@ export const ko: Record<MessageKey, string> = {
   'account.historyHint':
     '기록은 최근 플레이한 {max}개를 보관합니다 — 오래된 것을 다시 하면 맨 앞으로 올라옵니다.',
   'account.savesEmpty': '아직 클라우드 세이브가 없습니다.',
+  'account.commentsEmpty': '아직 작성한 댓글이 없습니다.',
   'account.savesCount': '총 세이브 {count}개',
   'account.savesGroupCount': '세이브 {count}개',
   'account.viewGame': '《{name}》 보기',

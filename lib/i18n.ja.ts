@@ -48,7 +48,7 @@ export const ja: Record<MessageKey, string> = {
   'home.hero.play': 'ローカルの ROM を読み込む',
   'home.hero.browse': 'すべてのゲームを見る',
   'home.join.title': '友だちと一緒に遊ぶ',
-  'home.join.hint': '友だちが共有した4文字のルームコードを入力すると、通信対戦に参加できます。',
+  'home.join.hint': '4文字のルームコードを入力して、ルームに入って一緒に遊ぼう。',
   'home.join.submit': 'ルームに参加',
   'home.hero.or': 'または',
   'home.search.label': 'ゲームライブラリを検索',
@@ -439,6 +439,7 @@ export const ja: Record<MessageKey, string> = {
   'account.historyHint':
     '履歴は最近遊んだ {max} 本を保持します — 古いものを遊び直すと先頭に戻ります。',
   'account.savesEmpty': 'クラウドセーブはまだありません。',
+  'account.commentsEmpty': 'まだコメントを投稿していません。',
   'account.savesCount': '合計 {count} 件のセーブ',
   'account.savesGroupCount': '{count} 件のセーブ',
   'account.viewGame': '『{name}』を見る',

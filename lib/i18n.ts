@@ -404,7 +404,7 @@ const en = {
   'home.hero.play': 'Load a local ROM',
   'home.hero.browse': 'Browse all games',
   'home.join.title': 'Play with a friend',
-  'home.join.hint': 'Enter the 4-character room code shared by your friend.',
+  'home.join.hint': 'Enter a 4-character code to join a friend and play.',
   'home.join.submit': 'Join room',
   /* 首屏按钮与搜索框之间的分隔词，单独一行（参考站也是这个结构） */
   'home.hero.or': 'OR',
@@ -1213,6 +1213,7 @@ const en = {
     'History keeps your {max} most recently played games — playing an older one again moves it back to the top.',
 
   'account.savesEmpty': 'No cloud save yet.',
+  'account.commentsEmpty': 'You have not posted any comments yet.',
   'account.savesCount': '{count} saves in total',
   /*
    * 树视图里每个游戏行右侧的存档份数（点开游戏行才看到具体存档）。
@@ -1787,7 +1788,7 @@ const zh: Record<MessageKey, string> = {
   'home.hero.play': '加载本地 ROM',
   'home.hero.browse': '浏览全部游戏',
   'home.join.title': '和朋友一起玩',
-  'home.join.hint': '朋友给了你一个 4 位房间码？填进去就能进他的房间。',
+  'home.join.hint': '输入 4 位房间码，进房间一起玩。',
   'home.join.submit': '加入房间',
   'home.hero.or': '或',
   'home.search.label': '搜索游戏库',
@@ -2218,6 +2219,7 @@ const zh: Record<MessageKey, string> = {
   'account.historyHint': '历史保留最近玩过的 {max} 款，重玩较早的一款会把它顶回最前面。',
 
   'account.savesEmpty': '还没有云端存档。',
+  'account.commentsEmpty': '你还没有发表过评论。',
   'account.savesCount': '共 {count} 份存档',
   'account.savesGroupCount': '{count} 份存档',
   'account.viewGame': '查看《{name}》',

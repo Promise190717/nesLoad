@@ -112,10 +112,22 @@
 ## 评论 / 星级
 
 - `components/GameComments.tsx`。**发评论必须先登录**（`readViewer()` 只验签名不查库，首屏就对）；列表公开可读，翻页只有「加载更多」。
-- 表 `game_comments` **有作者**（`userId` **不许出网**，路由层换 `mine`）；`DELETE` **只认作者**，否则一律 404。**没有后台 tab、没有 status 位**。
+- 表 `game_comments` **有作者**（`userId` **不许出网**，路由层换 `mine`）；`DELETE` **只认作者**，否则一律 404。**没有 status 位**。
+- **后台 tab「评论」2026-11-06 加**：`app/admin/(panel)/comments` + `components/AdminComments.tsx` + `/api/admin/comments`（GET 全站列表 / DELETE 任意一条）。数据层是 `listAllComments`（全站、无 gameId 条件，**现查 `game_texts` 补 `gameTitle`**：中文优先→英文→其余 locale，无标题回 null 由前端退 slug）与 `adminDeleteComment(id)`（**不判 user_id**）。⚠️ 和作者删分成两个函数，**别给 `deleteComment` 的 `userId` 加可空口子**（那函数的全部价值就是「作者才能删」）。后台**显示真名**（认得出是谁），公开接口才走 `maskUserName`；后台仍然不吐 `userId`。删除走两次确认（同 AdminUsers 删号）。
 - `rating` 与正文同条记录、**老库 ALTER 补的** ⇒ **刻意不写 CHECK**，1..5 只在 `POST /api/games/[id]/comments` 校验。
 - **星默认满星 5**；字号 24/14/13px（只动字号与 `px-0.5`）；⚠️ 星是字符 `★`/`☆`，**处处带 `.star-glyph`**（否则按 `<html lang>` 挑兜底字体，中英大小不一），⚠️⚠️ **别再改成画出来的图形**（试过像素星，用户嫌马赛克）。
 - 均分必须全量（`getGameRatingSummary` 单独 AVG/COUNT，**不许拿当前页 items 算**），显示数字不画半星。
+- 🔴 **用户名出网前必须脱敏**（2026-11-06 用户：「不能显示用户的邮箱，截取 @ 前面的，中间改星号」）：站上的用户名**就是注册邮箱**（注册接口 `const username = email`），所以 `lib/mask.ts` `maskUserName()` 是唯一出口，目前只挂在 `app/api/games/[id]/comments/route.ts` 的 `publicItem()`（列表 + 发表都从这儿出去）。数据层 `lib/server/comments.ts` 刻意留真名（后台要看真的）。规则：只认含 `@` 的、丢域名、首尾各留 1 字、中间等长换 `*`（`alice@x.com` → `a***e`）。顶栏/账号中心显示的是**自己的**名字，仍未脱敏。
+
+## 账号中心（`/account`）的 tab 与头像
+
+- tab 有五个：收藏 / 历史 / 存档 / 评论 / 密码。id 与 `?tab=` 白名单唯一出口是 `lib/account-tabs.ts`（`AccountCenter` 里那份 `TABS` 只管 label，两处要一起改）。
+- **「评论」tab 2026-11-06 加**（用户要求「看自己的评论」）：数据源 `/api/user/comments`（GET，`listUserComments` → `WHERE c.user_id = ?`，带 `gameTitle` 现查 game_texts），新的在前、加载更多；删除**复用作者那条 `DELETE /api/comments/<id>`**，不另开「我的删除」接口。空状态文案 `account.commentsEmpty`（18 份表都加了）；tab 标签借 `comments.heading`，没新增键。
+- ⚠️ **这些 tab 的 GET 一律走 `AccountCenter.tsx` 里的 `getJsonOnce()`**（2026-11-06）：开发模式 `reactStrictMode: true` 会把 effect 故意跑两遍（挂载→卸载→再挂载），切 tab 时同一个接口**同时飞两条**、服务端多查一次库（生产构建本来只有一条）。`getJsonOnce` 按 URL 复用**还在飞**的 Promise，落地即删，不缓存结果。页头 `/api/user/profile` + 四个 tab 共用；别在组件里退回裸 `fetch` + `res.json()`。
+- 🔴 **「资料」tab 2026-11-06 撤掉**（用户要求「隐藏资料 tab，点击顶部的头像可以上传图片」）：换头像 = **点页头那颗头像**（`<button>` + 隐藏的 file input，选完立刻 `POST /api/user/avatar`，结果报在名字下面那一行）。性别入口按用户原话「暂时不展示」——`PATCH /api/user/profile` 的 `gender` 仍在，只是没有 UI。`?tab=profile` 现在按白名单回落到收藏；**要恢复性别别把 tab 加回清单**，挂在页头或另起一屏。
+- 「移除头像」那颗按钮随资料页一起没了：`DELETE /api/user/avatar` 接口还在、暂无入口。
+- ⚠️ 头像那颗 `<button>` **不能加 `overflow-hidden`**：`.pixel-edge` 的四向描边是画在元素**外面**的 box-shadow，会一起被裁掉。要裁只裁叠在头像上面的那一层。
+- 资料拉取失败现在报在页头第二行（原来那句在 ProfileTab 里；tab 撤了不移过来，页头会永远停在「载入中…」）。
 
 ## 反馈 / 收藏 / 开发商
 

@@ -65,7 +65,7 @@ export const fil: Record<MessageKey, string> = {
   'home.hero.play': 'Mag-load ng local ROM',
   'home.hero.browse': 'Tingnan lahat ng laro',
   'home.join.title': 'Maglaro kasama ang kaibigan',
-  'home.join.hint': 'Ilagay ang 4-character room code na ibinahagi ng kaibigan mo.',
+  'home.join.hint': 'Ilagay ang 4-character room code para makapasok at makapaglaro.',
   'home.join.submit': 'Sumali sa room',
   'home.hero.or': 'O',
   'home.search.label': 'Maghanap sa game library',
@@ -447,6 +447,7 @@ export const fil: Record<MessageKey, string> = {
     'Tinatago ng history ang {max} pinakahuling nalaro mong laro — kapag nilaro mo ulit ang mas luma, babalik ito sa itaas.',
 
   'account.savesEmpty': 'Wala pang cloud save.',
+  'account.commentsEmpty': 'Wala ka pang naipost na komento.',
   'account.savesCount': '{count} save sa kabuuan',
   'account.savesGroupCount': '{count} save',
   'account.viewGame': 'Tingnan ang {name}',
