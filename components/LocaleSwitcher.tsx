@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTopLoader } from 'nextjs-toploader';
 import { LOCALE_OPTIONS } from '@/lib/i18n';
 import { FlagIcon } from './FlagIcon';
 import { useI18n } from './I18nProvider';
@@ -37,10 +38,19 @@ import { useI18n } from './I18nProvider';
  * ⚠️ 2026-10-16 之前这里用的是 `altHref`（「另一种语言」的地址），那**只在两种语言时
  *    成立**（选中的不是当前 ⇔ 就是那另一种）；四种语言下它会变成「不管点哪个都去
  *    同一个地方」。加语言时这里是必须改的一处。
+ *
+ * ⚠️ **导航前必须手动 `topLoader.start()`**（2026-11-06 修）：
+ *    顶部那条加载条（`nextjs-toploader`）只听 `document` 上的 `<a>` 点击和
+ *    `history` 补丁，**这颗下拉是 `<button>` + `router.push`，它一点都听不见** ——
+ *    不喊的话切语言就是「地址变了、条子纹丝不动」，看着像没点上。
+ *    屋里那颗同款下拉早就是这么写的（`ConsoleScene` 里那句注释），
+ *    这里当初照抄了交互、漏了这一行。
  */
 export default function LocaleSwitcher() {
   const { t, locale, hrefIn, rememberLocale } = useI18n();
   const router = useRouter();
+  /** 顶部加载条的接口（组件挂在 `app/layout.tsx`）。见文件头那条 ⚠️ */
+  const topLoader = useTopLoader();
 
   const [open, setOpen] = useState(false);
   /** 选择器 + 它那个下拉的包裹层（判「点的是不是它自己」）。 */
@@ -122,6 +132,8 @@ export default function LocaleSwitcher() {
                   // 点的是当前语言：只是收起来，不必白跑一趟导航
                   if (option.value === locale) return;
                   rememberLocale(option.value);
+                  // 这颗下拉不是 `<a>`，顶部加载条那个包听不见 —— 手动喊一声
+                  topLoader.start();
                   router.push(hrefIn(option.value));
                 }}
               >

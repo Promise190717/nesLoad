@@ -39,6 +39,7 @@
 ## 主题 / 首屏 / 两台机器
 
 - `<html data-theme>` 写入者只有 SiteDocument 的 `BOOT_INIT` 与 `saveTheme()`；导航丢属性由 BootAttributes 只补缺、不落盘。
+- 🔴 深色灰阶最底下四档 2026-11-06 整体上提过（`ink-950` **#1e1e1e**、900 #242424、850 #2a2a2a、800 #323232、700 #424242；用户「背景不要纯黑」）。**只能整段平移**，单独提 950 会让页面底和面板底贴合；`--color-floor` / `--wall-top` / `--wall-bottom` 是手抄值，改灰阶必须同步。`--color-crt-*` 与 `.screen` 永远是黑，不跟着翻。
 - 桌面 RetroTv / 移动 HandheldConsole 判据 `<html data-mobile>`（device.ts + 内联脚本两份同步）；尺寸唯一出口 globals.css `--tv-*`（档位只写上限）；掌机白边只能收细；PWR 灯左 ⇔ 菜单钮右（一起改）。
 
 ## 路由 / 缓存 / SEO

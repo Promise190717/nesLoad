@@ -1854,6 +1854,34 @@ export default function PlayScene({
             <div className="play-panel-divider" aria-hidden="true" />
 
             <ul className="play-controls">
+              {/*
+                顺序是用户定过的（2026-11-06）：**全屏 / 模式在最上，暂停 / 重载在它们下面**。
+                窄屏两列网格下正好排成两行（全屏|模式 / 暂停|重载），别按「暂停最常用」
+                的直觉把它们换回第一行。
+              */}
+              <Row label={t('play.fullscreen')}>
+                <RowBtn
+                  label={t('play.fullscreen')}
+                  onClick={() => void requestFullscreen()}
+                >
+                  <ExpandIcon size={15} />
+                </RowBtn>
+              </Row>
+
+              {/* 显示（夜 / 昼）。说明写的是「点了会变成什么」，和下一行同一口径 */}
+              <Row label={t('play.theme')}>
+                <RowBtn
+                  label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
+                  onClick={toggleTheme}
+                >
+                  {theme === 'dark' ? (
+                    <SunIcon size={15} />
+                  ) : (
+                    <PlayMoonIcon size={16} />
+                  )}
+                </RowBtn>
+              </Row>
+
               <Row label={t(paused ? 'panel.resume' : 'panel.pause')}>
                 <RowBtn
                   label={t(paused ? 'panel.resume' : 'panel.pause')}
@@ -1871,29 +1899,6 @@ export default function PlayScene({
                   disabled={!rom || busy || saveBusy}
                 >
                   <ReloadIcon size={16} />
-                </RowBtn>
-              </Row>
-
-              <Row label={t('play.fullscreen')}>
-                <RowBtn
-                  label={t('play.fullscreen')}
-                  onClick={() => void requestFullscreen()}
-                >
-                  <ExpandIcon size={15} />
-                </RowBtn>
-              </Row>
-
-              {/* 显示（夜 / 昼）。说明写的是「点了会变成什么」，和上面几行同一口径 */}
-              <Row label={t('play.theme')}>
-                <RowBtn
-                  label={t(theme === 'dark' ? 'theme.toLight' : 'theme.toDark')}
-                  onClick={toggleTheme}
-                >
-                  {theme === 'dark' ? (
-                    <SunIcon size={15} />
-                  ) : (
-                    <PlayMoonIcon size={16} />
-                  )}
                 </RowBtn>
               </Row>
 

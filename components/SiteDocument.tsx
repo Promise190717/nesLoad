@@ -391,10 +391,11 @@ export default async function SiteDocument({ children, locale, analytics = true 
           一片，收窄之后还是「CRT 荧光」那个意思，但不抢戏。
 
           ⚠️ 它只是**听**（`document` 上的点击 + history 补丁），题目外那几种情况它听不见，
-          得靠 `useTopLoader()` 手动喊 —— 全站只有三处（都带注释，搜 `topLoader`）：
+          得靠 `useTopLoader()` 手动喊 —— 全站只有四处（都带注释，搜 `topLoader`）：
             · `ConsoleScene` —— 屋里有活时点「游戏列表 / 账号 / 首页」弹确认框，
               那次点击**没有**跳转，要把已经起来的条收掉（写在那条 effect 里）；
             · `ConsoleScene` —— 语言那颗下拉不是 `<a>`，`router.push` 前手动 `start()`；
+            · `LocaleSwitcher` —— 内容页顶栏那颗语言下拉，同上（2026-11-06 补）；
             · `AccountCenter` —— 退出登录后那次 `router.push`，同上。
         */}
         <NextTopLoader

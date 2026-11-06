@@ -89,7 +89,7 @@
 
 - 参数固定：`color="var(--color-accent)"`（**能吃 CSS 变量** → 跟主题）、`showSpinner={false}`、`zIndex={70}`、`height={3}`。挂在 `app/layout.tsx` 的 `<body>`。
 - 它只**听** document click + history 补丁 + popstate。`router.back()` 只有 done 不画条。
-- ⚠️ **三处手动喊 `useTopLoader()`**（全站搜 `topLoader`）：① ConsoleScene 被 `leaveOpen` 拦下的那次点击 `done()`；② 语言下拉 `router.push` 前 `start()`；③ AccountCenter 退出登录 push 同。**`router.refresh()` 不能喊 start**。
+- ⚠️ **四处手动喊 `useTopLoader()`**（全站搜 `topLoader`）：① ConsoleScene 被 `leaveOpen` 拦下的那次点击 `done()`；② 屋里语言下拉 `router.push` 前 `start()`；③ 内容页顶栏 `LocaleSwitcher` 语言下拉同（2026-11-06 补，之前漏了 ⇒ 切语言条子不动）；④ AccountCenter 退出登录 push 同。**`router.refresh()` 不能喊 start**。
 - ⚠️ ①必须写在 **`leaveOpen` 的 effect 里**（包的监听也在 document，顺序不定）。⚠️ `useTopLoader()` 每渲染返回新对象 ⇒ 用 `useState(() => topLoader.done)` 冻结。
 - ⚠️ **下载不能起条**：包把任何同源 `<a>` 点击当换页 ⇒ 条挂 99%。**下载一律走 `lib/download.ts` 的 `downloadFile(source, filename)`**（造链时 `stopPropagation`）；**别手写 `<a download>`**。调用点：`RomDownloadGate`、`lib/emulator.ts` 的 `downloadState`。
 
@@ -242,5 +242,9 @@
 - 收起钮两颗（靠 CSS 分工，都得留 `.play-sidebar-toggle` 类名）：展开时那颗在**面板标题条右端**、和「编辑」并排（`.play-panel-collapse`）；收起后 `aside` 的直接孩子那颗（窄轨）接班，否则没有任何东西能把面板叫回来。旧的骑缝钮 `.play-sidebar-seam` 已删，别加回。
 - 右栏宽度唯一出口 `--play-sidebar-w`（240px，2026-10-22 从 280 收窄），工作区 / 顶栏线 / 网格三处都读它；`+ 18px` 是间距。
 - 右栏只有**一块**面板（2026-10-22：按键设置 + 游戏控制合成一张，用户说「不要做两块」）：通栏标题条 + 键位段 + 通栏发丝线 + 控制段；内边距下在段上、不下在 `.play-panel` 上（否则标题条贴不满边）。键位表仍包在 `.play-keys` 里，触屏只藏这一段、控制行要留。
+- ⚠️ **键位表字号只许往上，别压回去**：动作名（`.play-key dt`）12px / `--side-text`；键值（`.play-kbd`）**12px / @600 / 边框 `--color-ink-600`**（2026-11-06，用户「文字太细了 不明显」——键帽底与面板底只差一档，边框用 `--side-line` 时几乎看不见，单笔画字母 @400 在 125% 下被抗锯齿洗成中灰）。颜色已是最深的 `--side-text`（浅色 #202020），**再想「更明显」只能动字重/字号**。
 - ⚠️ lg 档 `.play-display` 的 `max-width` 是 `min(100%, var(--play-stage-width))`，别改回 `none`（否则 4:3 会顶穿视口）。
+- 控制段行序**用户定过**（2026-11-06）：全屏 → 模式 → 暂停 → 重载 → 存档/读档 → 音量 → 屏幕尺寸。窄屏两列正好排成「全屏|模式」「暂停|重载」；DOM 顺序就是桌面右栏的单列顺序，**别按「暂停最常用」把后两行换回第一行**。
+- ⚠️ **`.play-save-grid` 的 `column-gap` 必须等于 `.play-controls` 的 `column-gap`（≤1023 那档 24px）**：存档/读档内部也是两格、且横跨整行，gap 不一致时左格右缘会偏 (24−14)/2 = 5px ⇒ 磁盘图标比上面第一列那颗（全屏）多凸出来一点（2026-11-06 修）。lg 右栏那档没有外层两列，仍用 14px。
+- ⚠️ **单列档（≤1023px）`.play-screen-area` 不带 `aspect-ratio`、自己铺满颜色**（2026-11-06）：屏幕被 `--play-display-max-width`（按视口高算）卡窄，按容器宽推的 4:3 比屏幕高，`align-items: flex-start` 把多出来的那截全丢在屏幕下方 ⇒ PC 小屏上「屏幕和游戏控制面板隔一大截」。用户定的终态：**画面尺寸不动，黑边铺满整列**（左右多出来的两截是屏幕黑边的延长）。底色分主题：**浅色 `#000`**（与 `.screen` 的 `bg-black` 同色）、**深色 `ink-950`**（同一天「黑暗模式背景不要纯黑」定的，纯黑矩形在深底上边界更刺眼）。高度交给 `.play-game-screen` 自己的 `aspect-ratio: 4/3`。
 - 联机时右侧按键表锁 1P：`keysLocked = soloOnly || mode !== 'solo'` 一起管「不画 P1/P2 切换」+「取值锁 `bindings.p1`」；`KeyBindingsPanel` 可选 `online`。判据用派生的 `mode`，**不是 `netplayState.role`**。

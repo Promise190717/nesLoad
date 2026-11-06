@@ -182,9 +182,20 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
  */
 .play-key dt { flex-shrink: 0; font-size: 12px; letter-spacing: .02em; color: var(--side-text); }
 .play-key dd { min-width: 0; text-align: right; }
-/* 键值 10 → 11px（同日）：10px 的 mono 在 Windows 上比旁边的中文还小一圈，
-   跟 12px 的动作名放一起会失衡。宽的键名（`Enter`）由 max-width + anywhere 兜住。 */
-.play-kbd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; letter-spacing: .04em; color: var(--side-text); background: var(--side-soft); border: 1px solid var(--side-line); }
+/*
+ * 键值字号的三次调整，别往回压：
+ * 10 → 11px（2026-11-05）：10px 的 mono 在 Windows 上比旁边的中文还小一圈。
+ * 11px/@400 → **12px/@600**、边框 `--side-line` → `--color-ink-600`（2026-11-06）：
+ * 用户原话「文字太细了 不明显」（截图里框的正是两列键帽）。单笔画的 `W` `A` `J`
+ * 在 125% 缩放下一条 1px 的竖线被抗锯齿洗成中灰，只剩毛边；加粗才有实心笔画。
+ * · 没靠「再加深颜色」：颜色已经是 `--side-text`（浅色主题 = ink-100 #202020，最深一档），
+ *   没有更黑的可用，能动的只有字重和字号。
+ * · 边框必须一起提：键帽底 `--side-soft` 和面板底只差一档（浅色 #e6e6e6 / #eeeeee），
+ *   用 `--side-line`（#dcdcdc）时框线几乎看不见，加粗的字会读成「裸字浮在面板上」。
+ * · 字号到 12px 是为了和左边动作名同号 —— mono 的 x-height 小，同号不会显大。
+ * 宽的键名（`Enter`、`Num 0`）由 max-width + anywhere 兜住。
+ */
+.play-kbd { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--side-text); background: var(--side-soft); border: 1px solid var(--color-ink-600); }
 /* P1 / P2 = 分段选择器：一整条，中间一道竖线，选中的那半铺强调色 */
 .play-seg { display: flex; margin-bottom: 10px; border: 1px solid var(--side-line); }
 .play-seg > button { flex: 1; min-height: 24px; padding: 0; font-size: 11px; letter-spacing: .06em; color: var(--side-dim); background: var(--side-soft); transition: color .15s, background .15s; }
@@ -215,7 +226,7 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 .play-tick { width: 5px; height: 14px; padding: 0; background: var(--side-line); transition: background .15s; }
 .play-tick.is-on { background: var(--color-accent); }
 /* 画面大小：三档 */
-.play-size-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.play-size-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .play-size-btn { min-height: 24px; padding: 0 8px; font-size: 11px; color: var(--side-dim); background: var(--side-soft); border: 1px solid var(--side-line); transition: color .15s, border-color .15s; }
 .play-size-btn.is-on { color: var(--color-ink-950); background: var(--color-accent); border-color: var(--color-accent); }
 .play-size-btn:not(.is-on):hover { color: var(--side-text); }
@@ -227,7 +238,31 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   .play-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; max-width: 100%; }
   .play-navigation { max-width: 100%; }
   .play-stage { position: static; min-height: 0; }
-  .play-screen-area { height: auto; aspect-ratio: 4 / 3; }
+  /*
+   * 单列这一档：**屏幕保持原尺寸，黑底铺满整列**（2026-11-06 用户定）。
+   *
+   * 两条规矩，别分开改：
+   *
+   * ① 不给这层写 `aspect-ratio: 4 / 3`。列宽是整个工作区，而屏幕被
+   *    `--play-display-max-width` 卡在「装得进视口高度」那个尺寸（`PlayScene` 的
+   *    `updateSize()` 现算的）。按容器宽推出来的 4:3 比屏幕高，`align-items: flex-start`
+   *    又把屏幕贴在顶上 ⇒ 多出来的那截全落在屏幕下方，再接 16px 网格 gap，
+   *    860×660 的窗口上有一百五十多像素的空白，看着像面板掉下去了。
+   *    高度交给里面的 `.play-game-screen`（它自己带 `aspect-ratio: 4 / 3`）。
+   *
+   * ② 这层自己铺满颜色。列是 100% 宽、屏幕比列窄，多出来的左右两截如果留成透明，
+   *    屏幕就被一圈「陷进去」的浅底包围，和下面的满宽面板对不齐（用户原话
+   *    「黑边铺满就行，游戏区域还是那么大」）。铺满之后左右就是**屏幕黑边的延长**，
+   *    高度和画面一样（由 ① 决定），不会有第二条缝。
+   *    · 浅色主题：`#000`，和 `.screen` 的 `bg-black` 同一个黑，读成屏幕本身。
+   *    · 深色主题：跟页面同底（`ink-950`）。页面底本来就暗，再铺纯黑会是一块比页面
+   *      更黑的矩形，边界反而更刺眼（2026-11-06 用户「黑暗模式的背景不要纯黑」一起定的）。
+   *
+   * 宽度撑满必须留着 —— 屏幕被卡窄时得靠它在中间。
+   */
+  .play-screen-area { height: auto; background: var(--color-ink-950); }
+  /* 浅色主题例外，见上面 ② 的两条 */
+  :root[data-theme='light'] .play-screen-area { background: #000; }
   .play-display { height: auto; }
   .play-display .play-frame,
   .play-display .play-frame > div { height: auto; }
@@ -242,6 +277,15 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    */
   .play-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
   .play-row-wide { grid-column: 1 / -1; }
+  /*
+   * 存档 / 读档那一行内部**自己也是两格**（`.play-save-grid`），横跨整行之后再分成左右两半。
+   * 它的 `column-gap` 必须和上面 `.play-controls` 的 `column-gap` **同一个值** ——
+   * 两条 `1fr` 只有在 gap 相同时才算出同样的列宽：gap 写 14 时左格右缘会比别的行的
+   * 控件往右偏 (24 − 14) / 2 = 5px，屏幕上就是「存档那颗磁盘图标比上面的暂停 / 全屏
+   * 多凸出来一点」（2026-11-06 用户指出）。
+   * lg 档（右栏 260px）外面没有两列，`.play-save-grid` 那边仍是原来的 14px，别一起改。
+   */
+  .play-save-grid { column-gap: 24px; }
 }
 @media (max-width: 540px) {
   .play-sidebar { display: flex; }
@@ -481,11 +525,22 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 @theme {
   --font-pixel: 'Press Start 2P', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-ink-950: #121212;
-  --color-ink-900: #191919;
-  --color-ink-850: #202020;
-  --color-ink-800: #292929;
-  --color-ink-700: #3b3b3b;
+  /*
+   * 深色主题最底下四档（2026-11-06 整体上提约 10）：原来 950 是 `#121212`，
+   * 用户原话「黑暗模式的背景不要纯黑 有点难受」。
+   *
+   * ⚠️ 动的是**整段**不是单个 950：灰阶差值才是卡片 / 面板 / 键帽的分层，
+   *    只把 950 提亮会让「页面底」和「面板底」贴到一起（#1e1e1e vs #191919 只差 5），
+   *    面板会读成「没有边界」。按原来每档 ~7 的间距整体平移，关系一笔不动：
+   *      950 18→30 / 900 25→36 / 850 32→42 / 800 41→50 / 700 59→66
+   *    600 及以上是正文与描边色，压在更亮一点的底上对比反而更稳，保持不动。
+   *    屏幕内部那套 `--color-crt-*` 更不许碰 —— 显像管永远黑（见下面那段注释）。
+   */
+  --color-ink-950: #1e1e1e;
+  --color-ink-900: #242424;
+  --color-ink-850: #2a2a2a;
+  --color-ink-800: #323232;
+  --color-ink-700: #424242;
   --color-ink-600: #505050;
   --color-ink-500: #707070;
   --color-ink-400: #939393;
@@ -499,7 +554,8 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   --color-wood-800: #2e261b;
   --color-wood-700: #413526;
 
-  --color-floor: #292929;
+  /* 地板：跟着 ink-800 走（2026-11-06 从 #292929 上提到 #323232，理由见上面灰阶那段） */
+  --color-floor: #323232;
 
   --color-accent: #d16c70;
   --color-ok: #4ade80;
@@ -572,9 +628,12 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   /*
    * 墙面（.wall）。深色下比房间底色（ink-950）略亮一点点 —— 整面死黑会像个洞，
    * 但也不能亮过地板（--color-floor），不然墙和地会糊成一片。
+   *
+   * 两个值**手抄自灰阶**（2026-11-06 灰阶整体上提后同步）：top = ink-850、bottom = ink-950。
+   * 改 ink 时必须回来一起改 —— 墙是房间页的实际背景，漏了它这一页会比别处暗一档。
    */
-  --wall-top: #202020;
-  --wall-bottom: #141414;
+  --wall-top: #2a2a2a;
+  --wall-bottom: #202020;
   --wall-seam: rgba(255, 255, 255, 0.04);
 
   /* 地板。暖一点、比墙底亮一档 —— 原来是块冷灰，跟木桌子放一起像块水泥 */
