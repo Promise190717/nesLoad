@@ -17,8 +17,23 @@
  *      **字节数完全正确、内容全错**的文件，核心只会静默失败。
  *   3. 拼完再核对一次总长度（`parts` 一个不缺 + `blob.size === total`）。
  *   4. 服务器不认 Range（回 200 整包）时，**直接用这一个响应**，不再发第二次请求 ——
- *      上游那批 PS1 / NDS / GBA 盘都是这种，它们的整包路仍然靠 `Content-Length`
- *      和空响应兜底，这是已知缺口，见 `readBodyWithProgress`。
+ *      上游那批 PS1 / NDS / GBA 盘都是这种。但**必须先能核对长度**：200 且没有
+ *      `Content-Length` 的一律拒收（`UnverifiableBodyError`）。
+ *
+ *      ⚠️ 这条是 2026-11-06 补的，补的原因很具体：线上开着 Workers Caching
+ *      （`wrangler.jsonc` 的 `cache.enabled`），它在缓存未命中时会**摘掉 `Range`**
+ *      再回源，于是探针收到的是一个 200 + 整个几百 MB 的响应；那一层还会把它存成
+ *      **截断副本**（实测 261 MB 的对象只剩 44.8 MB）。以前这里只判 `size === 0`，
+ *      于是 44.8 MB 的残包被当成整张光盘交给核心，现象只是「游戏打不开」。
+ *      现在没有 `Content-Length` 就直接报「文件不完整，请重试」，至少是句准话。
+ *
+ *   5. **区间同时编进查询串**（`?span=0-4194303`，2026-11-06 晚些补）。
+ *      第 4 条只是把「收到残包」变成一句准话，没治病：那一层仍是每次未命中就摘
+ *      `Range`，探针照旧要拉整包，Worker 照旧被掐。那一层在 Worker **外面**，
+ *      既没有 per-path 开关、也不想为它单配一条 Cache Rule，所以让请求**不依赖
+ *      请求头**：`?span=` 会原样进缓存键，谁也不会改它。`Range` 头一起发，
+ *      只为兼容出口跳板（`ROM_EGRESS_ORIGIN`）与旧版本部署；路由以 `?span=` 为准。
+ *      见 `romSpanUrl`。
  */
 
 /**
@@ -59,6 +74,25 @@ class EmptyBodyError extends IncompleteBodyError {
     super(1, 0);
     this.name = 'EmptyBodyError';
     this.message = 'empty body: no bytes received';
+  }
+}
+
+/**
+ * 服务器回了 `200`（=「这就是整个文件」）却**没有 `Content-Length`**。
+ *
+ * 继承 `IncompleteBodyError` 是因为调用方的处理完全一样：宁可让用户看到
+ * 「文件不完整，请重试」，也不要把一份**没法核对长度**的字节交给核心。
+ *
+ * 为什么会走到这里（2026-11-06 实测）：Cloudflare 的 Workers Caching 在缓存未命中时
+ * 会把 `Range` 摘掉再回源，探针于是拿到 200 + 整个几百 MB 的响应；它还会把这份响应
+ * 存成**截断副本**（261 MB 的对象只剩 44.8 MB，且没有 `Content-Length`）。
+ * 只判 `size === 0` 的话，残包会被当成整张光盘，核心侧静默失败、界面上只有「打不开」。
+ */
+class UnverifiableBodyError extends IncompleteBodyError {
+  constructor() {
+    super(1, 0);
+    this.name = 'UnverifiableBodyError';
+    this.message = 'unverifiable body: 200 without content-length';
   }
 }
 
@@ -143,10 +177,40 @@ const ROM_CHUNK_SPLIT_DEPTH = 2;
 /**
  * 小文件走「一次 Range 拿整份」的阈值。
  *
- * 这个尺寸以下的包一次就要得完，多发几个请求只是多几次 RTT；
- * 而且整份响应会被服务端归一成 200（可缓存），对回访也友好。
+ * 这个尺寸以下的包一次就要得完，多发几个请求只是多几次 RTT。
+ * （ROM 从 2026-11-06 起一律 `no-store`，所以「整份能进缓存」这条早就不是理由了；
+ * 阈值留着是因为它对**请求数**仍然成立。）
  */
 const ROM_DIRECT_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 把 `[start, end]` 编成 ROM 接口的查询串，同时给出要一并发送的 `Range` 头。
+ *
+ * ## 为什么不只靠 `Range`（2026-11-06）
+ *
+ * 站点前面那层 Workers Caching（`wrangler.jsonc` 的 `cache.enabled`）在**缓存未命中**
+ * 时会先摘掉 `Range` 再回源 —— 它要一整份来填缓存。于是探针 `bytes=0-0` 落到路由
+ * 时已经「没有区间」，路由按无 Range 回 200 + 整个几百 MB；那一层再把大文件存成
+ * **截断副本**，之后所有分片都命中这个坏副本，游戏静默打不开（线上事故）。
+ *
+ * 那一层在 Worker 外面，代码里改不动它，也没有 per-path 开关。能让请求不受影响的
+ * 办法只有一个：**别把区间放在请求头里** —— 查询串会原样进缓存键，不会被谁摘掉。
+ * 路由侧的优先级见 `app/api/games/[id]/rom/route.ts` 的 `?span=`。
+ *
+ * `Range` 头仍然一起发：出口那一跳（`ROM_EGRESS_ORIGIN`）与旧版本部署靠它工作，
+ * 而且它本来就是这条接口的公开语义，删掉等于把一个能力丢掉。
+ *
+ * `end === null` 表示「一直到结尾」（`?span=N-`），和服务端的开放式 Range 对应。
+ */
+function romSpanUrl(url: string, start: number, end: number | null): string {
+  const span = end === null ? `${start}-` : `${start}-${end}`;
+  return `${url}${url.includes('?') ? '&' : '?'}span=${span}`;
+}
+
+/** `[start, end]` → `bytes=start-end`；`end === null` → `bytes=start-`。 */
+function romRangeHeader(start: number, end: number | null): string {
+  return `bytes=${start}-${end === null ? '' : end}`;
+}
 
 /** `bytes 0-1048575/94371840` → `{ start, end, total }`；`bytes * /N` 之类返回 null。 */
 function parseContentRange(value: string | null): { start: number; end: number; total: number } | null {
@@ -197,6 +261,8 @@ async function retryRom<T>(operation: () => Promise<T>, signal?: AbortSignal): P
     try { return await operation(); }
     catch (error) {
       if (signal?.aborted) throw abortError();
+      /* 重试解决不了：服务器每次都会回同一个「200 且无长度」，只会白拉三遍整包。 */
+      if (error instanceof UnverifiableBodyError) throw error;
       if (attempt >= ROM_CHUNK_RETRIES || (error instanceof RomHttpError && (!error.transient || error.retryMs > 30_000))) throw error;
       await waitForRomRetry(Math.max(error instanceof RomHttpError ? error.retryMs : 0,
         500 * 2 ** attempt), signal);
@@ -212,6 +278,9 @@ async function retryRom<T>(operation: () => Promise<T>, signal?: AbortSignal): P
  *   2. 总长 ≤ 8 MiB → 一次 Range 拿整份；
  *   3. 否则 4 MiB 一片、4 路并发，每片核对状态 / Content-Range / 字节数。
  *
+ * ⚠️ 每个请求的区间都**同时**写进 `?span=` 和 `Range`（见 `romSpanUrl`）：
+ *    请求头会被 Workers Caching 摘掉，查询串不会。
+ *
  * 服务器不认 Range 时（探针直接回 200 整包），**就用探针那个响应体**当整包读 ——
  * 那批上游盘（PS1 / NDS / GBA）本来就只有这一条路，多打一次请求纯属浪费。
  *
@@ -225,8 +294,18 @@ export async function fetchRomWithProgress(
 
   // ---------- 1. 探针：只要 1 字节 ----------
   const initial = await retryRom(async () => {
-    const response = await checkRomResponse(await fetch(url, { signal, headers: { Range: 'bytes=0-0' } }));
+    const response = await checkRomResponse(
+      await fetch(romSpanUrl(url, 0, 0), { signal, headers: { Range: romRangeHeader(0, 0) } })
+    );
     if (response.status !== 200) return { response, blob: null };
+    /*
+     * 200 = 服务器没理 Range，这份就是「整个文件」。但**没有 `Content-Length`
+     * 就无从核对**，宁可报错也别收下（原因见 `UnverifiableBodyError`）。
+     */
+    if (!Number(response.headers.get('content-length'))) {
+      await response.body?.cancel().catch(() => {});
+      throw new UnverifiableBodyError();
+    }
     // Include body reads in the retry: a 200 can still be truncated mid-stream.
     const blob = await readBodyWithProgress(response, onProgress);
     if (blob.size === 0) throw new EmptyBodyError();
@@ -271,7 +350,7 @@ export async function fetchRomWithProgress(
 /**
  * 用一次 Range 拿 `0..total-1`，核对长度。
  *
- * 服务端会把「覆盖整份的 206」改写成 200（为了能进缓存），所以这里**不要求 206**，
+ * 服务端可能把「覆盖整份的 206」改写成 200，所以这里**不要求 206**，
  * 只要求字节数对得上 —— 200 和 206 都接受。
  */
 async function fetchWholeRange(
@@ -279,7 +358,10 @@ async function fetchWholeRange(
   total: number,
   signal: AbortSignal | undefined
 ): Promise<Blob> {
-  const res = await fetch(url, { signal, headers: { Range: `bytes=0-${total - 1}` } });
+  const res = await fetch(romSpanUrl(url, 0, total - 1), {
+    signal,
+    headers: { Range: romRangeHeader(0, total - 1) },
+  });
   await checkRomResponse(res);
   const blob = await res.blob();
   if (blob.size === 0) throw new EmptyBodyError();
@@ -334,6 +416,9 @@ async function fetchInChunks(
    *   · `start/end` 与请求一致 —— 防「同长度、不同起点」的错位响应被拼进去；
    *   · `total` 与探针一致 —— 防下载途中对象被换掉；
    *   · `blob.size === expected` —— 防短读。
+   *
+   * ⚠️ 区间同时出现在 `?span=` 与 `Range` 里（见 `romSpanUrl`）：前者是唯一真值，
+   *    后者只是为了兼容出口跳板。校验用的仍是响应里的 `Content-Range`，与两者无关。
    */
   async function fetchSpan(start: number, end: number, depth = 0): Promise<Blob[]> {
     const expected = end - start + 1;
@@ -344,9 +429,9 @@ async function fetchInChunks(
       // 兄弟片已经失败了，别再白搬
       if (aborter.signal.aborted) throw failure ?? abortError();
       try {
-        const res = await fetch(url, {
+        const res = await fetch(romSpanUrl(url, start, end), {
           signal: aborter.signal,
-          headers: { Range: `bytes=${start}-${end}` },
+          headers: { Range: romRangeHeader(start, end) },
         });
         await checkRomResponse(res);
         const blob = await res.blob();

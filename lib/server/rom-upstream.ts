@@ -3,6 +3,14 @@ export interface RomFetchOptions {
   timeoutMs?: number;
   compatibility?: { userAgent: string; referer: string };
   /**
+   * 显式区间（`bytes=…`），优先于访客请求上的 `Range`（2026-11-06 加）。
+   *
+   * 由 `/api/games/[id]/rom` 从 `?span=` 解出来传进来。为什么区间要绕开请求头：
+   * 站内那层 Workers Caching 在缓存未命中时会摘掉 `Range` 再回源，请求头里的区间
+   * 到不了路由；查询串则原样保留。详见 `lib/http.ts` 的 `romSpanUrl`。
+   */
+  range?: string;
+  /**
    * 把访客请求里「像浏览器、但不承担功能」的那部分头转给上游（2026-10-20 加）。
    *
    * 只对**回源上游**有意义：本站 R2 的对象是自己的，不需要伪装，而且 UA 一多样
@@ -111,7 +119,11 @@ export async function fetchRomUpstream(
    * `CLIENT_HINT_HEADERS` 的注释（分片要核字节数，压缩会让 Range 全错）。
    */
   if (options.clientHints) applyClientHints(headers, request);
-  const range = request.headers.get('range');
+  /*
+   * 区间优先看调用方传进来的 `options.range`（来自 `?span=`），没有再读访客的
+   * `Range` 头 —— 请求头可能已经被站内那层 Workers Caching 摘掉了。
+   */
+  const range = options.range ?? request.headers.get('range');
   if (range) {
     if (!isSingleByteRange(range)) throw new TypeError('Invalid byte range');
     headers.set('range', range);

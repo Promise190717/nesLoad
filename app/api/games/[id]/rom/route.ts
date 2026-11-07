@@ -102,19 +102,33 @@ const WARMUP_POLL_MS = 2_000;
 /** 分片等不到时回给前端的 `Retry-After`（秒）。 */
 const WARMUP_RETRY_AFTER = '4';
 
-/**
- * 整份 ROM 的缓存时长（7 天，2026-10-20 加）。
+/*
+ * ⚠️ **ROM 一律不进边缘缓存**（2026-11-06 改，之前「整份」那份是 7 天）。
  *
- * ⚠️ **只有「响应体就是整个文件」时才用它**（见下面的 `servesWholeFile`）。
- *    真正的分片响应（206、只覆盖一段）仍然 `private, no-store` —— 半截字节一旦被
- *    CDN 当成完整对象存下来，之后所有访客拿到的都是坏 ROM，而且 `Content-Length`
- *    对得上、核心静默失败，线上根本查不出来。
+ * 2026-11-05 给 `wrangler.jsonc` 打开 Workers Caching（第 0 层）之后，这一层在
+ * **缓存未命中**时会先摘掉 `Range` 再回源整包（它要拿一整份来填缓存）。于是：
  *
- * ⚠️ ROM 的 URL（`/api/games/<id>/rom?lang=xx`）**不带内容版本**：后台给同一个 slug
- *    换了 ROM 之后，CDN 会继续发旧文件，最多 7 天。要立刻生效就在换盘后 purge 一次
- *    CDN（浏览器那层 purge 不了，只能等它过期）。
+ *   1. 播放器发的是 `bytes=0-0` 探针，落到这里已经**没有 Range**；
+ *   2. 本函数按「无 Range」处理，回 200 + 整个几百 MB 的文件，旧版还盖 `s-maxage=7d`；
+ *   3. 边缘把这一整份存下来 —— 大文件还会**存成截断的副本**
+ *      （2026-11-06 实测：`martian-gothic-unification` 261,479,549 字节的对象，
+ *      缓存里只有 44,875,456 字节，而且没有 `Content-Length`）；
+ *   4. 之后所有探针 / 分片请求拿到的都是 `200` + 那份残包，没有 `Content-Range`，
+ *      前端只能按「服务器忽略 Range = 这是整包」处理，把残包交给核心静默失败。
+ *
+ * 线上「同一个游戏返回 200、只发一个请求、游戏打不开，本地却是 206 分片」就是它。
+ * 所以这里永远回 `private, no-store`：宁可每次请求都回源（分片本来就是几十个请求），
+ * 也不要把 ROM 交给第 0 层 —— 它一旦存错，坏副本会挂到过期或下次发版为止。
+ *
+ * ## `no-store` 只解决「别再存坏副本」，区间还得绕开请求头
+ *
+ * 摘 `Range` 发生在看响应之前，光靠响应头治不了：下一个新键的第一次请求，探针照样
+ * 变成「无区间 ⇒ 200 + 整包 ⇒ Worker 被掐」。
+ *
+ * 所以区间改成**查询串主、请求头辅**（`?span=0-4194303`，见 `parseSpanParam`）：
+ * 查询串会原样进缓存键，第 0 层改不到它。前端 `lib/http.ts` 的 `romSpanUrl` 两个
+ * 都发，`Range` 只为兼容出口跳板与旧部署。**不需要在 Cloudflare 上配任何 Cache Rule。**
  */
-const ROM_CACHE_SECONDS = 7 * 24 * 60 * 60;
 
 /*
  * 一次大 ROM 下载会发几十个 4 MiB 分片请求。每个分片都查一遍 Supabase 不只是慢，
@@ -167,6 +181,32 @@ function parseRangeHeader(value: string): { start: number; end: number | null } 
   if (!Number.isSafeInteger(start)) return null;
   if (end !== null && !Number.isSafeInteger(end)) return null;
   return { start, end };
+}
+
+/**
+ * `?span=4194304-8388607` → `bytes=4194304-8388607`；`?span=0-` → `bytes=0-`。
+ *
+ * ## 为什么区间要有第二份表达（2026-11-06）
+ *
+ * 站点前面那层 Workers Caching（`wrangler.jsonc` 的 `cache.enabled`）在**缓存未命中**
+ * 时会先摘掉 `Range` 再回源。于是前端的 `bytes=0-0` 探针落到这里已经「没有区间」，
+ * 本函数按无 Range 回 200 + 整个几百 MB，那一层再把大文件存成**截断副本**，
+ * 之后所有分片都命中这个坏副本 —— 线上整款游戏打不开就是这么来的。
+ *
+ * 那一层在 Worker 外面，代码改不动它，也不想为它单独配 Cache Rule。能让请求不受
+ * 影响的办法只有一个：**别把区间放在请求头里**。查询串会原样进缓存键，谁也不会改。
+ *
+ * 认不出就返回 `null`，回落到 `Range` 头那条老路 —— 外链、curl、老前端都还能用。
+ */
+function parseSpanParam(value: string | null): string | null {
+  if (!value) return null;
+  const match = /^(\d+)-(\d*)$/.exec(value.trim());
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : null;
+  if (!Number.isSafeInteger(start)) return null;
+  if (end !== null && (!Number.isSafeInteger(end) || end < start)) return null;
+  return `bytes=${start}-${end === null ? '' : end}`;
 }
 
 /**
@@ -284,14 +324,8 @@ async function serveFromBinding(
     'Content-Disposition': contentDisposition(fileName),
     'Content-Length': String(length),
     'Accept-Ranges': 'bytes',
-    /*
-     * 整份 ⇒ 允许进 CDN（和公网那条路同一套 TTL）；
-     * 真分片 ⇒ `no-store`。半截字节一旦被 CDN 当成完整对象存下来，之后所有访客拿到的
-     * 都是坏 ROM，而且 `Content-Length` 对得上、核心静默失败 —— 线上查不出来。
-     */
-    'Cache-Control': span
-      ? 'private, no-store'
-      : `public, max-age=${ROM_CACHE_SECONDS}, s-maxage=${ROM_CACHE_SECONDS}`,
+    /* 一律 no-store，理由见上面那段「ROM 一律不进边缘缓存」。 */
+    'Cache-Control': 'private, no-store',
   };
   if (span) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
 
@@ -339,14 +373,16 @@ function relayEgress(response: Response, fileName: string): Response {
  * 站点代取（同一个接口、同一条 Range），本函数只做转发。R2 自持的那批不走这一跳 ——
  * 公网域名从哪儿都能取。
  *
- * 常态是**命中边缘缓存**：出口那一跳回的是 `public, max-age=7d, s-maxage=7d`，
- * Cloudflare 会整份存住，后续的分片请求根本不会再回源。
+ * ⚠️ 2026-11-06 起出口那一跳回的也是 `private, no-store`（ROM 不再进边缘缓存，
+ * 见文件上方那段），所以别指望「转发一次就把整份留在 CF 缓存里」——分片就是分片，
+ * 每片都得真回源。
  */
 async function fetchThroughEgress(
   request: Request,
   origin: string,
   id: string,
-  timeoutMs: number
+  timeoutMs: number,
+  range: string | null
 ): Promise<Response | null> {
   let hop: URL;
   try {
@@ -358,10 +394,14 @@ async function fetchThroughEgress(
   // 自己就是出口那一跳 / 已经在出口侧 → 直连，别绕回自己
   if (hop.host === new URL(request.url).host) return null;
   if (request.headers.get(EGRESS_HEADER)) return null;
-  hop.search = new URL(request.url).search; // ?lang= / ?disc= 原样带过去
+  hop.search = new URL(request.url).search; // ?lang= / ?disc= / ?span= 原样带过去
 
   const headers = new Headers({ accept: '*/*', [EGRESS_HEADER]: '1' });
-  const range = request.headers.get('range');
+  /*
+   * 区间**显式传进来**，不要从 `request.headers` 读（2026-11-06）：站内那层
+   * Workers Caching 可能已经把 `Range` 摘掉了，而 `?span=` 还在查询串里。
+   * 出口那一跳可能是旧版本部署，它只认 `Range`，所以这里必须把它补回去。
+   */
   if (range) headers.set('range', range);
   const validator = request.headers.get('if-range');
   if (validator) headers.set('if-range', validator);
@@ -389,7 +429,16 @@ async function fetchThroughEgress(
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  const range = request.headers.get('range');
+  const searchParams = new URL(request.url).searchParams;
+
+  /*
+   * 要哪一段：**`?span=` 优先，`Range` 头兜底**（2026-11-06）。
+   *
+   * 顺序不能反：站内那层 Workers Caching 在缓存未命中时会摘掉 `Range`，请求头里的
+   * 区间根本到不了这里；查询串则原样保留。反过来不存在（没人会改查询串）。
+   * 理由见 `parseSpanParam` 顶上那段。
+   */
+  const range = parseSpanParam(searchParams.get('span')) ?? request.headers.get('range');
   if (range && !isSingleByteRange(range)) {
     return new Response('Only a single valid byte range is supported', { status: 416, headers: { 'Cache-Control': 'no-store' } });
   }
@@ -401,7 +450,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    * `?disc=` = 多碟 CD 游戏要第几张碟（2026-10-22 加，默认 1）。
    * 换碟时前端拿 `?disc=2` 再要一次字节；单碟游戏永远只有 disc 1，传别的号会 404。
    */
-  const searchParams = new URL(request.url).searchParams;
   const lang = searchParams.get('lang')?.trim() || null;
   const requestedDisc = Number(searchParams.get('disc') ?? '1');
   const disc = Number.isInteger(requestedDisc) && requestedDisc >= 1 ? requestedDisc : 1;
@@ -486,7 +534,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       request,
       egressOrigin,
       id,
-      UPSTREAM_TIMEOUT_MS + 10_000
+      UPSTREAM_TIMEOUT_MS + 10_000,
+      range
     );
     if (viaEgress) return relayEgress(viaEgress, fileName);
   }
@@ -497,6 +546,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    */
   const upstreamOptions = {
     timeoutMs: UPSTREAM_TIMEOUT_MS,
+    /*
+     * 区间**显式传**，别让 `rom-upstream.ts` 去读 `request.headers`（2026-11-06）：
+     * 走到这里时 `Range` 可能已经被站内那层 Workers Caching 摘掉了，而 `?span=` 还在。
+     * `range` 为 null 时字段省略，那边仍按请求头兜底（curl / 外链）。
+     */
+    ...(range ? { range } : {}),
     /*
      * 回源上游时带上访客那组「像浏览器」的头（白名单在 `rom-upstream.ts` 的
      * `CLIENT_HINT_HEADERS`）—— 目的只是别让每片请求都顶着同一个 `nesLoad/1.0`。
@@ -686,18 +741,16 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 
   /*
-   * 响应体到底是不是**整个文件** —— 只有整份才敢缓存。
+   * 响应体到底是不是**整个文件** —— 只用来决定状态码和要不要带 `Content-Range`。
    *
    * 两种情况都算：
    *   · 上游忽略了 `Range`，直接回 200（完整表示）；
    *   · 回了 206，但范围正好覆盖 `0..total-1` —— **小 ROM 的常态**：
-   *     前端探针片一开口就要 8 MiB（`lib/http.ts` 的 `ROM_MAX_RUN`），而文件只有
+   *     前端小文件那条一次要整份（`lib/http.ts` 的 `fetchWholeRange`），而文件只有
    *     256 KB，上游于是回 `bytes 0-262143/262144`。
    *
-   * ⚠️ 以前这里按「请求里有没有 Range」决定缓存，于是**所有 ROM 都变成
-   *    `private, no-store`**（探针片无条件带 Range），`s-maxage` 那一支是死代码 ——
-   *    几百 KB 的卡带拔了再插也得重下一遍。现在按**响应体**判断：
-   *    整份 ⇒ 200 + 可缓存；真分片 ⇒ 206 + no-store。
+   * ⚠️ 它**不再影响缓存头**：ROM 一律 `no-store`，理由见文件上方那段
+   *    「ROM 一律不进边缘缓存」（边缘会把整包存成截断副本，再发给所有分片请求）。
    */
   const upstreamRange = upstream.headers.get('content-range');
   const servesWholeFile =
@@ -706,9 +759,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': contentDisposition(fileName),
-    'Cache-Control': servesWholeFile
-      ? `public, max-age=${ROM_CACHE_SECONDS}, s-maxage=${ROM_CACHE_SECONDS}`
-      : 'private, no-store',
+    'Cache-Control': 'private, no-store',
   };
   for (const name of ['accept-ranges', 'etag', 'last-modified']) {
     const value = upstream.headers.get(name);
@@ -723,11 +774,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (length) headers['Content-Length'] = length;
 
   /*
-   * 整份一律回 **200**（哪怕上游是 206）：
-   *   · 206 在 Cloudflare 默认不进缓存，留着它等于没缓存；
-   *   · 前端 2026-11-04 起用 1 字节探针（`bytes=0-0`）问总长，再按 4 MiB 切片；
-   *     只有「这一段覆盖整个文件」的请求才会走到这里，回 200 正好对应「整份」。
-   *     真分片（`servesWholeFile === false`）仍旧 206 + no-store。
+   * 整份一律回 **200**（哪怕上游是 206）：前端小文件那条要的就是「一次拿整份」，
+   * 200 正好对应这个语义；真分片（`servesWholeFile === false`）仍旧 206。
+   *
+   * ⚠️ 200 / 206 都带 `no-store`（见上面的缓存段）。**别**再为了「回访快一点」
+   *    给 200 盖上 `s-maxage` —— 第 0 层收到可缓存的 200 就会把几百 MB 存成截断副本，
+   *    再以 200 发给之后所有分片请求，线上整款游戏直接打不开。
    */
   return new Response(upstream.body, { status: servesWholeFile ? 200 : upstream.status, headers });
 }
