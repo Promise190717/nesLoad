@@ -22,19 +22,23 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getGame } from '@/lib/server/sb-games';
+import { getGameFullCached } from '@/lib/server/sb-games';
 
 export const runtime = 'nodejs';
 /*
- * ⚠️ **接口不吃缓存**（2026-10-20 用户要求「只要页面缓存，接口一律不缓存」）。
+ * 实时生成，但**数据层吃缓存**（2026-11-07 改）。
  *
- * 原来这里是 `force-static` + `revalidate = 86400`（后来一度改成 30 天）：构建期预生成
- * 一批、其余按需生成并缓存。代价是「后台改了游戏资料，这个接口最长一天/一个月才变」，
- * 而调用它的正是 `/play` 的兜底路径 —— 用户看到的是和详情页不一致的数据。
+ * 2026-10-20 那句「接口一律不缓存」的原意是「别把整条响应静态化，后台改了要能看到」，
+ * 当时改成了每次实时查库。那是用错了手段：这条接口要跑 4~6 次 Supabase 往返
+ * （实测 2~5 秒），而免费版 Workers 每条请求只有 10ms CPU —— 冷 isolate 打穿之后
+ * Cloudflare 直接回 503 空体，线上表现是「某个边缘节点一直失败、换节点就好」。
  *
- * 现在一律实时读库。这也是为什么导出的 `generateStaticParams` 一并删了：
- * `force-dynamic` 下预生成没有意义，留着只会让人以为这里还有静态副本。
- * 想提速请从页面侧（`getGameCached`）或客户端缓存上想办法，别把缓存塞回接口。
+ * 现在把新鲜度交给 `games` tag（后台改数据 → `revalidateTag('games')` → 立刻失效），
+ * 请求本身仍然每次现取，只是取的是 R2 里那份（几十毫秒）。`force-dynamic` 保留：
+ * 这条路由有动态 id，静态化没有意义，也会让 `?` 之后的参数变成构建期常量。
+ *
+ * 关于 `unstable_cache` 能不能在 route handler 里用：能。它是 Next 的 Data Cache，
+ * 和页面 ISR 是两套东西，挂在 R2 binding 上，不依赖页面的渲染模式。
  */
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +46,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
 
   try {
-    const game = await getGame(id);
+    const game = await getGameFullCached(id);
     if (!game) return NextResponse.json({ error: 'not-found' }, { status: 404 });
     return NextResponse.json({ game });
   } catch (error) {

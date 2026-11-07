@@ -939,6 +939,34 @@ export const getGameCached = cached(
   { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
+/**
+ * `/api/games/[id]` 专用的「全语言」版本（2026-11-07 加）。
+ *
+ * 那条接口的调用方（`/play` 与 `StaticPlay` 的兜底、`ConsoleScene` 取数、
+ * `GameDownloadPanel` 的正文）都不带语言参数，所以它必须一次给全部 18 种文案 ——
+ * 和 `getGameCached` 按 locale 裁过的那份**不是同一个键**，各存各的，互不影响。
+ *
+ * ## 为什么必须缓存（2026-11-07 线上 503 事故）
+ *
+ * 这条接口是 `force-dynamic`，缓存未命中就要跑完整 handler：加载 open-next、
+ * 初始化 i18n 表、**4~6 次 Supabase 往返**、序列化 89 KB JSON。实测 2~5 秒，
+ * 而这些时间在免费版 Workers 的 **10ms CPU** 预算面前毫无意义 —— CPU 记的是
+ * 执行时间，可一旦 isolate 冷、V8 没预热，这点活就能打穿限额，Cloudflare 直接
+ * 回 **503 空体**（Error 1102 的关联错误）。isolate 被回收后下次还是冷的，
+ * 于是同一个 colo 稳定复现、换个节点就好。
+ *
+ * 改成读缓存后，一次请求只走一次 R2（几十毫秒），数据库不再是这条路的瓶颈。
+ * 一致性由 `games` tag 兜住：后台改游戏走 `revalidateTag('games')`，缓存立刻失效。
+ *
+ * ⚠️ 别把它换成 `getGameCached(id, locale)`：那会按语言裁文案，调用方拿到的
+ *    `texts` 会从 18 种变 3 种，属于静默的接口行为变更。
+ */
+export const getGameFullCached = cached(
+  async (id: string) => getGame(id),
+  ['sb:games:by-id-full', 'v1'],
+  { revalidate: GAME_DETAIL_REVALIDATE_SECONDS, tags: ['games'] }
+);
+
 /** 写路径专用（评论 / 收藏 / 存档 / 举报）：要「此刻还在不在」，所以不吃缓存。 */
 export async function getGameForWrite(id: string): Promise<Game | null> {
   return getGame(id);

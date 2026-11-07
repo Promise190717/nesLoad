@@ -162,8 +162,32 @@ const TTL_PAGE = 86400;
 /** 404 副本的 TTL（秒）。2026-11-03 从 5 分钟拉到 1 小时 —— 它挡的是扫描器，
  *  而扫描器的特征是「同一个不存在的地址反复来」，5 分钟刚好让它每次都穿透。 */
 const TTL_NOT_FOUND = 3600;
-/** 公开接口副本的 TTL（秒）。 */
-const TTL_API = 30;
+/**
+ * 公开接口副本的 TTL（秒）。
+ *
+ * 2026-11-07 从 30 秒提到 1 小时。理由：`/api/games/[id]` 每次未命中都要跑一遍
+ * 完整 handler，而它在低流量 colo 上几乎命中不到（30 秒早过期了）—— 表现为
+ * 「某个边缘节点一直 503、换节点就好」。拉长之后，1 小时内同一个键只回源一次。
+ * 数据新鲜度由 `revalidateTag('games')` 在线下兜，这里只负责让线上别反复回源。
+ */
+const TTL_API = 60 * 60;
+/**
+ * 公开接口让**浏览器**存多久（秒）。
+ *
+ * 2026-11-07 从 0 提到 60。这一层才是「重复打开同一个游戏页」的真正免费午餐：
+ * 60 秒内连请求都不发，边缘和 Worker 都不用来。接口返回的是游戏静态资料，
+ * 晚一分钟没有任何影响。
+ */
+const TTL_API_BROWSER = 60;
+/**
+ * 公开接口过期后的兜底窗口（秒）。
+ *
+ * `stale-while-revalidate`：副本过期后仍先发给访客，同时在后台刷新。配合下面
+ * 1 小时的 `s-maxage`，等于「永远秒回，最坏情况拿到 1 小时前的数据」。
+ * 后台改游戏会 `revalidateTag('games')` 清掉数据层，但**清不动第 0 层**，
+ * 所以想让接口立刻变，还得等这个窗口过去（或发版，发版会清空命名空间）。
+ */
+const TTL_API_SWR = 24 * 60 * 60;
 
 /** 只缓存这些内容类型（HTML / 站点文件 / RSC flight / 公开接口的 JSON）。 */
 const CACHEABLE_CONTENT_TYPES =
@@ -355,9 +379,20 @@ function noStore(response: Response): Response {
  * ⚠️ 只用于 `variant === 'html'` 的那一份。flight / prefetch 一律走 `noStore` ——
  *    它们的地址带随机 `_rsc=`，存进去就是几万条只读一次的垃圾，还会挤掉真正有用的页。
  */
-function withCdnHeaders(response: Response, ttl: number): Response {
+function withCdnHeaders(
+  response: Response,
+  ttl: number,
+  browserMaxAge = 0,
+  staleWhileRevalidate = 0
+): Response {
   const headers = new Headers(response.headers);
-  headers.set('cache-control', `public, max-age=0, s-maxage=${ttl}`);
+  /*
+   * 页面（`browserMaxAge = 0`）保持原样：HTML 每次都要回边缘确认一遍，
+   * 否则发版后用户会继续看到旧页面。接口那份才给浏览器真缓存（见 TTL_API_BROWSER）。
+   */
+  const parts = ['public', `max-age=${browserMaxAge}`, `s-maxage=${ttl}`];
+  if (staleWhileRevalidate > 0) parts.push(`stale-while-revalidate=${staleWhileRevalidate}`);
+  headers.set('cache-control', parts.join(', '));
   headers.set('vary', 'RSC');
   /*
    * 把调试用的标记摘掉再交出去：这一份会被 Workers Caching 原样存起来，
@@ -458,7 +493,14 @@ const edgeCacheWrapper = {
          * 会让它把 flight 和整页 HTML 当成同一份互相覆盖。所以出这扇门之前补回来。
          */
         const hitTtl = hit.status === 404 ? TTL_NOT_FOUND : isApi ? TTL_API : TTL_PAGE;
-        return variant === 'html' ? withCdnHeaders(copy, hitTtl) : noStore(copy);
+        return variant === 'html'
+          ? withCdnHeaders(
+              copy,
+              hitTtl,
+              isApi ? TTL_API_BROWSER : 0,
+              isApi ? TTL_API_SWR : 0
+            )
+          : noStore(copy);
       }
     } catch (error) {
       console.error('[edge-cache] 命中路径失败，按未命中处理', pathname, error);
@@ -520,7 +562,9 @@ const edgeCacheWrapper = {
      *    flight / prefetch 一律 `no-store`：它们每条地址都带随机的 `_rsc=`，
      *    进了缓存就是几万条只读一次的垃圾，还会按 `Next-Router-State-Tree` 分叉。
      */
-    return variant === 'html' ? withCdnHeaders(response, ttl) : noStore(response);
+    return variant === 'html'
+      ? withCdnHeaders(response, ttl, isApi ? TTL_API_BROWSER : 0, isApi ? TTL_API_SWR : 0)
+      : noStore(response);
   },
 };
 
