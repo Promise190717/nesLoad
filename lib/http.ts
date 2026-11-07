@@ -34,6 +34,18 @@
  *      请求头**：`?span=` 会原样进缓存键，谁也不会改它。`Range` 头一起发，
  *      只为兼容出口跳板（`ROM_EGRESS_ORIGIN`）与旧版本部署；路由以 `?span=` 为准。
  *      见 `romSpanUrl`。
+ *
+ *   6. **分片走边缘缓存 + 版本号**（2026-11-07）。
+ *      一次分片就是一次 Worker 调用，427 MB 的光盘 100 多次，免费版 10 万次/天
+ *      只够约 970 次完整载入。所以分片必须能被第 0 层存住：
+ *
+ *        · 服务端对 span 分片回 **200**（Cloudflare 默认不缓存 206）+ `X-Rom-Span`
+ *          / `X-Rom-Total`，前端两种形态都认（见 `fetchSpan` 的校验）；
+ *        · 探针回 `X-Rom-Version`，前端把它挂成后续分片的 `?v=` —— **缓存键随
+ *          「这份文件」变化**，换 ROM 后旧分片永远不会被发出来；
+ *        · 探针自己 `no-store`，所以它永远是版本号的可靠来源。
+ *
+ *      分片大小同时从 4 MiB 调到 8 MiB，首次下载的请求数再砍半（见 `ROM_CHUNK_BYTES`）。
  */
 
 /**
@@ -163,10 +175,16 @@ export async function readBodyWithProgress(
 /*
  * ===== 分片参数 =====
  *
- * 4 MiB 一片：线上实测 8 MiB 的段在并发时更容易断，2 MiB 又让请求数翻倍。
+ * 8 MiB 一片（2026-11-07 从 4 MiB 调上来）。
+ *
+ * 为什么要调大：**一次分片 = 一次 Worker 调用**。4 MiB 时一张 427 MB 的光盘要
+ * 103 次（1 次探针 + 102 片），免费版每天 10 万次，等于只够约 970 次完整载入。
+ * 8 MiB 把请求数直接砍半。再往上（16 MiB）单片下载时间太长，网络差的时候容易被
+ * Worker 的响应时长上限掐掉，断流后的重试成本也更高 —— 8 是两头之间比较稳的一档。
+ *
  * 4 路并发：单流实测 0.25–0.5 MB/s，4 路大约能把 83 MiB 压到一分钟以内。
  */
-const ROM_CHUNK_BYTES = 4 * 1024 * 1024;
+const ROM_CHUNK_BYTES = 8 * 1024 * 1024;
 const ROM_CHUNK_CONCURRENCY = 4;
 /** 一段失败重试几次（不含首次）。 */
 const ROM_CHUNK_RETRIES = 2;
@@ -182,6 +200,16 @@ const ROM_CHUNK_SPLIT_DEPTH = 2;
  * 阈值留着是因为它对**请求数**仍然成立。）
  */
 const ROM_DIRECT_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 往 URL 上挂一个查询参数（保留原有的）。
+ *
+ * 只在已有查询串后面追加，不解析重建 —— 传进来的是相对路径（`/api/games/x/rom`），
+ * 用 `new URL()` 得先补 base，稍不注意就把绝对地址带进 `fetch`。
+ */
+function withQueryParam(url: string, name: string, value: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}${name}=${encodeURIComponent(value)}`;
+}
 
 /**
  * 把 `[start, end]` 编成 ROM 接口的查询串，同时给出要一并发送的 `Range` 头。
@@ -203,13 +231,21 @@ const ROM_DIRECT_MAX_BYTES = 8 * 1024 * 1024;
  * `end === null` 表示「一直到结尾」（`?span=N-`），和服务端的开放式 Range 对应。
  */
 function romSpanUrl(url: string, start: number, end: number | null): string {
-  const span = end === null ? `${start}-` : `${start}-${end}`;
-  return `${url}${url.includes('?') ? '&' : '?'}span=${span}`;
+  return withQueryParam(url, 'span', end === null ? `${start}-` : `${start}-${end}`);
 }
 
 /** `[start, end]` → `bytes=start-end`；`end === null` → `bytes=start-`。 */
 function romRangeHeader(start: number, end: number | null): string {
   return `bytes=${start}-${end === null ? '' : end}`;
+}
+
+/** `X-Rom-Span: 0-8388607` → `{ start, end }`；新后端用它表达「这一段」。 */
+function parseSpanHeader(value: string | null): { start: number; end: number } | null {
+  const match = /^(\d+)-(\d+)$/.exec(value ?? '');
+  if (!match) return null;
+  const [start, end] = match.slice(1).map(Number);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) return null;
+  return { start, end };
 }
 
 /** `bytes 0-1048575/94371840` → `{ start, end, total }`；`bytes * /N` 之类返回 null。 */
@@ -332,19 +368,30 @@ export async function fetchRomWithProgress(
   }
 
   const total = probeRange.total;
+  /*
+   * 后面所有分片都挂上 ROM 版本（`?v=`），让边缘能把每一片一直缓存到「这份文件
+   * 被换掉」为止。版本由服务端按「文件名 + 来源 + 总大小」算，探针本身永远
+   * `no-store`，所以换盘后第一个探针就会给出新版本，分片自动落到新键上 ——
+   * 不会出现「旧分片混进新文件」那种拼出来全是错字节的坏包。
+   *
+   * 旧后端不给这个头，那就退回不带版本的 URL（行为与加它之前一字不差）。
+   */
+  const version = probe.headers.get('x-rom-version');
+  const chunkUrl = version ? withQueryParam(url, 'v', version) : url;
+
   // 这 1 字节用不上，早点把连接还回去；cancel 失败不影响后面（响应已经拿到了）
   await probe.body?.cancel().catch(() => {});
   onProgress(0);
 
   // ---------- 2. 小文件：一次拿整份 ----------
   if (total <= ROM_DIRECT_MAX_BYTES) {
-    const blob = await retryRom(() => fetchWholeRange(url, total, signal), signal);
+    const blob = await retryRom(() => fetchWholeRange(chunkUrl, total, signal), signal);
     onProgress(1);
     return blob;
   }
 
   // ---------- 3. 大文件：并发分片 ----------
-  return fetchInChunks(url, total, signal, onProgress);
+  return fetchInChunks(chunkUrl, total, signal, onProgress);
 }
 
 /**
@@ -412,13 +459,17 @@ async function fetchInChunks(
    * 要 `[start, end]` 这段，返回按顺序排好的若干 Blob（切过就是多块）。
    *
    * ⚠️ 这里的校验是「文件不完整」的正解，别为了省一次判断删掉任何一条：
-   *   · `status === 206` —— 200 说明服务器把整份塞回来了，长度对不上；
-   *   · `start/end` 与请求一致 —— 防「同长度、不同起点」的错位响应被拼进去；
-   *   · `total` 与探针一致 —— 防下载途中对象被换掉；
+   *   · 区间与请求一致 —— 防「同长度、不同起点」的错位响应被拼进去；
+   *   · 总长与探针一致 —— 防下载途中对象被换掉；
    *   · `blob.size === expected` —— 防短读。
    *
-   * ⚠️ 区间同时出现在 `?span=` 与 `Range` 里（见 `romSpanUrl`）：前者是唯一真值，
-   *    后者只是为了兼容出口跳板。校验用的仍是响应里的 `Content-Range`，与两者无关。
+   * ⚠️ **两种响应形态都要认**（2026-11-07）：
+   *   · `206 + Content-Range` —— 旧后端，或者走 Range 老路的客户端；
+   *   · `200 + X-Rom-Span / X-Rom-Total` —— 新后端。之所以回 200：Cloudflare
+   *     **默认不缓存 206**，而分片能被边缘存住才是「一次之后不再占 Worker 额度」的
+   *     全部前提。语义上也说得通 —— URL 里的 `?span=` 已经指名了这一段。
+   *
+   *   两条分支的校验强度一样，200 那条同样必须核对起点、终点和总长。
    */
   async function fetchSpan(start: number, end: number, depth = 0): Promise<Blob[]> {
     const expected = end - start + 1;
@@ -435,14 +486,15 @@ async function fetchInChunks(
         });
         await checkRomResponse(res);
         const blob = await res.blob();
-        const range = parseContentRange(res.headers.get('content-range'));
+        const legacy = parseContentRange(res.headers.get('content-range'));
+        const cached = parseSpanHeader(res.headers.get('x-rom-span'));
+        const cachedTotal = Number(res.headers.get('x-rom-total'));
         const matches =
-          res.status === 206 &&
-          range !== null &&
-          range.start === start &&
-          range.end === end &&
-          range.total === total &&
-          blob.size === expected;
+          blob.size === expected &&
+          (legacy
+            ? res.status === 206 && legacy.start === start && legacy.end === end && legacy.total === total
+            : res.status === 200 && cached !== null && cached.start === start && cached.end === end &&
+              cachedTotal === total);
         // 逐条见函数头：少判一条就可能拼进错位或缺失的字节
         if (!matches) throw new IncompleteBodyError(expected, blob.size);
         return [blob];

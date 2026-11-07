@@ -103,35 +103,48 @@ const WARMUP_POLL_MS = 2_000;
 const WARMUP_RETRY_AFTER = '4';
 
 /*
- * ⚠️ **ROM 一律不进边缘缓存**（2026-11-06 改，之前「整份」那份是 7 天）。
+ * ===== 边缘缓存策略（2026-11-07 定稿）=====
  *
- * 2026-11-05 给 `wrangler.jsonc` 打开 Workers Caching（第 0 层）之后，这一层在
- * **缓存未命中**时会先摘掉 `Range` 再回源整包（它要拿一整份来填缓存）。于是：
+ * **分片可缓存，整包一律不缓存。**
  *
- *   1. 播放器发的是 `bytes=0-0` 探针，落到这里已经**没有 Range**；
- *   2. 本函数按「无 Range」处理，回 200 + 整个几百 MB 的文件，旧版还盖 `s-maxage=7d`；
- *   3. 边缘把这一整份存下来 —— 大文件还会**存成截断的副本**
- *      （2026-11-06 实测：`martian-gothic-unification` 261,479,549 字节的对象，
- *      缓存里只有 44,875,456 字节，而且没有 `Content-Length`）；
- *   4. 之后所有探针 / 分片请求拿到的都是 `200` + 那份残包，没有 `Content-Range`，
- *      前端只能按「服务器忽略 Range = 这是整包」处理，把残包交给核心静默失败。
+ * 背景（2026-11-06 事故）：Workers Caching（第 0 层）在缓存未命中时会先摘掉 `Range`
+ * 再回源。旧实现把探针那次「无 Range」的响应当成整份，回 200 + 整个几百 MB，边缘
+ * 把它存成**截断副本**（实测 261,479,549 字节的对象只剩 44,875,456，且没有
+ * `Content-Length`），之后所有分片都命中这个坏副本 —— 线上整款游戏打不开。
  *
- * 线上「同一个游戏返回 200、只发一个请求、游戏打不开，本地却是 206 分片」就是它。
- * 所以这里永远回 `private, no-store`：宁可每次请求都回源（分片本来就是几十个请求），
- * 也不要把 ROM 交给第 0 层 —— 它一旦存错，坏副本会挂到过期或下次发版为止。
+ * 那次之后一律 `no-store`，但代价是**每一片都是一次 Worker 调用 + 一次回源**：
+ * 一张 427 MB 的光盘 4 MiB 时要 100 多次，免费版 10 万次/天只够约 970 次完整载入
+ * （分片调到 8 MiB 后是 53 次，约 1900 次）。
  *
- * ## `no-store` 只解决「别再存坏副本」，区间还得绕开请求头
+ * ## 缓存能救什么、不能救什么
  *
- * 摘 `Range` 发生在看响应之前，光靠响应头治不了：下一个新键的第一次请求，探针照样
- * 变成「无区间 ⇒ 200 + 整包 ⇒ Worker 被掐」。
+ * 命中边缘缓存时 Worker 一次都不启动、不计 CPU、不回源 —— 这是摆脱免费版 10ms
+ * 限制的关键（否则每个分片都要跑一遍 Next handler，1102 是常态）。
  *
- * 所以区间改成**查询串主、请求头辅**（`?span=0-4194303`，见 `parseSpanParam`）：
- * 查询串会原样进缓存键，第 0 层改不到它。前端 `lib/http.ts` 的 `romSpanUrl` 两个
- * 都发，`Range` 只为兼容出口跳板与旧部署。**不需要在 Cloudflare 上配任何 Cache Rule。**
+ * 但**请求数照计**（Cloudflare 官方口径：cache hit 按标准请求率计一次，只是不记
+ * CPU）。所以缓存不是「免费额度」，真正压请求数的是分片大小（`lib/http.ts` 的
+ * `ROM_CHUNK_BYTES`）和浏览器自己那份缓存（见下面的 `Cache-Control`）。
+ *
+ * ## 为什么现在敢存了
+ *
+ * 三件事同时成立，缺一不可：
+ *   1. **每个键只对应一小段**（URL 带 `?span=`，响应 ≤ 8 MiB），不存在「把大文件
+ *      存成截断副本」这回事；
+ *   2. **响应带准确的 `Content-Length`** —— 没有它的响应一律不进缓存。上次事故的
+ *      根因正是边缘无法判断「这份 chunked 响应收全了没有」；
+ *   3. **URL 带内容版本 `?v=`**（探针通过 `X-Rom-Version` 给出，见 `romCacheVersion`）。
+ *      没有它，后台换了 ROM 之后边缘会继续发旧分片，前端拼出来的是新旧混合的文件。
+ *
+ * ⚠️ 整包（没有 `?span=` 的下载）仍然 `no-store`：几百 MB、没有区间可核对，
+ *    正是上次被存坏的那一类。
+ * ⚠️ 探针（`span=0-0`）也 `no-store`：它是版本号的来源，缓存住就永远不更新。
  */
+const ROM_SPAN_CACHE_SECONDS = 7 * 24 * 60 * 60;
+/** 允许进边缘缓存的单段上限。前端最大就 8 MiB（`lib/http.ts` 的 `ROM_CHUNK_BYTES`）。 */
+const ROM_SPAN_MAX_BYTES = 16 * 1024 * 1024;
 
 /*
- * 一次大 ROM 下载会发几十个 4 MiB 分片请求。每个分片都查一遍 Supabase 不只是慢，
+ * 一次大 ROM 下载会发几十个 8 MiB 分片请求。每个分片都查一遍 Supabase 不只是慢，
  * 还要重复做 SQL 参数绑定与 JSON 解码；四个首发分片甚至会同时发出四条相同查询。
  * 在当前 isolate 里短存 60 秒并复用进行中的 Promise，既合并冷启动查询，也避免热分片
  * 反复查库。失败立即剔除，不会把一次数据库故障缓存一分钟；后台换来源最多晚 60 秒。
@@ -165,6 +178,34 @@ function lookupGameRoms(id: string): Promise<Awaited<ReturnType<typeof getGameRo
 function contentDisposition(name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
   return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/**
+ * 分片缓存键的版本号（`?v=`），由探针的 `X-Rom-Version` 发给前端。
+ *
+ * ## 为什么必须有
+ *
+ * 分片 URL 不带版本时，后台换了 ROM（哪怕只是同名覆盖上传）之后，边缘会继续发
+ * 旧分片，前端拼出来的是**新旧混合**的文件 —— 大小可能刚好对得上，内容全错，
+ * 比直接报错难查得多。
+ *
+ * ## 为什么不用上游 `ETag`
+ *
+ * ETag 由上游那层决定，不同边缘节点 / 不同源站的格式未必一致，抖一次就等于缓存
+ * 全废。这里用「文件名 + 来源 + 总大小」算一个 FNV-1a 短哈希：换语言、换来源、
+ * 换尺寸都一定会变，而且完全可控。
+ *
+ * ⚠️ **同名同尺寸的覆盖上传感知不到**。后台换 ROM 请走「换 key 再改库」那条老规矩
+ *    （见 `lib/server/media.ts` 那套 `-v2` 命名），否则最多 7 天（TTL）后才会自愈。
+ */
+function romCacheVersion(pick: { romName: string; sourceUrl: string | null }, total: number): string {
+  const seed = `${pick.romName}|${pick.sourceUrl ?? ''}|${total}`;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 /**
@@ -260,11 +301,18 @@ const EGRESS_HEADER = 'x-nl-rom-egress';
  *
  * ⚠️ 这条路径是「本站自持的 ROM 永远 206」的全部保证：binding 没有边缘缓存那一层，
  *    `range` 要多少给多少，不会出现「冷对象回 200 + 整个文件」。
+ *
+ * ⚠️ **缓存头和 `X-Rom-*` 必须在这里也写一份**（2026-11-07）：这条路在 GET 里是
+ *    「提前 return」的，走不到下面那段统一的响应构造。漏了它，自持 ROM 就永远
+ *    `no-store` + 没有版本号，半分钱缓存都吃不到。
  */
 async function serveFromBinding(
   key: string,
   rangeHeader: string | null,
-  fileName: string
+  fileName: string,
+  pick: { romName: string; sourceUrl: string | null },
+  spanRequest: boolean,
+  probe: boolean
 ): Promise<Response | null> {
   const bucket = gamesBucket();
   if (!bucket) return null;
@@ -319,17 +367,36 @@ async function serveFromBinding(
   }
   const end = start + length - 1;
 
+  /*
+   * 这一段覆盖整个对象吗？两种情形：根本没要区间；要的是 `0-(total-1)`（小文件
+   * 走 `fetchWholeRange` 就是这种，R2 会把越界的 length 截到实际大小）。
+   */
+  const wholeFile = span === null || (start === 0 && length === total);
+  /*
+   * 新前端的 span 分片：回 200 + `X-Rom-Span`（Cloudflare 默认不缓存 206）。
+   * 探针（`spanRequest && probe`）不在此列 —— 它要的是 `Content-Range` 里的总长。
+   */
+  const spanChunk = spanRequest && !probe && span !== null && !wholeFile;
+  const cacheable = spanRequest && !probe && length > 0 && length <= ROM_SPAN_MAX_BYTES;
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': contentDisposition(fileName),
     'Content-Length': String(length),
     'Accept-Ranges': 'bytes',
-    /* 一律 no-store，理由见上面那段「ROM 一律不进边缘缓存」。 */
-    'Cache-Control': 'private, no-store',
+    'X-Rom-Version': romCacheVersion(pick, total),
+    'Cache-Control': cacheable
+      ? `public, max-age=${ROM_SPAN_CACHE_SECONDS}, s-maxage=${ROM_SPAN_CACHE_SECONDS}`
+      : 'private, no-store',
   };
-  if (span) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+  if (spanChunk) {
+    headers['X-Rom-Span'] = `${start}-${end}`;
+    headers['X-Rom-Total'] = String(total);
+  } else if (span && !wholeFile) {
+    headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+  }
 
-  return new Response(object.body, { status: span ? 206 : 200, headers });
+  return new Response(object.body, { status: wholeFile || spanChunk ? 200 : 206, headers });
 }
 
 /**
@@ -348,7 +415,15 @@ function relayEgress(response: Response, fileName: string): Response {
     'accept-ranges',
     'etag',
     'last-modified',
-    'retry-after'
+    'retry-after',
+    /*
+     * 区间与版本必须一起带过来（2026-11-07）：出口那一跳返回的是 200 + 这三个头，
+     * 前端靠它们核对「这段是不是我要的」，主站靠 `cache-control` 决定存不存。
+     * 漏一个，前端就会把每一片都判成「文件不完整」。
+     */
+    'x-rom-span',
+    'x-rom-total',
+    'x-rom-version'
   ]) {
     const value = response.headers.get(name);
     if (value) headers.set(name, value);
@@ -437,11 +512,23 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    * 顺序不能反：站内那层 Workers Caching 在缓存未命中时会摘掉 `Range`，请求头里的
    * 区间根本到不了这里；查询串则原样保留。反过来不存在（没人会改查询串）。
    * 理由见 `parseSpanParam` 顶上那段。
+   *
+   * `spanParam` 单独留一份：后面判断「这次能不能进边缘缓存」时，只认**查询串里
+   * 明确写了区间**的请求（`isSpanRequest`）。靠 `Range` 头来的（curl / 老前端）
+   * 一律不缓存 —— 那类请求没有 `?v=`，我们无法保证换 ROM 后不串片。
    */
-  const range = parseSpanParam(searchParams.get('span')) ?? request.headers.get('range');
+  const spanParam = parseSpanParam(searchParams.get('span'));
+  const isSpanRequest = spanParam !== null;
+  const range = spanParam ?? request.headers.get('range');
   if (range && !isSingleByteRange(range)) {
     return new Response('Only a single valid byte range is supported', { status: 416, headers: { 'Cache-Control': 'no-store' } });
   }
+  /*
+   * 是不是「只要 1 字节」的探针 —— 缓存判据要用（探针永远不缓存，它是版本号的来源），
+   * 所以在这儿就定下来，binding 那条提前 return 的路也要用。
+   */
+  const requestSpan = range ? parseRangeHeader(range) : null;
+  const isProbe = requestSpan !== null && requestSpan.start === 0 && requestSpan.end === 0;
 
   /*
    * `?lang=` = 这一款要哪个语言版本的 ROM（2026-10-20 起由 `game_roms` 直接支持）。
@@ -463,9 +550,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     roms = await lookupGameRoms(id);
   } catch (error) {
     console.error('[games] ROM 查询失败', error);
-    return new Response('lookup failed', { status: 500 });
+    return new Response('lookup failed', { status: 500, headers: { 'Cache-Control': 'no-store' } });
   }
-  if (roms.length === 0) return new Response('not found', { status: 404 });
+  if (roms.length === 0) {
+    return new Response('not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
 
   /*
    * 取哪一份（2026-10-20 起「自有 R2 优先」）：
@@ -485,7 +574,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
      * 静默回第一碟会让前端拿到一份和碟号对不上的文件，现象比报错难查得多。
      */
     (disc === 1 ? roms[0] : undefined);
-  if (!picked) return new Response('disc not found', { status: 404 });
+  if (!picked) {
+    return new Response('disc not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
   const fileName = picked.romName || 'rom';
   const selfHosted = picked.sourceUrl?.startsWith('r2:') ?? false;
   const selfHostedKey = selfHosted ? (picked.sourceUrl as string).slice(3) : null;
@@ -504,7 +595,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    *    而 `publicUrl()` 缺配置是会抛的（它只适合当兜底）。
    */
   if (selfHostedKey) {
-    const served = await serveFromBinding(selfHostedKey, range, fileName);
+    const served = await serveFromBinding(
+      selfHostedKey,
+      range,
+      fileName,
+      picked,
+      isSpanRequest,
+      isProbe
+    );
     if (served) return served;
   }
 
@@ -513,7 +611,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     : sourceFileUrl(picked.sourceUrl);
   if (!target) {
     console.error('[games] 这一份 ROM 没有可用的来源地址', id, picked.language);
-    return new Response('not found', { status: 404 });
+    return new Response('not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
   }
   /*
    * 只有回源上游时才带那套 UA / Referer：本站 R2 对象不需要，带了反而会让 R2 的
@@ -577,7 +675,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       timedOut
         ? `upstream error: 上游 ${UPSTREAM_TIMEOUT_MS / 1000} 秒内没有响应（多半是被限流或源站过慢）`
         : 'upstream error: 连接上游失败',
-      { status: 504 }
+      { status: 504, headers: { 'Cache-Control': 'no-store' } }
     );
   }
   /*
@@ -650,6 +748,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
             'Accept-Ranges': 'bytes',
             'Cache-Control': 'no-store',
             'Content-Disposition': contentDisposition(fileName),
+            /* 探针是版本号的唯一来源（见 `romCacheVersion`），这一支也不能漏。 */
+            'X-Rom-Version': romCacheVersion(picked, declared),
           },
         });
       } else {
@@ -726,7 +826,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     );
     return new Response(
       `upstream error: 上游返回的是网页而不是文件（content-type: ${contentType}）`,
-      { status: 502 }
+      { status: 502, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 
@@ -741,45 +841,90 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 
   /*
-   * 响应体到底是不是**整个文件** —— 只用来决定状态码和要不要带 `Content-Range`。
+   * 响应体到底是不是**整个文件** —— 决定状态码和要不要带区间头。
    *
    * 两种情况都算：
    *   · 上游忽略了 `Range`，直接回 200（完整表示）；
    *   · 回了 206，但范围正好覆盖 `0..total-1` —— **小 ROM 的常态**：
    *     前端小文件那条一次要整份（`lib/http.ts` 的 `fetchWholeRange`），而文件只有
    *     256 KB，上游于是回 `bytes 0-262143/262144`。
-   *
-   * ⚠️ 它**不再影响缓存头**：ROM 一律 `no-store`，理由见文件上方那段
-   *    「ROM 一律不进边缘缓存」（边缘会把整包存成截断副本，再发给所有分片请求）。
    */
   const upstreamRange = upstream.headers.get('content-range');
+  const upstreamSpan = upstreamRange ? parseContentRange(upstreamRange) : null;
   const servesWholeFile =
     upstream.status === 200 || (upstream.status === 206 && isCompleteByteRange(upstreamRange));
+
+  const length = upstream.headers.get('content-length');
+  const lengthBytes = Number(length ?? 0);
+
+  /*
+   * 这一次能不能交给第 0 层，三条缺一不可（理由见文件上方「边缘缓存策略」）：
+   *   · `isSpanRequest` —— URL 里有明确的区间，这个键永远只对应这一小段；
+   *   · `!isProbe` —— 探针必须每次新鲜，它是版本号的来源；
+   *   · 有准确且足够小的 `Content-Length` —— 没有长度就无法判断边缘存下来的是不是
+   *     残片，那正是 2026-11-06 那次事故。
+   */
+  const cacheable =
+    isSpanRequest && !isProbe && lengthBytes > 0 && lengthBytes <= ROM_SPAN_MAX_BYTES;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'Content-Disposition': contentDisposition(fileName),
-    'Cache-Control': 'private, no-store',
+    /*
+     * 浏览器也存（`max-age` 与 `s-maxage` 同长）。
+     *
+     * 命中边缘缓存**仍然按一次请求计费**（Cloudflare 官方口径：cache hit 不跑 Worker、
+     * 不计 CPU，但按标准请求率计一次）。所以真正能让「重玩同一款」零请求的，只有
+     * 浏览器自己那份：分片 URL 带 `?v=`，版本变了 URL 就变，不存在拿到旧分片的可能。
+     *
+     * 代价是缓存会占用户磁盘，但浏览器按 LRU 自己淘汰，且一次载入几十片的大对象
+     * 本来就存不全 —— 存下的都是最近玩过的那几款，正好是最该留的。
+     */
+    'Cache-Control': cacheable
+      ? `public, max-age=${ROM_SPAN_CACHE_SECONDS}, s-maxage=${ROM_SPAN_CACHE_SECONDS}`
+      : 'private, no-store',
   };
   for (const name of ['accept-ranges', 'etag', 'last-modified']) {
     const value = upstream.headers.get(name);
     if (value) headers[name] = value;
   }
+
   /*
-   * `Content-Range` 只在**真分片**时带：`200` 配 `Content-Range` 是自相矛盾的响应，
-   * 有些代理会因此把整份当成部分对象处理（反过来又是一次「缓存了半截」）。
+   * 版本号：前端拿它拼 `?v=`，缓存键因此随「这份文件」变化。
+   * 拿不到总长就不给 —— 那种响应本来也不缓存，给了只会让 URL 多一个没用的参数。
    */
-  if (!servesWholeFile && upstreamRange) headers['Content-Range'] = upstreamRange;
-  const length = upstream.headers.get('content-length');
+  const romTotal = upstreamSpan?.total ?? (upstream.status === 200 ? lengthBytes : 0);
+  if (romTotal > 0) headers['X-Rom-Version'] = romCacheVersion(picked, romTotal);
+
+  /*
+   * 三种响应形态：
+   *   ① 整份（小 ROM）：200，不带区间头；
+   *   ② 新前端的 span 分片：**200** + `X-Rom-Span` / `X-Rom-Total`。回 200 是为了让
+   *      Cloudflare 愿意存 —— 它默认不缓存 206；语义上也说得通，URL 里的 `?span=`
+   *      已经指名了这一段，这就是它的完整表示；
+   *   ③ 老前端 / curl 的 Range 分片：206 + `Content-Range`，不缓存。
+   *
+   * ⚠️ **探针（`span=0-0`）必须留在 206 + `Content-Range`**：前端从那里解析总长，
+   *    换成 200 + `X-Rom-Span` 它会认不出来。它也不缓存，所以没有「改成 200 才存得住」
+   *    的问题。
+   * ⚠️ `Content-Range` 不能和 200 一起出现：有些代理会因此把整份当成部分对象处理。
+   */
+  const spanChunk = isSpanRequest && !isProbe && !servesWholeFile && upstreamSpan !== null;
+  if (spanChunk) {
+    headers['X-Rom-Span'] = `${upstreamSpan.start}-${upstreamSpan.end}`;
+    headers['X-Rom-Total'] = String(upstreamSpan.total);
+  } else if (!servesWholeFile && upstreamRange) {
+    headers['Content-Range'] = upstreamRange;
+  }
   if (length) headers['Content-Length'] = length;
 
   /*
-   * 整份一律回 **200**（哪怕上游是 206）：前端小文件那条要的就是「一次拿整份」，
-   * 200 正好对应这个语义；真分片（`servesWholeFile === false`）仍旧 206。
-   *
-   * ⚠️ 200 / 206 都带 `no-store`（见上面的缓存段）。**别**再为了「回访快一点」
-   *    给 200 盖上 `s-maxage` —— 第 0 层收到可缓存的 200 就会把几百 MB 存成截断副本，
-   *    再以 200 发给之后所有分片请求，线上整款游戏直接打不开。
+   * ⚠️ 整包（第 ① 种、且不是 span 请求）**必须**保持 `no-store`：几百 MB、没有区间
+   *    可核对，正是 2026-11-06 被存成截断副本的那一类。`cacheable` 的判据已经把
+   *    它排除在外（`isSpanRequest` 为 false），这里别再为「回访快一点」开口子。
    */
-  return new Response(upstream.body, { status: servesWholeFile ? 200 : upstream.status, headers });
+  return new Response(upstream.body, {
+    status: servesWholeFile || spanChunk ? 200 : upstream.status,
+    headers,
+  });
 }

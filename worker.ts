@@ -402,24 +402,28 @@ const edgeCacheWrapper = {
 
     const isApi = pathname.startsWith('/api/');
     /*
-     * ROM 路由：**一律不进缓存**（2026-11-06 改，原来是把 200 原样交给 Workers Caching）。
+     * ROM 路由：**缓存策略交给路由自己决定**（2026-11-07 改）。
      *
-     * 第 0 层在缓存未命中时会先摘掉 `Range` 再回源整包，路由于是按「无 Range」回一个
-     * 200 + 整个几百 MB 的文件；这一层把它存下来（大文件还会存成**截断副本**，
-     * 实测 261 MB 的对象只剩 44.8 MB），之后所有探针 / 分片请求拿到的都是那个 200。
-     * 前端只能当成「服务器忽略 Range = 整包」，把残包交给核心静默失败 ——
-     * 线上「返回 200、只发一个请求、游戏打不开，本地却 206 分片」就是这个。
+     * 2026-11-06 这里曾经一律 `noStore`：第 0 层在缓存未命中时会先摘掉 `Range`
+     * 再回源整包，路由于是回 200 + 整个几百 MB，这一层把它存成**截断副本**
+     * （实测 261,479,549 字节的对象只剩 44,875,456），之后所有分片都命中那个坏副本，
+     * 线上整款游戏打不开。
      *
-     * 所以路由自己的缓存头已经改成一律 `no-store`，这里再兜一层：**不要**再把 ROM
-     * 交给外层缓存。分片本来就是几十个请求，缓存它省不了什么，存错一次就是整款游戏打不开。
+     * 现在敢交回去，是因为路由已经完全换了形态：
+     *   · 分片只走 `?span=`（查询串不会被摘掉），响应 ≤ 8 MiB 且带**准确的**
+     *     `Content-Length` —— 边缘存不下残片，存错了前端也会当场校验失败；
+     *   · 分片回 **200** 而不是 206（Cloudflare 默认不缓存 206），命中时 Worker
+     *     一次都不启动、不计 CPU、不回源 —— 免费版 10ms 的坎就是这么过的；
+     *   · URL 带 `?v=` 版本号，换 ROM 自动换键，不会新旧混片；
+     *   · 整包下载、探针、以及所有错误分支，路由仍然显式 `private, no-store`。
      *
-     * ⚠️ `no-store` 只保证「不再存坏副本」，拦不住摘 `Range`：那发生在看响应之前。
-     *    真正把分片救回来的是**区间改走查询串**（`?span=0-4194303`，见 `lib/http.ts`
-     *    的 `romSpanUrl` 与路由的 `parseSpanParam`）—— 查询串原样进缓存键，这一层
-     *    改不到它。所以**不需要**在 Cloudflare 上给 ROM 接口配 Bypass cache 规则。
+     * ⚠️ **命中照样算一次请求**（官方口径：cache hit 不记 CPU，但按标准请求率计一次）。
+     *    压请求数靠分片大小（8 MiB）和浏览器缓存，不是靠这一层。
+     * ⚠️ **别在这里再套 `noStore`**：那会把路由写好的 `s-maxage` 盖掉，每一片都退回
+     *    「一次 Worker 调用 + 一次回源」，免费版的 CPU 额度立刻吃紧。
      */
     if (ROM_API.test(pathname)) {
-      return noStore(await handler.fetch(request, env, ctx));
+      return handler.fetch(request, env, ctx);
     }
     if (isApi && !PUBLIC_API.test(pathname)) {
       return noStore(await handler.fetch(request, env, ctx));
