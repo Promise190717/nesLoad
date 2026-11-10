@@ -364,37 +364,16 @@ export default function PlayScene({
    */
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  /**
-   * 嵌入页要不要画触屏手柄（`data-pad`，2026-11-10）。
+  /*
+   * 嵌入页**没有**自己的「要不要画触屏手柄」开关（2026-11-10 撤掉）。
    *
-   * 为什么另外算一遍：全站那套 `.play-touch` 只认 `<html data-mobile>`，而那是
-   * **设备**判据（`lib/device.ts`：只看 UA / 触摸能力，刻意不看宽度）。到了 iframe 里，
-   * 这条判据会漏掉一大片真实场景 —— 桌面浏览器把窗口收成手机宽、宿主页面把嵌入框
-   * 放在一个窄栏里，`data-mobile` 都还是 `off`，手柄于是永远不出现（用户 2026-11-10
-   * 报的「移动端没有按键」）。
-   *
-   * 这里补的两条都只在**嵌入页**生效（`!embed` 直接不挂监听）：
-   *   · `pointer: coarse` —— 真触屏但 UA 被判成桌面的情况（带触屏的平板 / 某些安卓机）；
-   *   · 视口 ≤ 1023px —— 和 `.play-workspace` 收成单列的那个断点同一个数。iframe 的
-   *     视口就是**嵌入方给的那个框**，框窄了屏幕下面本来就有空间，手柄放着不挡事。
-   *
-   * ⚠️ 别把这条推广到 `/play`：那一页的宽度不撒手是用户定过的规矩（见 globals.css
-   *    那段「只看设备，不看窗口宽度」），桌面端把窗口拉窄时手柄冒出来会挡掉右栏。
+   * 当天第一版是按 iframe 的框宽算的（`pointer: coarse || 视口 ≤ 1023px`，写到
+   * `.play-workspace[data-pad]`），想覆盖「桌面浏览器窗口收窄 / 宿主把框塞进窄栏」。
+   * 用户否了：手柄出不出现要按**请求的 UA** 判，按框宽算等于让一批桌面用户平白多出
+   * 一排他们用不上的按钮。而按 UA 判的那套**本来就有** —— `<html data-mobile>`
+   * （`lib/device.ts`，`SiteDocument` 的内联脚本在首帧前写好），`.play-touch` 一直认它。
+   * 所以这里什么都不用算，嵌入页和 `/play` 走同一条判据。
    */
-  const [padForced, setPadForced] = useState(false);
-  useEffect(() => {
-    if (!embed || typeof window === 'undefined') return;
-    const coarse = window.matchMedia('(pointer: coarse)');
-    const narrow = window.matchMedia('(max-width: 1023px)');
-    const sync = () => setPadForced(coarse.matches || narrow.matches);
-    sync();
-    coarse.addEventListener('change', sync);
-    narrow.addEventListener('change', sync);
-    return () => {
-      coarse.removeEventListener('change', sync);
-      narrow.removeEventListener('change', sync);
-    };
-  }, [embed]);
 
   /**
    * 地址栏上写着的模式（`?room=` 优先当加入者，否则看 `?mode=`）。**只是初值**，
@@ -1401,7 +1380,6 @@ export default function PlayScene({
         data-screen-size={screenSize}
         data-sidebar={sidebarOpen ? 'open' : 'closed'}
         data-embed={embed ? '' : undefined}
-        data-pad={embed && padForced ? 'on' : undefined}
       >
         {/*
           这一页没有可见的大标题（用户要的就是干净），但**不能没有 h1** ——

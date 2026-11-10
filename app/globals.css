@@ -97,6 +97,15 @@
  */
 .play-workspace[data-embed] .play-stage { position: static; width: 100%; flex-direction: column; }
 /*
+ * 手柄一出现（= `<html data-mobile='on'>`），屏幕 / 回站条 / 手柄之间要留一道缝。
+ * 手机上那道由下面 `@media (max-width: 767px)` 的 `gap: 20px` 给，768 以上没有 ——
+ * 原来靠 `.play-workspace[data-pad='on'] .play-stage` 的 `gap`（那个属性 2026-11-10
+ * 当天就撤了），所以这里补上，只认设备、只认嵌入页。
+ */
+@media (min-width: 768px) {
+  :root[data-mobile='on'] .play-workspace[data-embed] .play-stage { gap: 16px; }
+}
+/*
  * 嵌入页的回站条（2026-11-10）：左边键位表、右边回站入口。
  *
  * 位置在 `.play-stage` 里面、**屏幕和触屏手柄之间**（用户拿箭头指着那块空隙要的）。
@@ -167,8 +176,10 @@
  * 于是只剩一条 `.play-embed-site`。`justify-content: flex-end` 让它靠右，
  * 和原来那条 bar 的右端对齐；`border-top` 留着当分隔线，不然它和手柄糊成一块。
  *
- * ⚠️ 阈值 1023 与触屏手柄的判据（`.play-workspace[data-pad='on']`）对齐。
- *    桌面嵌入（> 1023）仍然显示键位表 —— 那边一行就排得下。
+ * ⚠️ 这条判据是**宽度**，和触屏手柄那条（`:root[data-mobile='on']`，只看设备 / UA）
+ *    已经不是同一个数了 —— 2026-11-10 当天手柄那条先按框宽算、随后被用户改回 UA。
+ *    留着宽度是有意的：框窄到 400 多的时候这 12 组折成三行，比不显示更丑；
+ *    窄框里的桌面用户虽然没了手柄，也只好忍这张表不出现（他手上是键盘，看得懂方向键）。
  * ⚠️ 别再把键位表在窄屏下放回来：真要给手机用户看键位，正确的位置是详情页，
  *    不是在游戏画面底下再铺一块字。
  */
@@ -177,7 +188,7 @@
   /*
    * 只剩一个链接时，它要的是「安静地待在屏幕和手柄之间」，不是一条栏：
    * 去掉发丝线、内边距和上外边距，只留居中的一行字。上下那 16px 由
-   * `.play-stage` 的 `gap` 给（`[data-pad='on']` 那条），这里不要再叠。
+   * `.play-stage` 的 `gap` 给（`@media (max-width: 767px)` 那条），这里不要再叠。
    */
   .play-embed-bar {
     justify-content: center;
@@ -476,9 +487,10 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
  *   · `.play-keys` 一窄就消失 —— 窄窗口的桌面端正需要那张表。
  * 触屏目标尺寸（40px 那批）同理：那是给手指的，不是给窄窗口的。
  *
- * ⚠️ 唯一的例外是**嵌入页**（2026-11-10）：那条路另外认 `.play-workspace[data-pad='on']`
- *    （触屏或视口 ≤ 1023px），理由见下面那段注释 —— iframe 里「设备」是宿主页面，
- *    只认 `data-mobile` 会把「窄框」这一大类全漏掉。`/play` 不受影响，别照着抄过去。
+ * ⚠️ 嵌入页（`/embed/games/<id>`）也**只认这一条**（2026-11-10）。当天第一版给那条路
+ *    另加了一个 `.play-workspace[data-pad='on']`（`pointer: coarse || 视口 ≤ 1023px`），
+ *    想兜住「宿主把 iframe 塞进窄栏」；用户否了 —— 手柄出不出现按**请求的 UA** 判，
+ *    按框宽算只会让桌面用户平白多出一排用不上的按钮。组件那边已经不再写那个属性。
  *
  * 纯版式那几条（workspace 收成单列、屏幕按 4:3、sidebar 堆叠、overlay 内边距）
  * **留在下面那个宽度媒体查询里** —— 它们回答的才是「现在有多宽」，窄窗口照样要收。
@@ -488,22 +500,14 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 :root[data-mobile='on'] .play-keys,
 :root[data-mobile='on'] .play-panel-divider { display: none; }
 /*
- * 触屏手柄的显示规则 —— 两个判据合在一起：
+ * 触屏手柄的显示规则 —— 判据只有一个：`:root[data-mobile='on']`，也就是**设备**
+ * （`lib/device.ts`，只看 UA / 触摸能力，刻意不看宽度）。`/play` 和嵌入页共用它。
  *
- *   ① `:root[data-mobile='on']`：全站的**设备**判据（`lib/device.ts`，只看 UA /
- *      触摸能力）。`/play` 和嵌入页都吃这一条。
- *   ② `.play-workspace[data-pad='on']`：**只有嵌入页会写**（2026-11-10 加）。
- *      `PlayScene` 在 `embed` 下另外算 `pointer: coarse || 视口 ≤ 1023px` 写上去 ——
- *      iframe 里「设备」是宿主页面，桌面浏览器把窗口收窄、宿主把框放进窄栏这两种
- *      情况 ① 都判成 off，手柄于是永远不出现（用户 2026-11-10 报的「移动端没有按键」）。
- *      为什么不干脆把 ① 改成看宽度：`/play` 那条不撒手是用户定过的规矩
- *      （见下面那段「只看设备，不看窗口宽度」），桌面端拉窄窗口时手柄会挡右栏。
- *
- * ⚠️ 这一组 `.play-touch*` 的尺寸规则都带着 ② 这个别名，改的时候别只改一边：
- *    `--pad-btn` / `--pad-font` 是这里给的，键帽的宽高全靠它们（组件那边没有兜底值）。
+ * ⚠️ 别再按窗口宽度 / `pointer: coarse` 给嵌入页开小门：iframe 的「视口」是宿主页面
+ *    给的那个框，桌面站上一块窄栏就能把一排键盘用户从「没有手柄」推成「有手柄」。
+ *    用户 2026-11-10 的原话是「不能根据屏幕宽度来判断，而是用户的请求 UA」。
  */
-:root[data-mobile='on'] .play-touch,
-.play-workspace[data-pad='on'] .play-touch {
+:root[data-mobile='on'] .play-touch {
   display: block;
   width: 100%;
   /*
@@ -538,23 +542,18 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   margin-inline: auto;
   padding: 12px 8px max(16px, env(safe-area-inset-bottom));
 }
-:root[data-mobile='on'] .play-touch-main,
-.play-workspace[data-pad='on'] .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-:root[data-mobile='on'] .play-touch-system,
-.play-workspace[data-pad='on'] .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
+:root[data-mobile='on'] .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+:root[data-mobile='on'] .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
 /*
  * SELECT / START（`PillBtn`，`/play` 上 snes 的肩键也走这条）的**最小触摸面**。
  * 2026-11-03 跟着上面那条一起收：76×40 → 68×34。34 是手指按得住的底线，
  * `PillBtn` 自己的内边距算出来只有 ~19px 高，全靠这条撑起来。
  */
 :root[data-mobile='on'] .play-touch-system button,
-:root[data-mobile='on'] .play-shoulders button,
-.play-workspace[data-pad='on'] .play-touch-system button,
-.play-workspace[data-pad='on'] .play-shoulders button { min-height: 34px; min-width: 68px; }
-:root[data-mobile='on'] .play-shoulders,
-.play-workspace[data-pad='on'] .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
+:root[data-mobile='on'] .play-shoulders button { min-height: 34px; min-width: 68px; }
+:root[data-mobile='on'] .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
 /*
- * 手柄一出现（窄框 / 触屏），这块内容**保持在容器里居中** —— 这条是刻意的「不做」。
+ * 手柄一出现（触屏），这块内容**保持在容器里居中** —— 这条是刻意的「不做」。
  *
  * 2026-11-10 试过改成 `align-content: start`（想让屏幕贴顶、留白集中到下方），
  * 用户看到后回的是「这样更丑了」：屏幕顶到 iframe 上沿，底下空出 200px+，
@@ -567,10 +566,11 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 /*
  * 手柄一出现，`.play-stage` 就必须竖排（屏幕在上、手柄在下）。
  *
- * 靠的不是 `@media (max-width: 767px)` 那条：嵌入页的判据是 1023 —— 768~1023 这一档
- * 会落到「手柄显示了、stage 还是横排」，手柄被挤成屏幕右边的一列。
+ * ⚠️ 曾经是 `.play-workspace[data-pad='on'] .play-stage`（嵌入页按框宽算的那套，
+ *    2026-11-10 当天就撤了，见上面「只看设备」那段）。嵌入页现在靠
+ *    `.play-workspace[data-embed] .play-stage`（本来就要竖排，屏幕 + 回站条 + 手柄），
+ *    `/play` 靠下面 `@media (max-width: 767px)` 那条 —— 两边都已经有了，别再补回来。
  */
-.play-workspace[data-pad='on'] .play-stage { flex-direction: column; justify-content: flex-start; gap: 16px; }
 /* 触屏：手指要 34px 起步（右栏这排按钮在桌面上是 24px） */
 :root[data-mobile='on'] .play-row { min-height: 44px; }
 :root[data-mobile='on'] .play-row-label,
@@ -604,10 +604,8 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    *    320 的容器自己会算出 33~34px，写死反而把自适应压死了。
    *    只留「机身太窄，横缝不能再占地方」这一件事。
    */
-  :root[data-mobile='on'] .play-touch,
-  .play-workspace[data-pad='on'] .play-touch { padding-inline: 2px; }
-  :root[data-mobile='on'] .play-touch-main,
-  .play-workspace[data-pad='on'] .play-touch-main { gap: 8px; }
+  :root[data-mobile='on'] .play-touch { padding-inline: 2px; }
+  :root[data-mobile='on'] .play-touch-main { gap: 8px; }
 }
 @media (max-height: 540px) and (orientation: landscape) and (pointer: coarse) {
   .play-display { max-width: min(100%, 62vh); }

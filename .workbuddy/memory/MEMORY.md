@@ -57,7 +57,7 @@
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`；`/login`、`/account` Link `prefetch={false}`。
 - 长文档页（`/privacy` `/terms` `/about` `/contact`）共用壳 `components/DocPage.tsx`（原 LegalPage，2026-11-03 改名）；文案在 `lib/legal.ts` / `lib/site-doc.ts`（四语言 + 其余回退英文，短文导航词别往 18 张表里加）；页脚免责声明唯一出处 `lib/site-doc.ts` `disclaimer()`，三处页脚都挂。
 - `/play` 唯一开局页（PlayScene + GamesShell）；`?id=` 自动载入、`?room=` 加入者、`?lang=` 选 ROM 版本。`/embed/games/<id>` 是详情页「嵌入此游戏」给的纯播放页（`PlayScene` 的 `embed` 模式：无右栏 + `data-embed` 单列 + 屏幕下一条 `.play-embed-bar` 放键位表和回站链接），`noindex` 且 robots 挡 `/embed`。
-- 🔴 触屏手柄**两条判据**：`:root[data-mobile='on']`（全站设备判据，`/play` 只认这条）＋ `.play-workspace[data-pad='on']`（**只有嵌入页写**：`pointer: coarse || 视口≤1023px`，因为 iframe 里「设备」是宿主页面）。那组 `.play-touch*` 尺寸规则（`--pad-btn`/`--pad-font`）两个选择器必须一起改，组件里没有兜底值。嵌入页的底是写死的黑，说明条只能用 `--color-crt-*`，别用 ink / `.play-kbd`（会随主题反相）。
+- 🔴 触屏手柄**只有一条判据** `:root[data-mobile='on']`（`lib/device.ts` 的 UA/触摸判定，首帧前由 `SiteDocument` 内联脚本写），`/play` 与嵌入页共用。2026-11-10 当天给嵌入页加过的 `.play-workspace[data-pad='on']`（`pointer: coarse || 框宽≤1023`）**当天撤掉**：用户要「按请求 UA 判，不按屏幕宽度」。那组 `.play-touch*` 尺寸（`--pad-btn`/`--pad-font`）只有这一个选择器，组件里没有兜底值。嵌入页键位表隐藏仍是 `max-width: 1023px`（已与手柄解耦，别再对齐）。嵌入页的底是写死的黑，说明条只能用 `--color-crt-*`，别用 ink / `.play-kbd`（会随主题反相）。
 - 存档 = 电池 `.srm` 一款一份（快照别加回）；读档 = 带存档重插卡（applySave）。
 - 🔴 房间页永久下线（代码在 `app/[locale]/_room`），别加入口、别写 sitemap；**看/评整体页面风格、盘点页面时也别读它、别算进去**（2026-11-05 用户：「不要看 room 页面」）。
 - 🔴 功能开关唯一出口 `lib/features.ts`。`ROM_DOWNLOAD_ENABLED`（2026-11-04 起 `false`，AdSense 送审）关掉时：详情页下载钮不画（`downloadHref` 传 `null`）、`/games/[id]/download` 直接 `notFound()`、首页 FAQ q4 收起。**`/api/games/[id]/rom` 不归它管**（关掉等于关站）。编译期常量，改完必须重新构建部署。
