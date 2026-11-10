@@ -234,6 +234,8 @@ export const th: Record<MessageKey, string> = {
   'netplay.copied': 'คัดลอกแล้ว',
   'netplay.share': 'แชร์',
   'netplay.shareCopied': 'คัดลอกลิงก์แล้ว',
+  'netplay.qr': 'แสดงคิวอาร์โค้ด',
+  'netplay.qrHint': 'สแกนด้วยมือถือเพื่อเข้าร่วม',
   'netplay.inviteTitle': 'คำเชิญเข้าห้อง',
   'netplay.inviteBody': 'เข้าร่วมห้อง {code} ไหม?',
   'netplay.inviteJoin': 'เข้าร่วม',

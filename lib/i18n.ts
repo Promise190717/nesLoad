@@ -793,6 +793,14 @@ const en = {
   'netplay.share': 'Share',
   'netplay.shareCopied': 'Link copied',
   /*
+   * 二维码（2026-11-10 用户要求）：房间卡上那颗方块钮 + 展开后码下面那句说明。
+   * 解决的是「手机怎么进来」——分享钮给的链接在手机上粘贴不方便，念 4 位码更慢；
+   * 二维码就是**同一条链接**的另一种给法（见 PlayScene 的 `shareLink`）。
+   * `qr` 只当 aria-label / tooltip 用，钮上画的是像素图标、没有字。
+   */
+  'netplay.qr': 'Show QR code',
+  'netplay.qrHint': 'Scan with your phone to join',
+  /*
    * 打开分享链接时先弹这个确认框，**不直接进房间** ——
    * 光点一条链接就被塞进陌生人的房间太突然了，而且对方可能已经走了。
    */
@@ -1989,6 +1997,9 @@ const zh: Record<MessageKey, string> = {
   /* 「分享」= 复制带房间码的链接，见英文表里同一条上面的说明 */
   'netplay.share': '分享',
   'netplay.shareCopied': '链接已复制',
+  /* 二维码那颗钮 + 说明，理由见英文表里同两条上面的说明 */
+  'netplay.qr': '显示二维码',
+  'netplay.qrHint': '用手机扫码加入这个房间',
   /* 打开分享链接时的确认框 */
   'netplay.inviteTitle': '房间邀请',
   'netplay.inviteBody': '加入房间 {code}？',

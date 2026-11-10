@@ -269,6 +269,8 @@ export const id: Record<MessageKey, string> = {
   /* 「分享」复制的是带房间码的整条链接，和上面那条只复制码的分工不同 */
   'netplay.share': 'Bagikan',
   'netplay.shareCopied': 'Tautan tersalin',
+  'netplay.qr': 'Tampilkan kode QR',
+  'netplay.qrHint': 'Pindai dengan ponsel untuk bergabung',
   /* 打开分享链接先确认，不直接进房间 */
   'netplay.inviteTitle': 'Undangan ruang',
   'netplay.inviteBody': 'Gabung ke ruang {code}?',

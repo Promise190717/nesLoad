@@ -231,6 +231,8 @@ export const zhTW: Record<MessageKey, string> = {
   'netplay.copied': '已複製',
   'netplay.share': '分享',
   'netplay.shareCopied': '連結已複製',
+  'netplay.qr': '顯示 QR 碼',
+  'netplay.qrHint': '用手機掃碼加入這個房間',
   'netplay.inviteTitle': '房間邀請',
   'netplay.inviteBody': '加入房間 {code}？',
   'netplay.inviteJoin': '加入',

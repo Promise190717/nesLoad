@@ -292,6 +292,32 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    触屏那档由下面 `[data-mobile='on'] .play-room button` 的 40px 盖回来（手指优先）。 */
 .play-room-actions { display: flex; flex-shrink: 0; align-items: center; gap: 6px; }
 .play-room-actions > button { height: 22px; padding: 0 8px; font-size: 11px; }
+/* 二维码那颗钮（2026-11-10）：和旁边两颗字钮同高，只是宽度也收成正方形。
+   选择器要带 `.play-room-actions` 前缀 —— 上面那条 `> button` 的 padding 是 0 8px，
+   单类名压不过它。底色 / 悬停跟 CopyBtn 的 sidebar 档对齐（ink-800 + 强调色）。
+   触屏那档由下面 `[data-mobile='on']` 那段把宽高一起撑到 40px。 */
+.play-room-actions > .play-room-qr-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; padding: 0; color: var(--color-ink-200); background: var(--color-ink-800);
+  transition: color .15s, border-color .15s;
+}
+.play-room-actions > .play-room-qr-btn:hover,
+.play-room-actions > .play-room-qr-btn[aria-expanded='true'] {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--side-line));
+}
+/* 展开中：连描边一起点成主题色（`--px-c` 已注册成 <color>，可动画），
+   一眼看出「码在下面开着」而不是只变了图标颜色 */
+.play-room-actions > .play-room-qr-btn[aria-expanded='true'] { --px-c: var(--color-accent); }
+/* 展开后的二维码：白纸一张 + 一句说明。
+   ⚠️ 白底**写死**、不跟主题翻 —— 二维码必须深码浅底才扫得出来，深色主题下这块
+   就是一张贴在机台上的贴纸（和 `--color-crt-*` 那组「永远黑」同一个性质）。 */
+.play-room-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 9px; }
+.play-room-qr-paper { display: flex; padding: 5px; background: #fff; border: 1px solid var(--side-line); }
+.play-room-qr-paper svg { display: block; }
+/* 占位：qrcode.react 那个 chunk 还在路上时先把方块撑住，免得卡片跳一下（132 = 120 + 5×2 + 1×2） */
+.play-room-qr-wait { display: block; width: 132px; height: 132px; background: #fff; }
+.play-room-qr-hint { font-size: 11px; line-height: 1.45; text-align: center; color: var(--side-dim); }
 /* 房间卡刚出现时的提醒：描边闪主题色几下（steps 保像素感），几秒后停。
    闪的是 --px-c（已 @property 注册成 <color>，可动画）——直接改 box-shadow
    会把 pixel-edge 的四条边整个顶掉 */
@@ -553,6 +579,8 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 :root[data-mobile='on'] .play-size-btn { min-height: 34px; }
 :root[data-mobile='on'] .play-tick { width: 7px; height: 18px; }
 :root[data-mobile='on'] .play-room button { min-height: 40px; }
+/* 二维码那颗只有图标，跟着 40px 的同时宽度也得撑开，不然是个 22×40 的细条 */
+:root[data-mobile='on'] .play-room-actions > .play-room-qr-btn { width: 40px; }
 :root[data-mobile='on'] .play-page { padding-bottom: env(safe-area-inset-bottom); }
 @media (max-width: 767px) {
   .play-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }

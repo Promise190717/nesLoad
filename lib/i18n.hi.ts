@@ -245,6 +245,8 @@ export const hi: Record<MessageKey, string> = {
   'netplay.copied': 'कॉपी हो गया',
   'netplay.share': 'शेयर',
   'netplay.shareCopied': 'लिंक कॉपी हो गया',
+  'netplay.qr': 'QR कोड दिखाएँ',
+  'netplay.qrHint': 'जुड़ने के लिए फ़ोन से स्कैन करें',
   'netplay.inviteTitle': 'रूम का न्योता',
   'netplay.inviteBody': 'रूम {code} जॉइन करें?',
   'netplay.inviteJoin': 'जॉइन करें',

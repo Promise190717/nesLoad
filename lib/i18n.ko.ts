@@ -225,6 +225,8 @@ export const ko: Record<MessageKey, string> = {
   'netplay.copied': '복사했습니다',
   'netplay.share': '공유',
   'netplay.shareCopied': '링크를 복사했습니다',
+  'netplay.qr': 'QR 코드 표시',
+  'netplay.qrHint': '휴대폰으로 스캔해 참가',
   'netplay.inviteTitle': '방 초대',
   'netplay.inviteBody': '{code} 방에 참여할까요?',
   'netplay.inviteJoin': '참여',

@@ -250,6 +250,8 @@ export const fr: Record<MessageKey, string> = {
   'netplay.copied': 'Copié',
   'netplay.share': 'Partager',
   'netplay.shareCopied': 'Lien copié',
+  'netplay.qr': 'Afficher le QR code',
+  'netplay.qrHint': 'Scannez avec votre téléphone pour rejoindre',
   'netplay.inviteTitle': 'Invitation à une salle',
   'netplay.inviteBody': 'Rejoindre la salle {code} ?',
   'netplay.inviteJoin': 'Rejoindre',

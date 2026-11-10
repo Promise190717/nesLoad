@@ -229,6 +229,8 @@ export const de: Record<MessageKey, string> = {
   'netplay.copied': 'Kopiert',
   'netplay.share': 'Teilen',
   'netplay.shareCopied': 'Link kopiert',
+  'netplay.qr': 'QR-Code anzeigen',
+  'netplay.qrHint': 'Mit dem Handy scannen und beitreten',
   'netplay.inviteTitle': 'Raumeinladung',
   'netplay.inviteBody': 'Raum {code} beitreten?',
   'netplay.inviteJoin': 'Beitreten',

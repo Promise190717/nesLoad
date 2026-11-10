@@ -238,6 +238,8 @@ export const nl: Record<MessageKey, string> = {
   'netplay.copied': 'Gekopieerd',
   'netplay.share': 'Delen',
   'netplay.shareCopied': 'Link gekopieerd',
+  'netplay.qr': 'QR-code tonen',
+  'netplay.qrHint': 'Scan met je telefoon om mee te doen',
   'netplay.inviteTitle': 'Kameruitnodiging',
   'netplay.inviteBody': 'Deelnemen aan kamer {code}?',
   'netplay.inviteJoin': 'Deelnemen',

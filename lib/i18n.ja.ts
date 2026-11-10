@@ -227,6 +227,8 @@ export const ja: Record<MessageKey, string> = {
   'netplay.copied': 'コピーしました',
   'netplay.share': '共有',
   'netplay.shareCopied': 'リンクをコピーしました',
+  'netplay.qr': 'QR コードを表示',
+  'netplay.qrHint': 'スマホで読み取って参加',
   'netplay.inviteTitle': 'ルームへの招待',
   'netplay.inviteBody': 'ルーム {code} に参加しますか？',
   'netplay.inviteJoin': '参加',

@@ -24,6 +24,7 @@
     "nextjs-toploader": "^3.9.17",
     "nostalgist": "^0.22.0",
     "postgres": "^3.4.9",
+    "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

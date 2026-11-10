@@ -236,6 +236,8 @@ export const fil: Record<MessageKey, string> = {
   'netplay.copied': 'Nakopya',
   'netplay.share': 'I-share',
   'netplay.shareCopied': 'Nakopya ang link',
+  'netplay.qr': 'Ipakita ang QR code',
+  'netplay.qrHint': 'I-scan gamit ang telepono para sumali',
   'netplay.inviteTitle': 'Imbitasyon sa room',
   'netplay.inviteBody': 'Sumali sa room {code}?',
   'netplay.inviteJoin': 'Sumali',

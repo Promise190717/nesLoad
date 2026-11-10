@@ -257,6 +257,8 @@ export const ms: Record<MessageKey, string> = {
   /* 「分享」= 复制一条带房间码的链接；上面那条复制的是码本身 */
   'netplay.share': 'Kongsi',
   'netplay.shareCopied': 'Pautan disalin',
+  'netplay.qr': 'Tunjuk kod QR',
+  'netplay.qrHint': 'Imbas dengan telefon untuk menyertai',
   'netplay.inviteTitle': 'Jemputan bilik',
   'netplay.inviteBody': 'Sertai bilik {code}?',
   'netplay.inviteJoin': 'Sertai',

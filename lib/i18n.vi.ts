@@ -247,6 +247,8 @@ export const vi: Record<MessageKey, string> = {
   'netplay.copied': 'Đã sao chép',
   'netplay.share': 'Chia sẻ',
   'netplay.shareCopied': 'Đã sao chép liên kết',
+  'netplay.qr': 'Hiện mã QR',
+  'netplay.qrHint': 'Quét bằng điện thoại để tham gia',
   'netplay.inviteTitle': 'Lời mời vào phòng',
   'netplay.inviteBody': 'Tham gia phòng {code}?',
   'netplay.inviteJoin': 'Tham gia',

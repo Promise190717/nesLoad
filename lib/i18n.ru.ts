@@ -246,6 +246,8 @@ export const ru: Record<MessageKey, string> = {
   'netplay.copied': 'Скопировано',
   'netplay.share': 'Поделиться',
   'netplay.shareCopied': 'Ссылка скопирована',
+  'netplay.qr': 'Показать QR-код',
+  'netplay.qrHint': 'Отсканируйте телефоном, чтобы войти',
   'netplay.inviteTitle': 'Приглашение в комнату',
   'netplay.inviteBody': 'Войти в комнату {code}?',
   'netplay.inviteJoin': 'Войти',

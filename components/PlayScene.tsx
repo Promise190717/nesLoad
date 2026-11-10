@@ -56,9 +56,10 @@ import { useI18n } from './I18nProvider';
 import KeyBindingsPanel from './KeyBindingsPanel';
 import PadGlyph from './PadGlyph';
 import PlaySaveControls from './PlaySaveControls';
+import RoomQr from './RoomQr';
 import { unpackSave } from '@/lib/state-file';
 import { MobileGamepad } from './HandheldConsole';
-import { ExpandIcon, PlayMoonIcon, ReloadIcon, SunIcon } from './icons';
+import { ExpandIcon, PlayMoonIcon, QrIcon, ReloadIcon, SunIcon } from './icons';
 import { TV_SIZES, type TvSize } from '@/lib/tv-size';
 import { readTheme, saveTheme } from '@/lib/theme';
 
@@ -436,6 +437,12 @@ export default function PlayScene({
   const [netplayState, setNetplayState] =
     useState<NetplayState>(IDLE_NETPLAY_STATE);
   const [netplayBusy, setNetplayBusy] = useState(false);
+  /**
+   * 房间二维码展开在**哪一间房**上 —— 存的是房间码本身，不是 boolean。
+   * 这样换房 / 退房重开会自己收起来（码变了就对不上），不用再写一条「离开时清掉」的 effect;
+   * 和 `CopyBtn` 里那个「存内容、不存 true」是同一个套路。
+   */
+  const [qrRoomCode, setQrRoomCode] = useState<string | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [roomToast, setRoomToast] = useState<{
     key: MessageKey;
@@ -503,6 +510,9 @@ export default function PlayScene({
 
   const hasPicture = Boolean(rom) || Boolean(remoteStream);
   const inRoom = netplayState.status !== 'idle';
+  /** 二维码现在开着吗 —— 只在**当前这间房**上算开着（见 `qrRoomCode`）。 */
+  const roomQrOpen =
+    netplayState.code !== null && qrRoomCode === netplayState.code;
   const busy = phase === 'downloading' || phase === 'booting';
   /**
    * 加载卡正盖在屏幕上吗？两个入口：主流程（busy）和 directSolo 的自动开播。
@@ -1777,6 +1787,25 @@ export default function PlayScene({
                 */}
                 {netplayState.role === 'host' && (
                   <div className="play-room-actions">
+                    {/*
+                      二维码（2026-11-10 用户要求：手机扫码直接进房）。
+                      摆在「复制」「分享」**左边**：三颗里只有它是「展开」而不是复制，
+                      放最外侧不会和两颗字钮混成一组。钮上只有图标，字全靠 aria-label /
+                      title —— 这一行还要塞下房间码，加字就挤了。
+                    */}
+                    <button
+                      type="button"
+                      aria-label={t('netplay.qr')}
+                      title={t('netplay.qr')}
+                      aria-expanded={roomQrOpen}
+                      aria-controls="play-room-qr"
+                      onClick={() =>
+                        setQrRoomCode(roomQrOpen ? null : netplayState.code)
+                      }
+                      className="play-room-qr-btn pixel-edge pxw-2 pxc-500"
+                    >
+                      <QrIcon size={16} />
+                    </button>
                     <CopyBtn
                       text={netplayState.code}
                       label={t('netplay.copy')}
@@ -1798,6 +1827,14 @@ export default function PlayScene({
                   </div>
                 )}
               </div>
+              {/*
+                二维码展开位（2026-11-10）。紧贴房间码那一行下面 —— 它讲的还是
+                「怎么进这个房间」这一件事，掉到卡片最底下就断成两截了。
+                编进去的是 `shareLink()`：和「分享」钮**同一条**链接，不另开一条通道。
+              */}
+              {roomQrOpen && netplayState.code && (
+                <RoomQr url={shareLink(netplayState.code)} />
+              )}
               <p
                 role="status"
                 className={`mt-2 flex items-center gap-2 text-[12px] ${netplayState.error ? 'text-danger' : netplayState.status === 'connected' ? 'text-ok' : netplayState.role === 'guest' ? 'text-accent' : 'text-info'}`}

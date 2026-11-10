@@ -116,6 +116,35 @@ export function ExpandIcon({ size = 16 }: IconProps) {
 }
 
 /**
+ * 二维码（2026-11-10，联机房间卡上那颗「扫码进房」的钮）。
+ *
+ * 三个 6×6 的定位角（2px 边 + 2×2 芯）+ 右下几枚散点 —— 小尺寸下只靠「三个角」
+ * 就能读成二维码，再多画只会糊成一片。定位角走 `evenodd` 的挖孔路径（两个同心方块），
+ * 比用四根边条拼省一半节点，整数坐标 + `crispEdges` 一样是硬边。
+ */
+export function QrIcon({ size = 16 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+    >
+      <path fillRule="evenodd" d="M1 1h6v6H1zM3 3h2v2H3z" />
+      <path fillRule="evenodd" d="M9 1h6v6H9zM11 3h2v2H11z" />
+      <path fillRule="evenodd" d="M1 9h6v6H1zM3 11h2v2H3z" />
+      <rect x="9" y="9" width="2" height="2" />
+      <rect x="13" y="9" width="2" height="2" />
+      <rect x="11" y="11" width="2" height="2" />
+      <rect x="9" y="13" width="2" height="2" />
+      <rect x="13" y="13" width="2" height="2" />
+    </svg>
+  );
+}
+
+/**
  * 两个并肩站着的半身玩家 + 头顶一道信号，表示「联机对战」。
  *
  * 为什么是这两块拼一起：光画两个人只会读成「好友 / 群组」（试过，看不出是联机），

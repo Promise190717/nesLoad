@@ -240,6 +240,8 @@ export const pt: Record<MessageKey, string> = {
   'netplay.copied': 'Copiado',
   'netplay.share': 'Compartilhar',
   'netplay.shareCopied': 'Link copiado',
+  'netplay.qr': 'Mostrar código QR',
+  'netplay.qrHint': 'Escaneie com o celular para entrar',
   'netplay.inviteTitle': 'Convite para a sala',
   'netplay.inviteBody': 'Entrar na sala {code}?',
   'netplay.inviteJoin': 'Entrar',
