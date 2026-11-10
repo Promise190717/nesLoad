@@ -96,7 +96,7 @@ export const nl: Record<MessageKey, string> = {
   'home.faq.a5': 'Natuurlijk! Pak een vriend erbij en open een kamer voor een potje.',
   'home.faq.q6': 'Werkt het met gamecontrollers?',
   'home.faq.a6':
-    'Ja — sluit een USB- of bluetoothcontroller aan en de emulator pikt hem via je browser op. De toetsen volgen de standaardwaarden van elke core; op een telefoon gebruik je de knoppen op het scherm.',
+    'Ja — een USB- of bluetoothcontroller werkt zodra je browser hem ziet. De toetsen blijven de standaardindeling van elke console.',
   'seo.heading': 'Speel retrospellen in je browser',
   'seo.intro':
     '{site} is een online retrogamekamer. NES, SNES, Game Boy, GBA, Mega Drive en arcadegames draaien gewoon in de browser — geëmuleerd op je eigen machine, met RetroArch gecompileerd naar WebAssembly.',

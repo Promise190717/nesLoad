@@ -108,7 +108,7 @@ export const id: Record<MessageKey, string> = {
   'home.faq.a5': 'Tentu! Ajak teman dan buat ruang untuk bertanding.',
   'home.faq.q6': 'Apakah mendukung gamepad?',
   'home.faq.a6':
-    'Mendukung — colok gamepad USB atau Bluetooth dan emulator akan mengenalinya lewat browser. Pemetaan tombol mengikuti bawaan tiap core; di ponsel pakai tombol di layar.',
+    'Mendukung — gamepad USB atau Bluetooth langsung jalan begitu browser mengenalinya. Susunan tombol tetap mengikuti bawaan tiap konsol.',
 
   /* 首屏那段看不见的正文（sr-only）：这页除了按钮没有可索引的文字 */
   'seo.heading': 'Main game retro di browser',

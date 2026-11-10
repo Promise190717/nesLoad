@@ -234,6 +234,33 @@ function romSpanUrl(url: string, start: number, end: number | null): string {
   return withQueryParam(url, 'span', end === null ? `${start}-` : `${start}-${end}`);
 }
 
+/**
+ * 给同一段换一个**缓存键**，用于「重试时绕过一份坏分片」。
+ *
+ * ## 为什么需要（2026-11-10）
+ *
+ * 分片响应是 `200` + 准确的 `Content-Length` + `s-maxage` 7 天（见
+ * `app/api/games/[id]/rom/route.ts` 的 `cacheable`），所以第 0 层会把它存住。
+ * 但存的时候挡不住「这次转发中途断了」——边缘有可能把半截 body 当成这一段的
+ * 完整表示（2026-11-06 那次是 261 MB 只剩 44.8 MB，同一个机制）。
+ *
+ * 坏片本身不可怕，`fetchSpan` 的校验会当场拦住；可怕的是**它的缓存键不变**：
+ * 同一个 URL 重试多少次都拿到同一份残片，客户端只能报「文件不完整」，
+ * 要等 7 天 TTL 过期才自愈。用户点「重新载入」也永远不会好。
+ *
+ * ## 为什么不用「把 TTL 调短」
+ *
+ * TTL 就是这层缓存命中率的全部。调短等于把每片都退回一次 Worker 调用，
+ * 免费版 10ms CPU 立刻吃紧 —— 那是拿正常路径的稳定性换失败路径的恢复速度。
+ * `nc` 只在**失败重试**时出现，正常下载的 URL 一个字节都不多。
+ *
+ * 也考虑过「整单从头重来」：那要用户重新点一次，前面已经下好的几十片全部丢掉，
+ * 起不到任何作用（坏片的键还是没变）。
+ */
+function romRetryUrl(url: string, attempt: number): string {
+  return attempt === 0 ? url : withQueryParam(url, 'nc', String(attempt));
+}
+
 /** `[start, end]` → `bytes=start-end`；`end === null` → `bytes=start-`。 */
 function romRangeHeader(start: number, end: number | null): string {
   return `bytes=${start}-${end === null ? '' : end}`;
@@ -291,10 +318,14 @@ function waitForRomRetry(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function retryRom<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+/**
+ * 重试包装。`operation` 会收到**第几次尝试**（从 0 起），用来给失败重试换一个
+ * 缓存键（见 `fetchSpan` / `fetchWholeRange` 里的 `nc`）。
+ */
+async function retryRom<T>(operation: (attempt: number) => Promise<T>, signal?: AbortSignal): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     if (signal?.aborted) throw abortError();
-    try { return await operation(); }
+    try { return await operation(attempt); }
     catch (error) {
       if (signal?.aborted) throw abortError();
       /* 重试解决不了：服务器每次都会回同一个「200 且无长度」，只会白拉三遍整包。 */
@@ -312,7 +343,7 @@ async function retryRom<T>(operation: () => Promise<T>, signal?: AbortSignal): P
  * 三部曲：
  *   1. 探针 `bytes=0-0`，问出总长度；
  *   2. 总长 ≤ 8 MiB → 一次 Range 拿整份；
- *   3. 否则 4 MiB 一片、4 路并发，每片核对状态 / Content-Range / 字节数。
+ *   3. 否则 8 MiB 一片、4 路并发，每片核对状态 / Content-Range / 字节数。
  *
  * ⚠️ 每个请求的区间都**同时**写进 `?span=` 和 `Range`（见 `romSpanUrl`）：
  *    请求头会被 Workers Caching 摘掉，查询串不会。
@@ -385,13 +416,36 @@ export async function fetchRomWithProgress(
 
   // ---------- 2. 小文件：一次拿整份 ----------
   if (total <= ROM_DIRECT_MAX_BYTES) {
-    const blob = await retryRom(() => fetchWholeRange(chunkUrl, total, signal), signal);
+    const blob = await retryRom((attempt) => fetchWholeRange(chunkUrl, total, signal, attempt), signal);
     onProgress(1);
     return blob;
   }
 
   // ---------- 3. 大文件：并发分片 ----------
-  return fetchInChunks(chunkUrl, total, signal, onProgress);
+  /*
+   * 整单再来一次（2026-11-10）。
+   *
+   * `fetchInChunks` 内部已经把单片重试（3 次）+ 二分（8→4→2 MiB）用完了，
+   * 走到这里说明某一段是真的过不去。但绝大多数失败只是「那一次转发被掐了」，
+   * 重来一遍就能过 —— 而**已经成功的片全部走边缘缓存**，重来的真实成本只有
+   * 那次断掉的段。以前这里直接把「文件不完整」丢给用户，让他自己点重新载入，
+   * 等于把一次自动可恢复的抖动做成了人工操作。
+   *
+   * 只重来**一次**：第二次还失败就说明不是抖动（上游没了 / 对象本身坏了），
+   * 无限重试只会让用户盯着一条永远不动的载入条。用户取消照旧立刻停。
+   *
+   * ⚠️ 别把这次重来挪到调用方（`PlayScene` / `ConsoleScene`）：
+   *    那两个地方不知道 `total`、也拿不到已经下好的分片，重来只能整包重下。
+   */
+  try {
+    return await fetchInChunks(chunkUrl, total, signal, onProgress);
+  } catch {
+    if (signal?.aborted) throw abortError();
+    // 给上游/边缘一点时间自愈，紧接着再打多半还是同一个失败的段
+    await waitForRomRetry(800, signal);
+    onProgress(0);
+    return fetchInChunks(chunkUrl, total, signal, onProgress);
+  }
 }
 
 /**
@@ -399,13 +453,17 @@ export async function fetchRomWithProgress(
  *
  * 服务端可能把「覆盖整份的 206」改写成 200，所以这里**不要求 206**，
  * 只要求字节数对得上 —— 200 和 206 都接受。
+ *
+ * `attempt > 0` 时换一个缓存键（`nc`）：小文件整包同样是「一条缓存记录 = 一整份
+ * 文件」，被存成残片时同 URL 重试永远拿到同一份，见 `romRetryUrl`。
  */
 async function fetchWholeRange(
   url: string,
   total: number,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  attempt = 0
 ): Promise<Blob> {
-  const res = await fetch(romSpanUrl(url, 0, total - 1), {
+  const res = await fetch(romRetryUrl(romSpanUrl(url, 0, total - 1), attempt), {
     signal,
     headers: { Range: romRangeHeader(0, total - 1) },
   });
@@ -417,10 +475,11 @@ async function fetchWholeRange(
 }
 
 /**
- * 按 4 MiB 切片、4 路并发下完，每片严格核对 `Content-Range` 与长度。
+ * 按 8 MiB 切片、4 路并发下完，每片严格核对 `Content-Range` 与长度。
  *
- * 任何一片连续失败就二分重试（4 → 2 → 1 MiB），还不行就整单失败 ——
- * 绝不会把「少一段」或「错一段」的字节拼进结果里。
+ * 任何一片连续失败就二分重试（8 → 4 → 2 MiB），还不行就整单失败 ——
+ * 绝不会把「少一段」或「错一段」的字节拼进结果里。（整单再重来一次由
+ * `fetchRomWithProgress` 负责，见那边的注释。）
  */
 async function fetchInChunks(
   url: string,
@@ -480,7 +539,11 @@ async function fetchInChunks(
       // 兄弟片已经失败了，别再白搬
       if (aborter.signal.aborted) throw failure ?? abortError();
       try {
-        const res = await fetch(romSpanUrl(url, start, end), {
+        /*
+         * 第 2 次起换一个缓存键（`nc`），理由见 `romRetryUrl`：坏片进了第 0 层之后，
+         * 同一个 URL 重试几次都是同一份残片，校验永远不过 —— 那不叫重试。
+         */
+        const res = await fetch(romRetryUrl(romSpanUrl(url, start, end), attempt), {
           signal: aborter.signal,
           headers: { Range: romRangeHeader(start, end) },
         });
@@ -555,6 +618,12 @@ async function fetchInChunks(
       Array.from({ length: Math.min(ROM_CHUNK_CONCURRENCY, chunkCount) }, () => worker())
     );
   } catch (error) {
+    /*
+     * 先把已经下好的片放手（2026-11-10）：调用方可能紧接着整单重来，
+     * 这些 Blob 已经没有用处，攥着它们等于让大 ROM 的峰值内存翻倍。
+     * 取消那一路也一起放，反正不会再用。
+     */
+    parts.length = 0;
     // 用户取消照实抛；一片失败连累出来的 AbortError 要按「没下完」报
     if (outerSignal?.aborted) throw abortError();
     // 具体是哪一片坏了不重要，调用方只需要知道「没拼成，重来」

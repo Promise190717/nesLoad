@@ -909,7 +909,42 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
    *    的问题。
    * ⚠️ `Content-Range` 不能和 200 一起出现：有些代理会因此把整份当成部分对象处理。
    */
+  /*
+   * 上游回的区间必须与请求**完全一致**，否则这一份不许进缓存（2026-11-10）。
+   *
+   * ## 为什么这条闸必须在这儿
+   *
+   * 下面那行 `X-Rom-Span` 是「照抄上游」的。万一上游因为代理缓存错位（或者对象
+   * 正好被换掉）回了一段**起点不对**的字节，我们仍会把它当成「请求的这一段」
+   * 存进第 0 层，TTL 7 天，`X-Rom-Span` 写的还是错位的值 —— 前端 `fetchSpan`
+   * 会当场判定「区间不符」，可同一个 URL 重试几次都是这份，只能等 TTL 过期。
+   * 这就是「某款游戏永远坏在同一段、重新载入也没用」的完整剧本。
+   *
+   * 自持 R2 那条路不会走到这里（binding 按 offset 读，不会错位），所以这道闸
+   * 只对回源上游生效。宁可回 502 + `no-store` 让前端换键重试
+   * （`lib/http.ts` 的 `nc`），也不要把错位的字节存成 7 天的「正确答案」。
+   */
+  const spanMatchesRequest =
+    requestSpan !== null &&
+    upstreamSpan !== null &&
+    upstreamSpan.start === requestSpan.start &&
+    (requestSpan.end === null || upstreamSpan.end === requestSpan.end);
+
   const spanChunk = isSpanRequest && !isProbe && !servesWholeFile && upstreamSpan !== null;
+  if (spanChunk && !spanMatchesRequest) {
+    await upstream.body?.cancel();
+    console.error(
+      '[games] 上游区间与请求不一致，拒绝缓存',
+      id,
+      `upstream=${upstreamRange ?? '-'}`,
+      `requested=${requestSpan?.start}-${requestSpan?.end ?? ''}`,
+      target
+    );
+    return new Response('upstream error: 上游返回的区间与请求不一致', {
+      status: 502,
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  }
   if (spanChunk) {
     headers['X-Rom-Span'] = `${upstreamSpan.start}-${upstreamSpan.end}`;
     headers['X-Rom-Total'] = String(upstreamSpan.total);

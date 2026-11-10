@@ -104,7 +104,7 @@ export const ms: Record<MessageKey, string> = {
   'home.faq.a5': 'Sudah tentu! Ajak rakan dan buka bilik untuk bertanding.',
   'home.faq.q6': 'Adakah ia menyokong pengawal permainan?',
   'home.faq.a6':
-    'Ya — pasang pengawal USB atau Bluetooth dan emulator akan mengesannya melalui pelayar. Pemetaan butang mengikut tetapan lalai setiap teras; pada telefon anda guna butang di skrin.',
+    'Ya — pengawal USB atau Bluetooth terus berfungsi apabila pelayar mengesannya. Susunan butang kekal seperti lalai setiap konsol.',
 
   /* 首屏那段看不见的正文（sr-only），简短且与页面真实功能一致 */
   'seo.heading': 'Main permainan retro dalam pelayar',

@@ -5,6 +5,7 @@ import { cache, type ReactNode } from 'react';
 import { consoleLabel } from '@/lib/consoles';
 import { ROM_DOWNLOAD_ENABLED } from '@/lib/features';
 import AboutText from '@/components/AboutText';
+import EmbedPanel from '@/components/EmbedPanel';
 import FavoriteButton from '@/components/FavoriteButton';
 import GameLanguageActions from '@/components/GameLanguageActions';
 import GameComments from '@/components/GameComments';
@@ -654,6 +655,24 @@ export default async function GameDetailPage({
               </ul>
             </section>
           ) : null}
+
+          {/*
+            「嵌入此游戏」（2026-11-10 加，用户拿着参考图要求「也在游戏详情里面
+            增加一个嵌入的模块」）。
+
+            地址是**服务端现算的规范地址**（`origin` 来自 `resolveSiteOrigin()`），
+            不是前端拼 `window.location` —— 分享 / 嵌入的代码必须在任何环境下
+            都指向同一个域名，包括本地预览时贴在别人站上不会带 localhost。
+
+            ⚠️ 位置**在标签之后、评论之前**：它属于「关于这款游戏」那一组说明的尾部；
+              评论是读者说话的地方，嵌到一半插一块工具卡片会把它切断。
+            ⚠️ 真正被 iframe 的是 `/embed/games/<id>`（那一页只有屏幕）。
+              改这块的 URL 形状时，两条路由必须一起改。
+          */}
+          <EmbedPanel
+            url={`${origin}${localePath(locale, `/embed/games/${game.id}`)}`}
+            locale={locale}
+          />
         </div>
       </div>
 

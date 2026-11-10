@@ -57,7 +57,12 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
       {
         userAgent: '*',
         allow: '/',
-        disallow: ['/admin', '/api'],
+        /*
+         * `/embed`（2026-11-10 加）：给第三方站点 iframe 的纯播放页。它自己已经
+         * `noindex, follow`，这里再挡一道只是**省爬虫额度** —— 那一页没有正文，
+         * 抓它等于白抓；真正的索引入口是它 canonical 指过去的 `/games/<id>`。
+         */
+        disallow: ['/admin', '/api', '/embed'],
       },
       /*
        * AI 爬虫显式放行 —— 与上面 `*` 同义，理由见文件顶部注释。
@@ -68,7 +73,7 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
       {
         userAgent: AI_CRAWLER_TOKENS,
         allow: ['/', '/llms.txt', '/ai.txt'],
-        disallow: ['/admin', '/api'],
+        disallow: ['/admin', '/api', '/embed'],
       },
     ],
     /*

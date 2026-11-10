@@ -233,7 +233,7 @@ export const viewport: Viewport = {
  * 把根文档从唯一的 `app/layout.tsx` 挪进了 `app/[locale]/layout.tsx`（带 `[locale]`
  * 动态段的 root layout），另外还有 `app/admin/layout.tsx`、`app/global-not-found.tsx`
  * 两个独立根。软导航不会重跑这段脚本，但**跨 root layout、切语言（动态段参数变了）、
- * 进 404、联机退出时的 `window.location.assign`、middleware 的 307** 都是整页加载
+ * 进 404、联机退出时的 `window.location.assign`、middleware 的 `/en` 301** 都是整页加载
  * ⇒ 都会重跑。所以修法是「重跑也必须算出同一个结果」，不是「让它别重跑」。
  */
 const BOOT_INIT = `(function(){

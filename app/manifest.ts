@@ -47,9 +47,10 @@ export default function manifest(): MetadataRoute.Manifest {
     description: translate('en', 'meta.description', { site: SITE_NAME.en }),
     lang: 'en',
     /*
-     * `start_url` 写**无前缀**的 `/` 而不是 `/zh`：装上之后从哪儿进来，由 middleware
-     * 现判 —— **只有用户主动设置过语言（cookie）才会被送去 `/zh`**，没设置过就是英文
-     * （然后客户端弹一句问，见 components/LocalePrompt.tsx）。
+     * `start_url` 写**无前缀**的 `/` 而不是 `/zh`：manifest 是**一份静态文件**，
+     * 给不出「按语言分叉」的启动地址。无前缀现在是**永远的英文**（2026-11-10 起
+     * 不再按 cookie 跳转，见 middleware.ts 文件头），所以中文用户装到桌面后从图标
+     * 进来会落在英文站，再自己切一次语言。
      * 写死任何一种语言都会把另一半用户锁在错的那份上。
      */
     start_url: '/',

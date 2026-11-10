@@ -75,8 +75,9 @@ export function I18nProvider({
   }, [locale]);
 
   const rememberLocale = useCallback((next: Locale) => {
-    // 写 cookie 而不是 localStorage：middleware 读的是 cookie，用它决定
-    // 「无前缀地址要不要把你送去 /zh」；服务端下次渲染也能直接读到。
+    // 写 cookie 而不是 localStorage：这是**服务端也能看到**的那份偏好。
+    // ⚠️ 2026-11-10 起 middleware 不再用它做跳转（无前缀永远是英文，理由见
+    // middleware.ts 文件头）；它现在只负责告诉 LocalePrompt「用户主动选过语言，别再问」。
     document.cookie = `${LOCALE_COOKIE}=${next}; path=/; max-age=31536000; SameSite=Lax`;
   }, []);
 

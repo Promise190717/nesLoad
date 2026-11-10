@@ -90,7 +90,7 @@ export const it: Record<MessageKey, string> = {
   'home.faq.a5': 'Certo! Chiama un amico e apri una stanza per una sfida.',
   'home.faq.q6': 'Supporta i controller?',
   'home.faq.a6':
-    'Sì — collega un controller USB o Bluetooth e l\'emulatore lo rileva tramite il browser. La mappatura segue i valori predefiniti di ogni core; sul telefono usi i pulsanti a schermo.',
+    'Sì — un controller USB o Bluetooth funziona appena il browser lo rileva. La disposizione dei pulsanti resta quella predefinita di ogni console.',
   'seo.heading': 'Gioca ai giochi retrò nel browser',
   'seo.intro':
     '{site} è una stanza di giochi retrò online. Titoli NES, Super Nintendo (SNES), Game Boy, GBA, Mega Drive e arcade girano qui nel browser — emulati sulla tua macchina, con RetroArch compilato in WebAssembly.',

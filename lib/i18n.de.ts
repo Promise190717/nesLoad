@@ -89,7 +89,7 @@ export const de: Record<MessageKey, string> = {
   'home.faq.a5': 'Natürlich! Schnapp dir einen Freund und eröffne einen Raum für eine Partie.',
   'home.faq.q6': 'Werden Gamepads unterstützt?',
   'home.faq.a6':
-    'Ja — schließ ein USB- oder Bluetooth-Gamepad an, der Emulator erkennt es über den Browser. Die Tastenbelegung folgt den Standardwerten des jeweiligen Cores; auf dem Handy nutzt du die Tasten auf dem Bildschirm.',
+    'Ja — ein USB- oder Bluetooth-Gamepad funktioniert, sobald der Browser es erkennt. Die Tastenbelegung bleibt die Standardbelegung der jeweiligen Konsole.',
   'seo.heading': 'Retro-Games im Browser spielen',
   'seo.intro':
     '{site} ist ein Online-Retrospielzimmer. NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive und Arcade-Titel laufen direkt hier im Browser — emuliert auf deinem eigenen Gerät, mit RetroArch, kompiliert zu WebAssembly.',

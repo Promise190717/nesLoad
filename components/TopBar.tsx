@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { fetchCurrentUser, type AuthUser } from '@/lib/current-user';
 import { splitLocalePath } from '@/lib/i18n';
 import { readTheme, saveTheme, type Theme } from '@/lib/theme';
-import { GamepadIcon, MoonIcon, SunIcon } from './icons';
+import { PlayMoonIcon, SunIcon } from './icons';
 import { useI18n } from './I18nProvider';
 import LocaleSwitcher from './LocaleSwitcher';
 
@@ -184,25 +184,21 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
           游戏库。文案借 `topLinks.games`（法务页页脚用的是同一个键）——
           同一个落点（`/games`）在站里只该有一个名字。
 
-          ⚠️ 文字前面那个**手柄图标是 2026-10-14 用户要求加的**（「游戏列表文字前面加一个
-          游戏手柄的图标」）—— 只加在**这个顶栏**（首页 `/` 与 `/games*`、`/developers*`、
-          `/privacy`、`/terms` 共用），法务页页脚不加。
+          ⚠️ **文字前面那颗手柄图标 2026-11-10 已去掉**（用户要求「游戏列表前面的图标
+          去掉吧」）。它是 2026-10-14 用户自己要求加的（「游戏列表文字前面加一个游戏
+          手柄的图标」），当时的做法是只加在这个顶栏、法务页页脚不加；现在整颗撤掉，
+          这一行退回纯文字，与旁边的「首页」「登录」同一套基线和字重。
 
-          ⚠️ **这里刻意不复用 `.row-icon`**：那个类在小屏抽屉里是「左边图标、右边文案」用的，
-          但它**大屏默认 `display: none`**（见 globals.css 那段注释 —— 大屏右上角那一行
-          照规矩是纯文字）。这个顶栏不是抽屉，直接用一个 inline-flex 的 `<span>` 包住图标
-          即可，不碰那套开关。
+          ⚠️ **别再加回来，也别换别的图标**：这一排是纯文字导航，单独一颗图标会让它
+          的垂直基线和邻居对不上 —— 当初为了对齐还得套一层 inline-flex。真要做视觉
+          标识，应该动整排的样式，不是给其中一个链接戴个帽子。
 
-          ⚠️ 2026-10-14 曾给这一处另画过一个实心手柄剪影（`JoystickIcon`），用户看过之后
-          **当天就要求换回 `GamepadIcon`**，那个图标已删；别再加第二个手柄图标。
+          `GamepadIcon` 本身没删：`ConsoleScene` 的抽屉 / 帮助还用着。
         */}
         <Link
           href={localeHref('/games')}
-          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+          className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
-          <span className="inline-flex items-center">
-            <GamepadIcon size={16} />
-          </span>
           {t('topLinks.games')}
         </Link>
 
@@ -258,19 +254,45 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         {showTheme && (
           <>
             <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+            {/*
+              ⚠️ **方钮 + 圆润月牙**（2026-11-10，用户定的形态：「还是底座加图标，
+              图标使用 play 页面的那个」）。这一格当天来回试过三版，别再自己发挥：
+
+              ① 裸图标（只有 `p-1`，无边框无底色）：丑。旁边五项全是文字，只有它一颗
+                 没有边的 16px 图形，看着像页面上残留的符号。
+              ② 方钮 + 像素 `MoonIcon`：更丑（用户：「可以说是丑麻了」）。放大看是
+                 「一个 C 加一个小句点」，16px 里那颗星只会贴着 C 的缺口，像 © 的变形。
+              ③ 纯文字（`Night` / `Day`）：「文字不好」。
+
+              现在：② 的底座 + `/play` 那颗 `PlayMoonIcon`（圆润 path 版月牙），
+              并按用户要求「整体小点，只有背景，不要边框」收成下面这样。
+
+              ⚠️ **只有背景色，没有描边**（`pixel-edge` 已摘）。色块本身就是形状，
+              所以盒子必须小 —— `p-0.5`(2px) + 16px 图标 = **20px 见方**，
+              只比旁边 12px 文字高一点。想再大就加 `p`，但 24px 配无边框会重新变成
+              「一行字里贴了块砖」；再小则图标贴边（2px 是下限）。
+
+              ⚠️ **两颗图标都渲染，由 CSS 按 `<html data-theme>` 挑**（globals.css 的
+              `.theme-toggle`），别写成 `theme === 'light' ? … : …`：`theme` 首帧只能
+              给 'dark'，那样浅色用户会先看见太阳再「啪」地翻成月亮。
+
+              `rounded-[2px]` 是用户 2026-11-10 要的「加点圆角，一点点」。**只有 2px** ——
+              20px 的盒子上，3px 起就开始像胶囊，和整站直角像素块不搭；2px 只是把四个尖
+              磨掉，远看仍是方块。别顺手往 `rounded-sm`/`rounded` 上跳。
+            */}
             <button
               type="button"
               onClick={toggleTheme}
               title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
               aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
-              className="theme-toggle shrink-0 p-1 text-ink-300 transition-colors hover:text-accent"
+              className="theme-toggle shrink-0 rounded-[2px] bg-ink-800 p-0.5 text-ink-300 transition-colors hover:bg-ink-700 hover:text-accent"
             >
               {/* 图标画的是**切过去之后**的那一颗，和 title 同方向 */}
               <span className="theme-icon-light">
                 <SunIcon size={16} />
               </span>
               <span className="theme-icon-dark">
-                <MoonIcon size={16} />
+                <PlayMoonIcon size={16} />
               </span>
             </button>
           </>

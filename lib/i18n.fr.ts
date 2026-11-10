@@ -98,7 +98,7 @@ export const fr: Record<MessageKey, string> = {
   'home.faq.a5': 'Bien sûr ! Invitez un ami et créez une salle pour faire une partie.',
   'home.faq.q6': 'Les manettes sont-elles prises en charge ?',
   'home.faq.a6':
-    'Oui — branchez une manette USB ou Bluetooth et l’émulateur la détecte via votre navigateur. Les boutons suivent les réglages par défaut de chaque cœur ; sur téléphone, utilisez les boutons à l’écran.',
+    'Oui — une manette USB ou Bluetooth fonctionne dès que le navigateur la détecte. La disposition des boutons reste celle par défaut de chaque console.',
 
   /* 首屏那段看不见的正文（sr-only） */
   'seo.heading': 'Jouez aux jeux rétro dans votre navigateur',

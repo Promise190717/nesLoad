@@ -101,7 +101,7 @@ export const fil: Record<MessageKey, string> = {
   'home.faq.a5': 'Siyempre! Isama ang kaibigan at gumawa ng room para sa laban.',
   'home.faq.q6': 'Sinusuportahan ba nito ang game controller?',
   'home.faq.a6':
-    'Oo — isaksak ang USB o Bluetooth controller at makikita agad ito ng emulator sa browser. Ang button mapping ay sumusunod sa default ng bawat core; sa phone, gamitin ang on-screen buttons.',
+    'Oo — gumagana agad ang USB o Bluetooth controller kapag nakita ito ng browser. Default na layout ng bawat console ang gamit sa mga button.',
 
   'seo.heading': 'Maglaro ng retro games sa browser',
   'seo.intro':

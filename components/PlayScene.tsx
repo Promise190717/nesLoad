@@ -26,7 +26,7 @@ import { readGamepads } from '@/lib/gamepad';
 import { IncompleteBodyError, fetchRomWithProgress, isAbortError } from '@/lib/http';
 import { unwrapRom, type UnwrappedEntry, type UnwrappedRom } from '@/lib/unwrap';
 import { setPlayActive } from '@/lib/play-leave-guard';
-import { localePath, type MessageKey } from '@/lib/i18n';
+import { SITE_NAME, localePath, type MessageKey } from '@/lib/i18n';
 import {
   buttonLabel,
   buttonsFor,
@@ -121,6 +121,18 @@ interface PlaySceneProps {
    * 空 = 不带参数，ROM 代理按默认版本回源。
    */
   romLang?: string;
+  /**
+   * 嵌入模式（`/embed/games/<id>`，2026-11-10 加）。
+   *
+   * 只做两件事：**不画右栏**（`<aside>`），工作区切成单列（见 `globals.css` 的
+   * `.play-workspace[data-embed]`）。载入、存档、键位、尺寸这些逻辑全部照常 ——
+   * 嵌入页要的是「能玩」，不是「少一半功能」。
+   *
+   * ⚠️ 别顺手把存档 / 键位在 embed 下也关掉：那两块的入口本来就在右栏里，
+   *    右栏不画它们自然就没了。反过来，以后要往屏幕上加控件时得记得
+   *    **嵌入页没有右栏可以停靠**，别把新控件挂在那边。
+   */
+  embed?: boolean;
 }
 
 export default function PlayScene({
@@ -128,7 +140,8 @@ export default function PlayScene({
   initialMode = 'solo',
   autoStart = false,
   initialRoomCode = '',
-  romLang = ''
+  romLang = '',
+  embed = false,
 }: PlaySceneProps) {
   const { t, locale, href } = useI18n();
   const router = useRouter();
@@ -349,6 +362,38 @@ export default function PlayScene({
    * （窗口又高又窄、屏幕被宽度卡住时才真的变大；其余情况屏幕尺寸是高度算死的）。
    */
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  /**
+   * 嵌入页要不要画触屏手柄（`data-pad`，2026-11-10）。
+   *
+   * 为什么另外算一遍：全站那套 `.play-touch` 只认 `<html data-mobile>`，而那是
+   * **设备**判据（`lib/device.ts`：只看 UA / 触摸能力，刻意不看宽度）。到了 iframe 里，
+   * 这条判据会漏掉一大片真实场景 —— 桌面浏览器把窗口收成手机宽、宿主页面把嵌入框
+   * 放在一个窄栏里，`data-mobile` 都还是 `off`，手柄于是永远不出现（用户 2026-11-10
+   * 报的「移动端没有按键」）。
+   *
+   * 这里补的两条都只在**嵌入页**生效（`!embed` 直接不挂监听）：
+   *   · `pointer: coarse` —— 真触屏但 UA 被判成桌面的情况（带触屏的平板 / 某些安卓机）；
+   *   · 视口 ≤ 1023px —— 和 `.play-workspace` 收成单列的那个断点同一个数。iframe 的
+   *     视口就是**嵌入方给的那个框**，框窄了屏幕下面本来就有空间，手柄放着不挡事。
+   *
+   * ⚠️ 别把这条推广到 `/play`：那一页的宽度不撒手是用户定过的规矩（见 globals.css
+   *    那段「只看设备，不看窗口宽度」），桌面端把窗口拉窄时手柄冒出来会挡掉右栏。
+   */
+  const [padForced, setPadForced] = useState(false);
+  useEffect(() => {
+    if (!embed || typeof window === 'undefined') return;
+    const coarse = window.matchMedia('(pointer: coarse)');
+    const narrow = window.matchMedia('(max-width: 1023px)');
+    const sync = () => setPadForced(coarse.matches || narrow.matches);
+    sync();
+    coarse.addEventListener('change', sync);
+    narrow.addEventListener('change', sync);
+    return () => {
+      coarse.removeEventListener('change', sync);
+      narrow.removeEventListener('change', sync);
+    };
+  }, [embed]);
 
   /**
    * 地址栏上写着的模式（`?room=` 优先当加入者，否则看 `?mode=`）。**只是初值**，
@@ -1345,6 +1390,8 @@ export default function PlayScene({
         className="play-workspace w-full"
         data-screen-size={screenSize}
         data-sidebar={sidebarOpen ? 'open' : 'closed'}
+        data-embed={embed ? '' : undefined}
+        data-pad={embed && padForced ? 'on' : undefined}
       >
         {/*
           这一页没有可见的大标题（用户要的就是干净），但**不能没有 h1** ——
@@ -1581,6 +1628,60 @@ export default function PlayScene({
               </div>
             </div>
           </div>
+
+          {/*
+            嵌入页的回站条（2026-11-10，用户三条要求连着来：「没有按键说明」
+            「还需要加一个进入到我们站点的入口」「移动端下可以放在这里」）。
+
+            **位置在屏幕和触屏手柄之间**（用户拿箭头指着这块空隙要的）：
+            手机上手指本来就在这段区域活动，链接放在这里不用抬头也不用下探；
+            挂在屏幕最底下（原来那样）会被挤出视口，或者离手柄老远。
+            桌面嵌入没有手柄，它就落在屏幕正下方，等于原位的自然结果 ——
+            所以这里不需要为「有没有手柄」写两套位置。
+
+            ⚠️ **键位表在窄框（≤1023）里由 CSS 藏掉**（「移动端下不要显示按键说明」）：
+               手机上本来就有触屏手柄，一行 12 组键位怎么排都是乱的，那套字是给
+               键盘用户看的。所以这个 `dl` 只在桌面嵌入里真的可见；别看见它在 JSX
+               里就以为手机上也有。
+            ⚠️ 键位表的数据源和右栏那张表**同一份**（`buttonsFor` / `buttonLabel` /
+               `codeLabel` + 同一份 `bindings`），用户改过按键这里就跟着变，
+               不要另存一份「嵌入页用的键位」。这里只画 1P：嵌入页没有联机，
+               也没有 P1/P2 切换（那个切换钮在右栏里）。
+
+            回站入口：落到这一款的详情页，`target="_blank"` 是刻意的 ——
+            在别人页面的 iframe 里点开站内链接，默认会在**那个框里**把我们的站渲染
+            出来，嵌入方等于被自己的页面套了一层；`_blank` 把访客带到完整的新标签页。
+            （用 `_top` 会把宿主页面整个换掉，对嵌入方不礼貌。）
+            手机上这条 bar 只剩它一个，居中站。
+          */}
+          {embed && (
+            <div className="play-embed-bar">
+              <dl className="play-embed-keys" aria-label={t('play.controlsTitle')}>
+                {buttonsFor(consoleType).map((button) => (
+                  <div key={button}>
+                    {/* PS1 那四颗符号走图形，理由同右栏那张表（见 components/PadGlyph.tsx） */}
+                    <dt>
+                      <PadGlyph name={buttonLabel(button, t, consoleType)} />
+                    </dt>
+                    <dd>
+                      <span className="play-embed-kbd">{codeLabel(bindings.p1[button])}</span>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <a
+                href={game ? href(`/games/${game.id}`) : href('/games')}
+                target="_blank"
+                rel="noopener"
+                className="play-embed-site"
+                title={SITE_NAME[locale]}
+              >
+                {SITE_NAME[locale]}
+                <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+          )}
+
           <MobileGamepad
             consoleType={
               rom?.console ??
@@ -1614,6 +1715,7 @@ export default function PlayScene({
           **只放该有的东西**（说明 + 控件，没有分组卡片、没有键帽、没有多余标题），
           不是把站上的视觉语言砍掉。
         */}
+        {!embed && (
         <aside className="play-sidebar" data-collapsed={sidebarOpen ? undefined : 'true'}>
           {/*
             收起 / 展开的**窄轨那一颗**。
@@ -1969,6 +2071,7 @@ export default function PlayScene({
             </ul>
           </section>
         </aside>
+        )}
       </div>
 
       {/*

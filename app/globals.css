@@ -52,6 +52,142 @@
   .play-sidebar[data-collapsed='true'] .play-sidebar-toggle [aria-hidden='true'] { display: inline-block; transform: rotate(-90deg); }
 }
 /*
+ * 嵌入模式（`/embed/games/<id>`，2026-11-10）：**只有屏幕**。
+ *
+ * `data-embed` 由 `PlayScene` 写在 `.play-workspace` 上（那个组件同时不画右栏）。
+ * 两列网格在这里收成一列，右栏那 260px 和 18px 间距一起归零 —— 否则 iframe 里
+ * 会剩一条永远空着的右边缘，屏幕也被挤小。
+ *
+ * 屏幕尺寸仍然由 JS 算（`--play-display-max-width` / `--play-display-height` 是
+ * `updateSize()` 按 iframe 自己的视口写的），所以这里**不要**写死宽高：
+ * 4:3 的 iframe 正好铺满，扁一点的 iframe 就按高度收缩、上下留黑。
+ *
+ * ⚠️ 这段必须排在 `@media (min-width: 1024px)` **之后**，且用 `.play-workspace[data-embed]`
+ *    这个更高的特异性 —— 那个媒体查询里的 `.play-workspace` 写了
+ *    `width: calc(... + var(--play-sidebar-w) + 18px)`，靠顺序覆盖不住。
+ * ⚠️ `--play-size-scale: 1` 也是覆盖：`[data-screen-size='small'/'medium']` 在
+ *    iframe 里没有意义，嵌入方给的框子本身就是尺寸。
+ */
+.play-workspace[data-embed] {
+  --play-sidebar-w: 0px;
+  --play-size-scale: 1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
+  min-height: 100dvh;
+  /*
+   * 这一格里现在只有 `.play-stage` 一个孩子（屏幕 + 回站条 + 手柄都在它里面，
+   * 2026-11-10 起），所以 `center` 让整组内容在 iframe 里居中（4:3 的框正好铺满，
+   * 高一点的框上下留黑）；`safe center` 是兜底：内容比框高时退回 `start`，
+   * 否则**顶部会被裁掉而且滚不上去** —— 手机上屏幕 + 手柄常常超一屏。
+   * 两行写在一起是有意的：不认 `safe` 的老浏览器会丢掉第二条，留下 `center`。
+   * ⚠️ 试过改成 `start`（屏幕贴顶、留白集中到下方），用户当天回「这样更丑了」，
+   *    别再动这两行。
+   */
+  align-content: center;
+  align-content: safe center;
+}
+/*
+ * `.play-stage` 在这条路上要变成竖排：屏幕、回站条、（有的话）触屏手柄从上往下排。
+ * 桌面嵌入里没有手柄，但 bar 仍然要落在屏幕下面 —— 不写这一句它会跑到屏幕右边
+ * （stage 基础样式是 `flex items-center justify-center`，也就是横向）。
+ */
+.play-workspace[data-embed] .play-stage { position: static; width: 100%; flex-direction: column; }
+/*
+ * 嵌入页的回站条（2026-11-10）：左边键位表、右边回站入口。
+ *
+ * 位置在 `.play-stage` 里面、**屏幕和触屏手柄之间**（用户拿箭头指着那块空隙要的）。
+ * 桌面上没有手柄，它就落在屏幕正下方 —— 一条 CSS 同时满足两种情形。
+ *
+ * 宽度跟着 `--play-display-max-width`（`updateSize()` 按 iframe 视口算的那个值），
+ * 所以它和屏幕左右对齐、一起居中；屏幕换档时它也一起变宽。
+ * 只在这条 bar 上用 `border-top` 一道发丝线，不再加卡片描边 —— 嵌入页要的是
+ * 「一块屏幕 + 一行说明」，描边多了像挂了一块面板。
+ * 窄框（≤1023）里整套都拆掉了：键位表隐藏、线去掉、只剩居中的链接，见下面那个媒体查询。
+ *
+ * ⚠️ **颜色一律走 `--color-crt-*`，不许用 `--color-ink-*` / `.play-kbd`**：
+ *    嵌入页的底是写死的黑（`app/[locale]/embed/games/[id]/page.tsx` 的 `bg-black`），
+ *    而 ink 那套灰阶会跟着主题整体反相 —— 浅色主题下 ink-300 是近黑，压在黑底上
+ *    整条说明直接看不见。crt 那套是「永远在暗底上」的固定值（见上面那段注释），
+ *    键帽也自己写一个 `.play-embed-kbd`，不复用右栏那颗 `.play-kbd`（它吃 `--side-*`）。
+ */
+.play-embed-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  width: 100%;
+  max-width: var(--play-display-max-width, 100%);
+  margin: 8px auto 0;
+  padding: 8px 2px 2px;
+  border-top: 1px solid var(--color-crt-ink-600);
+  font-size: 11px;
+  color: var(--color-crt-ink-400);
+}
+/* 键位表：一行排开、换行不换列（右栏那张是 2 列网格，这里只要「钮 = 键」的读法） */
+.play-embed-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; padding: 0; }
+.play-embed-keys > div { display: flex; align-items: center; gap: 4px; }
+.play-embed-keys dt { flex-shrink: 0; font-size: 11px; color: var(--color-crt-ink-200); }
+.play-embed-keys dd { margin: 0; }
+.play-embed-kbd {
+  display: inline-block;
+  padding: 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--color-crt-ink-200);
+  background: #1c1c22;
+  border: 1px solid var(--color-crt-ink-600);
+}
+.play-embed-site {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+  color: var(--color-crt-accent);
+  white-space: nowrap;
+}
+.play-embed-site:hover { text-decoration: underline; }
+/*
+ * 窄框（手机 iframe）：**不显示键位表，只留回站链接**（2026-11-10 用户定：
+ * 「移动端下不要显示按键说明」）。
+ *
+ * 为手机做的事都试过一遍了，结论是这条路根本不该走：
+ *   · 一行排开 → 12 组「方向 + 键」折成两三行，读起来是
+ *     `↑ W ↓ S ← A → D A J B K C L X U Y I Z O` 一串；
+ *   · 换成等宽网格 → 440 宽的屏上每格被拉得老开，三行之间空出一大截，
+ *     比原来更散（用户当天第二次截图：「这样更丑了」）。
+ * 手机上本来就有触屏手柄，键位表是给键盘用户看的 —— 那个场景在窄框里不存在。
+ *
+ * 于是只剩一条 `.play-embed-site`。`justify-content: flex-end` 让它靠右，
+ * 和原来那条 bar 的右端对齐；`border-top` 留着当分隔线，不然它和手柄糊成一块。
+ *
+ * ⚠️ 阈值 1023 与触屏手柄的判据（`.play-workspace[data-pad='on']`）对齐。
+ *    桌面嵌入（> 1023）仍然显示键位表 —— 那边一行就排得下。
+ * ⚠️ 别再把键位表在窄屏下放回来：真要给手机用户看键位，正确的位置是详情页，
+ *    不是在游戏画面底下再铺一块字。
+ */
+@media (max-width: 1023px) {
+  .play-embed-keys { display: none; }
+  /*
+   * 只剩一个链接时，它要的是「安静地待在屏幕和手柄之间」，不是一条栏：
+   * 去掉发丝线、内边距和上外边距，只留居中的一行字。上下那 16px 由
+   * `.play-stage` 的 `gap` 给（`[data-pad='on']` 那条），这里不要再叠。
+   */
+  .play-embed-bar {
+    justify-content: center;
+    margin-top: 0;
+    padding: 0;
+    border-top: 0;
+    font-size: 12px;
+  }
+}
+/*
 ⚠️ **这个页面的尺寸真源在 JS，不在 CSS**：`--play-display-max-width` 是 `PlayScene.tsx`
 的 `updateSize()` 算好、以内联自定义属性写在元素上的，上面这些 `var(..., 兜底值)`
 的兜底**永远轮不到**。要改屏幕占位大小就去改 `updateSize()`。
@@ -314,6 +450,10 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
  *   · `.play-keys` 一窄就消失 —— 窄窗口的桌面端正需要那张表。
  * 触屏目标尺寸（40px 那批）同理：那是给手指的，不是给窄窗口的。
  *
+ * ⚠️ 唯一的例外是**嵌入页**（2026-11-10）：那条路另外认 `.play-workspace[data-pad='on']`
+ *    （触屏或视口 ≤ 1023px），理由见下面那段注释 —— iframe 里「设备」是宿主页面，
+ *    只认 `data-mobile` 会把「窄框」这一大类全漏掉。`/play` 不受影响，别照着抄过去。
+ *
  * 纯版式那几条（workspace 收成单列、屏幕按 4:3、sidebar 堆叠、overlay 内边距）
  * **留在下面那个宽度媒体查询里** —— 它们回答的才是「现在有多宽」，窄窗口照样要收。
  */
@@ -321,7 +461,23 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
 /* 触屏上只藏键位表这一段，同一条卡里的控制行留着 ⇒ 那条分隔线也跟着藏 */
 :root[data-mobile='on'] .play-keys,
 :root[data-mobile='on'] .play-panel-divider { display: none; }
-:root[data-mobile='on'] .play-touch {
+/*
+ * 触屏手柄的显示规则 —— 两个判据合在一起：
+ *
+ *   ① `:root[data-mobile='on']`：全站的**设备**判据（`lib/device.ts`，只看 UA /
+ *      触摸能力）。`/play` 和嵌入页都吃这一条。
+ *   ② `.play-workspace[data-pad='on']`：**只有嵌入页会写**（2026-11-10 加）。
+ *      `PlayScene` 在 `embed` 下另外算 `pointer: coarse || 视口 ≤ 1023px` 写上去 ——
+ *      iframe 里「设备」是宿主页面，桌面浏览器把窗口收窄、宿主把框放进窄栏这两种
+ *      情况 ① 都判成 off，手柄于是永远不出现（用户 2026-11-10 报的「移动端没有按键」）。
+ *      为什么不干脆把 ① 改成看宽度：`/play` 那条不撒手是用户定过的规矩
+ *      （见下面那段「只看设备，不看窗口宽度」），桌面端拉窄窗口时手柄会挡右栏。
+ *
+ * ⚠️ 这一组 `.play-touch*` 的尺寸规则都带着 ② 这个别名，改的时候别只改一边：
+ *    `--pad-btn` / `--pad-font` 是这里给的，键帽的宽高全靠它们（组件那边没有兜底值）。
+ */
+:root[data-mobile='on'] .play-touch,
+.play-workspace[data-pad='on'] .play-touch {
   display: block;
   width: 100%;
   /*
@@ -356,16 +512,39 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   margin-inline: auto;
   padding: 12px 8px max(16px, env(safe-area-inset-bottom));
 }
-:root[data-mobile='on'] .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-:root[data-mobile='on'] .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
+:root[data-mobile='on'] .play-touch-main,
+.play-workspace[data-pad='on'] .play-touch-main { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+:root[data-mobile='on'] .play-touch-system,
+.play-workspace[data-pad='on'] .play-touch-system { display: flex; justify-content: center; gap: 36px; margin-top: 32px; }
 /*
  * SELECT / START（`PillBtn`，`/play` 上 snes 的肩键也走这条）的**最小触摸面**。
  * 2026-11-03 跟着上面那条一起收：76×40 → 68×34。34 是手指按得住的底线，
  * `PillBtn` 自己的内边距算出来只有 ~19px 高，全靠这条撑起来。
  */
 :root[data-mobile='on'] .play-touch-system button,
-:root[data-mobile='on'] .play-shoulders button { min-height: 34px; min-width: 68px; }
-:root[data-mobile='on'] .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
+:root[data-mobile='on'] .play-shoulders button,
+.play-workspace[data-pad='on'] .play-touch-system button,
+.play-workspace[data-pad='on'] .play-shoulders button { min-height: 34px; min-width: 68px; }
+:root[data-mobile='on'] .play-shoulders,
+.play-workspace[data-pad='on'] .play-shoulders { display: flex; justify-content: space-between; margin-bottom: 20px; }
+/*
+ * 手柄一出现（窄框 / 触屏），这块内容**保持在容器里居中** —— 这条是刻意的「不做」。
+ *
+ * 2026-11-10 试过改成 `align-content: start`（想让屏幕贴顶、留白集中到下方），
+ * 用户看到后回的是「这样更丑了」：屏幕顶到 iframe 上沿，底下空出 200px+，
+ * 整页像没排完。手机上「屏幕 + 手柄 + 回站链接」本来就填不满一屏（4:3 的画面
+ * 被宽度卡死在 330px 高），对称留黑的 `safe center` 反而是最稳的那一个。
+ *
+ * ⚠️ 所以 `.play-workspace[data-embed]` 里那对 `center` / `safe center` 不要再动。
+ */
+
+/*
+ * 手柄一出现，`.play-stage` 就必须竖排（屏幕在上、手柄在下）。
+ *
+ * 靠的不是 `@media (max-width: 767px)` 那条：嵌入页的判据是 1023 —— 768~1023 这一档
+ * 会落到「手柄显示了、stage 还是横排」，手柄被挤成屏幕右边的一列。
+ */
+.play-workspace[data-pad='on'] .play-stage { flex-direction: column; justify-content: flex-start; gap: 16px; }
 /* 触屏：手指要 34px 起步（右栏这排按钮在桌面上是 24px） */
 :root[data-mobile='on'] .play-row { min-height: 44px; }
 :root[data-mobile='on'] .play-row-label,
@@ -397,8 +576,10 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    *    320 的容器自己会算出 33~34px，写死反而把自适应压死了。
    *    只留「机身太窄，横缝不能再占地方」这一件事。
    */
-  :root[data-mobile='on'] .play-touch { padding-inline: 2px; }
-  :root[data-mobile='on'] .play-touch-main { gap: 8px; }
+  :root[data-mobile='on'] .play-touch,
+  .play-workspace[data-pad='on'] .play-touch { padding-inline: 2px; }
+  :root[data-mobile='on'] .play-touch-main,
+  .play-workspace[data-pad='on'] .play-touch-main { gap: 8px; }
 }
 @media (max-height: 540px) and (orientation: landscape) and (pointer: coarse) {
   .play-display { max-width: min(100%, 62vh); }
@@ -526,23 +707,33 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   --font-pixel: 'Press Start 2P', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /*
-   * 深色主题最底下四档（2026-11-06 整体上提约 10）：原来 950 是 `#121212`，
-   * 用户原话「黑暗模式的背景不要纯黑 有点难受」。
+   * 深色主题最底下六档。
+   *
+   * 沿革：
+   *   · 2026-11-06 —— 原来 950 是 `#121212`，用户「黑暗模式的背景不要纯黑 有点难受」，
+   *     整段上提约 10。
+   *   · 2026-11-10 —— 用户还是嫌暗，并且明说「不要黑色，换个其他的色值」：
+   *     于是**从纯中性灰换成冷调蓝灰**（页面底 #181c26）。同一天比过三档亮度、
+   *     三种色系（深蓝 / 深褐 / 墨绿），用户选了深蓝。
+   *
+   * ⚠️ **只给最底下六档上色相**：500~700 是背景、面板、描边这一层，蓝调能把它们
+   *    从「一片黑」里分出前后；**400 及以上（正文与标题）仍是中性灰** —— 跟着偏色会让
+   *    白字发蓝、长时间看着累，也会和暗红强调色打架。
    *
    * ⚠️ 动的是**整段**不是单个 950：灰阶差值才是卡片 / 面板 / 键帽的分层，
-   *    只把 950 提亮会让「页面底」和「面板底」贴到一起（#1e1e1e vs #191919 只差 5），
-   *    面板会读成「没有边界」。按原来每档 ~7 的间距整体平移，关系一笔不动：
-   *      950 18→30 / 900 25→36 / 850 32→42 / 800 41→50 / 700 59→66
-   *    600 及以上是正文与描边色，压在更亮一点的底上对比反而更稳，保持不动。
-   *    屏幕内部那套 `--color-crt-*` 更不许碰 —— 显像管永远黑（见下面那段注释）。
+   *    只把 950 提亮会让「页面底」和「面板底」贴到一起，面板会读成「没有边界」。
+   *    各档间距（6 / 6 / 8 / 16 / 14）是对出来的，换色相时也要保住这组差值：
+   *      950 27 / 900 34 / 850 41 / 800 50 / 700 67 / 600 80
+   *    屏幕内部那套 `--color-crt-*` 更不许碰 —— 显像管永远黑（见下面那段注释），
+   *    而且它本来就是蓝调的，跟这层没有关系。
    */
-  --color-ink-950: #1e1e1e;
-  --color-ink-900: #242424;
-  --color-ink-850: #2a2a2a;
-  --color-ink-800: #323232;
-  --color-ink-700: #424242;
-  --color-ink-600: #505050;
-  --color-ink-500: #707070;
+  --color-ink-950: #181c26;
+  --color-ink-900: #1e222e;
+  --color-ink-850: #242936;
+  --color-ink-800: #2c3241;
+  --color-ink-700: #3d4457;
+  --color-ink-600: #4a5061;
+  --color-ink-500: #6a7080;
   --color-ink-400: #939393;
   --color-ink-300: #b5b5b5;
   --color-ink-200: #d6d6d6;
@@ -554,8 +745,8 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
   --color-wood-800: #2e261b;
   --color-wood-700: #413526;
 
-  /* 地板：跟着 ink-800 走（2026-11-06 从 #292929 上提到 #323232，理由见上面灰阶那段） */
-  --color-floor: #323232;
+  /* 地板：跟着 ink-800 走（2026-11-10 换蓝调后同步成 #2c3241） */
+  --color-floor: #2c3241;
 
   --color-accent: #d16c70;
   --color-ok: #4ade80;
@@ -576,7 +767,9 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    * 屏幕内部（显像管）专用色，一律不跟随主题翻转。
    * 屏幕底永远是黑的，若里面还用会翻转的 ink 灰阶，浅色主题下就会变成
    * 「黑底黑字」——实测 text-ink-300 在浅色下是 #4a4a55，压在 #000 上对比度只有约 2.3:1。
-   * 取值与深色主题的 ink 灰阶完全相同，所以深色外观不会有任何变化。
+   * 取值原本抄自深色主题的 ink 灰阶，所以深色外观不会有任何变化；
+   * ⚠️ 2026-11-10 ink 换成蓝调后**它不再跟着变**（这里仍是原来那套更暗的蓝灰）——
+   *    屏幕是一块独立的玻璃，别为了「统一」把它往 ink 上挂，挂上去浅色主题就废了。
    */
   --color-crt-accent: #d16c70;
   --color-crt-ok: #4ade80;
@@ -629,11 +822,12 @@ NDS 的处理（2026-10-15 用户定）：**外框尺寸和其它机种完全一
    * 墙面（.wall）。深色下比房间底色（ink-950）略亮一点点 —— 整面死黑会像个洞，
    * 但也不能亮过地板（--color-floor），不然墙和地会糊成一片。
    *
-   * 两个值**手抄自灰阶**（2026-11-06 灰阶整体上提后同步）：top = ink-850、bottom = ink-950。
+   * 两个值**手抄自灰阶**（2026-11-10 换蓝调后同步）：top = ink-850、bottom ≈ ink-950
+   * （墙底比页面底亮 2，别和 950 写成一个值 —— 那样墙和页面底就贴死了）。
    * 改 ink 时必须回来一起改 —— 墙是房间页的实际背景，漏了它这一页会比别处暗一档。
    */
-  --wall-top: #2a2a2a;
-  --wall-bottom: #202020;
+  --wall-top: #242936;
+  --wall-bottom: #1a1e28;
   --wall-seam: rgba(255, 255, 255, 0.04);
 
   /* 地板。暖一点、比墙底亮一档 —— 原来是块冷灰，跟木桌子放一起像块水泥 */
@@ -1918,6 +2112,8 @@ body {
   display: inline-flex;
 }
 
+
+
 /*
  * 电视机大小那个选择器仍是**横排**的三格：它从钮的左边弹出来，横着只占一行、
  * 不往上下长（见 ConsoleScene 那颗钮）。三个格子宽度写死一致 ——
@@ -2238,6 +2434,30 @@ body {
   list-style: none;
   background: var(--color-ink-800);
   border: 2px solid var(--color-ink-600);
+}
+
+/*
+ * 窄屏改**右沿对齐**（2026-11-10 用户截图：手机上详情页那颗语言下拉的右半边
+ * 被视口裁掉了 —— 「Nederlands」只剩半截，右边框也看不见）。
+ *
+ * 原因是定位写死了 `left: 0`：大屏这颗钮在那一排的**最左边**，往右张开正好落在
+ * 「首页 / 游戏库 / 账号」那一段空白上；可窄屏版式（`TopBar` 里 `sm` 以下那套两行）
+ * 把它顶到了行的**最右端**，再往右张就直接出了屏幕。
+ * 登录页（`app/[locale]/login/page.tsx` 右上角）也是同一个毛病：那颗钮的右边还有
+ * 一截「首页」，窄屏下同样不够放。
+ *
+ * 右沿对齐之后面板朝左张开，左边是整行空白，永远不会出界。
+ * 断点跟着 `TopBar` 的 `sm`（640px）走 —— 再宽一点那颗钮就不贴右沿了，
+ * 大屏保持原样（别顺手改成全局：桌面那一版现在的朝向是对的）。
+ *
+ * ⚠️ 抽屉里那条（`.entries .locale-options`）是 `position: static` 就地展开，
+ *    `left` / `right` 本来就不参与布局，这条覆盖不到它，也不用管。
+ */
+@media (max-width: 639px) {
+  .locale-options {
+    left: auto;
+    right: 0;
+  }
 }
 
 .locale-option {

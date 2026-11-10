@@ -103,7 +103,7 @@ export const es: Record<MessageKey, string> = {
   'home.faq.a5': '¡Claro! Llama a un amigo y abrid una sala para echar una partida.',
   'home.faq.q6': '¿Admite mandos de juego?',
   'home.faq.a6':
-    'Sí: conecta un mando USB o Bluetooth y el emulador lo detecta a través del navegador. La asignación de botones sigue los valores por defecto de cada núcleo; en el móvil se usan los botones en pantalla.',
+    'Sí: un mando USB o Bluetooth funciona en cuanto el navegador lo detecta. La disposición de botones es la predeterminada de cada consola.',
 
   /* 首屏那段看不见的正文（sr-only），给爬虫和读屏用 */
   'seo.heading': 'Juega a juegos retro en tu navegador',

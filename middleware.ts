@@ -13,10 +13,9 @@
  *                别人分享的 `/zh/games` 不该被弹走；
  *   · `/en/x`  → 301 回 `/x`。显式英文前缀和默认地址是同一页，
  *                两套地址并存就是重复内容，`hreflang` 也只能指一个；
- *   · 无前缀   → **只看 cookie**（用户有没有主动设置过）：
- *                  · cookie = zh / ja / ko → 307 到 `/xx/x`；
- *                  · 没 cookie / cookie = en → **rewrite** 成 `/en/x`
- *                    （地址栏不变，`[locale]` 接住）。
+ *   · 无前缀   → **一律英文**（2026-11-10 改）：**rewrite** 成 `/en/x`，地址栏不变，
+ *                `[locale]` 接住。这里**不读 cookie、也不读 Accept-Language** ——
+ *                为什么把「按 cookie 307」撤了，见下面「2026-11-10」那段。
  *
  * ⚠️ **加语言时这个文件基本不用动**（下面那个 `for` 循环会自动覆盖新前缀）——
  *    真正要改的是 `lib/i18n.ts` 的 `LOCALES` / `LOCALE_PREFIX` 和四张文案表。
@@ -27,6 +26,31 @@
  * 渲染英文页，然后由**客户端**弹一个小窗问「要不要切到中文」
  * （`components/LocalePrompt.tsx`）。
  * 把服务端 307 换成客户端询问，是因为 307 会改地址、破坏分享出去的链接。
+ *
+ * 🔴 **2026-11-10：无前缀的 cookie 307 也撤了。现在「地址即语言」。**
+ *
+ * 起因：线上「从 `/zh/games/x` 手动回到根域名，首页是英语，点页内链接又变 `/zh`」。
+ * 那个链接 hover 时确实是无前缀的（首页那份英语 HTML 里写死的），是**点击后**被
+ * 这里 307 走的 —— 于是同一个站里，首页英语、内页中文。
+ *
+ * 根因不在这个文件，而在一层它管不到的东西上：`wrangler.jsonc` 的
+ * `cache.enabled`（第 0 层 Workers Caching）跑在 Worker **外面**，按 URL + `Vary: RSC`
+ * 存，**不看 Cookie**；命中时 middleware 一次都不执行。无前缀地址因此有了两个
+ * 互相矛盾的答案：没人带 cookie 时 200 英语（被缓存），带 `zh` cookie 时 307。
+ * 谁先填的缓存，之后所有人吃那一份 —— 热门路径（`/`、`/games`）吃英语，长尾冷路径
+ * 走 middleware 被弹回 `/zh`，表现就是你看到的那种时中时英。
+ *
+ * 只要无前缀的响应依赖 cookie，这个矛盾就无解，因为缓存键里没有 cookie：
+ *   · 无前缀一律 `no-store` → 英语站（主力流量）每次进 Worker，免费版 10ms 必炸；
+ *   · `Vary: Cookie` → CF 不拿它当缓存键；就算支持，也是每人一条，等于没缓存；
+ *   · 客户端脚本跳转 → 多一次往返，还得再维护一份「哪些路径不跳」的清单。
+ * 所以选最干净的那条：**无前缀永远是英语**，`/zh` `/ja` `/ko` 是显式选择，
+ * 站内切语言走语言切换器（`I18nProvider.hrefIn` 直接给出带前缀的地址）。
+ *
+ * **代价是明确接受的**：选了中文的人手动输根域名、或打开别人分享的无前缀链接，
+ * 看到的是英语站，不会再被自动拉回中文。这比「同一站一会儿英语一会儿中文」好。
+ * `nesload_locale` cookie 还在写（`I18nProvider.rememberLocale`），但只剩一个用途：
+ * 记住「用户主动选过语言」，让 `LocalePrompt` 别再问 —— 服务端不再读它。
  *
  * ⚠️ **那条 rewrite 会让 Next 内部再跑一遍这个 middleware**（rewrite 到同源路径的
  * 标准行为），那一遍看到的 pathname 已经是 `/en/x` —— 不拦的话会落进 `/en` 那条分支、
@@ -61,11 +85,9 @@ import { SESSION_COOKIE, verifySession } from '@/lib/server/session';
 import {
   DEFAULT_LOCALE,
   EN_PREFIX,
-  LOCALE_COOKIE,
   LOCALE_HEADER,
   LOCALE_PREFIX,
   LOCALES,
-  isLocale,
   type Locale,
 } from '@/lib/i18n';
 
@@ -76,16 +98,6 @@ function withLocale(headers: Headers, locale: Locale): Headers {
   const next = new Headers(headers);
   next.set(LOCALE_HEADER, locale);
   return next;
-}
-
-/**
- * 用户**主动设置过**的语言（cookie）。没设置过就是 `null`。
- *
- * ⚠️ 只读 cookie，**不碰 Accept-Language** —— 见文件头：没设置过就不该跳转。
- */
-function savedLocale(request: NextRequest): Locale | null {
-  const saved = request.cookies.get(LOCALE_COOKIE)?.value;
-  return isLocale(saved) ? saved : null;
 }
 
 /**
@@ -163,24 +175,15 @@ function routeLocale(request: NextRequest): NextResponse | null {
   }
 
   /*
-   * 无前缀 —— 只有**用户主动设置过非默认语言**才把人送去带前缀那份。
+   * 无前缀 —— **永远是英文**，地址栏不变（2026-11-10 改：不再读 cookie 307）。
    *
-   * 没设置过（或设置的就是英文）一律留在原地，rewrite 进 `[locale]` 段渲染英文。
-   * 这里**不看 Accept-Language**：浏览器是中文也照样渲染英文，改由客户端
-   * `LocalePrompt` 弹窗询问（见文件头）。
+   * 曾经这里会在 cookie = zh / ja / ko 时 307 到 `/zh/x`。撤掉的理由见文件头
+   * 「2026-11-10」那段：无前缀响应一旦依赖 cookie，就和第 0 层 Workers Caching
+   * （按 URL 存、不看 Cookie）打架，同一站里首页英语、内页中文。
    *
-   * 用 307 而不是 301：这个跳转**依赖 cookie**，同一地址对不同人指向不同结果，
-   * 301 会被浏览器和 CDN 永久缓存下来，之后用户手动切成英文也回不去。
+   * 这里不看 Accept-Language 是 2026-10-13 就定的：浏览器是中文也照样渲染英文，
+   * 想切语言由客户端 `LocalePrompt` 问（见文件头）。
    */
-  const saved = savedLocale(request);
-  if (saved !== null && saved !== DEFAULT_LOCALE) {
-    const url = request.nextUrl.clone();
-    // 根路径不加尾巴：`/zh` 而不是 `/zh/`（后者要多吃一个 308）
-    url.pathname = LOCALE_PREFIX[saved] + (pathname === '/' ? '' : pathname);
-    return NextResponse.redirect(url, 307);
-  }
-
-  // 英文：rewrite 进 `[locale]` 段（地址栏不变），顺手把语言写进请求头
   return publicRoute(request, DEFAULT_LOCALE, pathname);
 }
 
@@ -217,8 +220,7 @@ export async function middleware(request: NextRequest) {
  *   · `/_next/*` —— 框架自己的产物
  *   · `/opengraph-image` `/twitter-image` —— 分享图，**没有扩展名**（不像
  *     `/icon.svg` 那样能被下面那条正则顺带排掉），放进来会被当成页面接进
- *     `[locale]` 段（rewrite 成 `/en/opengraph-image`，cookie 为中文时则 307 到
- *     `/zh/opengraph-image`）而 404，分享卡片就瞎了
+ *     `[locale]` 段（rewrite 成 `/en/opengraph-image`）而 404，分享卡片就瞎了
  *   · 任何**带点**的路径 —— 静态文件（`/favicon.ico`、`/sw.js`、`/cores/*.wasm`、
  *     `/llms.txt`、`/sitemap.xml`…）
  *

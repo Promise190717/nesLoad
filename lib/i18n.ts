@@ -16,13 +16,16 @@
  *
  * 语言只有两个来源：
  *   · **路径** —— 带前缀就是那个语言，对谁都一样（`/zh/games` 一定是中文）；
- *   · **cookie** —— 用户主动设置过。它只在「访问无前缀地址」时决定要不要送去带前缀那份。
+ *     无前缀**永远是英文**（`/games` 对谁都是英文，2026-11-10 起不按 cookie 跳转，
+ *     理由见 middleware.ts 文件头的「2026-11-10」）。
+ *   · **cookie** —— 用户主动设置过。它**不再决定服务端渲染哪种语言**，只用来告诉
+ *     客户端弹窗「这位用户自己选过，别再问」（`components/LocalePrompt.tsx`）。
  *
  * ⚠️ **浏览器语言（Accept-Language / navigator.language）不再是任何语言的来源**
  * （2026-10-13 用户要求：「没主动设置过，访问哪个就是哪个，不要跳转」）。
  * 它只在客户端弹窗里用一次 —— 问用户要不要切（`components/LocalePrompt.tsx`）。
- * 唯一例外是**后台**：它没有语言前缀，路径里读不出语言，所以 middleware 的守卫分支
- * 仍按 cookie → Accept-Language 兜底（只写请求头，不引起跳转）。
+ * **后台**也没有别的来源：它不带语言前缀、不走 i18n，middleware 的守卫分支一律
+ * 盖 `zh`（只写请求头，不引起跳转）。
  *
  * ⚠️ **界面语言（这里）≠ 内容语言**（`lib/game-text.ts` 的 `CONTENT_LOCALES`）。
  * 界面 2026-10-20 起是 **18 种**，内容语言仍然只有 zh / en / ja / ko，**这是两套东西**：
@@ -455,7 +458,7 @@ const en = {
     'Of course! Grab a friend and start a room for a match.',
   'home.faq.q6': 'Does it support game controllers?',
   'home.faq.a6':
-    'Yes — plug in a USB or Bluetooth controller and the emulator picks it up through your browser. Button mapping follows each core\'s defaults; on a phone you use the on-screen buttons.',
+    'Yes — a USB or Bluetooth controller works as soon as your browser sees it. Each console keeps its default button layout.',
 
   /*
    * 首屏那段**看不见的正文**（ConsoleScene 里用 sr-only 渲染）。
@@ -1827,7 +1830,7 @@ const zh: Record<MessageKey, string> = {
     '可以，创建房间即可联机对战。',
   'home.faq.q6': '支持手柄吗？',
   'home.faq.a6':
-    '支持。USB 或蓝牙手柄连上电脑，浏览器认出来就能直接用，按键按各机型的默认设置来；手机上用屏幕上的虚拟按键。',
+    '支持。USB 或蓝牙手柄接上就行，浏览器认到直接能玩，键位沿用各机型的默认设置。',
 
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':

@@ -103,7 +103,7 @@ export const vi: Record<MessageKey, string> = {
   'home.faq.a5': 'Tất nhiên! Rủ một người bạn rồi mở phòng để đấu với nhau.',
   'home.faq.q6': 'Có hỗ trợ tay cầm không?',
   'home.faq.a6':
-    'Có — cắm tay cầm USB hoặc Bluetooth là trình giả lập nhận ngay qua trình duyệt. Việc gán nút theo mặc định của từng core; trên điện thoại bạn dùng các nút trên màn hình.',
+    'Có — tay cầm USB hay Bluetooth đều dùng được ngay khi trình duyệt nhận ra nó. Cách gán nút vẫn theo mặc định của từng hệ máy.',
 
   /* 首屏那段看不见的正文（sr-only）：简短、且与页面真实功能一致 */
   'seo.heading': 'Chơi game retro trên trình duyệt',

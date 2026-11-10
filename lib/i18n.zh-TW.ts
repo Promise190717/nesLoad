@@ -97,7 +97,7 @@ export const zhTW: Record<MessageKey, string> = {
   'home.faq.a5': '當然！快找朋友一起，開個房間連線對戰吧。',
   'home.faq.q6': '支援手把嗎？',
   'home.faq.a6':
-    '支援。用 USB 或藍牙接上手把，瀏覽器辨識到之後模擬器核心就會直接讀到；按鍵對應以各核心的預設值為準。手機上用螢幕上的虛擬按鍵。',
+    '支援。USB 或藍牙手把，瀏覽器辨識到就能玩，鍵位沿用各機型的預設設定。',
 
   'seo.heading': '用瀏覽器玩復古遊戲',
   'seo.intro':

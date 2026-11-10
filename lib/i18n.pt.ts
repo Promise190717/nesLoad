@@ -94,7 +94,7 @@ export const pt: Record<MessageKey, string> = {
   'home.faq.a5': 'Claro! Chame um amigo e abra uma sala para a partida.',
   'home.faq.q6': 'Suporta controle?',
   'home.faq.a6':
-    'Sim — conecte um controle USB ou Bluetooth e o emulador o reconhece pelo navegador. O mapeamento dos botões segue o padrão de cada core; no celular, use os botões na tela.',
+    'Sim — um controle USB ou Bluetooth funciona assim que o navegador o reconhece. O mapeamento de botões é o padrão de cada console.',
 
   'seo.heading': 'Jogue jogos retrô no navegador',
   'seo.intro':
