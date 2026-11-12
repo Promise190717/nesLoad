@@ -713,4 +713,14 @@ export const zhTW: Record<MessageKey, string> = {
   'deepLink.title': '正在載入遊戲',
   'deepLink.loading': '正在下載 ROM…',
   'deepLink.hint': '下載完成後自動開始',
+  /* H5 小游戏专栏 */
+  'h5.title': 'H5 遊戲',
+  'h5.intro': '直接在瀏覽器裡跑的小遊戲，不用下載、不用裝外掛。目前收錄 {count} 款。',
+  'h5.play': '開始遊戲',
+  'h5.note': '這些都是為本站原創的網頁小遊戲。設定和房間碼只存在你的瀏覽器裡，不會上傳任何資料。',
+  'h5.badge.online': '區域網路連線',
+  'h5.badge.bots': '人機對戰',
+  'h5.badge.touch': '支援觸控',
+  'h5.seo.title': 'H5 遊戲：在瀏覽器裡直接玩',
+  'h5.seo.description': '本站原創的網頁小遊戲：第一人稱射擊，三種槍械，支援區域網路連線和機器人對戰。免下載、免安裝，打開就能玩。',
 };

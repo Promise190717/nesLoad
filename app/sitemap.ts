@@ -186,6 +186,15 @@ export default async function sitemap({
      * 但它的 canonical 指自己、分享链接又常常带 `?id=`，总得有个正式地址。
      */
     entry(origin, locale, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
+    /*
+     * H5 小游戏专栏（2026-11-12 加）。
+     *
+     * `/h5/<id>` 也列进去：那一页正文只有一个 canvas，和 `/play` 是同一类
+     * 「跑得起来但读不出字」的页面 —— 它的价值在于分享出去的地址有个正式落点，
+     * 不在于被搜到。
+     */
+    entry(origin, locale, '/h5', { changeFrequency: 'weekly', priority: 0.7 }),
+    entry(origin, locale, '/h5/toy-gunfight', { changeFrequency: 'monthly', priority: 0.6 }),
     entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*
      * 详情页给 0.8。

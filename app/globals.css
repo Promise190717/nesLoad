@@ -3202,3 +3202,94 @@ body {
   :root.play-theme-fading *::before,
   :root.play-theme-fading *::after { transition: none !important; }
 }
+
+/* ── H5 射击游戏：命中标记（hitmarker）──────────────────────────────
+   四根斜杠从 1.3 倍收到 1 倍（「向外炸开再落定」），最后 38% 渐隐。
+   时长由组件内联给（普通 170ms / 击杀 250ms），这里只管形状。
+   渐隐段占三成而不是最后 5%：硬切会在 60fps 下看起来像闪屏。 */
+@keyframes ship-hit {
+  0% { opacity: 1; transform: scale(1.3); }
+  26% { opacity: 1; transform: scale(1); }
+  62% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* ── H5 射击游戏：准星爆头回弹 ─────────────────────────────────────
+   只在爆头击杀时播一次。1 → 1.15 → 1，220ms —— 再大就挡住命中点了。 */
+@keyframes ship-crosshair-pulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* ── H5 射击游戏：准星击杀回弹（普通档）────────────────────────────
+   每次击杀都弹，但比爆头档（1.15 / 220ms）小：峰值 1.07、170ms。
+   让「每一次击杀都有确认」和「爆头那一档仍然更爽」同时成立。 */
+@keyframes ship-crosshair-pulse-soft {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
+
+/* ── H5 射击游戏：击杀勋章 ────────────────────────────────────────
+   弹出（0.6 → 1.15 → 1）→ 停留 → 上飘 26px 并渐隐。
+   总长 1000ms 由组件给，这里的百分比按那个时长分配：120ms 弹出 / 600ms 停留
+   / 280ms 上飘渐隐。 */
+@keyframes ship-kill-icon {
+  0% { opacity: 0; transform: scale(0.6) translateY(0); }
+  12% { opacity: 1; transform: scale(1.15) translateY(0); }
+  20% { opacity: 1; transform: scale(1) translateY(0); }
+  72% { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(1) translateY(-26px); }
+}
+
+/* 爆头版：弹出更狠（峰值 1.3）。多这一档是为了让「金色 + 弹得更高」一起成立，
+   否则爆头只是换了个颜色，在余光里不够显眼。 */
+@keyframes ship-kill-icon-head {
+  0% { opacity: 0; transform: scale(0.6) translateY(0); }
+  12% { opacity: 1; transform: scale(1.3) translateY(0); }
+  20% { opacity: 1; transform: scale(1) translateY(0); }
+  72% { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(1) translateY(-26px); }
+}
+
+/* 爆头的放射光：0.28s 从 0.35 倍炸到 1.45 倍并消失。只有爆头有。 */
+@keyframes ship-kill-burst {
+  0% { opacity: 0; transform: scale(0.35); }
+  25% { opacity: 1; transform: scale(0.9); }
+  100% { opacity: 0; transform: scale(1.45); }
+}
+
+/* ── H5 射击游戏：击杀屏幕脉冲 ────────────────────────────────────
+   只动透明度，颜色/范围由组件内联给（峰值 ≤ 22%，需求上限 25%）。 */
+@keyframes ship-kill-pulse {
+  0% { opacity: 0; }
+  22% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── H5 射击游戏：低血量脉动 ──────────────────────────────────────
+   两段起伏（lub-dub）而不是均匀呼吸 —— 均匀的像呼吸灯，两段才像心跳。
+   只动 opacity，颜色和范围由组件内联给。 */
+@keyframes ship-heartbeat {
+  0%, 100% { opacity: .45; }
+  20% { opacity: 1; }
+  44% { opacity: .55; }
+  60% { opacity: .86; }
+}
+
+/* ── H5 射击游戏：击杀信息卡入场 ─────────────────────────────────
+   从下方 8px 推上来并淡入。位移很小 —— 这是一张「通知」，不是弹窗。 */
+@keyframes ship-card-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ── H5 射击游戏：连杀播报 ────────────────────────────────────────
+   砸下来（1.35 → 1 倍）+ 停留 + 淡出。前 12% 就到位，剩下的时间留给阅读。 */
+@keyframes ship-streak {
+  0% { opacity: 0; transform: scale(1.35); }
+  12% { opacity: 1; transform: scale(1); }
+  70% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}

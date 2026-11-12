@@ -768,4 +768,14 @@ export const fr: Record<MessageKey, string> = {
   'deepLink.title': 'Chargement du jeu',
   'deepLink.loading': 'Téléchargement de la ROM…',
   'deepLink.hint': 'Démarre automatiquement une fois le téléchargement terminé.',
+  /* H5 小游戏专栏 */
+  'h5.title': 'Jeux H5',
+  'h5.intro': 'Des mini-jeux qui tournent dans le navigateur, sans téléchargement ni plugin. {count} pour le moment.',
+  'h5.play': 'Jouer',
+  'h5.note': 'Ce sont des mini-jeux originaux créés pour ce site. Les réglages et les codes de salon restent dans votre navigateur ; rien n\'est envoyé.',
+  'h5.badge.online': 'Multijoueur LAN',
+  'h5.badge.bots': 'Contre des bots',
+  'h5.badge.touch': 'Tactile',
+  'h5.seo.title': 'Jeux H5 : jouez dans le navigateur',
+  'h5.seo.description': 'Mini-jeux originaux pour navigateur : un FPS avec trois armes, multijoueur LAN et parties contre des bots. Sans téléchargement.',
 };

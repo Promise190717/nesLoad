@@ -95,7 +95,10 @@
 
 ## 联机 / 手柄 / 街机
 
-- **联机（1v1）**：wire 只传钮名 `{b,d}`；加入者按 1P 键组；toast 判据必须互斥，断开时 `onState` 连发两次 ⇒ `lastRole` 只在 role 非空时更新；房主暂停经 `z` 广播；`onPeerLeave` 必须带 `peerId !== state.peerId`；质量三档唯一出口 `QUALITY_SPEC`。**首页不写「仅局域网/需配 TURN」**。
+- **联机（1v1）**：输入 wire 有两条 —— 老的钮名 `{b,d}`（兼容老客户端）和位图 `i` 里的 `{m}`（14 位，`BUTTON_BITS` **顺序即协议**；房主在会话包里带 `i:1`，加入者见到才切）；位图 250ms 心跳兜丢包，房主按上一帧 diff 注入；HOL 仍在（Trystero 只建一条有序可靠通道，库没有通道选项）。加入者按 1P 键组；toast 判据必须互斥，断开时 `onState` 连发两次 ⇒ `lastRole` 只在 role 非空时更新；房主暂停经 `z` 广播；`onPeerLeave` 必须带 `peerId !== state.peerId`；质量三档唯一出口 `QUALITY_SPEC`，码率按编码后像素数重算（`bitsPerPixel` **分档** 0.12 / 0.20 / 0.26，2026-11-12 从三档共用 0.11 拆开 —— 用户反馈「均衡太糊」，720p 上只有 2.5 Mbps），H.264 由 `preferLowLatencyCodecs` 钉在**首次协商前**。**首页不写「仅局域网/需配 TURN」**。
+- **联机降延迟的三层（2026-11-12）**：① **降级策略分档（2026-11-12 实测推翻「三档统一 `maintain-framerate`」）** —— `maintain-framerate` 会让 Chrome quality scaler 一直缩分辨率去追 QP：源 744×557@60、BWE 还有 5.4 Mbps，编码输出只剩 **279×207**（`qualityLimitationReason: bandwidth`），加入者拉到 743px 显示就是 2.7 倍插值放大 = 糊。同一时刻换 `maintain-resolution` 立刻回到 744×557@57fps 且 reason=none，换 `balanced` 是 744×557@61fps。**抬 `maxBitrate` 到 25 Mbps 无效**，瓶颈不是上限。现在：`sharp`=maintain-resolution / `balanced`=balanced / `smooth`=maintain-framerate。验证口径：两端 `getStats()` 的 `outbound-rtp.frameWidth` 与加入者 `video.videoWidth` 必须等于房主画布宽度，**不是** `getParameters().encodings[0].scaleResolutionDownBy`（那个一直是 1，看不出 Chrome 内部缩放）；码率上限按像素算，**每档一个 bpp**（0.12 / 0.20 / 0.26，见 `QUALITY_SPEC`）；`contentHint` 分档（smooth=motion / balanced=detail / sharp=text）。② **音频别抢带宽** —— `tuneAudioSender` 压 32 kbps + `dtx=false`；`preferLowLatencyAudio` 包 `pc.setLocalDescription` 改 Opus fmtp 加 `stereo=0;usedtx=0;maxaveragebitrate=32000`（**Chrome 默认已给 `minptime=10;useinbandfec=1`，不用重复写**）。必须在 `onPeerJoin` 里装 —— `onActivate` 先写 `activePeerMap` 再回调，那时 pc 一定在，且视频那次是**第二次协商**（第一次只有 DataChannel），赶得上。③ **可观测** —— `lib/netplay-telemetry.ts` 只在 dev 打 `console.table`（`qualityLimitationReason` / `jitterBufferDelay÷jitterBufferEmittedCount` / `candidate-pair` 的 rtt 与 candidateType），生产第一行返回。**接收端 `jitterBufferTarget=0` 音频也要设**（音画共用一个时钟）。
+- **码率上限必须跟画布尺寸走（2026-11-12，用户第二次反馈「还是太糊」的根因）**：`tuneVideoSender` 用 `track.getSettings()` 的宽高算 bpp，但建流那一刻画布还是 JSX 上的初始 **720×540**，RetroArch 要等核心起完、布局落定才把它改成实际尺寸。实测 1920 宽的窗口下画布 **1172×879**，而 `maxBitrate` 一直是 `720×540×60×0.2 = 4665 kbps`（`getStats().targetBitrate` 精确等于这个数），等于每像素只有 0.057 bit —— 这才是「糊」的真身，跟 `degradationPreference`（那轮已修好，`reason: none`、编码尺寸=画布尺寸）不是同一件事。修法：`NetplayController.watchVideoSize()` 每 500ms 比一次 `getSettings()`，尺寸一变就 `tuneStream()` 重压；`publishStream` 建流时先记一次当前尺寸，`unpublishStream` / `leave` 停表。**另：`balanced` / `sharp` 的 `maxHeight` 已改成 0（不再缩），`maxPixels` 兜超宽屏（2.1MP / 3.2MP），上限 12M / 20M** —— 以前写 720 是假设「画布大概 720 高」，画布一旦更高，编码端先缩小、加入者再放大，白丢清晰度。验收口径：`getParameters().encodings[0].maxBitrate` 必须约等于 `画布宽×高×fps×bpp`（截到档位上限），且 `scaleResolutionDownBy` 为 1。
+- **逐帧推进（2026-11-12，结论：这条路走不通，rollback 搁置）**：入口确实在 `Module.Browser.mainLoop`（`Module["Browser"]` 是导出的；`func` = C 侧 `main_loop`，`runIter(func)` = 一次调用推一帧），但**能推帧 ≠ 能做出确定性重放**，三条实测把门关上了。① `mainLoop.pause()` 不能用：它只是 `scheduler=null`，`runner()` 末尾那句 `scheduler()` 直接抛异常、rAF 链断掉；`resume()` 走 `setMainLoop(..., noSetTiming=true)` 不会重新排 rAF，实测解冻后一帧都不走。② 档帧只剩字节码层的 `_cmd_pause`，而它是**排队命令**、落地时机跟着主循环走 ⇒ 同一段帧数用不同切分（1×6 / 2+2+2 / 6）跑出三份不同状态，`stepFrames` 追不平。③ 存档是唯一的状态通道（没有 `retro_serialize` 导出），`_cmd_save_state` **只在核心处于暂停态时才写文件**，写出来还是 RZIP 压缩的（每次大小差几个字节、无法按偏移比对），而且要再推一轮主循环才落盘；连拍十几次 `_cmd_load_state` 之后还会彻底写不出来（本会话实测过）。⇒ 双端模拟器的地基不成立，联机继续走「房主渲染 + 推流」。
 - **手柄**：引擎 autoconfig 到 1P；两手柄按枚举顺序分 1P/2P；**单手柄永远落 1P**；映射表 `lib/gamepad.ts` 必须和引擎一致；切后台 `visibilitychange` 补 keyup。
 - **街机 romset**：`fbneo` **按 CRC** 取 rom、名字不参与 ⇒ 「补名字」那步**只对老核心 `fbalpha2012_cps1` 有用**。缺 `neogeo.zip` / 版本对不上**界面不提示**（判据 `lib/bios.ts` 的 `looksLikeNeoGeoRomset`）。
 
@@ -261,3 +264,236 @@
 - ⚠️ **单列档（≤1023px）`.play-screen-area` 不带 `aspect-ratio`、自己铺满颜色**（2026-11-06）：屏幕被 `--play-display-max-width`（按视口高算）卡窄，按容器宽推的 4:3 比屏幕高，`align-items: flex-start` 把多出来的那截全丢在屏幕下方 ⇒ PC 小屏上「屏幕和游戏控制面板隔一大截」。用户定的终态：**画面尺寸不动，黑边铺满整列**（左右多出来的两截是屏幕黑边的延长）。底色分主题：**浅色 `#000`**（与 `.screen` 的 `bg-black` 同色）、**深色 `ink-950`**（同一天「黑暗模式背景不要纯黑」定的，纯黑矩形在深底上边界更刺眼）。高度交给 `.play-game-screen` 自己的 `aspect-ratio: 4/3`。
 - 联机时右侧按键表锁 1P：`keysLocked = soloOnly || mode !== 'solo'` 一起管「不画 P1/P2 切换」+「取值锁 `bindings.p1`」；`KeyBindingsPanel` 可选 `online`。判据用派生的 `mode`，**不是 `netplayState.role`**。
 - 房间卡 `inRoom` 时出现在右栏最上：房主才画「二维码 / 复制 / 分享」三颗（加入者的码是别人的，1 对 1 再发一遍只会把第三人请出去，见 `room-full`）。二维码（2026-11-10）编的是 `shareLink()` **同一条链接**，`qrcode.react` 收在 `components/RoomQr.tsx` 里走 `next/dynamic` 的 `ssr:false`（链接由 `window.location` 拼、服务端是空串；也只有点开才加载）。展开状态 `qrRoomCode` 存的是**房间码**不是 boolean ⇒ 换房自动收起。白纸底写死白、不跟主题翻。
+
+## H5 游戏专栏 / FPS `toy-gunfight`（2026-11-12）
+
+- 三个入口：`/h5`（专栏列表，ISR 604800）、`/h5/toy-gunfight`（游玩页，`generateStaticParams` 只有一条）、顶栏「游戏库」后面的 `H5`。`app/sitemap.ts` 两处。
+- **和模拟器那套完全隔离**：不碰 Supabase / R2 / `lib/emulator.ts` / `lib/netplay.ts`。只复用 `generateRoomCode` 等三个纯函数 + `@trystero-p2p/mqtt`，**独立 `appId: 'nesload-fps'`**（改成 `nesload` 会和模拟器房间撞名）。
+- 分层：`lib/h5/` 15 个引擎文件（除 `net.ts` 标 `'use client'`，其余无 React/DOM 依赖，服务端 import 安全）；`components/h5/` 8 个只管 React；页面只做取数与外壳。
+- **零静态资源**：墙/船体/集装箱贴图运行时 Canvas 2D 画（`textures.ts`），人物与三把枪是 three 几何体（`character.ts` / `viewmodel.ts`），音效全 WebAudio 合成。`sprites.ts` 已删 —— 2D 帧画法别复活。
+
+### 渲染层（2026-11-12 当天大改：光线投射 → three.js）
+
+> 起因：用户截图《穿越火线》「运输船」，要求真 3D。手写 WebGL2 版（`render3d.ts` 700 行 + `math3d.ts`）写到一半被「我记得有一些现成的库吧」问停，评估后**换 three.js 并删掉手写那版**。结论：这类场景的性能上限在 draw call 和填充率，不在引擎；three 的合批/裁剪/状态排序是现成的正确做法。
+
+- `three@0.187` + `@types/three`（three 本体**不自带类型**，少装 `-D @types/three` 会报 TS7016）。只在游戏页的 client chunk 里，静态 import 即可（three 模块顶层不碰 DOM）。
+- **坐标只在一处换算**：世界 `(x 东, y 南, z 上)` → three `(x, z, y)`。出现位置只有 `SurfaceBuilder.push()` 与 `updateCamera()`，别的文件不用知道。
+- 关卡烘焙：40×26 格，按 **8×8 格分块 + 贴图分桶**合并成 BufferGeometry。每格贡献 ① 地面四边形（四角各算高度 ⇒ 楼梯是真斜面）② 实心体外露面（**邻居更高就跳过这一面**）③ 落差处的**裙边**（`TILE.skirt`），平台外沿再长一圈黄黑栏杆（`TILE.hazard`）。没有裙边，2.6 米的平台看起来就是一块悬空的布。
+- 材质 `MeshLambertMaterial` + `DoubleSide`，光照 `HemisphereLight 0.82` + `DirectionalLight 0.52`（调出来的值，不是物理值；给到 1.5 就过曝）。**不开 shadowMap**，人物脚下用径向渐变圆片糊住浮空感。
+- 像素比 `min(dpr, 1.75) × 画质 × 自适应系数`，帧时 45 帧采样一次（>19.5ms 降档 / <12.5ms 升档），**采样间隔内绝不 setPixelRatio**（会重建帧缓冲，抖着改比不降档还慢）。
+- 旧的手写管线文件 `lib/h5/render.ts` / `math3d.ts` 已删。`math.ts` 补了 `clampPitch`。
+
+### 枪（`viewmodel.ts`，2026-11-12 第二轮）
+
+- 用户第二轮要求「枪也是要 3D 的啊 换弹动作呢」。此前枪是第一人称贴图（`sprites.ts` 的 `gunAk/gunM4/gunAwm`，400×300 画好再 `drawImage`），近看就是一张卡片。
+- 现在是**独立 scene + 独立相机**（FOV 固定 55，不跟主相机的 ADS 变焦走）：主场景画完 `clearDepth()` 再画，所以贴墙时枪管不会插进铁皮。`renderer.autoClear = false`，每帧显式 `clear()`。
+- 一把枪 = 二三十个 `BoxGeometry` / `CylinderGeometry` 零件，材质 `MeshPhongMaterial`（金属必须有高光，这是「真 3D」和「贴图」最直观的差别）。`frustumCulled = false` 全部关掉 —— 枪永远在视野里，算包围盒是白花钱。
+- **枢轴放在机匣尾部**（握把上方）。后坐、换弹翻转都绕它转；绕枪身中心转会让枪口在屏幕上横移，像甩鞭子。
+- 动画全部**按 `reload` 进度切**，不自己计时：0.16~0.34 旧弹匣落下 → 0.44~0.62 新弹匣升起 → 0.58~0.74 拍一下 → 0.68~0.92 拉栓。进度来自 `world.ts` 的 `reloadUntil`，所以改 `weapons.ts` 的 `reloadTime` 动画自动变长变短，联机两边时长也一致。
+- 开镜到 86% 直接 `visible = false`（2D 遮罩接管）。真做镜片折射要一整套后处理，CF 里开镜也看不到枪。
+- ⚠️ 枪口朝向靠 `WEAPON_OFFSET.yaw ≈ 0.19`（`atan(0.168/0.85)`）：枪在右侧 0.168 米、枪口在 0.85 米外，不转这一点枪口会一直指着画面右侧外面。
+- ⚠️ `dispose()` 必须 traverse 释放每个零件的 geometry **并清空模块级材质 Map**。不清的话重新进游戏页会从缓存里拿到已 dispose 的材质，枪变成一片黑。
+
+### 人物（`character.ts`，2026-11-12 第三轮改成写实士兵）
+
+- 演进：Y 轴 billboard 广告牌 →（第二轮）球头 + 胶囊四肢的 Q 版小人 →（第三轮）**6.4 头身写实士兵**。第三轮起因：用户「不要 q 版画风」。
+- 现在：`HEAD_R 0.108` 的头 + 半球头盔（带帽檐）+ 护目镜 + 战术背心（三个弹匣袋）+ 背包 + 护膝 + 军靴 + 两段式四肢（髋→膝→靴 / 肩→肘→手），一把简化步枪挂在**右肘末端**（不是肩上，挂肩会在抬枪时飘到脸前）。总高对齐 `ACTOR_HEIGHT 1.72`。
+- 配色：敌人深橄榄绿 `0x4a5344`（`BOT_PALETTE`），队友沙漠沙 `0x8b7f66`（`PEER_PALETTE`）。敌人头顶有红色倒三角 `THREE.Sprite`（`markerAssets()`），死亡时 `marker.visible = false`。
+- 🔴 **改比例必须同步 `HEAD_Z`**：Q 版大头时头占 1.12 米以上的全部体积，写实比例下 `HEAD_Z` 还留 1.12 就会把**胸口**算成爆头（`world.ts` 按 `z - 脚下 >= HEAD_Z` 判头）。本轮一并把 `EYE_HEIGHT` 提到 1.58、`HEAD_Z` 提到 1.45。**这三处 + `character.ts` 顶部注释里的数字是同一组，改一处必须全改**。
+- **几何体与材质全场共享**（模块级 `geometry()` / `material()` 缓存）。5 个角色 × 十几个 mesh ≈ 60 draw call，创建成本只是 `new Mesh()`。
+- 上半身包在 `upper` 节点里：走路起伏必须**整体**抬（`upper.position.y`），只挪躯干会看到脑袋浮在身体上方。
+- ⚠️ 四肢 `rotation.x` 用**正值**才是往前抬。肢体沿 -y 下垂，绕 x 正转把 `(0,-1,0)` 转到 `(0,-cosθ,-sinθ)`，z 为负 = 朝模型正面（-z）。写成负值双臂会向后抡。
+- ⚠️ 靴子挂在腿关节上时**只能偏移 z**：关节已经在髋部的 x 上，再写一次 x 就跑到 -0.23 去了。
+- ⚠️ 朝向 `rotation.y = -yaw - π/2`。模型正面做成 three 的 -z，绕 y 转 θ 后前向是 `(-sinθ,-cosθ)`，代入 `(cos yaw, sin yaw)` 解得 θ。yaw=0 时 θ=-π/2，前向变 (1,0) ✓。
+- 扫地式判断速度：**用逐帧位移**（`moved / (dt*4)`）再 10/s 平滑，不用 `phase`。快照 20Hz 是跳着走的，直接拿瞬时值腿会抽；而 `phase` 在静止时也累加，分不出走没走。
+- 影子挂在 `root` 上但每帧把 y 算回**地面**，并按离地高度缩小。材质全场共用，不能单独改透明度。
+
+### 跳跃（2026-11-12 第二轮）
+
+- 用户：「现在还不支持跳跃」。`InputCommand.jump`（按住 = 连续跳，不是一次性动作）、`ActorState.vz`（只在本地模拟里存在，**不进协议**）。
+- `JUMP_SPEED 5.0` / `GRAVITY 13` ⇒ 跳高 0.96 米、滞空 0.77 秒。平台 2.6 米，跳不上去，必须走楼梯。
+- 🔴 **`blocked` 只挡「向上」的落差**（`levelAt - z > MAX_STEP`）。以前用 `Math.abs`，人一离地脚就比地面高，绝对值立刻超限 ⇒「跳起来之后不能前后移动」。
+- 🔴 **`onGround` 必须在水平移动之前算**。移动之后再算，从平台边缘走出去时脚下地面已变成 0，「站在地上」仍成立，`z` 会被瞬间贴到 0 —— 人是一帧掉下来的，不是掉下去的。
+- 走出平台边缘会真的掉下去（以前 `Math.abs` 让边缘变成隐形的墙）。栏杆只是视觉，不再挡人。
+- 🔴 加入者本地**只推进自己**（`if (!authority && id !== selfId) continue`）。远端实体全由快照驱动；本地再跑一次 `moveActor`，远端刚跳到 0.6 米就被本地重力拽回地面，看起来像原地抽搐。
+- 触屏跳跃钮在右下，`onJump(down)` 按住才算。单击会因为「按键只活一帧」在低帧率下漏掉。
+
+### 真 3D 的判定（比渲染更容易踩）
+
+- 🔴 **`solidAt` 与 `bulletBoxAt` 不是一回事**：平台把 `FLOOR` 抬到 2.6 但 `HEIGHT=0`，`solidAt` 认为「没有实心体」（走路/渲染要用这个）；`bulletBoxAt` 返回 `[0, FLOOR+HEIGHT]`（弹道要用这个），否则子弹从平台侧面穿进去、地上的人能隔着台面打死楼上的人。
+- 走路只认**落差**：`levelAt(目标) - 当前 z <= MAX_STEP(0.55)`（单向，见「跳跃」一节）。楼梯格 `RAMP` 存**格内低端**高度、`floorAt(gx,gy,fx,fy)` 按格内比例插值，所以脚下连续、能走上去；平台落差 2.6 直接成墙。
+- ⚠️ `pushStairs` 的下降段 base 要减一格：`(h-step-1)*RISE`。写成 `(h-step)*RISE` 会让整段楼梯凭空高一级（当天就是这么错的）。
+- 命中判定：眼睛出发的 3D 射线，先 `castRay` 拿墙的 3D 距离当 `maxDist`，敌人用「2D 圆求交 ÷ cos(pitch)」换算成沿射线的距离，再按 `z - 目标脚下` 判 `FOOT_Z..ACTOR_HEIGHT`，`>= HEAD_Z` 算头（**真的按命中高度算**，不再是概率近似）。
+- 散布只抖 yaw/pitch，**后坐不改弹道**（视角踢上去是纯表现 `shakePitch`）；否则「准星指着人却打在地上」。
+- 平台边缘的栏杆判定要比**同一条边**的高度，且 `isRamp` 的邻居直接跳过 —— 拿邻居的 `FLOOR`（低端）去比，会在楼梯口给平台围一圈栏杆把入口挡住。
+- 机器人寻路用 `pathBlocked`（查 `solidAt` + `levelAt`），不要用射线探测：射线只看得见墙，看不见平台边缘，机器人会一路顶着边缘磨。
+
+### 联机
+
+- 主机权威（机器人只在主机跑、`checkMatchEnd` 只在主机）+ **各端本地判定命中**（`castShots(dryRun)` 发 `hitReport`，主机 `applyReportedHit()` 扣血）+ **加入者权威自己的位置**（`applyRemotePlayer()` 不二次校验）。主机 20Hz 快照、加入者 10Hz 输入，`JOIN_WAIT_MS 20_000`，严格 1v1（第三人收 `full`）。
+- ⚠️ 快照必须走 `WireSnapshot` 短字段（`packSnapshot`/`unpackSnapshot`）：Trystero 的 `makeAction<T>` 要求 T 带隐式索引签名，直接传内部 `Snapshot` 编译不过；顺带把协议钉死。3D 之后 `WireActor` 多了 `zz`（脚下高度）和 `pt`（俯仰），`WireInput` 多了 `z` 和 `p`。
+- ⚠️ `applySnapshot` 的实体列表以快照为准：**多删缺补**。`MatchRules` 也必须进快照，否则两边显示的目标人头数不一致。
+- ⚠️ **换弹发的是状态不是按键**：`reload: self.reloadUntil > world.time`（10Hz 发包，按键只活一帧）。
+- ⚠️ `net.ts` 里 `@trystero-p2p/mqtt` 必须 `await import()` 动态引入（顶层 import 会在 SSR 炸）；`open()` 开头先探 `crypto.subtle` ⇒ `insecure-context`（局域网 http 直连会命中）。
+- ⚠️ 指针锁定：`InputController.onPointerDown` **只认 `event.target instanceof HTMLCanvasElement`**，否则点菜单按钮会被抢走指针。全站唯一 `Esc` 语义不变（这里开暂停面板）。
+
+### 改动入口
+
+- 手感：`weapons.ts` 一张表（damage/interval/spread/kick/moveSpread/range/adsZoom/pierce/tone）。
+- 地图：`map.ts` 的 `WALLS` / `PLATFORMS` / `STAIRS` / `BOXES` / `BARRIERS` / `CRATES` 矩形清单。**加删完必须核一遍出生点有没有被箱子压住**（`PLAYER_SPAWNS` + `BOT_SPAWNS` 八个点）。
+- 加枪：`weapons.ts` 一行（含 `scoped`）+ `viewmodel.ts` 一个枪模 + `WEAPON_ORDER` + `ui-text.ts` 的名字键。加 H5 游戏：`catalog.ts` push 一条 + `FpsGameShell` 外挂分支。
+- 文案两套：页面级 18 语言在 `lib/i18n.ts` 的 9 个 `h5.*` 键；**游戏内文案独立**在 `lib/h5/ui-text.ts`（zh / zh-TW / en，其余回退英文）。加键要同时改 `H5TextKey`。
+- 设置存 `localStorage` 的 `nesload:h5-fps:settings`。UI 面板是**写死的近黑深色**（`#0f1318`），不跟站点 `data-theme` 翻。
+
+## 只有 AWM 能开镜（2026-11-12 第三轮）
+
+- 用户：「只有 awm 才支持开镜」。做成**单点开关** `WeaponSpec.scoped`（`weapons.ts`），ak / m4 为 `false`、awm 为 `true`。四个消费点全部跟着它走，**别在任何一处另写「是不是狙击枪」的判断**：
+  - `world.ts` 移动：`if (input.ads && actor.spec.scoped) speed *= ADS_MULT`。
+  - `world.ts` 散布：`const base = actor.input.ads && spec.scoped ? spec.adsSpread : spec.spread`。
+  - `world.ts` 机器人：`input.ads = actor.spec.scoped && targetDist > 16`（拿步枪的机器人不会端枪减速）。
+  - `game.ts` 相机：`camera.ads = spec.scoped ? this.adsValue : 0`；`adsTarget` 也先过 `spec.scoped`。
+- 切枪回步枪时 `adsValue` 以 16/s 归零，不需要另写「强制退出开镜」。
+- `viewmodel.ts` 读的是同一个 `camera.ads`，所以步枪自动不抬枪；`FpsHud.tsx` 的触屏镜按钮**只在 `spec.scoped` 时渲染**。
+
+## CF 视觉规范（2026-11-12 第三轮）
+
+- 识别点三件事：**直角无圆角**、**单一橙金强调色**、**面板顶部一道橙条**。
+- 色值：近黑底 `#0f1318` / `#0e1114`、边框 `#343a42`、橙金 `#f0a020`（主）/ `#d29428`（比分条底）。`catalog.ts` 的 `accent` 也是 `#f0a020`。**面板底色写死不跟主题**。
+- HUD 布局照 CF：顶部中段三块比分条（KILL / 目标 / DEATH，中间橙金实底）、右上击杀播报、**左下大号血量 + HP 条 + AP 条**（数字最大的是血量）、右下 40px 弹药 + 弹匣格（`flex-1` 自适应宽度，固定 px 会在 30 发的 AK 上拉出 150px 压到屏幕中间）、左上雷达、绿色四段准星带黑描边、CF 式狙击镜（圆外全黑 + 14px 镜筒 + 十字线 + 密位刻度 + 中心红点）、命中标记是准星四周四道斜线（击杀转红）。
+- 组件：`components/h5/ui.tsx` 的 `GamePanel` / `PanelTitle` / `GameButton` / `Segmented` / `Divider` 是唯一样式出口，`FpsSetup` / `FpsRoomPanel` / `FpsSettingsPanel` / `FpsResult` / `FpsHud` 全部复用它们。改视觉只改这一个文件。
+- `H5Cover.tsx` 是列表封面，重画成「运输船甲板一角」（阴天海面 + 四组集装箱 + 钢板透视网格 + 黄线 + 绿准星 + 底部压暗）。**不放人物**：缩略图尺寸下人形剪影比例必崩。
+
+## 地图：CF 运输船（2026-11-12 第三轮 —— ⚠️ 布局已被第四轮重做，坐标失效，只留思路）
+
+- `36×26` → **`40×26`**。长条形货轮，布局注释块里有一张 ASCII 平面图，改之前先看它。
+- 三条进攻线：两条内通道（x 12..14 / 25..27，正对出生舱门洞）+ 两侧船帮走道（x 1..4 / 35..38，舱壁**故意不封**）。中央高台 `PLATFORMS = [{x:18, y:12, w:4, h:2}]`，南北各一段 `STAIRS`（3 格）。
+- 集装箱**必须纵向摆**（六列，x 5/10/15/23/28/33）。横着放会把货场切成一条条横沟，三条线全断。`BARRIERS` 四组水泥墩补内通道掩体，`CRATES` 在出生舱与内通道中段。
+- 出生点：`PLAYER_SPAWNS` `(13.5,3.5)` yaw π/2、`(26.5,22.5)` yaw -π/2；`BOT_SPAWNS` 六点（两端 x 7.5/32.5，船帮 x 2.5/37.5）。**挪完箱子必须回来看这八个点有没有被压住**。
+- `textures.ts` 新增 `TILE.hull = 14`（船体钢板：深灰蓝 + 竖缝 + 横向加强筋 + 铆钉 + 锈迹流痕），`TILE_LAYERS` 随之 15。旧地图用的 `TILE.wallPanel` / `containerDoor` / `roof` 现在没人引用。
+- 配色整体压成工业冷调（甲板 `#5b676c`、集装箱绿 `#4d5f47` / 蓝 `#3b5265` / 红 `#8f4438` / 橙 `#9a6432`）。天空 `#5e7c92`→`#c2d1db`、雾 `0xa8b8c4` + `Fog(42, 128)`（**地图加长后雾太近会让远端舱壁糊掉**）。
+
+## 护甲（AP，2026-11-12 第三轮）
+
+- `MAX_ARMOR = 100`（`weapons.ts`），`ActorState.armor`，出生与复活都满。HUD 左下 AP 条 + `HudSnapshot.armor`；联机走 `WireActor.ar`。
+- 规则：步枪吃 **25%** 吸收，`amount < 60` 才吸 ⇒ **狙击穿透**（否则 AWM 一枪 100 会被拆成两枪，和 CF 里巴雷特一枪带走的手感不符）。
+- `damage()` 里先扣 `armor` 再扣 `hp`；`toHp` 才是真正掉的血。改伤害表时注意这条会吃走四分之一。
+
+## 地图：CF 运输船（2026-11-12 第四轮 —— ⚠️ 尺寸与坐标已被第五轮推翻，只留「为什么这么想」）
+
+用户原话「不是cf运输船的地图」，第三轮那版被判不像。这轮先查了 CF 官方攻略，拿到三个结构特征再动手，不是凭感觉重排：
+
+1. **两端是出生「舱」，不是露天出生点** —— 三面围合、只留门洞。玩家从舱里走出来才能看见货场，这一下就把「开局就被远处架枪」的体验改掉了。
+2. **中央高台是「视野最好、身位最差」** —— 能俯看全场，但站在上面全身暴露、只有南北两个楼梯口可退。所以高台不能小，小了就成了一个纯送人头的台子。
+3. **两翼贴船舷的窄走道能绕后** —— 让中路打不动的人有第三条路。
+
+`40×26`，`map.ts` 文件头注释块里保留了 ASCII 平面图 + 三条进攻线的文字说明。
+
+- **`WALLS` 12 条**：四周船体（`hull` 贴图）+ 两道舱壁各开三个口。北舱壁 `y=5` 拆成 `x0..3` / `x6..17` / `x23..34` / `x37..40`，中间留的是**大门 `x17..22`**（正对中央高台）与**两侧小门 `x3..5` / `x34..36`**；`y=20` 镜像。改门宽时**必须一起看 `BARRIERS`**：`y=6` / `y=19` 那两组水泥墩是正对大门放的，再往内挪一格就堵住楼梯口。
+- **`PLATFORMS = [{ x:17, y:11, w:6, h:3 }]`**：6×3 的中央高台（第三轮只有 4×2）。南北各一段 `STAIRS`（`x18..21`，`y8..10` / `y14..16`，`rising` 一真一假）。高台面积决定了「上面能站几个人」，`4×2` 只够一个人来回挪。
+- **`BOXES` 八条**：只贴船舷摆（`x4` / `x33`，`y7..10` 与 `y15..18`），加上内侧 `x9` / `x29` 两条中箱。**集装箱绝不摆到地图中线上** —— 摆中间会把 40 米长的货场切成一段段横沟，三条进攻线全断（第三轮就是栽在这）。
+- **`CRATES` 带 `low?: boolean`**：新增 8 个矮箱（0.88 米，`pushSolid(x,y,w,h,tex,height)` 的高度形参）。矮箱是**踏板**不是掩体——跳上去能越过 1.25 米水泥墩的视线。`pushSolid` 第五个参数不给就是默认高箱，别在别处再手写高度。
+- **`PATROL_POINTS` 九个点**：中路两个楼梯口、两翼走道、内线箱后、高台、两个出生舱。`roam()` 只认这张表。**别拿出生点当巡逻点**——机器人走过去会在舱里对着墙发呆。
+- **出生点**：`PLAYER_SPAWNS` `(19.5,3)` yaw π/2 / `(20.5,22)` yaw -π/2（舱内正中，面朝大门）；`BOT_SPAWNS` 六点全在舱里或走道上（`x9.5` / `x30.5` / `x2.5` / `x37.5`）。**挪任何矩形之后必须回来看这八个点有没有被压住**。
+- **没做地下船舱**：CF 运输船下层舱是真的，但 `HEIGHT` 只有一列、只能表达「这一格比地面高多少」，做不了负高度。真要做得把整张网格改成多层结构（`FLOOR`/`HEIGHT`/`solidAt`/`bulletBoxAt`/渲染分桶全要动），风险远大于收益，所以这轮明确放弃。这个判断写在 `map.ts` 注释里，免得下次又有人想加。
+- 校验手段：写一次性脚本把矩形清单还原成 2D 网格，打印 ASCII 平面图 + BFS 连通性 + 八个出生点的遮挡检查。**按格中心取高度会把 3 格楼梯（每级 0.87 米）误判成墙**，必须按跨格边界取高度并复现 `floorAt` 的格内插值。结果：高台 18/18 格可达、两翼走道贯通、八点全空。脚本验完即删。
+
+## 地图：CF 运输船（2026-11-12 第五轮 —— **现行版，坐标以此为准**）
+
+用户嫌「不是 CF 运输船」，并且给了一个参考站点。参考站点是别人 one-shot 复刻的 CF 运输船，README 里写了它自己考据出来的结构：**长条甲板、两端船舱出生、中部 V 形斜放集装箱、两侧 L 形箱堆、左右各一条只能从己方出生点进入的集装箱管道、管道顶是可以架枪的二楼**。这五条就是这张图的识别点，照着排。
+
+- 🔴 **尺寸 26×44**（原 40×26 完全错了）。`x` 是**船宽**（26 米）、`y` 是**船长**（44 米）。40×26 等于一块横着的方板，怎么摆都不像船；26:44 ≈ 真实比例的 1:1.8。改尺寸只影响 `map.ts` 与 `render3d.ts`（`MAP_*` 只有这两处引用），但阴影相机、雾、天空都要跟着复核。
+- **两端船舱**：北 y 1..5、南 y 38..42，舱壁在 y=6 / y=37，各开**两扇门**（x 9..12、x 14..17），中间留 2 米实墙。CF 就是两扇门，不是三扇。
+- **中路 V 形箱**（`V_BOXES`）：网格做不了真斜角，用**三块 2×2 沿对角线错位**拼一条斜带，左臂 (11,24)→(9,20)、右臂 (14,24)→(16,20)。尖端在 y=24..26，两臂之间留 **1 格缝**（x 13..14）—— 中间能钻过去，但只容一个人，蹲着最稳，这就是 CF 里被堵在 V 中间的死亡位。**尖端朝南、开口朝北**：从两个门出来看到的东西不一样。
+- **两侧 L 形箱堆**（`L_BOXES`）：四个角各一组，5×2 的横箱 + 2×5 的纵箱在角上接起来。横箱切断中路直线视野，纵箱贴着二楼裙边造拐角。
+- **沿舷二楼**（`PLATFORMS`）：x 1..3 / x 22..24，y 10..34，`FLOOR = 2.6`。南北各一段 3 格楼梯（y 7..9 rising / y 34..36 下降）。这是全图唯一制高点，对应 CF 里「管道顶那层」。**中间不能下来**：上去就得决定往前压还是绕回去，视野好但退路只有两个口 —— 和管道顶的代价一模一样。
+- 🔴 **楼梯口那一格绝对不能放箱子**：第四轮我在 x=4,y=7 和 x=21,y=36 各放了一个木箱，结果两个楼梯全被 1.5 米的箱子堵死，二楼成了纯装饰。俯视图上完全看不出来，是连通性脚本报 `左舷二楼 0/3` 才发现的。
+- **没做管道内部**（还是要写下来，免得下次又试）：`FLOOR` 每格只有一个高度，表达不了「地面能走人、头顶 2.5 米还有一层板」。硬做得把 `solidAt`/`bulletBoxAt`/渲染分桶/弹道全改成多层结构，风险远大于收益。二楼已经给了等价的玩法。
+- **出生点**：玩家 `(12.5,3)` yaw π/2、`(12.5,40)` yaw -π/2；机器人四个在舱内 `(7.5|17.5, 3|40)`。**巡逻点全部落在地面层**：机器人是直线走向目标的，不会找楼梯，巡逻点放到二楼会让它们撞在 2.6 米裙边上原地抽搐。
+- **校验脚本**（一次性，跑完即删）：把矩形清单还原成二维网格，打印 ASCII 俯视图 + BFS 连通性 + 出生点占用 + 各关键点可达。🔴 BFS **必须比较跨格那条边的高度**，不是格中心高度 —— 3 格楼梯每级 0.87 米，按中心算会把整段楼梯判成墙，得出「二楼不可达」的假结论。这坑第四轮踩过一次，这次又踩了一次。
+- 结果：866 格可达、六个出生点全空且互通、八个巡逻点全可达、左右二楼各 3/3、V 中间缝可达、四扇门全通。
+
+## 枪口对准准星（2026-11-12 第五轮 —— 上一轮的修法是错的）
+
+- 🔴 **上一轮加的 `yaw = asin(hipX / muzzle)` 是错的，已删。** 它把枪口那个**点**拉回屏幕中轴，代价是整根枪管歪了 9.3°。玩家看的不是枪口那一个像素，是枪管的延长线 —— 而它现在指向准星左边一大片空白。翻遍 CS / CF / COD 的腰射构图，没有一个是把枪口拧到中线上的。
+- 🔴 **正解是 `rotation.y = 0`：枪管平行于视线。** 枪管延长线的消失点自然落在屏幕正中，也就是准星；枪口因为位置偏右下而投影在准星下方，但它「指着」准星。这就是所有 FPS 的做法，靠透视而不是靠旋转。
+- 于是只剩三个平移量要调：`HIP = { x: 0.15, y: -0.15, z: -0.52 }`。枪口落在准星右下约 8% 屏宽 / 12% 屏高，机匣压住右下角三分之一。`WEAPON_FIT` 里只有 `x/y/z`，**不再有 `muzzle`**，也不再接受任何角度参数。
+- `HIP.z` 从 -0.40 推到 -0.52：AK 枪托在局部 z=+0.43，-0.40 时只剩 3 厘米余量，开火后坐再往后一推就穿过近平面（0.04），枪托会凭空消失一帧。连带的 `recoil` 的 z 分量也从 0.072 压到 **0.038**。
+
+## 场景提亮（2026-11-12 第四轮）
+
+用户：「地图太暗」。
+
+- 🔴 **顺序不能反：先动贴图基色，再动灯。** 没开 tone mapping，只推灯会把甲板亮面直接烧到纯白（`MeshLambertMaterial` 没有 rolloff）。这轮贴图整体上一档：deck `#5b676c→#7d878d`、hull `#4a5765→#6a7684`、skirt `#3d4756→#586372`、barrier `#a8adb5→#bcc1c8`、crate `#b9853f→#c9964f`、concrete `#b6bac1→#cdd2d8`；四色集装箱同步（红 `#a85347` / 蓝 `#4a6a84` / 绿 `#5f7557` / 橙 `#b4783c`）。贴图提完灯只需小幅补。
+- 天空与雾：`SKY_ZENITH '#6d8ca6'` / `SKY_HORIZON '#cfdce6'` / `FOG_COLOR 0xb9c8d4` / `Fog(48, 142)`（地图加长后雾的起雾距离也要跟着推远，否则远端舱壁糊掉）/ 背景渐变底 `#e0e9ef`。
+- 光照三层：半球光 1.02 → **1.3**（提环境）、主平行光 1.05（带投影，见下）、反向补光 0.35（压死黑）。
+
+## 实时阴影（2026-11-12 第四轮）
+
+用户：「增加光影」。只给**一盏**平行光开投影，不是全场景开——合批之后阴影 pass 只剩几十个 draw call。
+
+```ts
+this.renderer.shadowMap.enabled = true;
+this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+sun.position.set(47, 32, 50);      // 仰角约 36°，不是顶光
+sun.target.position.set(13, 0, 22); // 地图中心（three 坐标）
+sun.castShadow = true;
+sun.shadow.mapSize.set(1536, 1536);
+const half = 32;                    // 覆盖整张 26×44 地图
+sun.shadow.camera.left = -half;     // right/top/bottom 同理
+sun.shadow.bias = -0.0012;
+sun.shadow.normalBias = 0.035;
+sun.shadow.camera.updateProjectionMatrix();
+```
+
+🔴 **太阳压在 36°，不是顶光。** 顶光的影子缩在箱子脚下，等于没有；36° 时一串 2.7 米的集装箱在甲板上拉出 3.7 米的斜影，这才是「这张图有太阳」最直接的证据。改地图尺寸后 `sun.position` / `target` 必须一起挪 —— 光挪一个，方向就歪了。
+
+🔴 两个坑：
+
+1. **双面材质在阴影 pass 里会画背面** ⇒ 薄片（栏杆、裙边、黄线）投出正反两片、边缘发黑。必须对关卡材质设 `material.shadowSide = THREE.FrontSide`。
+2. **改完 `shadow.camera` 的正交范围要手动 `updateProjectionMatrix()`**。three 的 `LightShadow.updateMatrices()` 只更新视图/投影矩阵的**内容**，不会重新算投影矩阵。
+
+- 枪口光：`PointLight(0xffd9a0, 0, 12, 2)` 常驻（**不要每次开火新建**），`updateMuzzleLight()` 把强度设成 `recoil * 2`、位置取视线前方 0.9 米。常驻一盏 `PointLight` 会让所有材质多算一次衰减，但比每次 `new` + `dispose` 便宜得多。
+- 低画质自动关：`settings.resolution < 0.99` 时 `shadowMap.enabled = false`，只在初始化判一次（`shadowReady`），不要在每帧里改 —— 运行中切 `enabled` 会让 three 重建 shadow map 纹理。
+- 角色：`rig.root.traverse(o => o.castShadow = true)`，`receiveShadow` 不开（自阴影在这种低模上只会出噪点）。
+- **集装箱顶面单独换贴图**（`CONTAINER_TEX` + `TILE.roof`）：四个立面是竖瓦楞，同一张图平铺到顶面，俯视就是一片竖条纹。站在沿舷二楼往下俯射时这个角度是常态，箱子会立刻显得像贴纸；换成 `roof` 的横向加强筋，俯视才有「一摞铁皮箱」的实感。木箱、水泥墩、船壳不走这条，它们顶面本来就没花纹。
+
+## 蹲姿（2026-11-12 第四轮）
+
+用户：「无法下顿」。**只降相机是不够的**，一共六处联动，全部收敛到两个唯一出口，别处不许自己乘系数：
+
+- `types.ts`：`CROUCH_HEIGHT = 0.68`、`CROUCH_SPEED = 0.58`；`eyeHeight(crouch)` 与 `bodyMetrics(crouch)` 是唯一出口。`ActorState.crouch` 是 0..1 的插值量（既当表现状态也当判定参数），`InputCommand.crouch` 是布尔。
+- **插值在 `moveActor()` 最前面**（12/s，差 0.002 就贴到目标值），这样物理和渲染读到的永远是同一个数。
+- ① 相机：`game.ts` `camera.z = state.z + eyeHeight(state.crouch)`；② 射线起点：`world.ts` 同样用 `eyeHeight()`；③ 命中框：`bodyMetrics()` 给身高与头高，`candidates.push({ ..., head: body.head })`；④ 机器人视线与瞄高；⑤ 速度 `speed *= 1 - (1 - CROUCH_SPEED) * crouch`，**蹲着不给冲刺**（`crouch < 0.2` 才乘 `SPRINT_MULT`）；⑥ 散布 `stance = 1 - 0.35 * crouch` 乘进 `spread`。
+- 联机：`WireActor.cr`（百分位整数），缺省当站着。
+- 模型：`character.ts` 蹲姿叠加在摆腿之上，`stride = 1 - crouch * 0.75` 收步幅；髋 `-0.30 * crouch`、上半身**同一个数**（差 4 厘米就会看出上下半身脱节）、大腿 `0.96 * crouch`、膝 `-1.75 * crouch`。头顶红三角 `ACTOR_HEIGHT + 0.12 - 0.4 * crouch`。
+- 输入：`C` / `Ctrl` / 触屏「蹲」钮（按住）。🔴 **`Ctrl` 必须在「带修饰键就放行」之前判**，否则 `event.ctrlKey` 会把它一起放过去：
+  ```ts
+  if (event.code === 'ControlLeft' || event.code === 'ControlRight') {
+    this.keys.add('Crouch');
+    return;
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  ```
+- 🔴 **`CROUCH_HEIGHT 0.68` 反推出的 1.17 米身高，刚好低于 1.25 米水泥墩** —— 「蹲在墩后完全藏住」这个掩体价值是算出来的，改 `CROUCH_HEIGHT` 或 `BARRIER` 高度时两者要一起看。
+
+## 枪口对准准星（2026-11-12 第四轮）
+
+用户：「枪口和准星不太一条线」。
+
+- **根因**：旧 `WEAPON_OFFSET.yaw = 0.17` 是照着「枪口 0.85 米」手填的常量，而 AK 枪口实际在 0.62 米、AWM 在 0.84 米。同一个角度套在三把枪上，短的必然偏右半个准星。
+- **修法**：`WEAPON_FIT[weaponId].muzzle` 记下每把枪的枪口距离，`yaw = asin(pivotX / muzzle)` 反算修正角，再按 `(1 - ads)` 淡出（开镜时枪本来就回到中轴，不需要修正）。`HIP.x` 从 0.168 收到 0.1 —— 偏得越小需要的修正角越小，视觉上枪管越不歪。
+- 加新枪只填 `WEAPON_FIT` 的 `muzzle` 一个数，不要再手调 yaw。
+
+## 武器质感（2026-11-12 武器精细度轮 —— 现行版，以代码为准）
+
+> 需求文档「武器模型精细度提升」：先做路线 A（材质渲染）再做路线 B（模型细节）。
+> ⚠️ 本轮时代码已是 `engine.ts` 中枢的重构版（NeutralToneMapping 1.15，无 composer），
+> 上面各节里的 ACES / SSAO / `map.ts` / `render3d.ts` 等描述均已失效。
+
+- **路线 A = `lib/h5/weapon-textures.ts`（新增）**：金属/木纹/聚合物三类 PBR 贴图运行时 Canvas 画，零静态资源。底色**以灰度为主、上色靠材质 `color`**（一张金属图喂钢/铜/刀身）；法线由高度图中心差分生成；**ORM 三合一**（R=AO、G=roughness、B=metalness 恒 1，金属度仍由材质标量决定）。做旧 = 划痕（亮底+低粗糙+凹槽，三数组逐像素对齐）+ 污渍（高粗糙+AO 压暗）。🔴 三张图**统一 CanvasTexture**：DataTexture flipY=false 与 CanvasTexture 混用会让划痕与凹槽 V 向错位。🔴 模块级缓存**不要 dispose**：材质缓存不重建，清了重进游戏页枪全黑。
+- **环境反射 = `engine.ts` PMREM + RoomEnvironment**（three 自带，无 HDRI 文件）：主场景 `environmentIntensity 0.3`（补反射不提亮）、枪模场景 `0.85`。🔴 **两个场景都必须给**：`dropped.ts` 与第一人称共享材质，只给枪模场景地上的枪会死黑 —— 金属度能从 0.35 提到 0.9 全靠它。枪模半球光 1.55→1.1（env 已补漫反射），另加暖色方向光 0.4 模拟手部反射。
+- **路线 B = 程序化细节，不引外部 GLB**：AK 三段弯弹匣/机匣铆钉（小球）/准星护圈/斜切防跳器/导气管/拉机柄/托垫；M4 导轨横档/伸缩托三段/鸟笼消焰器开槽/抛壳窗；AWM 制退器侧孔/物镜+目镜镜片（glass 吃 env 反光）/调节旋钮/镜架/斜撑两脚架；M870 护木防滑肋/散热肋/弹仓帽；USP 套筒防滑纹/击锤/弹匣释放钮/扳机护圈；军刀缠绳四道 + **ExtrudeGeometry 双材质**（0=刀面 1=侧壁，侧壁用更亮 `edge` ⇒ 开刃高光线）；手雷保险环（Torus）+保险片+半壳接缝环。每把 ≤40 mesh，面数远低于 8k 预算。
+- **换弹弹匣真拔插**：`ViewModel.magazine` 独立子组（ak/m4/awm/usp），`viewmodel.ts` 按 `reloadProgress` 驱动：0.06~0.32 easeInCubic 拔出下移 0.16m（到底隐藏=旧匣掉落）、0.52~0.8 easeOutCubic 新匣插入。进度来自 player，联机一致。
+- **未做**（讲给用户听过）：外部 GLB 枪模（保持零静态资源+无版权风险）；第一人称手臂（程序化手容易丑，等用户定）；`ASSETS.md` 无需更新（无新外部资源）。
+- **亮度风险**：主场景 IBL 0.3 会略提亮整体；用户嫌亮/暗先调两个 `environmentIntensity`，别动贴图。
+

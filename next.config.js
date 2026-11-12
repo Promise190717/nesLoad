@@ -181,6 +181,21 @@ const nextConfig = {
           },
         ],
       },
+      /*
+       * H5 游戏的 GLB 模型（`public/models/`，2026-11-12 加）。
+       *
+       * 发版不常变的二进制资源，缓存一天。文件名不带 hash（`soldier.glb` 换模型
+       * 还是这个名字），换模型后 purge CDN —— 规矩和 `/cores/`、`/bios/` 一致。
+       */
+      {
+        source: '/models/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400',
+          },
+        ],
+      },
     ];
   },
 };

@@ -712,4 +712,14 @@ export const ja: Record<MessageKey, string> = {
   'deepLink.title': 'ゲームを読み込み中',
   'deepLink.loading': 'ROM をダウンロード中…',
   'deepLink.hint': 'ダウンロードが終わると自動で始まります',
+  /* H5 小游戏专栏 */
+  'h5.title': 'H5 ゲーム',
+  'h5.intro': 'ブラウザでそのまま遊べるミニゲーム。ダウンロードもプラグインも不要です。現在 {count} 本。',
+  'h5.play': 'プレイ',
+  'h5.note': 'これらは本サイトのために作られたオリジナルのブラウザゲームです。設定とルームコードはブラウザ内にのみ保存され、送信されません。',
+  'h5.badge.online': 'LAN 対戦',
+  'h5.badge.bots': 'CPU 対戦',
+  'h5.badge.touch': 'タッチ対応',
+  'h5.seo.title': 'H5 ゲーム：ブラウザでそのままプレイ',
+  'h5.seo.description': '本サイトオリジナルのブラウザミニゲーム。FPS、武器は 3 種類、LAN 対戦と CPU 戦に対応。ダウンロード不要ですぐ遊べます。',
 };

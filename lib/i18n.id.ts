@@ -833,4 +833,14 @@ export const id: Record<MessageKey, string> = {
   'deepLink.title': 'Memuat game',
   'deepLink.loading': 'Mengunduh ROM…',
   'deepLink.hint': 'Mulai otomatis setelah unduhan selesai.',
+  /* H5 小游戏专栏 */
+  'h5.title': 'Game H5',
+  'h5.intro': 'Minigame yang langsung berjalan di browser, tanpa unduhan atau plugin. Saat ini {count}.',
+  'h5.play': 'Main',
+  'h5.note': 'Semua ini minigame orisinal yang dibuat untuk situs ini. Pengaturan dan kode room hanya tersimpan di browser Anda, tidak diunggah.',
+  'h5.badge.online': 'Multipemain LAN',
+  'h5.badge.bots': 'Lawan bot',
+  'h5.badge.touch': 'Dukungan sentuh',
+  'h5.seo.title': 'Game H5: main langsung di browser',
+  'h5.seo.description': 'Minigame browser orisinal: penembak sudut pandang orang pertama dengan tiga senjata, multipemain LAN, dan pertandingan lawan bot. Tanpa unduhan.',
 };

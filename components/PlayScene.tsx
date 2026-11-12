@@ -1236,6 +1236,47 @@ export default function PlayScene({
     netplay.announcePaused(controller.isPaused);
   }, [controller, netplay]);
 
+  /*
+   * 房主切走标签页 = 对局暂停。按暂停的不是房主，是浏览器。
+   *
+   * 标签页一隐藏，`requestAnimationFrame` 就停，RetroArch 的主循环跟着停，核心自然
+   * 不跑了 —— 但加入者手上是一条**活着的**视频流，只是没有新帧。他看到的是一张冻住的
+   * 图，和「卡了 / 断了」长得一模一样。
+   *
+   * 所以这里要做的不是「让游戏停下」（它已经停了），而是**把原因说出去**：
+   * 走 `announcePaused`，对面屏幕就会盖出 PAUSED + 「等房主继续」。
+   *
+   * 回来自动恢复，和自动暂停对称。切走前本来就是暂停态的话一个字节都不动 ——
+   * 那种「暂停」是人按的，不该被系统的可见性事件接管。
+   */
+  const awayPaused = useRef(false);
+  useEffect(() => {
+    if (netplayState.role !== 'host' || netplayState.status !== 'connected') return;
+    const onVisibility = () => {
+      if (!controller.isRunning) return;
+      if (document.hidden) {
+        if (controller.isPaused) return;
+        awayPaused.current = true;
+        void togglePause();
+        return;
+      }
+      if (!awayPaused.current) return;
+      awayPaused.current = false;
+      if (controller.isPaused) void togglePause();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    // 这里**只摘监听**，不动 `awayPaused`：`togglePause` 的引用一变这个 effect 就重挂，
+    // 而重挂完全可能发生在「标签页还藏着」的时候。顺手把标记清掉的话，回来那一下
+    // 就不会恢复，玩家看到的是「切出去再回来，画面永远停住」。
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [netplayState.role, netplayState.status, controller, togglePause]);
+
+  // 真正该清标记的是「不再是房主」或「不在对局里」——换房、退房、掉线都走这条
+  useEffect(() => {
+    if (netplayState.role === 'host' && netplayState.status === 'connected') return;
+    awayPaused.current = false;
+  }, [netplayState.role, netplayState.status]);
+
   const reload = useCallback(async () => {
     const file = lastRomRef.current;
     if (!file) return;

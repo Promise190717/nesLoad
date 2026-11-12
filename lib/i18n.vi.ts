@@ -752,4 +752,14 @@ export const vi: Record<MessageKey, string> = {
   'deepLink.title': 'Đang nạp game',
   'deepLink.loading': 'Đang tải ROM…',
   'deepLink.hint': 'Tự động bắt đầu khi tải xong.',
+  /* H5 小游戏专栏 */
+  'h5.title': 'Game H5',
+  'h5.intro': 'Game nhỏ chạy ngay trên trình duyệt, không cần tải về hay cài plugin. Hiện có {count}.',
+  'h5.play': 'Chơi',
+  'h5.note': 'Đây là các game nguyên bản làm cho trang này. Cài đặt và mã phòng chỉ nằm trong trình duyệt của bạn, không gửi đi đâu.',
+  'h5.badge.online': 'Chơi qua LAN',
+  'h5.badge.bots': 'Đấu với bot',
+  'h5.badge.touch': 'Hỗ trợ cảm ứng',
+  'h5.seo.title': 'Game H5: chơi ngay trên trình duyệt',
+  'h5.seo.description': 'Game trình duyệt nguyên bản: bắn súng góc nhìn thứ nhất  với ba loại súng, chơi qua LAN và đấu với bot. Không cần tải về.',
 };

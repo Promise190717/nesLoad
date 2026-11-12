@@ -116,9 +116,12 @@ export type NetplayMode = 'lan' | 'wan';
 export { captureFpsFor, DEFAULT_STREAM_QUALITY } from './netplay-media';
 export type { StreamQuality } from './netplay-media';
 import {
-  DEFAULT_STREAM_QUALITY, configureStreamContent, tuneVideoSender, tuneMediaReceiver,
+  DEFAULT_STREAM_QUALITY, configureStreamContent, preferLowLatencyAudio,
+  preferLowLatencyCodecs, tuneAudioSender, tuneMediaReceiver, tuneVideoSender,
   type StreamQuality,
 } from './netplay-media';
+import { startNetplayTelemetry } from './netplay-telemetry';
+import type { ButtonName } from './keybindings';
 
 /**
  * idle     —— 不在房间里
@@ -250,6 +253,48 @@ type ButtonMessage = {
 };
 
 /**
+ * 位图输入：14 个钮各占一位，一次发完整状态。
+ *
+ * 为什么不再一条 keydown / keyup 发一个包：Trystero 建的 DataChannel 是**有序可靠**的
+ * （`peer.mjs` 里 `pc.createDataChannel('data')` 用的默认参数），丢一个包，后面所有输入
+ * 都得等它重传 —— 局域网里无所谓，公网上一卡就是几十毫秒的「按键失灵」。位图不怕丢：
+ * 下一帧发的是完整状态，丢哪一包都会被下一包纠正，丢掉的 keyup 也不会再把角色卡在
+ * 按住状态。
+ *
+ * 位宽选 16 是因为 `ButtonName` 正好 14 个（见 `lib/keybindings.ts` 的 `ALL_BUTTONS`），
+ * 留两位余量。**顺序是协议**：改这张表等于改协议，房主和加入者必须同版本。
+ */
+const BUTTON_BITS: Record<ButtonName, number> = {
+  up: 1 << 0,
+  down: 1 << 1,
+  left: 1 << 2,
+  right: 1 << 3,
+  b: 1 << 4,
+  a: 1 << 5,
+  y: 1 << 6,
+  x: 1 << 7,
+  l: 1 << 8,
+  r: 1 << 9,
+  l2: 1 << 10,
+  r2: 1 << 11,
+  select: 1 << 12,
+  start: 1 << 13,
+};
+
+const BUTTON_ENTRIES = Object.entries(BUTTON_BITS) as [ButtonName, number][];
+const MASK_ALL = (1 << BUTTON_ENTRIES.length) - 1;
+
+/**
+ * 位图包。和 ButtonMessage / SessionMessage 一样必须是 `type`（隐式索引签名，见上）。
+ *
+ * 用新的 action 名 `i`，不和老的 `b` 混在一起：老版本客户端不认识 `i`，收到会直接
+ * 丢掉，所以两边都得先确认对方支持（房主在会话包里带 `i: 1`，加入者见到才切过来）。
+ */
+type MaskMessage = {
+  m: number;
+};
+
+/**
  * 线上传的会话状态：房主当前在不在出画面、出的是哪盘、**有没有暂停**。
  *
  * 为什么不能只靠媒体流判断「有没有画面」：Trystero 没有「远端流结束」的回调，
@@ -273,6 +318,14 @@ type SessionMessage = {
    * 收到 undefined 就当「没暂停」（见 onMessage 里的解析），不会翻车。
    */
   z?: 0 | 1;
+  /**
+   * 房主支持位图输入（`i` action）。
+   *
+   * 加入者**必须等这一位到了**才把按键切到位图：老版本房主根本没有 `i` 这个 action，
+   * 发过去会被静默丢掉，表现就是「怎么按都没反应」。带 `?:` 是为了向下兼容 ——
+   * 不认识就当没有，继续走老的 `b` 事件。
+   */
+  i?: 1;
 };
 
 /**
@@ -378,7 +431,21 @@ export class NetplayController {
   private buttonAction: MessageAction<ButtonMessage> | null = null;
   private sessionAction: MessageAction<SessionMessage> | null = null;
   private controlAction: MessageAction<ControlMessage> | null = null;
+  /** 位图输入通道（协议见 `MaskMessage`）。老版本对端没有这个 action。 */
+  private maskAction: MessageAction<MaskMessage> | null = null;
+  /** 加入者：房主已经在会话包里声明支持位图（`SessionMessage.i`）。 */
+  private maskCapable = false;
+  /** 加入者本机当前按住的钮（位图）。 */
+  private localMask = 0;
+  /** 房主：对方上一帧的位图，用来做差量注入。 */
+  private remoteMask = 0;
+  /** 同一轮里连按几个键只发一包 —— 微任务里合流，不额外加一帧延迟。 */
+  private maskFlushScheduled = false;
+  /** 位图心跳：丢包后靠它把状态纠回来。 */
+  private maskHeartbeat: ReturnType<typeof setInterval> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  /** 开发态链路体检的停止函数（`lib/netplay-telemetry.ts`）。生产环境是空函数。 */
+  private stopTelemetry: (() => void) | null = null;
   /** 加入者的「等房主」超时计时器，见 JOIN_WAIT_MS */
   private joinTimer: ReturnType<typeof setTimeout> | null = null;
   private state: NetplayState = IDLE_NETPLAY_STATE;
@@ -412,6 +479,17 @@ export class NetplayController {
    */
   private quality: StreamQuality = DEFAULT_STREAM_QUALITY;
   private readonly tunedConnections = new WeakSet<RTCPeerConnection>();
+  /**
+   * 画布尺寸观察。
+   *
+   * 为什么需要它：`tuneVideoSender` 的码率是拿 `track.getSettings()` 的宽高乘出来的，
+   * 而建流那一刻画布往往还是 JSX 上的初始 720×540 —— RetroArch 要等核心起完、
+   * 布局落定才把画布改成实际大小。2026-11-12 实测：1920 宽的窗口下画布是 1172×879，
+   * 码率却仍按 720×540 算，只有 4.67 Mbps，等于每像素 0.057 bit，加入者看到的就是糊的。
+   * 尺寸一变就重压一次，这个错配才追得上。
+   */
+  private sizeWatch: ReturnType<typeof setInterval> | null = null;
+  private watchedVideoSize = '';
   private readonly callbacks: NetplayCallbacks;
 
   constructor(callbacks: NetplayCallbacks) {
@@ -448,6 +526,9 @@ export class NetplayController {
    */
   async leave(): Promise<void> {
     this.stopPing();
+    this.stopMaskHeartbeat();
+    this.stopTelemetry?.();
+    this.stopTelemetry = null;
     // 退房/换房那条「等房主」的计时也要停，否则它会在下一个房间里放着跑
     this.stopJoinWatchdog();
     // 必须在重置 state 之前松 —— releaseHeld 要靠 state.role 才知道该注到哪个玩家位
@@ -458,6 +539,11 @@ export class NetplayController {
     this.buttonAction = null;
     this.sessionAction = null;
     this.controlAction = null;
+    this.maskAction = null;
+    this.maskCapable = false;
+    this.localMask = 0;
+    this.remoteMask = 0;
+    this.maskFlushScheduled = false;
     this.localGame = null;
     this.localPaused = false;
 
@@ -465,6 +551,7 @@ export class NetplayController {
     // 那张 canvas 会一直被 captureStream 攥着，弹卡之后还在编码。
     const stream = this.localStream;
     this.localStream = null;
+    this.stopVideoSizeWatch();
     if (room && stream) room.removeStream(stream);
     if (stream) for (const track of stream.getTracks()) track.stop();
 
@@ -479,9 +566,77 @@ export class NetplayController {
     }
   }
 
-  /** 把本地按下的键发给对方。没在房间里就是空操作。 */
+  /**
+   * 把本地按下的键发给对方。没在房间里就是空操作。
+   *
+   * 对端支持位图时这里只改一个整数、在同一轮微任务里合并成一包；不支持（老版本房主，
+   * 或者会话包还没到）就走原来的一条事件一包。两条路的**语义完全一样**，所以调用方
+   * （键盘、手柄、虚拟钮、失焦时的一次性松开）不用改。
+   */
   sendButton(button: string, down: boolean): void {
-    void this.buttonAction?.send({ b: button, d: down ? 1 : 0 }).catch(() => undefined);
+    // 用 hasOwnProperty 而不是直接查表：`BUTTON_BITS['toString']` 会命中原型链上的函数
+    const known = Object.prototype.hasOwnProperty.call(BUTTON_BITS, button);
+    const bit = known ? BUTTON_BITS[button as ButtonName] : 0;
+    if (!bit) {
+      void this.buttonAction?.send({ b: button, d: down ? 1 : 0 }).catch(() => undefined);
+      return;
+    }
+
+    /*
+     * 位图**不管当前走哪条路都要跟着改**。
+     *
+     * 会话包到得比第一次按键晚的话，按下那一下是走老 `b` 通道发出去的；如果这里
+     * 不记账，切到位图之后按同一颗键松开时，「新状态」和「旧状态」都算不出变化，
+     * 那一包就永远不会发 —— 房主那边角色会一直往一个方向走。
+     */
+    const before = this.localMask;
+    this.localMask = down ? before | bit : before & ~bit;
+
+    if (!this.maskCapable || !this.maskAction) {
+      void this.buttonAction?.send({ b: button, d: down ? 1 : 0 }).catch(() => undefined);
+      return;
+    }
+
+    if (this.localMask === before) return;
+    this.flushMask();
+  }
+
+  /**
+   * 把当前位图发出去。
+   *
+   * 用微任务而不是 rAF：同一轮里「方向键换向」可能连着改两位，合流后只发一包；
+   * 而 rAF 在后台标签页会停，恰好错过「切走窗口时松开所有键」那一包 —— 那正是最
+   * 需要送出去的一包（否则房主那边角色会一直往一个方向走）。
+   */
+  private flushMask(): void {
+    if (this.maskFlushScheduled || !this.maskAction) return;
+    this.maskFlushScheduled = true;
+    queueMicrotask(() => {
+      this.maskFlushScheduled = false;
+      void this.maskAction?.send({ m: this.localMask }).catch(() => undefined);
+    });
+  }
+
+  /**
+   * 位图心跳（250ms 一次）。
+   *
+   * 位图本身能自愈，但前提是**后面还有包**。用户一直不按键时，最后那一包要是丢了，
+   * 房主那边就会保持一个按住的状态直到下次操作 —— 加个低频心跳兜住这一种。
+   * 4 包/秒、每包十几字节，可以忽略。
+   */
+  private startMaskHeartbeat(): void {
+    this.stopMaskHeartbeat();
+    this.maskHeartbeat = setInterval(() => {
+      if (!this.maskCapable || !this.maskAction) return;
+      void this.maskAction.send({ m: this.localMask }).catch(() => undefined);
+    }, 250);
+  }
+
+  private stopMaskHeartbeat(): void {
+    if (this.maskHeartbeat !== null) {
+      clearInterval(this.maskHeartbeat);
+      this.maskHeartbeat = null;
+    }
   }
 
   /**
@@ -498,6 +653,7 @@ export class NetplayController {
     this.localStream = stream;
     this.quality = quality;
     configureStreamContent(stream, quality);
+    this.watchVideoSize(stream);
     if (previous) {
       const room = this.room;
       if (room) room.removeStream(previous);
@@ -514,10 +670,55 @@ export class NetplayController {
   unpublishStream(): void {
     const stream = this.localStream;
     this.localStream = null;
+    this.stopVideoSizeWatch();
     if (!stream) return;
     const room = this.room;
     if (room) room.removeStream(stream);
     for (const track of stream.getTracks()) track.stop();
+  }
+
+  /**
+   * 盯住采集尺寸，一变就重压参数。
+   *
+   * 只关心 `getSettings()` 报出来的宽高（= 画布后备尺寸），不关心窗口本身：画布变大
+   * 才意味着编码像素变多、码率该跟着涨。500ms 一次足够 —— 画布只会在核心启动和
+   * 窗口缩放时变，一秒内最多变一两次。
+   *
+   * 建流那一刻先把当前尺寸记下来：如果那时画布已经是对的，这次记录就顶掉第一次
+   * 「变化」，免得白白多压一遍；如果还是初始的 720×540，等真实尺寸出现时会正好
+   * 被判定为「变了」，补上那一次。
+   */
+  private watchVideoSize(stream: MediaStream): void {
+    this.stopVideoSizeWatch();
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
+    const initial = track.getSettings();
+    this.watchedVideoSize =
+      initial.width && initial.height ? `${initial.width}x${initial.height}` : '';
+
+    this.sizeWatch = setInterval(() => {
+      if (this.localStream !== stream) {
+        this.stopVideoSizeWatch();
+        return;
+      }
+      const current = stream.getVideoTracks()[0];
+      if (!current) {
+        this.stopVideoSizeWatch();
+        return;
+      }
+      const { width = 0, height = 0 } = current.getSettings();
+      if (!width || !height) return;
+      const key = `${width}x${height}`;
+      if (key === this.watchedVideoSize) return;
+      this.watchedVideoSize = key;
+      this.tuneStream();
+    }, 500);
+  }
+
+  private stopVideoSizeWatch(): void {
+    if (this.sizeWatch !== null) clearInterval(this.sizeWatch);
+    this.sizeWatch = null;
+    this.watchedVideoSize = '';
   }
 
   /**
@@ -556,8 +757,38 @@ export class NetplayController {
           if (this.room === room && connection.signalingState === 'stable') this.tuneStream();
         });
       }
+      // 编码格式要在第一次协商之前钉住（见 preferLowLatencyCodecs 的注释）
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) preferLowLatencyCodecs(connection, videoTrack);
+
       for (const sender of connection.getSenders()) {
         void tuneVideoSender(sender, stream, this.quality);
+        // 音频 sender 和视频共用同一条候选对，它多占的每一 kbps 都是视频的排队时间
+        void tuneAudioSender(sender);
+      }
+    }
+  }
+
+  /**
+   * 向对端要一个关键帧。
+   *
+   * 新接收端接上轨道时浏览器自己会发 PLI，这一枪是补在「补发流」之后的：那条路上
+   * 多了一次 addStream / setParameters，个别实现会把刚出的关键帧等丢掉，表现就是
+   * 加入者先看到一两秒灰屏。失败无所谓（Chrome 之外的实现可能没有这个方法）。
+   */
+  private requestKeyFrame(): void {
+    const room = this.room;
+    if (!room) return;
+    for (const connection of Object.values(room.getPeers())) {
+      for (const sender of connection.getSenders()) {
+        if (sender.track?.kind !== 'video') continue;
+        const keyed = sender as RTCRtpSender & { generateKeyFrame?: () => Promise<void> };
+        try {
+          const request = keyed.generateKeyFrame?.();
+          if (request && typeof request.catch === 'function') void request.catch(() => undefined);
+        } catch {
+          // 没协商完 / 不支持的实现：忽略
+        }
       }
     }
   }
@@ -644,6 +875,7 @@ export class NetplayController {
     this.buttonAction = room.makeAction<ButtonMessage>('b');
     this.sessionAction = room.makeAction<SessionMessage>('s');
     this.controlAction = room.makeAction<ControlMessage>('c');
+    this.maskAction = room.makeAction<MaskMessage>('i');
 
     /*
      * 加入者的兜底：房间码打错 / 房主根本没开房时，信令层不会给我们任何事件
@@ -666,7 +898,19 @@ export class NetplayController {
 
     this.sessionAction.onMessage = (data) => {
       const role = this.state.role;
-      if (!role || data?.p === undefined) return;
+      if (!role) return;
+
+      /*
+       * 房主声明支持位图输入。放在 `p` 判空之前：这一位和「在不在出画面」无关，
+       * 但它决定加入者接下来按的键走哪条通道，越早切越好。
+       */
+      if (role === 'guest' && data?.i === 1) {
+        this.maskCapable = true;
+        this.startMaskHeartbeat();
+        this.flushMask();
+      }
+
+      if (data?.p === undefined) return;
 
       const playing = data.p === 1;
       const game: RemoteGame | null =
@@ -705,10 +949,41 @@ export class NetplayController {
       void this.leave().then(() => this.fail('room-full'));
     };
 
+    /*
+     * 位图输入。只有房主有得注，加入者收到也不该动（他本机没有模拟器）。
+     *
+     * 差量注入：拿这一帧和上一帧异或，只对变了的位调 pressButton。这样即使位图
+     * 重复到达（心跳、或者一次按键没改变状态），也不会反复注入同一个事件。
+     */
+    this.maskAction.onMessage = (data) => {
+      if (typeof data?.m !== 'number') return;
+      const role = this.state.role;
+      if (role !== 'host') return;
+
+      const next = data.m & MASK_ALL;
+      const changed = next ^ this.remoteMask;
+      if (changed === 0) return;
+      this.remoteMask = next;
+
+      for (const [button, bit] of BUTTON_ENTRIES) {
+        if ((changed & bit) === 0) continue;
+        const down = (next & bit) !== 0;
+        if (down) this.heldButtons.add(button);
+        else this.heldButtons.delete(button);
+        this.callbacks.onRemoteButton(button, down, role);
+      }
+    };
+
     // 房主推来的画面。注意这里**不**直接决定「屏幕显示什么」——
     // 那是 remotePlaying 说了算（见 SessionMessage 的注释）。
     room.onPeerStream = (stream) => {
       for (const connection of Object.values(room.getPeers())) {
+        /*
+         * 兜一次 SDP 改写。`onPeerJoin` 那一刻 pc 一定在，正常不会走到这里 —
+         * 但万一哪天 Trystero 改了握手时序，这条路上补装还能赶上后续的重协商
+         * （函数内部有 WeakSet，重复调用是空操作）。
+         */
+        preferLowLatencyAudio(connection);
         for (const receiver of connection.getReceivers()) tuneMediaReceiver(receiver);
       }
       this.callbacks.onRemoteStream(stream);
@@ -736,6 +1011,30 @@ export class NetplayController {
       // 人已到场，「等房主」的兜底不用再跑了
       this.stopJoinWatchdog();
       this.startPing(peerId);
+
+      /*
+       * SDP 改写要在**媒体协商之前**挂上去 —— 两侧都要挂：房主的 offer 里带
+       * opus 的 fmtp，加入者的 answer 里也带一份。
+       *
+       * 时机是够的：`onPeerJoin` 在 Trystero 握手完成时才回调，而第一次协商
+       * （只建 DataChannel）早就交换完了。媒体那条流是在下面 `addStream` 之后
+       * 才触发**第二次**协商，所以现在包上去正好赶在那之前。
+       */
+      const connection = room.getPeers()[peerId];
+      if (connection) preferLowLatencyAudio(connection);
+
+      // 只在开发态：每 2 秒一张 getStats 表，生产构建里是空函数
+      this.stopTelemetry?.();
+      this.stopTelemetry = startNetplayTelemetry(
+        this.state.role ?? 'guest',
+        () => Object.values(this.room?.getPeers() ?? {})
+      );
+
+      // 新 peer 的位图从 0 起算，别拿上一局的残留状态做差量
+      this.remoteMask = 0;
+      // 加入者：等房主的会话包声明支持后，心跳才真正开始发（见 startMaskHeartbeat）
+      if (this.state.role === 'guest') this.startMaskHeartbeat();
+
       /*
        * 补发：流和会话状态都是在对方连上之前就准备好的，Trystero 不会自动补给后来者。
        * `.then(tuneStream)` 不能省 —— sender 是**这一刻**才出现的，开房时那次
@@ -744,7 +1043,14 @@ export class NetplayController {
       const stream = this.localStream;
       if (stream)
         void Promise.all(room.addStream(stream))
-          .then(() => this.tuneStream())
+          .then(() => {
+            this.tuneStream();
+            /*
+             * 补一个关键帧：接收端在轨道刚接上时自己也会发 PLI，但这一枪不花什么钱，
+             * 能少掉一次「加入后黑屏一两秒」。450ms 留给 SDP 走完。
+             */
+            setTimeout(() => this.requestKeyFrame(), 450);
+          })
           .catch(() => undefined);
       this.sendSession();
     };
@@ -758,6 +1064,11 @@ export class NetplayController {
       if (this.state.peerId && peerId !== this.state.peerId) return;
 
       this.stopPing();
+      this.stopMaskHeartbeat();
+      this.stopTelemetry?.();
+      this.stopTelemetry = null;
+      this.remoteMask = 0;
+      this.maskCapable = false;
       // 对方可能是直接关的页面 —— 他欠的那些 keyup 永远不会到，得我们替他松开
       this.releaseHeld();
 
@@ -812,6 +1123,8 @@ export class NetplayController {
         c: game?.console,
         // 没在出画面时暂停位必然是 0 —— `announceGame` 已经把开关归零了
         z: this.localPaused ? 1 : 0,
+        // 本端支持位图输入，加入者见到这一位才切通道（见 MaskMessage）
+        i: 1,
       })
       .catch(() => undefined);
   }

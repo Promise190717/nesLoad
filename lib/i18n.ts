@@ -1758,6 +1758,16 @@ const en = {
   'deepLink.title': 'Loading game',
   'deepLink.loading': 'Downloading the ROM…',
   'deepLink.hint': 'Starts automatically once the download finishes.',
+  /* H5 小游戏专栏（2026-11-12 加）：入口在顶栏、列表在 /h5 */
+  'h5.title': 'H5 games',
+  'h5.intro': 'Small browser games you can start instantly, with no download and no plugin. {count} title so far.',
+  'h5.play': 'Play',
+  'h5.note': 'These mini games are built in-house for this site. Settings and room codes stay in your browser; nothing is uploaded.',
+  'h5.badge.online': 'LAN multiplayer',
+  'h5.badge.bots': 'Solo vs bots',
+  'h5.badge.touch': 'Touch ready',
+  'h5.seo.title': 'H5 Games: Play in Your Browser',
+  'h5.seo.description': 'Original browser mini games: a first-person shooter with three weapons, LAN multiplayer and matches against bots. No download, no plugin.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -2544,6 +2554,16 @@ const zh: Record<MessageKey, string> = {
   'deepLink.title': '正在载入游戏',
   'deepLink.loading': '正在下载 ROM…',
   'deepLink.hint': '下载完成后自动开始',
+  /* H5 小游戏专栏（2026-11-12 加） */
+  'h5.title': 'H5 游戏',
+  'h5.intro': '直接在浏览器里跑的小游戏，不用下载、不装插件。目前收录 {count} 款。',
+  'h5.play': '开始游戏',
+  'h5.note': '这些都是为本站原创的网页小游戏。设置和房间码只存在你的浏览器里，不会上传任何数据。',
+  'h5.badge.online': '局域网联机',
+  'h5.badge.bots': '人机对战',
+  'h5.badge.touch': '支持触屏',
+  'h5.seo.title': 'H5 游戏：在浏览器里直接玩',
+  'h5.seo.description': '本站原创的网页小游戏：第一人称射击，三种枪械，支持局域网联机和机器人对战。免下载、免安装，打开就玩。',
 };
 
 /*

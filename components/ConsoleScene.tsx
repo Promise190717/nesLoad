@@ -51,6 +51,7 @@ import {
   type StreamQuality,
 } from '@/lib/netplay';
 import {
+  ALL_BUTTONS,
   codeToButton,
   DEFAULT_BINDINGS,
   loadBindings,
@@ -3104,6 +3105,34 @@ export default function ConsoleScene({
       releaseAll();
     };
   }, [netplayState.role, netplay, bindings, saveOpen, netplayOpen, keybindOpen, libraryOpen, userOpen, legendOpen, noteOpen, feedbackOpen, paintingOpen, tourOpen, leaveOpen, deepLinkOpen]);
+
+  /*
+   * 切走窗口 / 标签页时把**本机直接喂给核心**的钮松开。
+   *
+   * 上面那个 effect 管的是「加入者发给房主的钮」，这一条管的是「本机自己的钮」：
+   * 房主的键盘是 Nostalgist 挂在 window 上的，按住方向键切到别的窗口，keyup 落在
+   * 那个窗口，核心那边永远收不到 —— 回来时角色会一直朝那个方向走，按一下再松开才停。
+   * 单机游玩一样会中招，只是没人联机时不容易察觉。
+   *
+   * `blur` 和 `visibilitychange` 都挂：前者管切窗口，后者管切标签页
+   *（有些路径切标签页不派发 blur，反过来有的浏览器切窗口不派发 visibilitychange）。
+   */
+  useEffect(() => {
+    const releaseLocal = () => {
+      if (!controller.isRunning) return;
+      // 没在当前机种键位表里的钮会被解码器丢掉，整张表扫一遍最省事
+      for (const button of ALL_BUTTONS) controller.pressButton(button, 1, false);
+    };
+    const onVisibility = () => {
+      if (document.hidden) releaseLocal();
+    };
+    window.addEventListener('blur', releaseLocal);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('blur', releaseLocal);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [controller]);
 
   /**
    * 面板关掉之后，把焦点从按钮上摘掉。

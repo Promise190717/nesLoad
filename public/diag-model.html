@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>模型诊断</title></head>
+<body style="margin:0;background:#222">
+<canvas id="c"></canvas>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.187.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.187.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x334455);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 200);
+camera.position.set(0, 1.6, 3);
+camera.lookAt(0, 0.9, 0);
+
+// 地面
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(20,20), new THREE.MeshStandardMaterial({color:0x888888}));
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+scene.add(hemi);
+const dir = new THREE.DirectionalLight(0xffffff, 2);
+dir.position.set(5,8,3);
+dir.castShadow = true;
+scene.add(dir);
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+const loader = new GLTFLoader();
+loader.load('/models/soldier.glb', (gltf) => {
+  const model = gltf.scene;
+  // 模拟 prepare
+  model.rotation.y = Math.PI;
+  const box = new THREE.Box3().setFromObject(model);
+  console.log('[诊断] 加载后 bbox min', box.min.toArray(), 'max', box.max.toArray(), '高度', (box.max.y-box.min.y).toFixed(3));
+  model.position.y -= box.min.y;
+  model.traverse(o => { if (o.isMesh) { o.frustumCulled = false; o.castShadow = true; } });
+  scene.add(model);
+
+  const box2 = new THREE.Box3().setFromObject(model);
+  console.log('[诊断] prepare后 bbox min', box2.min.toArray(), 'max', box2.max.toArray(), '高度', (box2.max.y-box2.min.y).toFixed(3));
+
+  // 播放 Idle 动画
+  if (gltf.animations.length) {
+    const mixer = new THREE.AnimationMixer(model);
+    const clip = gltf.animations.find(a => a.name === 'Idle') || gltf.animations[0];
+    mixer.clipAction(clip).play();
+    const clock = new THREE.Clock();
+    function anim(){ requestAnimationFrame(anim); mixer.update(clock.getDelta()); renderer.render(scene, camera); }
+    anim();
+  } else {
+    renderer.render(scene, camera);
+  }
+}, undefined, (e) => console.error('[诊断] 加载失败', e));
+</script>
+</body>
+</html>

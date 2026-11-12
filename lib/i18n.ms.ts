@@ -784,4 +784,14 @@ export const ms: Record<MessageKey, string> = {
   'deepLink.title': 'Memuatkan permainan',
   'deepLink.loading': 'Memuat turun ROM…',
   'deepLink.hint': 'Bermula secara automatik setelah muat turun selesai.',
+  /* H5 小游戏专栏 */
+  'h5.title': 'Permainan H5',
+  'h5.intro': 'Permainan mini yang berjalan terus dalam pelayar, tanpa muat turun atau pemalam. Setakat ini {count}.',
+  'h5.play': 'Main',
+  'h5.note': 'Semua ini permainan asli yang dibina untuk laman ini. Tetapan dan kod bilik kekal dalam pelayar anda; tiada apa dihantar.',
+  'h5.badge.online': 'Berbilang pemain LAN',
+  'h5.badge.bots': 'Lawan bot',
+  'h5.badge.touch': 'Sokongan sentuh',
+  'h5.seo.title': 'Permainan H5: main dalam pelayar',
+  'h5.seo.description': 'Permainan pelayar asli: penembak orang pertama dengan tiga senjata, berbilang pemain LAN dan perlawanan bot. Tanpa muat turun.',
 };

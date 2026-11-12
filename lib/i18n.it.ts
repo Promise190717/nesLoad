@@ -757,4 +757,14 @@ export const it: Record<MessageKey, string> = {
   'deepLink.title': 'Caricamento gioco',
   'deepLink.loading': 'Download della ROM…',
   'deepLink.hint': 'Parte automaticamente al termine del download.',
+  /* H5 小游戏专栏 */
+  'h5.title': 'Giochi H5',
+  'h5.intro': 'Mini giochi che girano nel browser, senza download né plugin. Per ora {count}.',
+  'h5.play': 'Gioca',
+  'h5.note': 'Sono mini giochi originali creati per questo sito. Impostazioni e codici stanza restano nel browser; non viene caricato nulla.',
+  'h5.badge.online': 'Multigiocatore LAN',
+  'h5.badge.bots': 'Contro i bot',
+  'h5.badge.touch': 'Touch',
+  'h5.seo.title': 'Giochi H5: gioca nel browser',
+  'h5.seo.description': 'Mini giochi originali per browser: uno sparatutto in prima persona con tre armi, multigiocatore LAN e partite contro i bot. Senza download.',
 };
