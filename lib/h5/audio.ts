@@ -1,5 +1,8 @@
 /**
- * 音效层 —— **全部由 WebAudio 程序合成，没有任何音频文件、没有任何第三方采样**。
+ * 音效层 —— **枪声 / 脚步 / 机械音全部由 WebAudio 程序合成；唯一的例外是击杀
+ * 惨叫采样**（`public/h5/audio/scream-*.mp3`，CC0，来源 sfxmint.com）——
+ * 合成人声六版迭代（滴滴/破锣/短叮/低频重击/哨声 formant）全被用户否掉，
+ * 2026-11-12 拍板换真实录音，见 `loadKillSamples`。
  *
  * ## 枪声的五代史（别走回头路）
  *
@@ -73,6 +76,7 @@
  */
 
 import { clamp, rand } from './math';
+import type { Surface } from './types';
 import type { SwitchSound } from './weapons';
 
 export type GunSoundId = 'ak47' | 'm4a1' | 'awm' | 'shotgun' | 'usp';
@@ -102,10 +106,10 @@ interface SpatialOptions {
   /**
    * 是不是「玩家自己」触发的。
    *
-   * 只有枪声和肉搏命中用它，两件事都靠它：
+   * 枪声、肉搏命中和**自己的脚步**用它，三件事都靠它：
    *   ① 自己的那一声**不跟别人共享节流**。上一版是一个全局 35ms 闸，Bot 在你
    *      前一发之后 20ms 开枪，你自己那一声就被吞掉了 —— 表现是「点了左键没响」，
-   *      而且极难复现。
+   *      而且极难复现。脚步同理：别人齐步走会吞掉你自己的步子。
    *   ② 自己的那一声**不受 `MAX_GUN_VOICES` 限制**，也**不过距离低通**。
    */
   own?: boolean;
@@ -293,6 +297,24 @@ const MASTER_TRIM = 0.82;
  */
 const MAX_GUN_VOICES = 6;
 
+/**
+ * 脚步声每个表面预烘几个变体。
+ *
+ * 真人左右脚、步态轻重每一步都不同 —— 同一份波形连播两步就能听出是循环。
+ * 5 个变体（触地强度 / 摩擦长度 / 板腔音高各自随机）× 播放时 ±8% 变速失谐，
+ * 相邻两步基本不重样。
+ */
+const STEP_VARIANTS = 5;
+
+/**
+ * 脚步声的出口响度（缓冲归一化到 0.9 之后统一乘它）。
+ *
+ * 自己跑步全响约 0.55 —— 比弹着声略轻、比 UI 音重得多；跑步的脚步声应该
+ * 是「我在移动」的存在感，不是背景音。步态（蹲 / 静步）的再衰减在 player.ts
+ * 的调用点做，那里才知道这一步是什么姿态。
+ */
+const STEP_BASE = 0.55;
+
 class GameAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -317,6 +339,14 @@ class GameAudio {
   private voices: { at: number; life: number }[] = [];
   /** 预烘焙的枪声缓冲（每把枪首次开火时算一次，进程内复用 —— 见 `bakeGun`） */
   private gunBuffers = new Map<GunSoundId, AudioBuffer>();
+  /** 击杀惨叫（CC0 采样，普通/爆头两版；加载失败时回退 `bakeKill` 合成版） */
+  private killBuffers = new Map<boolean, AudioBuffer>();
+  /** 惨叫采样加载状态：`loading` 期间击杀不响（宁缺毋滥），`failed` 才走合成兜底 */
+  private killSampleState: 'loading' | 'ready' | 'failed' = 'loading';
+  /** 预烘焙的脚步声（每个表面 5 个变体，第一步落下时算一次 —— 见 `bakeStep`） */
+  private stepBuffers = new Map<Surface, AudioBuffer[]>();
+  /** 别人的脚步节流（自己的不节流 —— 同枪声「点了没响」的纪律） */
+  private lastStepAt = 0;
 
   /** 第一次用户交互时调用。重复调用无副作用。 */
   unlock(): void {
@@ -411,7 +441,106 @@ class GameAudio {
     for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
     this.noise = buffer;
 
+    // 惨叫采样异步加载：不阻塞 unlock，加载完成前击杀暂时无声（见 killConfirm）。
+    // 重复 unlock / dispose 后重进都要重置 —— killBuffers 已被 dispose 清空
+    this.killSampleState = 'loading';
+    void this.loadKillSamples();
+
     if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  /**
+   * 击杀惨叫采样（**唯一的真实音频素材**，CC0，来源 sfxmint.com）：
+   *
+   *   false → scream-short.mp3  普通击杀：Nonverbal Male Pain Scream 02（0.7s）
+   *   true  → scream-long.mp3   爆头击杀：Brief Male Pain Scream 01（2.3s）
+   *
+   * 源文件统一被站点垫静音到 ~2.56s（三个不同音效的 mp3 字节数完全一致），
+   * 所以解码后必须按峰值阈值裁掉静音（`prepareKillSample`）。合成版 `bakeKill`
+   * 只在这两个文件 404 / 解码失败时兜底 —— 合成人声已被用户连续否掉六版，
+   * 别再把合成版当主路径。
+   */
+  private static readonly KILL_SAMPLE_URLS = {
+    false: '/h5/audio/scream-short.mp3',
+    true: '/h5/audio/scream-long.mp3',
+  } as const;
+
+  private async loadKillSamples(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    try {
+      const entries = await Promise.all(
+        ([false, true] as const).map(async (head) => {
+          const res = await fetch(head ? GameAudio.KILL_SAMPLE_URLS.true : GameAudio.KILL_SAMPLE_URLS.false);
+          if (!res.ok) throw new Error(`kill sample HTTP ${res.status}`);
+          const decoded = await ctx.decodeAudioData(await res.arrayBuffer());
+          return [head, this.prepareKillSample(decoded)] as const;
+        }),
+      );
+      // 加载期间可能已 dispose（退出游戏）：ctx 没了就别回填
+      if (!this.ctx) return;
+      for (const [head, buffer] of entries) this.killBuffers.set(head, buffer);
+      this.killSampleState = 'ready';
+    } catch {
+      this.killSampleState = 'failed';
+    }
+  }
+
+  /**
+   * 采样清洗：裁掉头尾静音（源文件统一垫到 2.56s）+ 5ms/60ms 防爆音淡入淡出
+   * + 峰值归一化到 0.9（和烘焙枪声同一量级，出口增益负责压过它）。
+   */
+  private prepareKillSample(decoded: AudioBuffer): AudioBuffer {
+    const sr = decoded.sampleRate;
+    const ch = decoded.numberOfChannels;
+    const channels: Float32Array[] = [];
+    let peak = 0;
+    for (let c = 0; c < ch; c += 1) {
+      const d = decoded.getChannelData(c);
+      channels.push(d);
+      for (let i = 0; i < d.length; i += 1) peak = Math.max(peak, Math.abs(d[i]!));
+    }
+    if (peak < 1e-4 || !this.ctx) return decoded;
+
+    // 内容边界：所有声道联合找「最后一个 >2% 峰值」的样本
+    const threshold = peak * 0.02;
+    let first = decoded.length;
+    let last = 0;
+    for (const d of channels) {
+      for (let i = 0; i < d.length; i += 1) {
+        if (Math.abs(d[i]!) > threshold) {
+          if (i < first) first = i;
+          last = i;
+        }
+      }
+    }
+    const start = Math.max(0, first - Math.floor(sr * 0.01));
+    const end = Math.min(decoded.length, last + Math.floor(sr * 0.05));
+    const len = Math.max(1, end - start);
+    const out = this.ctx.createBuffer(ch, len, sr);
+    const fadeIn = Math.floor(sr * 0.005);
+    const fadeOut = Math.min(Math.floor(sr * 0.06), len - 1);
+    for (let c = 0; c < ch; c += 1) {
+      const src = channels[c]!;
+      const dst = out.getChannelData(c);
+      for (let i = 0; i < len; i += 1) dst[i] = src[start + i]!;
+      for (let i = 0; i < fadeIn; i += 1) dst[i]! *= i / fadeIn;
+      for (let i = 0; i < fadeOut; i += 1) dst[len - 1 - i]! *= i / fadeOut;
+    }
+    // 归一化到 0.9
+    let outPeak = 0;
+    for (let c = 0; c < ch; c += 1) {
+      const d = out.getChannelData(c);
+      for (let i = 0; i < d.length; i += 1) outPeak = Math.max(outPeak, Math.abs(d[i]!));
+    }
+    if (outPeak > 0) {
+      const norm = 0.9 / outPeak;
+      for (let c = 0; c < ch; c += 1) {
+        const d = out.getChannelData(c);
+        for (let i = 0; i < d.length; i += 1) d[i]! *= norm;
+      }
+    }
+    return out;
   }
 
   setVolume(volume: number): void {
@@ -746,6 +875,143 @@ class GameAudio {
   }
 
   /**
+   * 把击杀确认音逐样本烘焙成 AudioBuffer —— **现在是惨叫采样 404/解码失败时
+   * 的兜底**（主路径见 `loadKillSamples`）。
+   *
+   * 合成人声迭代史（都停在「别回头」）：二版纯振荡器「滴滴」、三版金属盘
+   * 「破锣」、四版短「叮」、五版低频重击、六版 formant 惨叫「像吹口哨」——
+   * 全被用户否掉，2026-11-12 拍板换真实录音。这台微型 formant 合成器留着，
+   * 只是断网时的保底：
+   *
+   *   glottal  锯齿波声源；f0 包络 = 70ms 内从 500Hz 冲到 680Hz 的起音
+   *            「啊！」，再按 τ 0.32 落到 230Hz（痛到脱力的下坠）——
+   *            音高轮廓就是「惨叫」的本体
+   *   formant  三个 Klatt 式两极点共振器（F1/F2/F3），频率随「张嘴→合嘴」
+   *            下滑（F1 720→380、F2 1220→900、F3 2600 不动）—— 元音从
+   *            「啊」滑到「呃」全靠它
+   *   strain   27Hz 振幅粗糙感（喉咙绷紧的抖）+ f0 抖动 + 渐入的 5.5Hz 颤音
+   *   breath   1.8kHz 共振的气声垫底，没它就是「管风琴唱歌」
+   *   混完过 tanh（drive 1.4）添失真密度，归一化 0.9
+   *
+   * 爆头版更高更久（640→880→300Hz，τ 0.55，1.05s），死得更「透」。
+   */
+  private bakeKill(head: boolean): AudioBuffer {
+    const ctx = this.ctx!;
+    const sr = ctx.sampleRate;
+    const TWO_PI = Math.PI * 2;
+    const life = head ? 1.05 : 0.8;
+    const n = Math.ceil(sr * life);
+    const buffer = ctx.createBuffer(1, n, sr);
+    const data = buffer.getChannelData(0);
+
+    const f0Start = head ? 640 : 500;
+    const f0Top = head ? 880 : 680;
+    const f0End = head ? 300 : 230;
+    const fallTau = head ? 0.4 : 0.32;
+    const riseT = 0.07;
+    const envTau = head ? 0.55 : 0.4;
+
+    const F1a = 720;
+    const F1b = 380;
+    const F2a = 1220;
+    const F2b = 900;
+    const F3 = 2600;
+
+    // 三个共振器 + 气声共振器的两极点状态（Klatt：b1 = 2r·cosθ，b2 = -r²）
+    let y11 = 0;
+    let y12 = 0;
+    let y21 = 0;
+    let y22 = 0;
+    let y31 = 0;
+    let y32 = 0;
+    let yb1 = 0;
+    let yb2 = 0;
+    let phase = 0;
+
+    const bw = [80, 100, 140];
+
+    for (let i = 0; i < n; i += 1) {
+      const t = i / sr;
+      const noise = Math.random() * 2 - 1;
+
+      // ① f0 包络：冲顶 → 指数下坠；颤音 5.5Hz 渐入，±1.2% 抖动去机器感
+      let f0: number;
+      if (t < riseT) f0 = f0Start + ((f0Top - f0Start) * t) / riseT;
+      else f0 = f0End + (f0Top - f0End) * Math.exp(-(t - riseT) / fallTau);
+      f0 *= 1 + Math.min(1, t / 0.35) * 0.02 * Math.sin(TWO_PI * 5.5 * t);
+      f0 *= 1 + (Math.random() * 2 - 1) * 0.012;
+      phase += (TWO_PI * f0) / sr;
+      const glottal = 2 * (phase - Math.floor(phase)) - 1;
+
+      // ② 共振峰随「合嘴」下滑：k=1 张大嘴「啊」→ 0 痛到合嘴「呃」
+      const k = Math.exp(-Math.max(0, t - 0.1) / 0.35);
+      const forms: [number, number][] = [
+        [F1b + (F1a - F1b) * k, bw[0]!],
+        [F2b + (F2a - F2b) * k, bw[1]!],
+        [F3, bw[2]!],
+      ];
+
+      let voiced = 0;
+      for (let p = 0; p < 3; p += 1) {
+        const [F, B] = forms[p]!;
+        const r = Math.exp((-Math.PI * B) / sr);
+        const b1 = 2 * r * Math.cos((TWO_PI * F) / sr);
+        const b2 = -r * r;
+        const c = 1 - b1 - b2;
+        let y1: number;
+        let y2: number;
+        let y: number;
+        if (p === 0) {
+          y1 = y11;
+          y2 = y12;
+          y = c * glottal + b1 * y1 + b2 * y2;
+          y12 = y1;
+          y11 = y;
+        } else if (p === 1) {
+          y1 = y21;
+          y2 = y22;
+          y = c * glottal + b1 * y1 + b2 * y2;
+          y22 = y1;
+          y21 = y;
+        } else {
+          y1 = y31;
+          y2 = y32;
+          y = c * glottal + b1 * y1 + b2 * y2;
+          y32 = y1;
+          y31 = y;
+        }
+        voiced += y * [1, 0.55, 0.3][p]!;
+      }
+
+      // ③ 气声：1.8kHz 共振的噪声垫底（走同一个共振器公式）
+      {
+        const F = 1800;
+        const B = 400;
+        const r = Math.exp((-Math.PI * B) / sr);
+        const b1 = 2 * r * Math.cos((TWO_PI * F) / sr);
+        const b2 = -r * r;
+        const c = 1 - b1 - b2;
+        const y = c * noise + b1 * yb1 + b2 * yb2;
+        yb2 = yb1;
+        yb1 = y;
+        voiced += y * 0.12;
+      }
+
+      // ④ 包络 + 喉部粗糙感（27Hz 振幅抖 = 声带绷紧的「惨」）
+      const env = Math.min(1, t / 0.035) * Math.exp(-t / envTau);
+      const strain = 1 + 0.22 * Math.sin(TWO_PI * 27 * t);
+      data[i] = Math.tanh(voiced * env * strain * 1.4) / Math.tanh(1.4);
+    }
+
+    // 归一化到 0.9：响度和枪声同一量级，出口增益负责压过它
+    let peak = 0;
+    for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(data[i]));
+    const norm = peak > 0 ? 0.9 / peak : 1;
+    for (let i = 0; i < n; i += 1) data[i] *= norm;
+    return buffer;
+  }
+
+  /**
    * 开一枪：把预烘焙的缓冲按「每发 ±4.5% 变速失谐」推出去。
    *
    * 节流是「整声」级别的（30ms），自动武器最快 88ms 一发（M4 685 RPM），撞不到它。
@@ -859,17 +1125,131 @@ class GameAudio {
     }
   }
 
-  step(surface: 'metal' | 'wood' = 'metal'): void {
-    if (!this.ctx) return;
+  /**
+   * 一步脚步声：把预烘焙的变体随机挑一个、±8% 变速失谐后推出去。
+   *
+   * 第三版（2026-11-12「真实的脚步声」）：旧实时版是「一段带通噪声 + 一个正弦」，
+   * 听感是电子游戏里那种没有重量的「嗒」。真实脚步是三层结构 + 表面余响
+   * （见 `bakeStep`），和枪声同一个结论 —— 只能逐样本烘焙，实时节点拼不出。
+   *
+   * `options` 带坐标时按距离衰减 + 声像空间化（别人的脚步 —— 听声辨位就靠它）；
+   * 自己的脚步传 `own: true` 不带坐标，也不节流。别人的脚步做一道 45ms 的轻节流：
+   * 五个人机同时走，不节流一秒能叠出二三十个源节点，糊成一片沙沙声。
+   */
+  step(surface: Surface = 'metal', options: SpatialOptions = {}): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
     const t = this.now;
-    const out = this.output({ gain: 0.26 });
-    if (!out) return;
-    if (surface === 'metal') {
-      this.burst(t, 0.055, out, 'bandpass', 1700, 900, 0.3, 1.8);
-      this.tone(t, 'sine', 150, 90, 0.04, 0.06, out);
-    } else {
-      this.burst(t, 0.07, out, 'lowpass', 900, 400, 0.3, 0.7);
+    if (!options.own) {
+      if (t - this.lastStepAt < 0.045) return;
+      this.lastStepAt = t;
     }
+
+    // 第一步才烘焙（5 个变体 <2ms，玩家感知不到）；之后每步只是 1 个源节点
+    let variants = this.stepBuffers.get(surface);
+    if (!variants) {
+      variants = [];
+      for (let i = 0; i < STEP_VARIANTS; i += 1) variants.push(this.bakeStep(surface));
+      this.stepBuffers.set(surface, variants);
+    }
+
+    const out = this.output({ ...options, bus: 'world', gain: (options.gain ?? 1) * STEP_BASE });
+    if (!out) return;
+
+    const source = ctx.createBufferSource();
+    source.buffer = variants[Math.floor(Math.random() * variants.length)]!;
+    source.playbackRate.value = 1 + rand(-0.08, 0.08);
+    source.connect(out);
+    source.start(t);
+  }
+
+  /**
+   * 把一步脚步声逐样本烘焙成 AudioBuffer（同 `bakeGun` 的思路）。
+   *
+   * 真实脚步 = **三层结构 + 表面响应**，缺任何一层都是「游戏脚步」：
+   *
+   *   contact  全带噪声硬起（鞋底拍上钢板的「啪」，τ≈5ms，零淡入 —— 同枪声纪律）
+   *   thump    扫频正弦 ~100→52Hz（身体的重量踩进钢板；30ms 滑完，同 bakeGun
+   *            的 boom 纪律 —— 滑太快出「啾」，太慢听得出音高）
+   *   scuff    低通噪声、4ms 起音 + τ 30~50ms 衰减（鞋底蹭钢板的「沙」——
+   *            远处有人走过来时最先听到的一层就是它，音色识别全靠这层）
+   *   ring     金属甲板独有：钢板受击后的阻尼振荡（三条**非泛音列**分音，
+   *            τ 40~100ms，压得很低）—— 军舰甲板和水泥地的区别全在这一层；
+   *            木箱换成一只 400→180Hz 的短促空腔「咚」
+   *
+   * 每个变体随机触地强度（0.75~1.0）、重量音高（±12%）、摩擦长度、余响失谐 ——
+   * 加上播放时的变速失谐，脚步和脚步之间不会是同一个声音。
+   */
+  private bakeStep(surface: Surface): AudioBuffer {
+    const ctx = this.ctx!;
+    const sr = ctx.sampleRate;
+    const TWO_PI = Math.PI * 2;
+    const metal = surface === 'metal';
+    const life = metal ? 0.34 : 0.26;
+    const n = Math.ceil(sr * life);
+    const buffer = ctx.createBuffer(1, n, sr);
+    const data = buffer.getChannelData(0);
+
+    const contactPeak = rand(0.75, 1.0);
+    const thumpF0 = rand(88, 112);
+    const scuffTau = rand(0.03, 0.05);
+    const ringDetune = rand(0.94, 1.06);
+
+    // 鞋底摩擦的低通截止：钢板上更亮，木箱上发闷
+    const scuffA = 1 - Math.exp((-TWO_PI * (metal ? 1100 : 650)) / sr);
+    let scuffLp = 0;
+    let thumpPhase = 0;
+    let knockPhase = 0;
+
+    // 甲板余响：非泛音列（整数倍泛音叠出来是音叉，不是钢板）
+    const RING = metal
+      ? [
+          { f: 168 * ringDetune, tau: 0.1, peak: 0.09 },
+          { f: 254 * ringDetune, tau: 0.062, peak: 0.055 },
+          { f: 431 * ringDetune, tau: 0.038, peak: 0.03 },
+        ]
+      : [];
+    const ringPhase = new Float64Array(RING.length);
+    const ringOmega = RING.map((r) => (TWO_PI * r.f) / sr);
+
+    for (let i = 0; i < n; i += 1) {
+      const t = i / sr;
+      const noise = Math.random() * 2 - 1;
+
+      // ① 触地瞬态：全带、硬起
+      const contact = noise * Math.exp(-t / 0.005) * contactPeak;
+
+      // ② 重量：扫频正弦，30ms 内滑到 52Hz
+      const thumpF = 52 + (thumpF0 - 52) * Math.exp(-t / 0.012);
+      thumpPhase += (TWO_PI * thumpF) / sr;
+      const thump = Math.sin(thumpPhase) * Math.exp(-t / 0.055) * 0.42;
+
+      // ③ 鞋底摩擦：4ms 起音 —— 脚步不是零 attack，「沙」要有蹭上去的过程
+      scuffLp += scuffA * (noise - scuffLp);
+      const scuff = scuffLp * Math.min(1, t / 0.004) * Math.exp(-t / scuffTau) * 0.3;
+
+      let v = contact + thump + scuff;
+
+      for (let r = 0; r < RING.length; r += 1) {
+        ringPhase[r] += ringOmega[r];
+        v += Math.sin(ringPhase[r]) * Math.exp(-t / RING[r].tau) * RING[r].peak;
+      }
+      if (!metal) {
+        // 木箱空腔：400→180Hz 的短「咚」（中空板材受击的腔体共鸣）
+        const knockF = 180 + (400 - 180) * Math.exp(-t / 0.008);
+        knockPhase += (TWO_PI * knockF) / sr;
+        v += Math.sin(knockPhase) * Math.exp(-t / 0.032) * 0.16;
+      }
+
+      data[i] = v;
+    }
+
+    // 归一化到 0.9：与枪声同一量纲，响度差全交给出口增益
+    let peak = 0;
+    for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(data[i]));
+    const norm = peak > 0 ? 0.9 / peak : 1;
+    for (let i = 0; i < n; i += 1) data[i] *= norm;
+    return buffer;
   }
 
   land(): void {
@@ -910,52 +1290,41 @@ class GameAudio {
   /**
    * 击杀确认音。**和击杀图标、hitmarker 的红色严格对应**。
    *
-   * 两套音色不是「同一个音换个音高」，而是两种截然不同的包络：
-   *   普通击杀 —— 低沉的「咚」，像有人往胸口砸了一下，尾巴短（0.18s）
-   *   爆头击杀 —— 高频的「叮——」，带一条 0.3s 的余韵，是「打得很准」的奖励音
+   * 现行：**真实惨叫采样**（CC0，见 `loadKillSamples`）—— 合成人声六版迭代
+   * 全被否（滴滴/破锣/短叮/低频重击/像吹口哨的 formant），2026-11-12 用户
+   * 拍板「去网上搜现成的」。采样没加载完时这一杀不响（宁缺毋滥）；加载失败
+   * 才回退 `bakeKill` 合成版。
    *
-   * `streak` 每多一杀抬两个半音（第 5 杀封顶）。封顶是刻意的：再往上抬会跑出
-   * 这段合成音的有效频段，听起来变成刺耳的噪声而不是「更高亢」。
+   * 出口增益 1.05 × feedback 总线 1.15：采样已归一化 0.9（`prepareKillSample`），
+   * 实响高于致命那一枪自己的枪声，且 `duckWorld` 把底噪让开 0.18 秒。
+   *
+   * 每次播放 ±4% 变速失谐（同 `shot()` 每发失谐的路子）—— 同一段惨叫不会
+   * 连着两次一模一样。`streak` 升调收敛到每杀半个音（第 5 杀封顶）：人声
+   * 抬调太狠会变花栗鼠。
    */
   killConfirm(head: boolean, streak = 1): void {
-    if (!this.ctx) return;
-    const t = this.now;
-    // 出口增益 0.62 → 0.85：击杀音要压过致命那一枪自己的枪声（那一枪同时在
-    // gunBus 上响），压不过的话「咚」就被自己的枪声吃掉了 —— 用户反馈的
-    // 「太小声没爽感」主因就是这个。master 上的 -4dB 压缩器当安全网，够用。
-    const out = this.output({ bus: 'feedback', gain: 0.85 });
-    if (!out) return;
-    // 击杀是最高优先级：把底下那一层（弹着、脚步、机械）让开 0.18 秒，
-    // 让「咚」或「叮——」完整地露出来
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    if (this.killSampleState === 'loading') return; // 宁缺毋滥，等采样到位
+    let buffer = this.killBuffers.get(head);
+    if (!buffer) {
+      if (this.killSampleState !== 'failed') return;
+      // 采样加载失败：烘焙合成版兜底（每版只算一次，<2ms）
+      buffer = this.bakeKill(head);
+      this.killBuffers.set(head, buffer);
+    }
+
     this.duckWorld();
+    const out = this.output({ bus: 'feedback', gain: 1.05 });
+    if (!out) return;
 
     const steps = Math.min(4, Math.max(0, streak - 1));
-    const shift = Math.pow(2, (steps * 2) / 12);
-
-    if (head) {
-      // 爆头 = 「叮——」加厚：正弦主音抬高一点，三角波补中频，
-      // 尾韵拉长一拍再补一个回声「叮」；底下垫一层 150→55Hz 的短促低频，
-      // 让奖励音有「重量」，不然纯高频听着像 UI 提示音而不是击杀。
-      this.tone(t, 'sine', 2200 * shift, 1850 * shift, 0.09, 0.26, out);
-      this.tone(t + 0.03, 'triangle', 3300 * shift, 2500 * shift, 0.2, 0.14, out);
-      this.tone(t + 0.05, 'sine', 1650 * shift, 1650 * shift, 0.34, 0.07, out);
-      this.tone(t + 0.14, 'sine', 1650 * shift, 1650 * shift, 0.22, 0.035, out);
-      this.tone(t, 'sine', 150 * shift, 55, 0.15, 0.24, out, 0.001);
-      // 一记极短的「斩」瞬态：高频噪声 30ms，只给开头那一下锐度
-      this.burst(t, 0.03, out, 'highpass', 3200, 1600, 0.16, 0.7);
-    } else {
-      // 普通击杀 = 往胸口砸一下。四层分工：
-      //   ① 92→40Hz 次低频 —— 「咚」的身体感，attack 压到 1ms 保证开头是硬起
-      //   ② 300→82Hz 主音 —— 原有的下坠「咚」，峰值抬高
-      //   ③ 三角波低八度 —— 补一块厚度
-      //   ④ 低通噪声 —— 枪械感的冲击纹理
-      //   ⑤ 高频瞬态 snap —— 头 30ms 的「脆」，没有它整声偏闷
-      this.tone(t, 'sine', 92 * shift, 40, 0.22, 0.34, out, 0.001);
-      this.tone(t, 'sine', 300 * shift, 82, 0.18, 0.34, out, 0.002);
-      this.tone(t + 0.01, 'triangle', 150 * shift, 58, 0.26, 0.2, out);
-      this.burst(t, 0.09, out, 'lowpass', 620, 180, 0.38, 0.8);
-      this.burst(t, 0.03, out, 'highpass', 2800, 1400, 0.18, 0.7);
-    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = (1 + rand(-0.04, 0.04)) * Math.pow(2, steps / 24);
+    source.connect(out);
+    source.start(this.now);
   }
 
   /**
@@ -1242,6 +1611,9 @@ class GameAudio {
     this.ambience = null;
     this.voices = [];
     this.gunBuffers.clear();
+    this.killBuffers.clear();
+    this.killSampleState = 'loading';
+    this.stepBuffers.clear();
   }
 }
 

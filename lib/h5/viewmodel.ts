@@ -10,6 +10,8 @@ import {
   type ViewModel,
   buildWeaponModel,
   disposeWeaponModel,
+  hasGlbTemplate,
+  preloadWeaponGlbs,
 } from './weapons';
 
 /**
@@ -44,9 +46,6 @@ import {
  * 里配一行参数，不用再导一套动画。
  */
 
-/** 枪模基准位置。稍微偏右下，是 FPS 的常规构图。 */
-const BASE_POSITION = { x: 0.17, y: -0.15, z: -0.58 };
-
 /** 枪模相机的 FOV。比主相机窄，枪看起来更「近」。 */
 const VIEW_FOV = 50;
 
@@ -62,22 +61,31 @@ interface BasePose {
   rotZ: number;
 }
 
-const GUN_POSE: BasePose = { ...BASE_POSITION, rotX: 0, rotY: 0, rotZ: 0 };
-
 /**
  * 每把武器自己的基准位姿。
  *
- * 绝大多数枪共用 `GUN_POSE`；**军刀是唯一的例外** —— 它是刺击握法（刀尖朝
- * 视线正前方，见 `weapons.ts` 的 `knife` 分支），刀身大部分在画面纵深里，
- * 收得比枪更靠右下、稍近一点，让刀柄和前段刀身落在右下象限、不挡准星。
+ * 旋转角**不再是全零**：真实持枪时枪托抵在肩上、手往身体中线带，枪口轴线
+ * 会微微收向准星（rotY）、枪身带一点侧倾（rotZ）、枪口比视线低一丝（rotX）。
+ * 三个角全零的枪模看起来像一块悬浮在相机前的展品，而不是「有人拿着」。
+ * 幅度都压在 5° 以内，不会让枪口火光偏离准星太远（火光位置投影的是真实
+ * muzzle 节点，跟着姿态走，弹道仍由主相机决定，互不影响）。
+ *
+ * **军刀是唯一的例外** —— 刺击握法（见 `weapons.ts` 的 `knife` 分支）。
  */
+const RIFLE_POSE: BasePose = { x: 0.16, y: -0.16, z: -0.55, rotX: -0.012, rotY: 0.055, rotZ: 0.06 };
+/** AWM 更沉：端得更低、侧倾略大，和它「重」的开火手感对齐 */
+const SNIPER_POSE: BasePose = { x: 0.17, y: -0.175, z: -0.56, rotX: -0.02, rotY: 0.05, rotZ: 0.075 };
+/** 手枪单手持：更靠近视线中线，姿态比步枪收敛 */
+const PISTOL_POSE: BasePose = { x: 0.13, y: -0.145, z: -0.5, rotX: -0.008, rotY: 0.045, rotZ: 0.04 };
+const GRENADE_POSE: BasePose = { x: 0.18, y: -0.17, z: -0.5, rotX: 0, rotY: 0.05, rotZ: 0 };
+
 const BASE_POSES: Record<WeaponId, BasePose> = {
-  ak47: GUN_POSE,
-  m4a1: GUN_POSE,
-  awm: GUN_POSE,
-  shotgun: GUN_POSE,
-  usp: GUN_POSE,
-  grenade: GUN_POSE,
+  ak47: RIFLE_POSE,
+  m4a1: RIFLE_POSE,
+  awm: SNIPER_POSE,
+  shotgun: RIFLE_POSE,
+  usp: PISTOL_POSE,
+  grenade: GRENADE_POSE,
   knife: { x: 0.3, y: -0.26, z: -0.82, rotX: 0, rotY: 0, rotZ: 0 },
 };
 
@@ -92,6 +100,13 @@ export interface ViewModelParams {
   reloadProgress: number;
   /** 开镜时整把枪退到画面下方并隐藏 */
   scoped: boolean;
+  /**
+   * 本帧视角增量（弧度，与 `InputFrame.lookYaw / lookPitch` 同源同号）。
+   * 枪是拿在手里的重物：转向时它会慢半拍追上来 —— 这个「滞后」就是
+   * `swayYaw / swayPitch` 的来源。菜单 / 死亡冻结时传 0。
+   */
+  lookYaw: number;
+  lookPitch: number;
   /** 拉栓进度 0..1。0 = 没在拉栓；只有带 `boltCycle` 的武器（AWM）会 > 0 */
   bolt: number;
   /**
@@ -160,6 +175,10 @@ export class ViewModelLayer {
   /** >= 0 表示正在转刀（0..1 的进度），< 0 表示没在转 */
   private spinProgress = -1;
 
+  /* ---- 视角摇晃（平滑后的视角角速度，rad/s） ---- */
+  private swayYaw = 0;
+  private swayPitch = 0;
+
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(VIEW_FOV, aspect, 0.01, 8);
 
@@ -175,6 +194,17 @@ export class ViewModelLayer {
     const warm = new THREE.DirectionalLight(0xffd9a0, 0.4);
     warm.position.set(0.4, -0.6, 0.3);
     this.scene.add(warm);
+
+    // GLB 枪模后台预载（CC0 外部模型，见 weapons.ts 的 GLB 一节）。
+    // 就绪前 buildWeaponModel 走程序化兜底，全部就绪后如果手里还是程序化模型
+    // （开局就切枪、网络慢的极端情况），热替换一次 —— 换的时候玩家看到的仍是
+    // 自己手里那把枪，姿态不变，只是模型变精细。
+    // 失败的枪永久留在程序化路线上（loadGlbWeapon 不重试）。
+    void preloadWeaponGlbs().then(() => {
+      if (this.weapon && this.phase === 'ready' && hasGlbTemplate(this.weapon)) {
+        this.swapModel(this.weapon);
+      }
+    });
   }
 
   /* ============================================================
@@ -472,6 +502,21 @@ export class ViewModelLayer {
     targetY -= boltDip;
     targetRotX -= boltTilt;
 
+    /* ---- 视角摇晃：转向时枪慢半拍追上来 ----
+     * 把本帧视角增量换算成角速度（除以 dt 抹平帧率差异），限幅后做指数平滑
+     * —— 鼠标一甩就停的话，增量是脉冲，不平均一下枪会抽搐。枪「追上来」的
+     * 方向：视线左转（lookYaw 正）枪往右拖（+x）、枪口相对视线偏右（rotY 负，
+     * 见下方推导：rotY 正是枪口朝左）。幅度按 1.5 rad/s 的常规转头标定，
+     * 猛甩头（6 rad/s）会到限幅边缘，权重感最重。 */
+    const velYaw = dt > 0 ? clamp(params.lookYaw / dt, -6, 6) : 0;
+    const velPitch = dt > 0 ? clamp(params.lookPitch / dt, -6, 6) : 0;
+    this.swayYaw = damp(this.swayYaw, velYaw, 8, dt);
+    this.swayPitch = damp(this.swayPitch, velPitch, 8, dt);
+    targetX += this.swayYaw * 0.01;
+    targetY -= this.swayPitch * 0.008;
+    targetRotY -= this.swayYaw * 0.028;
+    targetRotX -= this.swayPitch * 0.022;
+
     // 军刀的走路摆动（walk sway）：刀尖朝前，摆动就是「刀尖随步伐上下点、
     // 左右摆」；奔跑时往画面内侧收一点，免得跑起来刀柄在右下角乱晃
     if (isKnife && bobAmount > 0.01) {
@@ -516,6 +561,15 @@ export class ViewModelLayer {
       }
     } else {
       this.spinProgress = -1;
+      /* ---- 枪械待机：呼吸浮动 ----
+       * 人站着不动也在呼吸，持枪的手会跟着起伏。幅度是刀的 1/3（枪端得
+       * 更稳，起伏大会像帕金森）；切枪 / 死亡 / 开镜时停掉，免得和那些
+       * 绝对覆盖的姿态打架。 */
+      if (!switching && !params.melee.active && params.dying <= 0 && !params.scoped) {
+        targetY += Math.sin(this.idleTime * 1.3) * 0.0035;
+        targetRotZ += Math.sin(this.idleTime * 0.9) * 0.008;
+        targetRotX += Math.sin(this.idleTime * 1.7) * 0.004;
+      }
     }
 
     /* ---- 近战挥砍 ---- */

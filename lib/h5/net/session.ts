@@ -521,7 +521,17 @@ export class ShipLobby {
   private push(): void {
     const own = this.own;
     if (!own) return;
-    void this.beacon?.send({ v: NET_VERSION, ...own }).catch(() => undefined);
+    // LobbyEntry 是给 UI 用的长字段名，BeaconWire 是线上传输的短字段名，这里做一次映射
+    void this.beacon
+      ?.send({
+        v: NET_VERSION,
+        code: own.code,
+        n: own.host,
+        h: own.humans,
+        b: own.bots,
+        o: own.open,
+      })
+      .catch(() => undefined);
   }
 
   private prune(): void {

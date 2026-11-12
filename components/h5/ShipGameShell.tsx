@@ -37,7 +37,7 @@ import ShipHud from './ShipHud';
 import ShipKillIcon, { ShipKillPulse } from './ShipKillIcon';
 import ShipKillFeed, { ShipStreakBanner } from './ShipKillFeed';
 import ShipNetPanel, { type NetScreen } from './ShipNetPanel';
-import ShipPauseMenu from './ShipPauseMenu';
+import ShipGameMenu from './ShipGameMenu';
 import ShipResultPanel from './ShipResultPanel';
 import ShipScoreboard from './ShipScoreboard';
 import ShipSettingsPanel from './ShipSettingsPanel';
@@ -55,9 +55,9 @@ import ShipTouchControls from './ShipTouchControls';
  *
  * ## 状态机
  *
- *   ready ──开始──▶ playing ──Esc──▶ paused ──继续──▶ playing
+ *   ready ──开始──▶ playing ──Esc──▶ menu（不冻结）──返回战斗──▶ playing
  *     │                │
- *     └──设置──▶（设置面板，可从 ready / paused 打开）
+ *     └──设置──▶（设置面板，可从 ready / menu 打开）
  *                      └──打满时间 / 到人头──▶ result ──再来一局──▶ playing
  *
  * ## 引擎只建一次
@@ -73,7 +73,7 @@ import ShipTouchControls from './ShipTouchControls';
  * 这个组件本来就要按 10Hz 被 HUD 数据推着重渲染，多几个闭包无感。
  */
 
-type Phase = 'ready' | 'playing' | 'paused' | 'result';
+type Phase = 'ready' | 'playing' | 'menu' | 'result';
 
 /**
  * 设置存档键。
@@ -135,8 +135,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     head: false,
     streak: 0,
   });
-  /** 爆头击杀时准星放大回弹的时间戳。0 = 不播 */
-  const [crosshairPulse, setCrosshairPulse] = useState(0);
+  /** 击杀时准星「放大回弹」的时间戳。`strong` = 爆头击杀；`at` 为 0 = 不播 */
+  const [crosshairPulse, setCrosshairPulse] = useState({ at: 0, strong: false });
   const [damage, setDamage] = useState(0);
   /** 最近一次死亡的击杀信息卡。只在 `deathPhase !== 'alive'` 时显示 */
   const [deathInfo, setDeathInfo] = useState<DeathInfo | null>(null);
@@ -189,14 +189,14 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
           setResult(matchResult);
           setPhase('result');
         },
-        onPauseChange: (paused) => setPhase(paused ? 'paused' : 'playing'),
+        onMenuChange: (open) => setPhase(open ? 'menu' : 'playing'),
         onLockChange: (value) => setLocked(value),
         onHitMarker: (tier, spot) => setHitMarker({ at: Date.now(), tier, spot }),
         onKillFeedback: (info) => {
           setKillFx({ at: Date.now(), head: info.head, streak: info.streak });
-          // 爆头额外让准星「放大回弹」一下 —— 需求里点名要的那一下爽感。
-          // 只有爆头才有：普通击杀也弹的话，这个动作就不再有信息量了
-          if (info.head) setCrosshairPulse(Date.now());
+          // 每次击杀准星都「放大回弹」一下：普通击杀走小一档、爆头走大档 ——
+          // 「每次击杀都有确认」和「爆头仍然更值钱」同时成立（与 ShipCrosshair 的档位注释对齐）
+          setCrosshairPulse({ at: Date.now(), strong: info.head });
         },
         onDamage: (strength) => {
           setDamage(strength);
@@ -207,7 +207,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
           setDeathInfo(info);
           // 死了就把击杀特效清掉。死亡期间击杀勋章已经卸下，重生时它会重新挂载，
           // 留着旧时间戳就会在新一局开局凭空弹一个「你击杀了」的勋章
-          setCrosshairPulse(0);
+          setCrosshairPulse({ at: 0, strong: false });
           setKillFx({ at: 0, head: false, streak: 0 });
         },
         onStreak: (count) => setStreak({ count, at: Date.now() }),
@@ -284,7 +284,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     setStreak({ count: 0, at: 0 });
     setHitMarker({ at: 0, tier: 'hit', spot: undefined });
     setKillFx({ at: 0, head: false, streak: 0 });
-    setCrosshairPulse(0);
+    setCrosshairPulse({ at: 0, strong: false });
     setDamage(0);
   };
 
@@ -574,7 +574,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
 
   // ── 渲染 ─────────────────────────────────────────────────────────
 
-  const playing = phase === 'playing' || phase === 'paused';
+  const playing = phase === 'playing' || phase === 'menu';
   /** 这一局是不是联机局。`hud.net === null` 就是单人局 —— 单人玩法一点不碰 */
   const netMode = Boolean(hud?.net);
   const deathPhase: DeathPhase = hud?.deathPhase ?? 'alive';
@@ -599,7 +599,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
 
       {playing && hud ? (
         <>
-          <ShipCrosshair scoped={hud.scoped} dead={hud.dead} pulseAt={crosshairPulse} />
+          <ShipCrosshair scoped={hud.scoped} weapon={hud.weapon} dead={hud.dead} pulse={crosshairPulse} />
           <ShipDamageArc angle={hud.damageFrom} />
           <ShipDamageVignette strength={damage} />
           <ShipLowHpPulse hp={hud.hp} />
@@ -690,8 +690,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
         />
       ) : null}
 
-      {phase === 'paused' && !settingsOpen ? (
-        <ShipPauseMenu
+      {phase === 'menu' && !settingsOpen ? (
+        <ShipGameMenu
           locale={locale}
           onResume={resume}
           // 联机局不给「重新开始」：比分是全场共用的，单方面清掉就违反了

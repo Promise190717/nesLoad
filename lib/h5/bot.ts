@@ -111,6 +111,10 @@ const RADIUS = 0.42;
 const GRAVITY = 20;
 /** 自动上台阶高度。楼梯单级 0.32 米，0.45 留了余量。 */
 const STEP_UP = 0.45;
+/** 听枪声的距离（米）。只对 30 米内的枪声有反应，免得全图人机同时涌向一个点。 */
+const HEAR_RANGE = 30;
+/** 目击 / 枪声情报的保鲜期（秒）。过期后回随机巡逻。 */
+const HEAR_MEMORY = 8;
 
 export type BotState = 'patrol' | 'engage';
 
@@ -162,6 +166,10 @@ export class Bot implements Actor {
   target: Actor | null = null;
   private seenFor = 0;
   private lostFor = 0;
+  /** 最后一次目击（或听到）敌人的位置。追击与搜索的唯一情报来源。 */
+  private lastKnown: { x: number; z: number } | null = null;
+  /** lastKnown 的失效时刻（绝对秒）。过期即当作情报作废。 */
+  private lastKnownUntil = 0;
 
   /* 移动 */
   private path: { x: number; z: number }[] = [];
@@ -171,6 +179,15 @@ export class Bot implements Actor {
   private readonly lastPos = new Vector3();
   private strafeDir = 1;
   private strafeTimer = 0;
+  /** 节点进度看门狗：上次采样时到当前路径点的距离 / 距采样计时 */
+  private nodeDistSample = Infinity;
+  private nodeSampleTimer = 0;
+  /** 脱困侧移：>0 时沿意图方向的垂直向硬走，把 Bot 从缝里剥出来 */
+  private unstuckTimer = 0;
+  private unstuckDir = 1;
+  /** 最近一次非零移动意图（脱困侧移的基准方向；脱困期间不更新，防止每帧转 90°） */
+  private intentX = 0;
+  private intentZ = 0;
   private onGround = false;
   /** 位置解算的跨帧状态（安全点 / 卡死计时）。和玩家同一条代码路径 */
   private readonly motion = createMotionState();
@@ -219,11 +236,18 @@ export class Bot implements Actor {
     this.target = null;
     this.seenFor = 0;
     this.lostFor = 0;
+    this.lastKnown = null;
+    this.lastKnownUntil = 0;
     this.path = [];
     this.pathIndex = 0;
     this.repathTimer = 0;
     this.stuckTimer = 0;
     this.lastPos.copy(position);
+    this.nodeSampleTimer = 0;
+    this.nodeDistSample = Infinity;
+    this.unstuckTimer = 0;
+    this.intentX = 0;
+    this.intentZ = 0;
     this.onGround = false;
 
     const spec = WEAPONS[this.weapon];
@@ -242,6 +266,22 @@ export class Bot implements Actor {
   /** 换难度。不用重建 Bot —— 只换一张参数表。 */
   setDifficulty(difficulty: Difficulty): void {
     this.skill = SKILL[difficulty];
+  }
+
+  /**
+   * 听到枪声。引擎在 `onShot` 里对每个 Bot 调用（含本机玩家开的枪）——
+   * 枪声是 Bot 主动找人最主要的情报来源：玩家不开枪摸过来，Bot 只能靠
+   * 巡逻撞见他。只对敌方射手、且限距内感兴趣。
+   */
+  hearShot(shooter: Actor): void {
+    if (!this.alive || shooter.team === this.team) return;
+    const distance = Math.hypot(shooter.pos.x - this.pos.x, shooter.pos.z - this.pos.z);
+    if (distance > HEAR_RANGE) return;
+    // 只记射手脚下的大致位置，不做测向 —— 听到「那边有人」就够了
+    this.lastKnown = { x: shooter.pos.x, z: shooter.pos.z };
+    this.lastKnownUntil = nowSeconds() + HEAR_MEMORY;
+    // 没在交战就立刻动身过去看看，不等下一个巡逻周期
+    if (this.state === 'patrol') this.repathTimer = 0;
   }
 
   update(dt: number, world: BotWorld): void {
@@ -304,6 +344,9 @@ export class Bot implements Actor {
       this.target = best;
       this.lostFor = 0;
       this.seenFor += dt;
+      // 情报刷新：看见一秒记一秒，丢了才知道往哪追
+      this.lastKnown = { x: best.pos.x, z: best.pos.z };
+      this.lastKnownUntil = nowSeconds() + HEAR_MEMORY;
       this.state = 'engage';
     } else {
       this.lostFor += dt;
@@ -317,6 +360,50 @@ export class Bot implements Actor {
   }
 
   /* ---------- 转向与移动 ---------- */
+
+  /**
+   * 沿当前路径走一步。返回 null = 当前没有节点可走（走完了 / 刚被跳过）。
+   *
+   * 节点进度看门狗：0.35 秒采样一次「到当前节点的距离」，没接近 0.15 米就是被
+   * 什么别住了 —— 典型是 nav 说能走、物理撞墙（网格一格的误差），或者被队友的
+   * 分离力挤进箱角。只重寻路不够：A* 从同一个位置会算出同一条路，Bot 会在同一
+   * 面墙上磨到天荒地老，所以跳过节点的同时起一段垂直侧移。
+   */
+  private followPath(dt: number, speed: number): { x: number; z: number; speed: number } | null {
+    const node = this.path[this.pathIndex];
+    if (!node) return null;
+    const dx = node.x - this.pos.x;
+    const dz = node.z - this.pos.z;
+    const length = Math.hypot(dx, dz);
+    if (length < 0.75) {
+      this.pathIndex += 1;
+      this.nodeSampleTimer = 0;
+      this.nodeDistSample = Infinity;
+      return null;
+    }
+
+    this.nodeSampleTimer += dt;
+    if (this.nodeSampleTimer >= 0.35) {
+      const progress = this.nodeDistSample - length;
+      if (progress < 0.15) {
+        // 别住了：跳过这个节点 + 起侧移；这是最后一个节点就整段重寻路
+        this.pathIndex += 1;
+        if (this.pathIndex >= this.path.length) {
+          this.path = [];
+          this.repathTimer = 0;
+        }
+        this.unstuckTimer = 0.6;
+        this.unstuckDir = Math.random() < 0.5 ? -1 : 1;
+        this.nodeSampleTimer = 0;
+        this.nodeDistSample = Infinity;
+        return null;
+      }
+      this.nodeDistSample = length;
+      this.nodeSampleTimer = 0;
+    }
+
+    return { x: dx / length, z: dz / length, speed };
+  }
 
   private steer(dt: number, world: BotWorld): void {
     const skill = this.skill;
@@ -342,39 +429,55 @@ export class Bot implements Actor {
     let speed = 0;
 
     if (this.state === 'engage' && this.target) {
-      // 保持交战距离（8~18 米），同时横向游走 —— 站桩对枪的 Bot 太好打了
-      this.strafeTimer -= dt;
-      if (this.strafeTimer <= 0) {
-        this.strafeTimer = rand(0.7, 1.7);
-        this.strafeDir = Math.random() < 0.5 ? -1 : 1;
+      if (this.lostFor > 0) {
+        // 目标躲进掩体 / 脱离视线（1.2s 宽容期内）：不站桩游走，直接 A* 追向
+        // 目标当前位置。以前这里是 strafe —— 玩家躲一下人机就原地蹭着不动，
+        // 「躲在障碍后面不动」就是这段写出来的。
+        this.repathTimer -= dt;
+        if (this.repathTimer <= 0) {
+          this.repathTimer = rand(0.8, 1.4);
+          this.path = findPath(world.nav, this.pos.x, this.pos.z, this.target.pos.x, this.target.pos.z);
+          this.pathIndex = 0;
+          this.nodeSampleTimer = 0;
+          this.nodeDistSample = Infinity;
+        }
+        const step = this.followPath(dt, 4.0);
+        if (step) {
+          moveX = step.x;
+          moveZ = step.z;
+          // 比巡逻（3.6）快一点，追人要有「压上来」的观感
+          speed = step.speed;
+        }
+      } else {
+        // 可见交战：保持交战距离（8~18 米），同时横向游走 —— 站桩对枪的 Bot 太好打了
+        this.strafeTimer -= dt;
+        if (this.strafeTimer <= 0) {
+          this.strafeTimer = rand(0.7, 1.7);
+          this.strafeDir = Math.random() < 0.5 ? -1 : 1;
+        }
+        const distance = Math.hypot(this.target.pos.x - this.pos.x, this.target.pos.z - this.pos.z);
+        const forward = distance > 18 ? 1 : distance < 8 ? -1 : 0;
+        const forwardX = -Math.sin(this.yaw);
+        const forwardZ = -Math.cos(this.yaw);
+        const rightX = Math.cos(this.yaw);
+        const rightZ = -Math.sin(this.yaw);
+        moveX = forwardX * forward * 0.9 + rightX * this.strafeDir * 0.75;
+        moveZ = forwardZ * forward * 0.9 + rightZ * this.strafeDir * 0.75;
+        speed = 3.4;
       }
-      const distance = Math.hypot(this.target.pos.x - this.pos.x, this.target.pos.z - this.pos.z);
-      const forward = distance > 18 ? 1 : distance < 8 ? -1 : 0;
-      const forwardX = -Math.sin(this.yaw);
-      const forwardZ = -Math.cos(this.yaw);
-      const rightX = Math.cos(this.yaw);
-      const rightZ = -Math.sin(this.yaw);
-      moveX = forwardX * forward * 0.9 + rightX * this.strafeDir * 0.75;
-      moveZ = forwardZ * forward * 0.9 + rightZ * this.strafeDir * 0.75;
-      speed = 3.4;
     } else {
       this.repathTimer -= dt;
       if (this.repathTimer <= 0 || this.pathIndex >= this.path.length) {
         this.repathTimer = rand(2.5, 5);
         this.chooseDestination(world.nav);
+        this.nodeSampleTimer = 0;
+        this.nodeDistSample = Infinity;
       }
-      if (this.pathIndex < this.path.length) {
-        const node = this.path[this.pathIndex]!;
-        const dx = node.x - this.pos.x;
-        const dz = node.z - this.pos.z;
-        const length = Math.hypot(dx, dz);
-        if (length < 0.75) {
-          this.pathIndex += 1;
-        } else {
-          moveX = dx / length;
-          moveZ = dz / length;
-          speed = 3.6;
-        }
+      const step = this.followPath(dt, 3.6);
+      if (step) {
+        moveX = step.x;
+        moveZ = step.z;
+        speed = step.speed;
       }
     }
 
@@ -382,6 +485,11 @@ export class Bot implements Actor {
     if (magnitude > 0.001) {
       moveX /= magnitude;
       moveZ /= magnitude;
+      // 脱困期间不更新基准方向，否则侧移方向每帧自乘一次会转圈
+      if (this.unstuckTimer <= 0) {
+        this.intentX = moveX;
+        this.intentZ = moveZ;
+      }
     }
 
     // 与队友分离：不加这一条，三个 Bot 会叠在同一个路径点上抖成一片
@@ -393,6 +501,17 @@ export class Bot implements Actor {
       if (distance < 1.1 && distance > 0.001) {
         moveX += (dx / distance) * 0.8;
         moveZ += (dz / distance) * 0.8;
+      }
+    }
+
+    // 脱困侧移盖过一切移动意图：沿「想走的方向」垂直硬走 0.6 秒。
+    // 分离力、寻路意图都先让位 —— 先把身体从 nav/物理不一致的缝里挪出来
+    if (this.unstuckTimer > 0) {
+      this.unstuckTimer -= dt;
+      if (this.intentX !== 0 || this.intentZ !== 0) {
+        moveX = -this.intentZ * this.unstuckDir;
+        moveZ = this.intentX * this.unstuckDir;
+        speed = 3.0;
       }
     }
 
@@ -431,13 +550,22 @@ export class Bot implements Actor {
       resetMotionState(this.motion, this.pos);
     }
 
-    // 卡住检测：1.4 秒内几乎没动过就重新规划
+    // 卡住检测收紧：1.0 秒内位移 < 0.45 米就重新规划 + 起一段脱困侧移。
+    // （旧版 1.4s/0.6m 太宽松，Bot 贴墙磨蹭半天才反应。）
     this.stuckTimer += dt;
-    if (this.stuckTimer > 1.4) {
+    if (this.stuckTimer > 1.0) {
       const moved = Math.hypot(this.pos.x - this.lastPos.x, this.pos.z - this.lastPos.z);
-      if (moved < 0.6 && this.state === 'patrol') {
-        this.path = [];
-        this.repathTimer = 0;
+      if (moved < 0.45) {
+        if (this.state === 'engage' && this.target && this.lostFor === 0) {
+          // 可见交战卡住 = strafe 撞上掩体，换个方向游走
+          this.strafeDir = -this.strafeDir;
+          this.strafeTimer = rand(0.7, 1.7);
+        } else {
+          this.path = [];
+          this.repathTimer = 0;
+          this.unstuckTimer = 0.6;
+          this.unstuckDir = Math.random() < 0.5 ? -1 : 1;
+        }
       }
       this.lastPos.copy(this.pos);
       this.stuckTimer = 0;
@@ -445,6 +573,21 @@ export class Bot implements Actor {
   }
 
   private chooseDestination(nav: NavGrid): void {
+    // 有新鲜情报（目击 / 枪声）先去搜：到了附近没人才回随机巡逻。
+    if (this.lastKnown) {
+      if (nowSeconds() >= this.lastKnownUntil) {
+        this.lastKnown = null;
+      } else if (Math.hypot(this.pos.x - this.lastKnown.x, this.pos.z - this.lastKnown.z) < 3) {
+        // 人已经站在情报点上了还没看见人 —— 情报作废
+        this.lastKnown = null;
+      } else {
+        this.path = findPath(nav, this.pos.x, this.pos.z, this.lastKnown.x, this.lastKnown.z);
+        this.pathIndex = 0;
+        if (this.path.length > 0) return;
+        this.lastKnown = null;
+      }
+    }
+
     // 偏向敌方半场：保卫者想去 +z，潜伏者想去 -z
     const preferZ = this.team === 0 ? 1 : -1;
     const cellCount = nav.nx * nav.nz;

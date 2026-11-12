@@ -40,6 +40,15 @@ export type PrimaryId = 'ak47' | 'm4a1' | 'awm' | 'shotgun';
 export type WeaponId = PrimaryId | 'usp' | 'knife' | 'grenade';
 export type SlotId = 'primary' | 'secondary' | 'melee' | 'throwable';
 
+/**
+ * 判「这把枪是不是主武器」。联机副本用它对齐 `Player.primary`：
+ * 快照里只带当前**手里**的武器（切到刀 / 雷 / 手枪时不是主武器），
+ * 只有主武器才允许写回 `primary`，否则买菜单的高亮会被一把小刀顶掉。
+ */
+export function isPrimaryId(value: WeaponId): value is PrimaryId {
+  return value === 'ak47' || value === 'm4a1' || value === 'awm' || value === 'shotgun';
+}
+
 /** 背包顺序：1 主武器 / 2 手枪 / 3 刀 / 4 手雷。 */
 export const SLOT_ORDER: readonly SlotId[] = ['primary', 'secondary', 'melee', 'throwable'];
 
@@ -354,7 +363,8 @@ export interface MatchResult {
  * 引擎构造参数。
  *
  * 回调全部是「推」而不是「拉」：React 不轮询引擎，引擎也不读 React 的 state。
- * `onPauseChange` 同时承担两件事 —— 指针锁定被 Esc 放掉、以及组件主动暂停。
+ * `onMenuChange` 表示 Esc 放掉指针锁定后游戏菜单的开合 —— **游戏不冻结**，
+ * 单机/联机一致（联机本来就不能暂停，单机也取消暂停）。
  */
 export interface EngineOptions {
   rules: MatchRules;
@@ -362,7 +372,7 @@ export interface EngineOptions {
   /** 10Hz 的常规快照 */
   onHud: (hud: HudSnapshot) => void;
   onFinish: (result: MatchResult) => void;
-  onPauseChange: (paused: boolean) => void;
+  onMenuChange: (open: boolean) => void;
   onLockChange: (locked: boolean) => void;
   /**
    * 命中反馈。**不走 `onHud`**：命中标记只显示 120ms，10Hz 的快照根本表达不了

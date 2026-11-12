@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { PrimaryId, SlotId, WeaponId } from './types';
-import { type PbrTextureSet, weaponTextures } from './weapon-textures';
+import { type PbrTextureSet, type WeaponTextureLibrary, weaponTextures } from './weapon-textures';
 
 /**
  * 全部武器的数值表 + 第一人称枪模。
@@ -707,13 +708,314 @@ export interface ViewModel {
   /**
    * 可拆卸弹匣（独立子组，静止位姿已摆好）。
    * 换弹时由 `viewmodel.ts` 驱动它「拔出 → 插入」；霰弹枪逐发装填、刀、雷为 null。
+   * GLB 枪模是整块网格，没有独立弹匣节点 —— 恒为 null（见下方 GLB 一节的妥协说明）。
    */
   magazine: THREE.Group | null;
   /**
    * 可动画的枪栓（独立子组，静止位姿已摆好）。
    * 拉栓时由 `viewmodel.ts` 驱动它「提栓 → 后拉 → 推回 → 压下」；只有 AWM 有，其余为 null。
+   * GLB 路径同样恒为 null。
    */
   bolt: THREE.Group | null;
+}
+
+/**
+ * 各武器枪口在模型局部坐标里的位置 —— **GLB 与程序化两条路共用这一份**。
+ *
+ * 引擎的契约（火光世界坐标、`muzzleScreen` 的准星对齐）全挂在这个点上：
+ * GLB 归一化时把枪管轴线精确对到这里的 y/z，程序化分支直接用它摆 `muzzle`。
+ * 改任何一个数，两条路都要同时验。
+ */
+const MUZZLE_POS: Record<WeaponId, readonly [number, number, number]> = {
+  ak47: [0, 0.018, -0.7],
+  m4a1: [0, 0.012, -0.7],
+  awm: [0, 0.01, -0.85],
+  shotgun: [0, 0.028, -0.74],
+  usp: [0, 0.028, -0.32],
+  knife: [-0.047, 0.01, -0.295],
+  grenade: [0, 0, -0.06],
+};
+
+/* ============================================================
+   GLB 枪模模板（外部 CC0 模型）
+   ============================================================ */
+
+/**
+ * 外部枪模。来源：Quaternius「Ultimate Guns Pack」（经 poly.pizza 分发），
+ * **CC0 公有领域** —— 可商用、免署名。文件已重命名放进 `public/h5/guns/`，
+ * 刀与手雷没有合适的 CC0 模型，**仍走程序化路线**（kukri 的挤出剖面也比低模刀好）。
+ *
+ * ## 归一化（关键：为什么引擎完全不用改）
+ *
+ * GLB 原始朝向是「枪口朝 +x、上为 +y」（对五个模型逐顶点实测确认）。加载时：
+ *
+ *   1. `rotation.y = π/2` 把枪口转到 -z（和程序化枪模同向）
+ *   2. 按 `scale` 压到程序化模型的包络长度（AK 1.12m、AWM 1.33m……）
+ *   3. 按 `offset` 把**枪管轴线**对齐到 `MUZZLE_POS[id]` 的 y/z
+ *
+ * 于是枪口火光位置、`muzzleScreen` 的准星对齐、`BASE_POSES` 的持枪位姿
+ * 这些引擎契约**原封不动** —— 枪托落点与程序化模型的偏差实测都在毫米级。
+ *
+ * ## 生命周期（与 `materials()` 同一条铁律）
+ *
+ * 模板在模块级缓存存一份，`buildWeaponModel` 返回 `clone(true)`：
+ * 几何体与材质全场共享，所以 `disposeWeaponModel` 对 GLB 克隆**必须跳过
+ * dispose**（打穿模板 = 下次切枪拿到已释放几何体，枪变全黑）。
+ *
+ * 已知妥协：GLB 是整块网格，没有独立弹匣节点，换弹拔匣在 GLB 路径上退化为
+ * 整体动作（`magazine` 传 null，`viewmodel.ts` 对 null 已有兼容分支）。
+ * **AWM 拉栓不在此列**：拉机柄是 DarkMetal 网格里一簇可按质心干净切出的
+ * 三角形（见 `splitBoltHandle`），加载时切出来装进动画组，原装手柄自己动。
+ * USP 本体不带消音器 → 程序化 `attachSuppressor` 附加件补上。
+ */
+interface GlbGunConfig {
+  /** public 下的资源路径 */
+  file: string;
+  /** 统一缩放：GLB 原始包围盒压到程序化模型的包络长度 */
+  scale: number;
+  /** 内层偏移：把枪管轴线对齐到 `MUZZLE_POS[id]`（实测值，见上方说明） */
+  offset: [number, number, number];
+}
+
+const GLB_GUNS: Partial<Record<WeaponId, GlbGunConfig>> = {
+  ak47: { file: '/h5/guns/ak47.glb', scale: 0.2066, offset: [0, -0.1148, 0.0885] },
+  m4a1: { file: '/h5/guns/m4a1.glb', scale: 0.2196, offset: [0, -0.1279, 0.0926] },
+  awm: { file: '/h5/guns/awm.glb', scale: 0.1823, offset: [0, -0.0465, 0.1073] },
+  shotgun: { file: '/h5/guns/shotgun.glb', scale: 0.2066, offset: [0, -0.0126, 0.1501] },
+  usp: { file: '/h5/guns/usp.glb', scale: 0.1237, offset: [0, -0.0409, 0.0646] },
+};
+
+const glbTemplates = new Map<WeaponId, THREE.Group>();
+const glbJobs = new Map<WeaponId, Promise<boolean>>();
+
+/**
+ * GLB 材质按名字挂上 Canvas PBR 贴图（法线 + 粗糙度 + AO）。
+ *
+ * Quaternius 模型全是无贴图的顶点色材质 —— 轮廓是真枪的，表面却是塑料。
+ * 名字里带 wood / metal / glass 的按语义分派，其余一律当聚合物处理；
+ * 底色保留 GLB 原色（贴图是灰度，只在上面叠纹理）。
+ * **不挂 metalnessMap**：ORM 的 B 通道恒为 1，会把聚合物也变金属。
+ */
+function tuneGlbMaterial(src: THREE.MeshStandardMaterial, tex: WeaponTextureLibrary): THREE.MeshStandardMaterial {
+  const name = src.name.toLowerCase();
+  const mat = new THREE.MeshStandardMaterial({ color: src.color.clone() });
+  mat.aoMapIntensity = 0.7;
+  if (name.includes('glass')) {
+    // 镜片：低粗糙 + 环境反射出高光（与程序化 m.glass 同参）
+    mat.roughness = 0.12;
+    mat.metalness = 0.5;
+    return mat;
+  }
+  const set = name.includes('wood') ? tex.wood : name.includes('metal') ? tex.metal : tex.polymer;
+  mat.map = set.map;
+  mat.normalMap = set.normalMap;
+  mat.normalScale = new THREE.Vector2(0.8, 0.8);
+  mat.roughnessMap = set.ormMap;
+  mat.aoMap = set.ormMap;
+  mat.roughness = name.includes('metal') ? 0.78 : 1;
+  mat.metalness = name.includes('metal') ? 0.9 : name.includes('wood') ? 0 : 0.08;
+  return mat;
+}
+
+/**
+ * 三平面投射生成 UV。Quaternius 的 GLB 大多不带 TEXCOORD（没有贴图就不导出），
+ * 而我们的噪声 / 划痕贴图必须有 UV 才能采样。按法线主导轴把局部坐标投影出去，
+ * 对噪声类贴图完全够用，还省去了逐部件展 UV 的功夫。
+ */
+function generateUv(geometry: THREE.BufferGeometry): void {
+  const pos = geometry.attributes.position;
+  const nor = geometry.attributes.normal;
+  if (!pos || !nor) return;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const nx = Math.abs(nor.getX(i));
+    const ny = Math.abs(nor.getY(i));
+    const nz = Math.abs(nor.getZ(i));
+    let u: number;
+    let v: number;
+    if (nx >= ny && nx >= nz) {
+      u = z;
+      v = y;
+    } else if (ny >= nz) {
+      u = x;
+      v = z;
+    } else {
+      u = x;
+      v = y;
+    }
+    uv[i * 2] = u * 8;
+    uv[i * 2 + 1] = v * 8;
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+
+/* ---------- AWM 拉机柄切分（GLB 拉栓动画的前提） ---------- */
+
+/** 拉栓动画组挂到克隆体上后用名字找回来（`clone(true)` 保留 name） */
+const AWM_BOLT_NAME = 'awm_bolt';
+
+/**
+ * 拉机柄的质心判定区域（**归一化坐标**，对 `awm.glb` 逐三角形实测得出）。
+ *
+ * GLB 的拉机柄是 DarkMetal 网格里一小簇 42 个三角形（x 0.021~0.055、
+ * z 0.053~0.063、轴线下方），与机匣壁（质心 x ≤ 0.013）之间有干净的空隙，
+ * 按质心切一刀不会伤到机匣 —— 切出来的手柄装进动画组，原装件自己动，
+ * 比另造一个程序化手柄盖上去少一层「双拉机柄」的破绽。
+ */
+const BOLT_REGION = { xMin: 0.017, yMax: 0.002, zMin: 0.045, zMax: 0.075 };
+
+/**
+ * 从 GLB 网格中切出拉机柄，返回烘到归一化坐标的手柄几何体；
+ * 原网格的索引同步剔除手柄三角形（几何体数组共享，只有索引分家）。
+ * 找不到手柄（结构不符预期 / 非索引网格）返回 null，调用方静默跳过 ——
+ * 宁可没有拉栓动画，也不能把机匣撕个洞。
+ */
+function splitBoltHandle(mesh: THREE.Mesh): THREE.BufferGeometry | null {
+  const geo = mesh.geometry;
+  const index = geo.getIndex();
+  const pos = geo.getAttribute('position');
+  const nor = geo.getAttribute('normal');
+  if (!index || !pos || !nor) return null;
+
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const centroid = new THREE.Vector3();
+  const boltIdx: number[] = [];
+  const keepIdx: number[] = [];
+  for (let t = 0; t < index.count; t += 3) {
+    const ia = index.getX(t);
+    const ib = index.getX(t + 1);
+    const ic = index.getX(t + 2);
+    a.fromBufferAttribute(pos, ia);
+    b.fromBufferAttribute(pos, ib);
+    c.fromBufferAttribute(pos, ic);
+    centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+    // matrixWorld = raw → 归一化坐标的完整链（节点 ×100 / -90°X + 外层摆位）
+    mesh.localToWorld(centroid);
+    const hit =
+      centroid.x > BOLT_REGION.xMin &&
+      centroid.y < BOLT_REGION.yMax &&
+      centroid.z > BOLT_REGION.zMin &&
+      centroid.z < BOLT_REGION.zMax;
+    (hit ? boltIdx : keepIdx).push(ia, ib, ic);
+  }
+  // 两边都得有货：全判成手柄说明区域写错了，此时绝不能动原网格
+  if (boltIdx.length === 0 || keepIdx.length === 0) return null;
+
+  const handleGeo = new THREE.BufferGeometry();
+  // position / normal **必须克隆**：applyMatrix4 是原地变换属性数组，共享的话
+  // 烘矩阵会把原网格的顶点一起烘掉 —— 原网格对象树上还挂着同一条 ×18 的
+  // 变换链，等于被双重变换，整个枪身金属件直接糊到镜头上。uv 无变换，可共享。
+  handleGeo.setAttribute('position', pos.clone());
+  handleGeo.setAttribute('normal', nor.clone());
+  const uv = geo.getAttribute('uv');
+  if (uv) handleGeo.setAttribute('uv', uv);
+  handleGeo.setIndex(boltIdx);
+  handleGeo.applyMatrix4(mesh.matrixWorld); // 烘死变换，动画组直接挂最终坐标
+
+  geo.setIndex(keepIdx); // 原网格只剩机匣部分
+  return handleGeo;
+}
+
+async function loadGlbWeapon(id: WeaponId, config: GlbGunConfig): Promise<boolean> {
+  try {
+    const res = await fetch(config.file);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buffer = await res.arrayBuffer();
+    const loader = new GLTFLoader();
+    const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+      loader.parse(buffer, '', resolve, reject);
+    });
+
+    const inner = gltf.scene;
+    inner.rotation.y = Math.PI / 2; // 枪口 +x → -z（实测五把枪枪口都在 +x）
+    inner.scale.setScalar(config.scale);
+    inner.position.set(...config.offset);
+
+    const tex = weaponTextures();
+    const tuned = new Map<THREE.Material, THREE.MeshStandardMaterial>();
+    inner.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry) return;
+      mesh.frustumCulled = false; // 枪永远在视野里（与程序化枪模同一策略）
+      generateUv(mesh.geometry);
+      const src = mesh.material as THREE.MeshStandardMaterial;
+      let mat = tuned.get(src);
+      if (!mat) {
+        mat = tuneGlbMaterial(src, tex);
+        tuned.set(src, mat);
+      }
+      mesh.material = mat;
+    });
+
+    const root = new THREE.Group();
+    root.userData.shared = true; // disposeWeaponModel 见此跳过 dispose
+    root.add(inner);
+
+    // AWM：切出拉机柄装进动画组（viewmodel 的拉栓动画合同见 ViewModel.bolt）。
+    // 组挂在 **root**（最终坐标）而不是 inner —— inner 带 0.18 缩放，会把
+    // position.z 的 0.085 拉栓行程也缩掉。轴心 = 枪管轴线（提栓绕轴转 66°）。
+    if (id === 'awm') {
+      root.updateMatrixWorld(true); // localToWorld / matrixWorld 需要
+      inner.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const handleGeo = splitBoltHandle(mesh);
+        if (!handleGeo) return;
+        const boltGroup = new THREE.Group();
+        boltGroup.name = AWM_BOLT_NAME;
+        boltGroup.position.set(0, MUZZLE_POS.awm[1], 0);
+        const handle = new THREE.Mesh(handleGeo, mesh.material);
+        handle.position.set(0, -MUZZLE_POS.awm[1], 0); // 静止位姿与原位重合
+        handle.frustumCulled = false;
+        boltGroup.add(handle);
+        root.add(boltGroup);
+      });
+    }
+
+    glbTemplates.set(id, root);
+    return true;
+  } catch {
+    // 加载失败**永久**回退程序化模型，不重试：本地静态资源都拉不到说明
+    // 环境有问题，重试只会每次进图都闪一下兜底模型
+    return false;
+  }
+}
+
+/** 预载全部 GLB 枪模（幂等：并发调用共享同一个任务）。在 viewmodel 层开局时调用。 */
+export function preloadWeaponGlbs(): Promise<boolean[]> {
+  const jobs: Promise<boolean>[] = [];
+  for (const [id, config] of Object.entries(GLB_GUNS) as [WeaponId, GlbGunConfig][]) {
+    let job = glbJobs.get(id);
+    if (!job) {
+      job = loadGlbWeapon(id, config);
+      glbJobs.set(id, job);
+    }
+    jobs.push(job);
+  }
+  return Promise.all(jobs);
+}
+
+/** 这把枪的 GLB 模板是否已就绪（供 viewmodel 层决定要不要热替换） */
+export function hasGlbTemplate(id: WeaponId): boolean {
+  return glbTemplates.has(id);
+}
+
+/** 从模板克隆一把 GLB 枪。几何体与材质共享模板，dispose 侧跳过 */
+function cloneGlbViewModel(id: WeaponId, template: THREE.Group, m: Record<string, THREE.MeshStandardMaterial>): ViewModel {
+  const group = template.clone(true);
+  if (id === 'usp') attachSuppressor(group, m); // GLB 本体不带消音器
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(...MUZZLE_POS[id]);
+  group.add(muzzle);
+  // AWM：模板里预切好的拉机柄动画组（loadGlbWeapon 内 splitBoltHandle 产物）；
+  // 切分失败 / 结构不符时为 undefined → 退回整体动作的兜底分支
+  const bolt = id === 'awm' ? (group.getObjectByName(AWM_BOLT_NAME) as THREE.Group | undefined) : undefined;
+  return { group, muzzle, magazine: null, bolt: bolt ?? null };
 }
 
 /* ---------- 尼泊尔军刀（kukri）---------- */
@@ -771,9 +1073,28 @@ function buildKukriBlade(parent: THREE.Object3D, mat: THREE.Material, edgeMat: T
 }
 
 /**
+ * USP 的消音器（**程序化附加件**）：GLB 本体不带消音器，两条路都挂这一份，
+ * 保证「带消音的 USP」这个形象在两种模型来源下完全一致。
+ * 桥接段（螺纹枪管）从滑套前口一直铺到消音器后端，中间不留悬空缝。
+ */
+function attachSuppressor(parent: THREE.Object3D, m: Record<string, THREE.MeshStandardMaterial>): void {
+  cyl(parent, 0.016, 0.1, 0, 0.028, -0.14, m.steelLite, 12); // 螺纹枪管桥
+  cyl(parent, 0.022, 0.12, 0, 0.028, -0.24, m.steel, 18); // 消音器筒
+  cyl(parent, 0.023, 0.006, 0, 0.028, -0.297, m.steelLite, 18); // 端盖
+  cyl(parent, 0.008, 0.002, 0, 0.028, -0.301, m.polymer, 12); // 前口
+  // 三道滚花环：光筒消音器在侧光下就是根水管，滚花才有「拧上去的」质感
+  for (let i = 0; i < 3; i += 1) {
+    cyl(parent, 0.0225, 0.005, 0, 0.028, -0.21 + i * 0.028, m.steelLite, 18);
+  }
+}
+
+/**
  * 拼一把枪。**模型朝 -z**（和相机的前向一致），原点在握把附近。
  *
- * 全部用 Box / Cylinder 拼 —— 没有 glTF、没有外部资源、没有版权问题。
+ * **优先走 GLB 模板**（见下方 GLB 一节）：模板就绪就克隆外部模型返回；
+ * 未就绪 / 加载失败时用下面的程序化拼装兜底 —— 所以这条老路必须一直活着。
+ *
+ * 程序化路全部用 Box / Cylinder 拼 —— 没有 glTF、没有外部资源、没有版权问题。
  * 低模 FPS 枪械用几何体拼装的观感并不差，而且尺寸能精确对齐准星。
  *
  * ⚠️ **军刀是唯一的例外**：它不走「朝 -z」这套外层摆位，而是建在自己的 `arm`
@@ -782,6 +1103,11 @@ function buildKukriBlade(parent: THREE.Object3D, mat: THREE.Material, edgeMat: T
  */
 export function buildWeaponModel(id: WeaponId): ViewModel {
   const m = materials();
+
+  // GLB 模板就绪 → 外部模型。没有模板时走程序化兜底，之后由 viewmodel 层热替换
+  const template = glbTemplates.get(id);
+  if (template) return cloneGlbViewModel(id, template, m);
+
   const group = new THREE.Group();
   const muzzle = new THREE.Object3D();
   let magazine: THREE.Group | null = null;
@@ -828,7 +1154,7 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     // 斜切防跳器：短粗筒 + 一片斜面，枪口不再是一根光杆
     cyl(group, 0.02, 0.055, 0, 0.02, -0.672, m.steel);
     box(group, 0.04, 0.006, 0.05, 0, 0.042, -0.672, m.steelLite).rotation.x = -0.5;
-    muzzle.position.set(0, 0.018, -0.7);
+    muzzle.position.set(...MUZZLE_POS[id]);
   } else if (id === 'm4a1') {
     box(group, 0.07, 0.095, 0.36, 0, 0, 0, m.steel);
     box(group, 0.052, 0.052, 0.3, 0, 0.008, -0.32, m.steelLite);
@@ -859,7 +1185,7 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     }
     box(group, 0.002, 0.018, 0.05, 0.036, 0.01, 0.02, m.polymer); // 抛壳窗
     box(group, 0.05, 0.008, 0.02, 0, 0.045, 0.175, m.steelLite); // 拉机柄
-    muzzle.position.set(0, 0.012, -0.7);
+    muzzle.position.set(...MUZZLE_POS[id]);
   } else if (id === 'awm') {
     box(group, 0.07, 0.09, 0.4, 0, 0, 0, m.olive);
     cyl(group, 0.014, 0.62, 0, 0.01, -0.52, m.steel);
@@ -899,7 +1225,7 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     box(group, 0.008, 0.008, 0.14, -0.035, -0.06, -0.62, m.steel).rotation.x = 0.6;
     box(group, 0.008, 0.008, 0.14, 0.035, -0.06, -0.62, m.steel).rotation.x = 0.6;
     box(group, 0.08, 0.008, 0.008, 0, -0.045, -0.58, m.steel);
-    muzzle.position.set(0, 0.01, -0.85);
+    muzzle.position.set(...MUZZLE_POS[id]);
   } else if (id === 'shotgun') {
     box(group, 0.075, 0.1, 0.3, 0, 0, 0, m.steel);
     cyl(group, 0.024, 0.6, 0, 0.028, -0.42, m.steel);
@@ -916,10 +1242,9 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     box(group, 0.045, 0.09, 0.05, 0, -0.075, 0.11, m.wood);
     box(group, 0.012, 0.03, 0.012, 0, 0.062, -0.66, m.brass);
     box(group, 0.002, 0.02, 0.06, 0.038, 0.01, -0.02, m.polymer); // 抛壳窗
-    muzzle.position.set(0, 0.028, -0.74);
+    muzzle.position.set(...MUZZLE_POS[id]);
   } else if (id === 'usp') {
     box(group, 0.048, 0.075, 0.2, 0, 0.02, 0, m.steel); // 套筒
-    box(group, 0.032, 0.032, 0.1, 0, 0.028, -0.14, m.steelLite);
     // 套筒后部防滑纹：两侧各五条细槽
     for (const side of [-1, 1]) {
       for (let i = 0; i < 5; i += 1) {
@@ -940,10 +1265,8 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     box(group, 0.006, 0.006, 0.075, 0, -0.062, -0.015, m.steelLite);
     box(group, 0.004, 0.02, 0.006, 0, -0.04, 0.005, m.steel).rotation.x = 0.2;
     box(group, 0.008, 0.022, 0.008, 0, 0.062, -0.12, m.steel); // 准星
-    cyl(group, 0.022, 0.12, 0, 0.028, -0.24, m.steel); // 消音器
-    cyl(group, 0.023, 0.006, 0, 0.028, -0.297, m.steelLite); // 端盖
-    cyl(group, 0.008, 0.002, 0, 0.028, -0.301, m.polymer); // 前口
-    muzzle.position.set(0, 0.028, -0.32);
+    attachSuppressor(group, m);
+    muzzle.position.set(...MUZZLE_POS[id]);
   } else if (id === 'knife') {
     // 尼泊尔军刀（kukri）。
     //
@@ -977,7 +1300,7 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
 
     // 近战没有枪口火光，这个点只作为「刀尖」的语义占位（`group` 空间）——
     // 刀尖现在指向 -z，位置是 arm 姿态变换后刀尖的落点
-    muzzle.position.set(-0.047, 0.01, -0.295);
+    muzzle.position.set(...MUZZLE_POS[id]);
   } else {
     // 手雷：一颗弹体 + 保险片 + 保险环 + 一只握着它的手
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), m.olive);
@@ -998,7 +1321,7 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     ring.position.set(0.024, 0.104, -0.02);
     group.add(ring);
     box(group, 0.055, 0.075, 0.055, 0.01, -0.05, 0.03, m.hand);
-    muzzle.position.set(0, 0, -0.06);
+    muzzle.position.set(...MUZZLE_POS[id]);
   }
 
   group.add(muzzle);
@@ -1007,6 +1330,10 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
 
 /** 释放一把枪模的几何体（材质是共享的，不能 dispose）。 */
 export function disposeWeaponModel(model: ViewModel): void {
+  // GLB 模板克隆（userData.shared）：几何体与材质和模块级模板共享，
+  // dispose 会把模板打穿 —— 下次切枪拿到已释放几何体，枪变全黑。
+  // 与 materials() 缓存「不能清」是同一条铁律。
+  if (model.group.userData.shared === true) return;
   model.group.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.geometry) mesh.geometry.dispose();

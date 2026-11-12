@@ -360,7 +360,11 @@ const RUN_SPEED = 5.4;
  *   ② 移动 —— 按速度占奔跑速度的比例线性叠加。**是加法**，所以「移动连发」一定
  *      比「静止连发」更散，不会被连发累积先顶到上限而看不出区别；
  *   ③ 姿态 —— 蹲下更准（×<1）、空中更散（×>1），乘法叠加在①+②之上；
- *   ④ 开镜 —— ×0.05，狙击枪的全部意义所在；
+ *   ④ 开镜 —— ×0.05 只压「站桩」那部分散布；移动惩罚在开镜之后**再加一次全额**
+ *      （2026-11-12 用户要求「开镜移动时子弹落点不要很准」）。之前移动惩罚先加、
+ *      再被 ×0.05 一起压掉，开镜滑步等于指哪打哪；现在开镜急走约 +0.027 rad
+ *      （scoped 减速到 0.45 倍速 → 比例 0.45 × move），远距离明显打偏。
+ *      不开镜的路径与旧版逐字节一致。
  *   ⑤ 上限 —— 最后统一夹到 `spread.max`，任何组合都不会失控。
  *
  * ⚠️ 累积的 0.85×max 夹取**必须发生在②之前**：这样 `base + accum` 永远自己顶不到
@@ -381,8 +385,11 @@ export function currentSpread(spec: WeaponSpec, state: AimState): number {
   if (state.crouching) spread *= s.crouch;
   if (!state.onGround) spread *= s.air;
 
-  // ④ 开镜
-  if (state.scoped) spread *= 0.05;
+  // ④ 开镜：×0.05 之后把移动惩罚全额补回（站桩开镜依然是激光，移动开镜不准）
+  if (state.scoped) {
+    spread *= 0.05;
+    if (state.speed > 0.4) spread += s.move * Math.min(1, state.speed / RUN_SPEED);
+  }
 
   // ⑤ 上限
   return Math.min(spread, s.max);

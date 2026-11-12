@@ -294,7 +294,18 @@
 - ⚠️ 枪口朝向靠 `WEAPON_OFFSET.yaw ≈ 0.19`（`atan(0.168/0.85)`）：枪在右侧 0.168 米、枪口在 0.85 米外，不转这一点枪口会一直指着画面右侧外面。
 - ⚠️ `dispose()` 必须 traverse 释放每个零件的 geometry **并清空模块级材质 Map**。不清的话重新进游戏页会从缓存里拿到已 dispose 的材质，枪变成一片黑。
 
-### 人物（`character.ts`，2026-11-12 第三轮改成写实士兵）
+### 人物（`actor-view.ts`，2026-11-12 晚第三轮定稿：自建程序化士兵 —— 现行版）
+
+- **GLB 路线已彻底删除**（`actor-model.ts` / `public/h5/soldier.glb` 均已删）。两轮外部模型先后被用户否掉：shanebrumback 士兵（太丑、敌我不清）、Quaternius Toon Shooter（卡通风与写实地图不搭，且引入「人机看不见 / 尸体站着走路」bug）。**SkeletonUtils.clone + AnimationMixer 方案在本项目里不 work，别再提议外部 GLB 人物。**
+- 现行 = `actor-view.ts` 纯几何体拼装的士兵，**形体参考 CF（第五轮，2026-11-12 晚）**：四肢 CapsuleGeometry + 髋/膝/肩/肘球形关节；躯干 = 上粗下细变径圆柱（0.155/0.115）压 z 0.68 ⇒ 收腰倒三角；背心包胸腔 + 胸前三联弹匣袋 + 压扁球肩垫（宽肩）；球头 r0.11 + 球壳头盔（半球 0.55π + 外扩裙边）；髋 0.98（长腿比例）。真人肤色脸+眼条、人机戴面罩（clothDark 球头）。双手持枪固定姿势，**枪挂 body 不挂手臂**（双手 IK 太贵）。helper：`blob`/`capsule`/`part`。
+- 🔴 **机械感被用户否掉（2026-11-12 第四轮）**：人机旧造型 = 金属头+单眼传感器+天线+琥珀自发光目镜，用户「太有机械感」。现行全部士兵外观一致（只露脸/面罩差异），trim 材质改哑光深色不发光，cloth/vest/gear metalness 压到 0~0.05。**别再加发光件/天线/金属头。**
+- 枪按 `Actor.weapon` 换形（createActorView 第三参）：awm 长管+镜、shotgun 粗管、usp 手枪、默认步枪。
+- 动画：走路摆腿+屈膝+body 起伏+站立呼吸；蹲姿 = damp 的 crouchT（`Actor.height<1.45`）压身+屈膝+前倾；开火 = `playFire()`（引擎 `onShot` 早退后 + `replayShot` 非自己分支，`actorViewOf(id)` 三张表找视图）→ recoil=1 指数衰减（枪身后顶+枪口上跳）；死亡 = 弹道倒地+余震+淡出（整组 quaternion 旋转，pivot 在脚底）。
+- 配色（第五轮按 CF 做旧军服调过）：cloth 0 队 0x35597e 钢蓝 / 1 队 0x9c4530 锈红、clothDark 各自深化；vest 深橄榄 0x3a4034；全材质 metalness 0。色相保留敌我识别、饱和度压低（用户嫌高饱和「不搭」）。
+- 🔴 **敌我识别第二层 = 头顶发光倒三角 Sprite**（y=2.14、色 0 队 0x3f8cff / 1 队 0xff5a3c、Canvas 纹理模块级按色缓存全场共享、死亡熄灭、只 dispose SpriteMaterial 不 dispose 纹理）。
+- `TeamMaterials` 有 7 个槽位（cloth/clothDark/vest/gear/skin/gun/trim），模板按「阵营+造型」缓存、逐视图 clone（transparent 预开，防淡出瞬间 shader 重编译）。
+
+### 人物（历史：shanebrumback soldier_rigged 第一轮 / 旧 Box 造型 —— 均已弃用）
 
 - 演进：Y 轴 billboard 广告牌 →（第二轮）球头 + 胶囊四肢的 Q 版小人 →（第三轮）**6.4 头身写实士兵**。第三轮起因：用户「不要 q 版画风」。
 - 现在：`HEAD_R 0.108` 的头 + 半球头盔（带帽檐）+ 护目镜 + 战术背心（三个弹匣袋）+ 背包 + 护膝 + 军靴 + 两段式四肢（髋→膝→靴 / 肩→肘→手），一把简化步枪挂在**右肘末端**（不是肩上，挂肩会在抬枪时飘到脸前）。总高对齐 `ACTOR_HEIGHT 1.72`。
@@ -335,7 +346,9 @@
 - ⚠️ `applySnapshot` 的实体列表以快照为准：**多删缺补**。`MatchRules` 也必须进快照，否则两边显示的目标人头数不一致。
 - ⚠️ **换弹发的是状态不是按键**：`reload: self.reloadUntil > world.time`（10Hz 发包，按键只活一帧）。
 - ⚠️ `net.ts` 里 `@trystero-p2p/mqtt` 必须 `await import()` 动态引入（顶层 import 会在 SSR 炸）；`open()` 开头先探 `crypto.subtle` ⇒ `insecure-context`（局域网 http 直连会命中）。
-- ⚠️ 指针锁定：`InputController.onPointerDown` **只认 `event.target instanceof HTMLCanvasElement`**，否则点菜单按钮会被抢走指针。全站唯一 `Esc` 语义不变（这里开暂停面板）。
+- ⚠️ 指针锁定：`InputController.onPointerDown` **只认 `event.target instanceof HTMLCanvasElement`**，否则点菜单按钮会被抢走指针。全站唯一 `Esc` 语义不变（这里开游戏菜单）。🔴 H5 **没有暂停状态**（2026-11-12 用户定案：联机不能暂停、单机也取消）：Esc 放锁只弹菜单（ShipGameMenu），世界照常跑，只有本机输入走 `frozen` 归零；引擎里是 `menuOpen` + `onMenuChange`，别把冻结世界的 pause() 加回来。
+- 🔴 **加入者不跑 `Player.update` ⇒ `onWeaponChange` 钩子不走**（2026-11-12 晚修）：`mirrorSelf()` 必须检测武器变化并 `viewModel.setWeapon()`、主武器写回 `player.primary`（守卫 `isPrimaryId()` 在 types.ts），否则买枪/切刀/切雷后第一人称还是旧枪模型。加入者侧尸体淡出同理要自己在 `updateGuest` 补（时间轴同房主 `updateBotViews` 的 BOT_CORPSE_LIFE/CORPSE_FADE）。已知残留：加入者自己的 AWM 拉栓/近战挥刀动画、第三者打肉声不同步（协议无此事件，刻意不动）。
+- 🔴 **加入者「巨卡」根因 = 自己的移动零预测**（2026-11-12 深夜修）：输入上行→房主模拟→快照回来→阻尼，端到端 150~250ms。修复三件套：`SNAPSHOT_HZ` 20→30（protocol.ts，约 0.7Mbps）；`mirrorSelf` 阻尼目标沿快照速度外推 `SELF_POS_LEAD=0.08s`（抵消管线延迟，残余 ~25ms；输入断流时速度位归零自动收敛）；复活帧位置直接就位。`updateGuest` 给 `applySnapshot` 传真实 dt（原固定 1/60）。**电流声没有代码级声源**：audio.ts 全部节流（枪 30ms / 脚步 45ms / 弹着 30ms）且枪声预烘焙，单声源不可能连成蜂鸣；复现时先查环境（蓝牙耳机、机器负载、quality 档位），别往合成器里找。
 
 ### 改动入口
 
@@ -496,4 +509,19 @@ sun.shadow.camera.updateProjectionMatrix();
 - **换弹弹匣真拔插**：`ViewModel.magazine` 独立子组（ak/m4/awm/usp），`viewmodel.ts` 按 `reloadProgress` 驱动：0.06~0.32 easeInCubic 拔出下移 0.16m（到底隐藏=旧匣掉落）、0.52~0.8 easeOutCubic 新匣插入。进度来自 player，联机一致。
 - **未做**（讲给用户听过）：外部 GLB 枪模（保持零静态资源+无版权风险）；第一人称手臂（程序化手容易丑，等用户定）；`ASSETS.md` 无需更新（无新外部资源）。
 - **亮度风险**：主场景 IBL 0.3 会略提亮整体；用户嫌亮/暗先调两个 `environmentIntensity`，别动贴图。
+
+## 武器模型 GLB 化（2026-11-12 晚 —— 现行版，以代码为准）
+
+> 用户「枪模太粗糙，都是方块」→ 先提出三路线（几何升级 / 先改一把 / 外部 GLB），用户选「几何升级」后又追加「可以用三方或开源模型」→ 最终走 **CC0 外部 GLB + 程序化兜底**。
+
+- **模型来源**：Quaternius「Ultimate Guns Pack」（poly.pizza 分发），**CC0 公有领域**可商用免署名。五把进 `public/h5/guns/{ak47,m4a1,awm,shotgun,usp}.glb`（各 50~130KB）。挑型实测（poly.pizza 缩略图逐把看过）：ak47=K2lXTYFSLC 木托弯匣 AK、m4a1=Bgvuu4CUMV 标准 M4、awm=ASOMZIErq3 绿托拇指孔狙击、shotgun=ZmPTnh7njL 木托泵动、usp=J3i9KDQ3kt 经典 USP。刀/手雷**仍程序化**（包里没有 kukri/手雷）。
+- **itch.io 全站被沙箱代理 502**（styloo 的 CS 风格包拿不到）；poly.pizza / 3dassets.dev / opengameart 可达。直链规律：模型页 HTML 里有 `static.poly.pizza/<uuid>.glb`。
+- **归一化三步**（`weapons.ts` GLB 一节）：GLB 原始朝向枪口 +x / 上 +y（五把逐顶点实测）→ `rotation.y=π/2` 转到枪口 -z → 按 `scale` 压到程序化包络长度 → `offset` 把枪管轴线对齐到 `MUZZLE_POS[id]`。枪口火光 / muzzleScreen / BASE_POSES 契约**零改动**，枪托落点偏差毫米级。配置表 `GLB_GUNS` 的数字来自顶点包围盒实测，别手调。
+- 🔴 **`MUZZLE_POS` 是两条路共用的枪口表**（程序化分支 + GLB 归一化都对它），改任何数两条路都要验。
+- 🔴 **`disposeWeaponModel` 见 `userData.shared === true` 必须跳过**：GLB 克隆与模块级模板共享几何/材质，dispose 会打穿模板（枪变黑），同 `materials()` 缓存铁律。
+- **材质后处理** `tuneGlbMaterial`：Quaternius 全是无贴图顶点色材质 → 按材质名分派 wood/metal/polymer 的 Canvas PBR 贴图（法线+粗糙度+AO），底色保留 GLB 原色；🔴 **不挂 metalnessMap**（ORM 的 B 通道恒 1 会把聚合物变金属）。Glass 走低粗糙高金属高光。
+- **UV**：4/5 的 GLB 无 TEXCOORD → `generateUv` 三平面投射（法线主导轴投影 ×8）运行时补，M4 自带的也统一覆盖。
+- **已知妥协（用户知情）**：GLB 整块网格无独立弹匣/枪栓节点 → `magazine`/`bolt` 恒 null，换弹拔匣、AWM 拉栓零件动画退化为整体动作；USP 消音器由程序化 `attachSuppressor` 附加件补上（两条路共用）。
+- **加载流**：`viewmodel.ts` 构造时 `preloadWeaponGlbs()`（幂等共享任务）→ 就绪前 `buildWeaponModel` 走程序化兜底 → 就绪后若手里还是程序化模型则 `swapModel` 热替换一次（phase==='ready' 才换）。加载失败**永久**回退程序化，不重试。
+- 临时探针（GLB 解析/朝向分析）已删；`.tmp-glb/` 不存在了。
 

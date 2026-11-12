@@ -1,6 +1,7 @@
 'use client';
 
-import type { HitSpot, HitTier } from '@/lib/h5/types';
+import type { HitSpot, HitTier, WeaponId } from '@/lib/h5/types';
+import { WEAPONS } from '@/lib/h5/weapons';
 
 /**
  * 准星 / 命中标记 / 狙击镜 / 受击反馈。
@@ -49,10 +50,13 @@ const MARKER_OFFSET = 13;
 
 export function ShipCrosshair({
   scoped,
+  weapon,
   dead,
   pulse,
 }: {
   scoped: boolean;
+  /** 当前武器。**能不能开镜**以 `WEAPONS[id].scoped` 为准，别在这里另写「是不是狙击枪」 */
+  weapon: WeaponId;
   dead: boolean;
   /**
    * 击杀瞬间的准星「放大回弹」（需求 §3 准星扩散）。`strong` = 爆头击杀
@@ -66,11 +70,16 @@ export function ShipCrosshair({
 
   const pulsing = pulse !== undefined && pulse.at > 0;
 
+  // 狙击枪腰射**不画准星**（2026-11-12 用户要求）：枪本身没有机械瞄具给你对，
+  // 不开镜就是一片空白，逼玩家「停下来、开镜、开一枪」—— 和 weapons.ts 里
+  // AWM 的设计意图是同一句话。判定走 `spec.scoped` 单点开关，不是写死枪名。
+  const hipHidden = !scoped && WEAPONS[weapon].scoped;
+
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
       {scoped ? (
         <ScopeOverlay />
-      ) : (
+      ) : hipHidden ? null : (
         // 四段短线 + 中心点。CF 的准星就是这种「开缝」形状，
         // 缝宽固定、不随散布变化 —— 那是 CS 的做法，两套手感别混
         <div

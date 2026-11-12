@@ -8,33 +8,36 @@ import type { Actor, Team } from './types';
  * 顺序」「Bot 不生成模型就不更新」这类耦合。现在引擎每帧只做一件事：
  * `for (bot of bots) view.sync(bot, dt)`。
  *
- * 模型还是纯几何体拼的（Box 拼人形），没有 glTF —— 和场景、枪模保持同一套
- * 「零外部资源」的规矩。
+ * ## 为什么是自己建模（2026-11-12 第三轮定稿）
  *
- * ## 两套造型：真人 / 人机
+ * 外部 GLB 走过两轮（shanebrumback 士兵 → Quaternius Toon Shooter），用户先后
+ * 否掉：第一轮「太丑、分不清敌我」，第二轮「和地图不搭 + 人机看不见 + 尸体
+ * 站着走路」。**GLB 路线彻底删除**（actor-model.ts / public/h5/soldier.glb 已删），
+ * 回到纯几何体拼装 —— 但比最早的 Box 小人认真得多：
  *
- * 联机之后场上同时有真人和人机，**光靠头顶文字分不出来**（文字在 30 米外根本
- * 看不见），所以两套造型在**轮廓**上就不同：
+ *   - 分节四肢（髋/膝、肩/肘两级 pivot），走路有屈膝、跑步有前倾；
+ *   - 护甲 / 弹匣袋 / 背包 / 肩垫 / 头盔（半球）+ 风镜；真人露脸、人机戴面罩
+ *     （机器人造型 —— 金属头/天线/发光眼 —— 被用户否掉：机械感太重）；
+ *   - 双手持枪姿势，枪按武器换形（AK 默认 / AWM 长管+镜 / 霰弹粗管 / 手枪）；
+ *   - 蹲姿（压身 + 屈膝 + 前倾，跟随 `Actor.height`）、开火后座（枪身后顶 + 枪口上跳）；
+ *   - 死亡沿用弹道倒地 + 落地余震 + 淡出。
  *
- *   真人  战术头盔 + 前檐 + 护目镜条 + 肩甲 + 背包 + 胸前弹匣袋 + 大腿枪套
- *   人机  金属头（没有脸）+ 单眼传感器 + 天线 + 背部电池盒，没有背包和肩甲
+ * ## 敌我识别
  *
- * 关键约束：**区分不能和阵营识别打架**。所以两套造型的**布料颜色完全一样**
- * （阵营色仍是第一眼信息），差别只落在「加了几块装备」和「头是肉还是铁」上；
- * 护目镜 / 传感器的自发光也刻意选了中性色（真人是冷白、人机是琥珀），
- * 不占用蓝 / 红这两个阵营色。
+ *   ① 布料整块高饱和阵营色（0 队蓝 / 1 队红棕），和写实军事地图的冷灰底
+ *      拉开对比 —— 用户反馈过「轻微 lerp 看不出来」；
+ *   ② 头顶一枚发光倒三角（Canvas 贴图，全场共享纹理）—— **只挂队友**。
+ *      2026-11-12 用户要求去掉敌方头顶的箭头提示（等于给敌人开了透视），
+ *      敌人只剩阵营色布料这一层信号。
  *
- * ## 尸体
+ * ## 零静态资源
  *
- * Bot 死了不能原地消失。这里管三件事：
- *
- *   ① 倒地方向跟着弹道走（`setDeathImpulse`）—— 从正面打中的人应该往后仰，
- *      而不是所有尸体都用同一个姿势扑倒；
- *   ② 倒地过程有「弹一下」的余震，不是匀速转到 90°；
- *   ③ 最后一段淡出（`setOpacity`），尸体保留几秒后慢慢消失，不是被谁按了删除键。
+ * 和场景、枪模同一套规矩：没有外部模型 / 贴图 / 音频，全部 three 几何体 +
+ * 运行时 Canvas。几何体逐视图新建（逐个 dispose），材质按「阵营 + 造型」
+ * 缓存模板、逐视图 clone（淡出是材质级 opacity）。
  */
 
-/** 造型：真人（战术装备）还是人机（机械造型）。**由 `Actor.isHuman` 决定**。 */
+/** 造型：真人还是人机。**由 `Actor.isHuman` 决定**。两者都是普通士兵外观 —— 用户否掉了「机器人」造型（金属头/天线/发光眼太机械感），人机只戴面罩，敌我识别交给阵营色 + 队友头顶标记。 */
 export type ActorKind = 'human' | 'bot';
 
 export interface ActorView {
@@ -49,27 +52,30 @@ export interface ActorView {
   setDeathImpulse(dx: number, dz: number): void;
   /** 尸体透明度 1 → 0。活着的时候会被 `sync` 自动重置回 1。 */
   setOpacity(value: number): void;
+  /** 远端这一枪响了 —— 触发一次开火后座动画。 */
+  playFire(): void;
   /** 只释放几何体。材质是每个视图自己克隆的一份，也要在这里释放。 */
   dispose(): void;
 }
 
 interface TeamMaterials {
+  /** 主布料（作训服）：高饱和阵营色 */
   cloth: THREE.MeshStandardMaterial;
   clothDark: THREE.MeshStandardMaterial;
-  skin: THREE.MeshStandardMaterial;
+  /** 护甲 / 背心：比布料更深一档的冷灰 */
+  vest: THREE.MeshStandardMaterial;
+  /** 装备（枪套 / 头盔底 / 垫肩）：近黑 */
   gear: THREE.MeshStandardMaterial;
+  skin: THREE.MeshStandardMaterial;
   gun: THREE.MeshStandardMaterial;
-  /** 护目镜 / 传感器 / 天线这类「小面积高光」。自发光，远处也能看出一点亮 */
+  /** 风镜镜片：哑光深色，不发光（发光 = 机械感，用户否掉） */
   trim: THREE.MeshStandardMaterial;
 }
 
 /**
- * 材质模板按「阵营 + 造型」缓存。
- *
- * 缓存的是**模板**，每个视图再从它 `clone()` 一份 —— 因为尸体要淡出，而
- * `opacity` 是材质级的状态，共享一份会让一个 Bot 淡出时全场一起变透明。
- * 克隆出来的材质参数完全相同，three 的 program cache 会把它们合并到同一个
- * shader 程序上，所以并不存在「多一份材质就多编译一次」的问题。
+ * 材质模板按「阵营 + 造型」缓存，每个视图 clone 一份（尸体淡出是材质级
+ * opacity，共享会让全场一起透明）。克隆参数相同，three 的 program cache
+ * 会合并 shader，不存在多编译的问题。
  */
 const teamMaterials = new Map<string, TeamMaterials>();
 
@@ -78,40 +84,20 @@ function materialsFor(team: Team, kind: ActorKind): TeamMaterials {
   const cached = teamMaterials.get(key);
   if (cached) return cached;
 
+  // 🔴 敌我识别第一眼信息：0 队钢蓝、1 队锈红。色相按 CF 军服做旧感压了
+  // 饱和度（写实地图上不刺眼），但色差仍然拉开 —— 别改回同色系。
+  const cloth = team === 0 ? 0x35597e : 0x9c4530;
+  const clothDark = team === 0 ? 0x27425e : 0x74321f;
+
   const materials: TeamMaterials = {
-    // 保卫者冷色（蓝灰）、潜伏者暖色（红棕）—— 不看头顶也能一眼分敌我。
-    // ⚠️ 这一段**两套造型共用**，别为了区分真人去改它（阵营识别优先）
-    cloth: new THREE.MeshStandardMaterial({
-      color: team === 0 ? 0x33546e : 0x6e3a2f,
-      roughness: 0.88,
-      metalness: 0.05,
-    }),
-    clothDark: new THREE.MeshStandardMaterial({
-      color: team === 0 ? 0x22384a : 0x4a251d,
-      roughness: 0.9,
-      metalness: 0.05,
-    }),
-    skin: new THREE.MeshStandardMaterial({ color: 0x9c7a5e, roughness: 0.9 }),
-    gear: new THREE.MeshStandardMaterial({ color: 0x2a2f34, roughness: 0.7, metalness: 0.3 }),
-    // 枪身金属度可以高一点：它小、离得远，黑一点也不显眼
-    gun: new THREE.MeshStandardMaterial({ color: 0x1c1f23, roughness: 0.5, metalness: 0.7 }),
-    // 真人冷白（像夜视镜片）、人机琥珀（像机械传感器）—— 两者都不占阵营色
-    trim:
-      kind === 'human'
-        ? new THREE.MeshStandardMaterial({
-            color: 0xc9d8e4,
-            emissive: 0x8fb6d6,
-            emissiveIntensity: 0.55,
-            roughness: 0.35,
-            metalness: 0.2,
-          })
-        : new THREE.MeshStandardMaterial({
-            color: 0xffa245,
-            emissive: 0xff7a18,
-            emissiveIntensity: 0.9,
-            roughness: 0.4,
-            metalness: 0.1,
-          }),
+    cloth: new THREE.MeshStandardMaterial({ color: cloth, roughness: 0.92, metalness: 0 }),
+    clothDark: new THREE.MeshStandardMaterial({ color: clothDark, roughness: 0.94, metalness: 0 }),
+    // 背心 = CF 风深橄榄，装备近黑灰；金属度全部压到 0（机械感被否过）
+    vest: new THREE.MeshStandardMaterial({ color: 0x3a4034, roughness: 0.88, metalness: 0 }),
+    gear: new THREE.MeshStandardMaterial({ color: 0x23272b, roughness: 0.85, metalness: 0 }),
+    skin: new THREE.MeshStandardMaterial({ color: 0xb08a66, roughness: 0.9, metalness: 0 }),
+    gun: new THREE.MeshStandardMaterial({ color: 0x1c1f23, roughness: 0.6, metalness: 0.45 }),
+    trim: new THREE.MeshStandardMaterial({ color: 0x14181c, roughness: 0.35, metalness: 0.1 }),
   };
   teamMaterials.set(key, materials);
   return materials;
@@ -129,8 +115,9 @@ function cloneMaterials(base: TeamMaterials): TeamMaterials {
   return {
     cloth: clone(base.cloth),
     clothDark: clone(base.clothDark),
-    skin: clone(base.skin),
+    vest: clone(base.vest),
     gear: clone(base.gear),
+    skin: clone(base.skin),
     gun: clone(base.gun),
     trim: clone(base.trim),
   };
@@ -145,14 +132,82 @@ const FALL_ANGLE = Math.PI / 2;
 /** 落地那一下的回弹高度（米）。 */
 const FALL_BOUNCE = 0.14;
 
+/** 蹲姿判定：身高被 `damp` 到 1.45 以下就算蹲着（站 1.8 / 蹲 1.25）。 */
+const CROUCH_VISUAL_HEIGHT = 1.45;
+
+/** 开火后座动画在最后一枪之后继续保持的秒数（连发期间每枪刷新）。 */
+const FIRE_HOLD = 0.35;
+
 const UP = new THREE.Vector3(0, 1, 0);
 const yawQuat = new THREE.Quaternion();
 const fallQuat = new THREE.Quaternion();
 const fallAxis = new THREE.Vector3();
 
-export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView {
+/* ============================================================
+   头顶阵营标记（Canvas 贴图按颜色缓存，纹理全场共享不 dispose）
+   ============================================================ */
+const markerTextureFor = (() => {
+  const cache = new Map<number, THREE.Texture>();
+  return (color: number): THREE.Texture => {
+    const cached = cache.get(color);
+    if (cached) return cached;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    // 发光倒三角（▼）：阵营色填充 + 白描边，远看就是一个亮色点
+    const fill = `#${color.toString(16).padStart(6, '0')}`;
+    ctx.beginPath();
+    ctx.moveTo(22, 28);
+    ctx.lineTo(106, 28);
+    ctx.lineTo(64, 98);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.shadowColor = fill;
+    ctx.shadowBlur = 20;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.stroke();
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    cache.set(color, texture);
+    return texture;
+  };
+})();
+
+/** 标记色比布料更亮一档：0 队亮蓝。敌方（1 队）不挂标记 —— 头顶箭头等于
+ *  透视挂，用户 2026-11-12 明确要求去掉；敌我识别靠阵营色布料兜底。 */
+const MARKER_COLOR = 0x3f8cff;
+
+export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'ak47'): ActorView {
   const materials = cloneMaterials(materialsFor(team, kind));
   const group = new THREE.Group();
+
+  // ---- 头顶队友标记（死亡时熄灭）。敌方不挂：头顶箭头等于透视挂 ----
+  const marker =
+    team === 0
+      ? new THREE.Sprite(
+          new THREE.SpriteMaterial({
+            map: markerTextureFor(MARKER_COLOR),
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+          }),
+        )
+      : null;
+  if (marker) {
+    marker.scale.set(0.42, 0.42, 1);
+    marker.position.set(0, 2.14, 0);
+    group.add(marker);
+  }
+
+  /* ============================================================
+     士兵建模（正面 = -z。所有 y 都是「站立时离地高度」）
+
+     形体参考 CF：圆润人体块（胶囊四肢 + 球关节），不是直角盒子；
+     宽肩、收腰、长腿 —— 比例按 1.8m 拉开，摆脱「乐高感」。
+     ============================================================ */
 
   const part = (w: number, h: number, d: number, x: number, y: number, z: number, material: THREE.Material) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -161,97 +216,181 @@ export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView 
     mesh.receiveShadow = true;
     return mesh;
   };
-
-  // ---- 腿：放进 pivot，绕髋关节转 ----
-  const makeLeg = (side: number) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(side * 0.13, 0.86, 0);
-    pivot.add(part(0.17, 0.86, 0.2, 0, -0.43, 0, materials.clothDark));
-    pivot.add(part(0.18, 0.12, 0.26, 0, -0.86, -0.03, materials.gear));
-    group.add(pivot);
-    return pivot;
+  /** 球（关节 / 头 / 鞋头）。squash = y 向压扁系数。 */
+  const blob = (r: number, x: number, y: number, z: number, material: THREE.Material, squash = 1) => {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), material);
+    mesh.position.set(x, y, z);
+    mesh.scale.y = squash;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
   };
-  const legLeft = makeLeg(-1);
-  const legRight = makeLeg(1);
+  /** 胶囊：垂直放置，`y0` 是顶端离地高、`y1` 是底端，中段半径 r（相对 pivot）。 */
+  const capsule = (r: number, y0: number, y1: number, x: number, z: number, material: THREE.Material) => {
+    const length = Math.max(0.02, y0 - y1 - r * 2);
+    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, length, 3, 8), material);
+    mesh.position.set(x, (y0 + y1) / 2, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  };
 
-  // ---- 躯干 / 背心 / 腰带 ----
-  group.add(part(0.46, 0.6, 0.26, 0, 1.16, 0, materials.cloth));
-  group.add(part(0.5, 0.44, 0.32, 0, 1.2, 0, materials.gear));
-  group.add(part(0.48, 0.1, 0.28, 0, 0.88, 0, materials.clothDark));
+  /**
+   * 整个身体挂在 `body` 下：走路上下起伏、蹲姿压身、跑步前倾都只动这一个
+   * 组，腿和上身不用分别算。
+   */
+  const body = new THREE.Group();
+  group.add(body);
+
+  // ---- 腿：髋 pivot（大腿）→ 膝 pivot（小腿 + 靴），两级才能屈膝 ----
+  // 长腿是「摆脱乐高感」的关键：髋在 0.98，腿占身高一半以上
+  const makeLeg = (side: number) => {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.1, 0.98, 0);
+    hip.add(capsule(0.072, 0, -0.46, 0, 0, materials.clothDark)); // 大腿（相对 pivot）
+    hip.add(blob(0.075, 0, -0.46, 0, materials.clothDark)); // 膝关节球
+    const knee = new THREE.Group();
+    knee.position.set(0, -0.46, 0);
+    knee.add(capsule(0.058, -0.02, -0.42, 0, 0, materials.clothDark)); // 小腿
+    // 军靴：鞋就该有棱角，保留盒子；鞋头用球收圆
+    knee.add(part(0.13, 0.16, 0.15, 0, -0.34, 0.01, materials.gear));
+    knee.add(blob(0.065, 0, -0.395, -0.09, materials.gear));
+    knee.add(part(0.14, 0.05, 0.3, 0, -0.43, -0.06, materials.gear)); // 靴底
+    hip.add(knee);
+    body.add(hip);
+    return { hip, knee };
+  };
+  const legL = makeLeg(-1);
+  const legR = makeLeg(1);
+
+  // ---- 骨盆 / 躯干 / 战术背心 ----
+  // 躯干用变径圆柱（上粗下细）压扁成椭圆截面：收腰 + 挺胸，CF 的倒三角身形
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.115, 0.44, 10), materials.cloth);
+  torso.scale.z = 0.68;
+  torso.position.set(0, 1.28, 0);
+  torso.castShadow = true;
+  torso.receiveShadow = true;
+  body.add(torso);
+  body.add(blob(0.105, 0, 1.06, 0, materials.clothDark)); // 骨盆球
+  // 战术背心：包住胸腔的橄榄色壳 + 肩带
+  const vest = new THREE.Mesh(new THREE.CylinderGeometry(0.175, 0.15, 0.36, 10), materials.vest);
+  vest.scale.z = 0.75;
+  vest.position.set(0, 1.33, 0);
+  vest.castShadow = true;
+  vest.receiveShadow = true;
+  body.add(vest);
+  // 胸前三联弹匣袋（CF 标志性装具）
+  body.add(part(0.085, 0.13, 0.06, -0.085, 1.3, -0.15, materials.vest));
+  body.add(part(0.085, 0.13, 0.06, 0.005, 1.3, -0.155, materials.vest));
+  body.add(part(0.085, 0.13, 0.06, 0.09, 1.3, -0.15, materials.vest));
+  // 腰带 + 后腰包
+  body.add(part(0.3, 0.06, 0.2, 0, 1.1, 0, materials.gear));
+  body.add(part(0.22, 0.14, 0.1, 0, 1.16, 0.13, materials.vest));
+  // 肩垫：盖在肩球上的小扁球，撑出宽肩轮廓
+  body.add(blob(0.085, -0.2, 1.52, 0, materials.vest, 0.7));
+  body.add(blob(0.085, 0.2, 1.52, 0, materials.vest, 0.7));
+
+  // ---- 头：球头 + 球壳头盔 + 风镜（真人露脸，人机戴面罩） ----
+  const head = new THREE.Group();
+  head.position.set(0, 1.62, 0);
+  body.add(head);
 
   if (kind === 'human') {
-    /* ================= 真人：战术装备 ================= */
-
-    // 头 + 战术头盔（比人机那顶大一圈，侧面轮廓更「方」）
-    group.add(part(0.21, 0.23, 0.22, 0, 1.6, 0, materials.skin));
-    group.add(part(0.29, 0.17, 0.31, 0, 1.71, -0.01, materials.gear));
-    // 前檐：往外斜出去一小块 —— 远看就是「戴着头盔」而不是「顶着一块砖」
-    const brim = part(0.27, 0.045, 0.09, 0, 1.65, -0.16, materials.gear);
-    brim.rotation.x = -0.22;
-    group.add(brim);
-    // 护目镜条：横在脸上的一条冷白自发光。这是近距离最直接的「这是真人」信号
-    group.add(part(0.2, 0.055, 0.02, 0, 1.6, -0.115, materials.trim));
-
-    // 肩甲：两侧各一块，把肩膀垫宽 —— 剪影和瘦削的人机明显不同
-    group.add(part(0.13, 0.1, 0.2, -0.28, 1.42, 0, materials.gear));
-    group.add(part(0.13, 0.1, 0.2, 0.28, 1.42, 0, materials.gear));
-
-    // 胸前弹匣袋：两块小方块，贴在护甲正面
-    group.add(part(0.12, 0.1, 0.04, -0.1, 1.22, -0.17, materials.clothDark));
-    group.add(part(0.12, 0.1, 0.04, 0.1, 1.22, -0.17, materials.clothDark));
-
-    // 背包：身后一块厚实的方块。**这是最远距离都能看出来的差异**
-    group.add(part(0.34, 0.4, 0.16, 0, 1.22, 0.24, materials.clothDark));
-    group.add(part(0.3, 0.07, 0.17, 0, 1.42, 0.245, materials.gear));
-
-    // 大腿枪套：右腿外侧
-    group.add(part(0.1, 0.2, 0.13, 0.22, 0.62, -0.02, materials.gear));
+    head.add(blob(0.11, 0, 0.02, 0, materials.skin));
+    // 眼睛：一条深色横条，让正脸不是一整块肉色
+    head.add(part(0.13, 0.03, 0.02, 0, 0.045, -0.1, materials.gear));
   } else {
-    /* ================= 人机：机械造型 ================= */
-
-    // 头：**没有皮肤**，直接一块金属。脸的位置是黑色面板
-    group.add(part(0.23, 0.25, 0.24, 0, 1.6, 0, materials.gear));
-    group.add(part(0.19, 0.12, 0.02, 0, 1.6, -0.125, materials.clothDark));
-    // 单眼传感器：琥珀色自发光，比真人的护目镜条更小更圆（一块方块）
-    group.add(part(0.06, 0.06, 0.03, 0, 1.61, -0.135, materials.trim));
-    // 头盔：扁一些，没有前檐
-    group.add(part(0.26, 0.11, 0.27, 0, 1.71, 0, materials.gear));
-    // 天线：从右后脑斜出去一根细杆
-    const antenna = part(0.018, 0.3, 0.018, 0.1, 1.86, 0.07, materials.trim);
-    antenna.rotation.z = -0.18;
-    group.add(antenna);
-
-    // 背部电池盒：比真人的背包小得多，位置更靠上
-    group.add(part(0.22, 0.16, 0.1, 0, 1.36, 0.19, materials.gear));
-    // 胸口一条散热槽
-    group.add(part(0.26, 0.03, 0.02, 0, 1.1, -0.17, materials.clothDark));
+    // 人机 = 戴面罩的士兵：整个头是布料色（巴拉克拉法帽），留风镜缝。
+    // 不要金属头/天线/发光眼 —— 用户反馈机械感太重。
+    head.add(blob(0.11, 0, 0.02, 0, materials.clothDark));
   }
+  // 头盔：大半球壳 + 短裙边（下沿外扩一圈，像 CF 的战术头盔）
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.135, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), materials.vest);
+  dome.position.set(0, 0.03, 0);
+  dome.castShadow = true;
+  head.add(dome);
+  const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.128, 0.142, 0.05, 12), materials.vest);
+  rim.position.set(0, 0.028, 0);
+  rim.castShadow = true;
+  head.add(rim);
+  // 风镜：哑光深色镜片，两边一样 —— 不再自发光（发光 = 机械感）
+  head.add(part(0.16, 0.04, 0.03, 0, 0.045, -0.105, materials.trim));
 
-  // ---- 手臂 ----
+  // ---- 手臂：肩 pivot（大臂）→ 肘 pivot（小臂 + 手套），摆成持枪姿势 ----
   const makeArm = (side: number) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(side * 0.3, 1.4, 0);
-    pivot.add(part(0.13, 0.52, 0.15, 0, -0.24, 0, materials.cloth));
-    group.add(pivot);
-    return pivot;
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.24, 1.46, 0);
+    shoulder.add(blob(0.07, 0, 0.02, 0, materials.cloth)); // 肩关节球
+    shoulder.add(capsule(0.058, -0.04, -0.3, 0, 0, materials.cloth)); // 大臂
+    shoulder.add(blob(0.058, 0, -0.3, 0, materials.cloth)); // 肘关节球
+    const elbow = new THREE.Group();
+    elbow.position.set(0, -0.3, 0);
+    elbow.add(capsule(0.05, -0.02, -0.26, 0, 0, materials.clothDark)); // 小臂
+    elbow.add(blob(0.052, 0, -0.27, 0, materials.gear)); // 手套
+    shoulder.add(elbow);
+    body.add(shoulder);
+    return { shoulder, elbow };
   };
-  const armLeft = makeArm(-1);
-  makeArm(1);
+  const armL = makeArm(-1);
+  const armR = makeArm(1);
+  // 持枪姿势：右手扶握把（抬一半），左手伸向前护木（抬更多 + 肘弯更多）。
+  // rotation.x 正 = 手往身前（-z）摆。
+  armR.shoulder.rotation.x = 0.55;
+  armR.elbow.rotation.x = 0.85;
+  armL.shoulder.rotation.x = 0.75;
+  armL.elbow.rotation.x = 1.0;
 
-  // ---- 端在身前的枪 ----
+  // ---- 枪：按武器换形。挂在 body 上（不挂手臂 —— 双手 IK 太贵，姿势固定即可） ----
   const gun = new THREE.Group();
-  gun.position.set(0.1, 1.22, -0.3);
-  gun.add(part(0.07, 0.1, 0.52, 0, 0, 0, materials.gun));
-  gun.add(part(0.035, 0.035, 0.34, 0, 0.02, -0.42, materials.gun));
-  gun.add(part(0.05, 0.16, 0.08, 0, -0.12, 0.02, materials.gun));
-  group.add(gun);
+  gun.position.set(0.03, 1.26, -0.34);
+  const GUN_Z = gun.position.z;
+  const buildGun = (): void => {
+    if (weapon === 'awm') {
+      // 狙击：长管 + 瞄准镜
+      gun.add(part(0.05, 0.09, 0.5, 0, 0, 0, materials.gun));
+      gun.add(part(0.028, 0.028, 0.5, 0, 0.01, -0.48, materials.gun));
+      const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.18, 8), materials.gun);
+      scope.rotation.x = Math.PI / 2;
+      scope.position.set(0, 0.09, -0.06);
+      scope.castShadow = true;
+      gun.add(scope);
+      gun.add(part(0.045, 0.14, 0.08, 0, -0.1, 0.06, materials.gun));
+      gun.add(part(0.05, 0.1, 0.16, 0, -0.02, 0.32, materials.gun));
+    } else if (weapon === 'shotgun') {
+      // 霰弹：粗管 + 护木
+      gun.add(part(0.06, 0.1, 0.4, 0, 0, 0, materials.gun));
+      gun.add(part(0.05, 0.05, 0.34, 0, 0.01, -0.36, materials.gun));
+      gun.add(part(0.055, 0.05, 0.14, 0, -0.06, -0.26, materials.gear));
+      gun.add(part(0.05, 0.1, 0.16, 0, -0.02, 0.28, materials.gun));
+    } else if (weapon === 'usp') {
+      // 手枪：一小块
+      gun.add(part(0.04, 0.07, 0.2, 0, 0, -0.02, materials.gun));
+      gun.add(part(0.038, 0.11, 0.05, 0, -0.07, 0.06, materials.gun));
+    } else {
+      // 默认步枪（AK / M4）：机匣 + 枪管 + 弹匣 + 枪托 + 准星
+      gun.add(part(0.06, 0.1, 0.46, 0, 0, 0, materials.gun));
+      gun.add(part(0.03, 0.03, 0.34, 0, 0.015, -0.38, materials.gun));
+      const mag = part(0.045, 0.16, 0.09, 0, -0.11, 0.04, materials.gun);
+      mag.rotation.x = 0.25;
+      gun.add(mag);
+      gun.add(part(0.04, 0.1, 0.05, 0, -0.09, 0.13, materials.gear));
+      gun.add(part(0.05, 0.09, 0.17, 0, -0.01, 0.31, materials.gun));
+      gun.add(part(0.03, 0.04, 0.12, 0, 0.075, -0.05, materials.gear));
+    }
+  };
+  buildGun();
+  body.add(gun);
 
-  group.visible = false;
-
+  /* ============================================================
+     动画状态
+     ============================================================ */
   let animPhase = 0;
   let deathPhase = 0;
   let wasAlive = true;
   let opacity = 1;
+  let fireTimer = 0;
+  let recoil = 0;
+  let crouchT = 0;
 
   /* ---- 倒地方向：世界坐标下的弹道方向，`impulseSet` 为假时退回「往前扑」 ---- */
   let impulseX = 0;
@@ -264,10 +403,12 @@ export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView 
     opacity = next;
     materials.cloth.opacity = next;
     materials.clothDark.opacity = next;
-    materials.skin.opacity = next;
+    materials.vest.opacity = next;
     materials.gear.opacity = next;
+    materials.skin.opacity = next;
     materials.gun.opacity = next;
     materials.trim.opacity = next;
+    if (marker) marker.material.opacity = next;
     group.visible = next > 0.02;
   };
 
@@ -286,11 +427,16 @@ export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView 
     applyOpacity(value);
   };
 
+  const playFire = (): void => {
+    fireTimer = FIRE_HOLD;
+    recoil = 1;
+  };
+
   const sync = (actor: Actor, dt: number): void => {
     group.position.set(actor.pos.x, actor.pos.y, actor.pos.z);
 
     if (!actor.alive) {
-      // 倒地：绕「与弹道垂直的水平轴」旋转，所以往哪边倒跟着中弹方向走
+      // 倒地：绕「与弹道垂直的水平轴」旋转，往哪边倒跟着中弹方向走
       if (deathPhase < 1) {
         deathPhase = Math.min(1, deathPhase + dt * DEATH_FALL_SPEED);
 
@@ -320,6 +466,9 @@ export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView 
       wasAlive = true;
       deathPhase = 0;
       impulseSet = false;
+      fireTimer = 0;
+      recoil = 0;
+      if (marker) marker.visible = true;
       applyOpacity(1);
       group.visible = true;
     }
@@ -327,13 +476,37 @@ export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView 
     group.rotation.set(0, actor.yaw, 0);
 
     const speed = Math.hypot(actor.vel.x, actor.vel.z);
-    animPhase += dt * (1 + speed * 0.45);
+    const speedFactor = Math.min(1, speed / 3.5);
+    const crouching = actor.height < CROUCH_VISUAL_HEIGHT;
+    // 蹲/站的视觉过渡用 damp 追，不跳变
+    crouchT = THREE.MathUtils.damp(crouchT, crouching ? 1 : 0, 14, dt);
 
-    // 摆幅随速度增大，站住时腿是直的
-    const swing = Math.sin(animPhase * 7) * 0.55 * Math.min(1, speed / 3.5);
-    legLeft.rotation.x = swing;
-    legRight.rotation.x = -swing;
-    armLeft.rotation.x = -swing * 0.6;
+    // ---- 后座：枪身后顶 + 枪口上跳，指数衰减 ----
+    if (fireTimer > 0) fireTimer -= dt;
+    recoil = Math.max(0, recoil - dt * 6);
+    gun.position.z = GUN_Z + recoil * 0.05;
+    gun.rotation.x = recoil * 0.07;
+
+    // ---- 走路相位 + 起伏 ----
+    animPhase += dt * (1 + speed * 0.45);
+    const swing = Math.sin(animPhase * 7) * 0.6 * speedFactor;
+    const bob = Math.abs(Math.sin(animPhase * 7)) * 0.04 * speedFactor;
+    // 站立呼吸：极小幅度的起伏，站住时不是一尊雕像
+    const breath = (1 - speedFactor) * Math.sin(animPhase * 1.6) * 0.008;
+
+    // ---- 蹲姿：压身 + 屈膝 + 前倾 ----
+    body.position.y = -0.32 * crouchT + bob + breath;
+    body.rotation.x = 0.1 * crouchT + 0.07 * speedFactor;
+
+    // ---- 腿：摆腿 + 屈膝（摆到前面的那条腿膝盖弯），蹲姿整体屈膝 ----
+    legL.hip.rotation.x = swing + 0.95 * crouchT;
+    legR.hip.rotation.x = -swing + 0.95 * crouchT;
+    legL.knee.rotation.x = -Math.max(0, swing) * 1.15 - 1.35 * crouchT;
+    legR.knee.rotation.x = -Math.max(0, -swing) * 1.15 - 1.35 * crouchT;
+
+    // ---- 手臂：持枪姿势上叠一点随步伐的摆动，像端着枪在走 ----
+    armL.shoulder.rotation.x = 0.75 + swing * 0.08;
+    armR.shoulder.rotation.x = 0.55 - swing * 0.08;
   };
 
   return {
@@ -341,15 +514,19 @@ export function createActorView(team: Team, kind: ActorKind = 'bot'): ActorView 
     sync,
     setDeathImpulse,
     setOpacity,
+    playFire,
     dispose(): void {
       group.traverse((child) => {
         const mesh = child as THREE.Mesh;
         mesh.geometry?.dispose();
       });
+      // 标记材质是逐实例的，但 Canvas 纹理全场共享（缓存于模块级），不放
+      if (marker) marker.material.dispose();
       materials.cloth.dispose();
       materials.clothDark.dispose();
-      materials.skin.dispose();
+      materials.vest.dispose();
       materials.gear.dispose();
+      materials.skin.dispose();
       materials.gun.dispose();
       materials.trim.dispose();
     },

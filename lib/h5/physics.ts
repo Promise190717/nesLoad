@@ -512,3 +512,19 @@ export function traceShot(
 
   return { type: 'none', t: maxT, dmgMul, dir: rayDir() };
 }
+
+/**
+ * 一个落脚点（脚底坐标）踩在什么材质上。
+ *
+ * 判据是「脚下有一个顶面贴着 y 的碰撞盒」：站在甲板上时没有盒子 —— 甲板不是
+ * 碰撞体，是隐式地面 ⇒ 金属；站上木箱时脚下是木盒 ⇒ 木头。容差 ±0.15m：
+ * 上台阶瞬间的浮空和阶梯插值都吞得下。人的中心不可能在墙的脚印里
+ * （圆柱碰撞保证这一点），所以 x/z 命中就足够，不用做半径检查。
+ */
+export function surfaceUnder(x: number, y: number, z: number, colliders: readonly Collider[]): Surface {
+  for (const box of colliders) {
+    if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z) continue;
+    if (y >= box.max.y - 0.15 && y <= box.max.y + 0.15) return box.surf;
+  }
+  return 'metal';
+}

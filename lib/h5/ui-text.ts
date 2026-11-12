@@ -102,7 +102,7 @@ const ZH = {
   'settings.controls.crouch': 'C / Ctrl 下蹲',
   'settings.controls.weapon': '1 / 2 / 3 / 4 或滚轮切武器 · B 换枪（出生点）· Q 切回上一把',
   'settings.controls.grenade': 'G 快速扔雷',
-  'settings.controls.pause': 'Esc 暂停',
+  'settings.controls.pause': 'Esc 菜单',
   'settings.touch': '触屏：左下摇杆移动，右侧拖动转视角',
 
   /* 结算 */
@@ -114,12 +114,12 @@ const ZH = {
   'result.again': '再来一局',
   'result.leave': '返回专栏',
 
-  /* 暂停 */
-  'pause.title': '已暂停',
-  'pause.resume': '继续战斗',
-  'pause.restart': '重新开始',
-  'pause.quit': '退出对局',
-  'pause.settings': '设置',
+  /* 游戏菜单（Esc，不冻结游戏） */
+  'gamemenu.title': '菜单',
+  'gamemenu.resume': '返回战斗',
+  'gamemenu.restart': '重新开始',
+  'gamemenu.quit': '退出对局',
+  'gamemenu.settings': '设置',
 
   /* 其它 */
   'hint.lock': '点击画面继续',
@@ -259,7 +259,7 @@ const ZH_TW: Record<H5TextKey, string> = {
   'settings.controls.crouch': 'C / Ctrl 蹲下',
   'settings.controls.weapon': '1 / 2 / 3 / 4 或滾輪切武器 · B 換槍（出生點）· Q 切回上一把',
   'settings.controls.grenade': 'G 快速丟雷',
-  'settings.controls.pause': 'Esc 暫停',
+  'settings.controls.pause': 'Esc 選單',
   'settings.touch': '觸控：左下搖桿移動，右側拖曳轉視角',
 
   'result.win': '你贏了',
@@ -270,11 +270,11 @@ const ZH_TW: Record<H5TextKey, string> = {
   'result.again': '再來一局',
   'result.leave': '返回專欄',
 
-  'pause.title': '已暫停',
-  'pause.resume': '繼續戰鬥',
-  'pause.restart': '重新開始',
-  'pause.quit': '離開對局',
-  'pause.settings': '設定',
+  'gamemenu.title': '選單',
+  'gamemenu.resume': '返回戰鬥',
+  'gamemenu.restart': '重新開始',
+  'gamemenu.quit': '離開對局',
+  'gamemenu.settings': '設定',
 
   'hint.lock': '點擊畫面繼續',
   'hint.loading': '正在準備…',
@@ -410,7 +410,7 @@ const EN: Record<H5TextKey, string> = {
   'settings.controls.crouch': 'C / Ctrl to crouch',
   'settings.controls.weapon': '1 / 2 / 3 / 4 or wheel to switch · B loadout (at spawn) · Q quick-swap',
   'settings.controls.grenade': 'G to quick-throw a grenade',
-  'settings.controls.pause': 'Esc to pause',
+  'settings.controls.pause': 'Esc menu',
   'settings.touch': 'Touch: left stick to move, drag right side to look',
 
   'result.win': 'You win',
@@ -421,11 +421,11 @@ const EN: Record<H5TextKey, string> = {
   'result.again': 'Play again',
   'result.leave': 'Back to H5',
 
-  'pause.title': 'Paused',
-  'pause.resume': 'Resume',
-  'pause.restart': 'Restart',
-  'pause.quit': 'Quit match',
-  'pause.settings': 'Settings',
+  'gamemenu.title': 'Menu',
+  'gamemenu.resume': 'Back to combat',
+  'gamemenu.restart': 'Restart',
+  'gamemenu.quit': 'Quit match',
+  'gamemenu.settings': 'Settings',
 
   'hint.lock': 'Click to resume',
   'hint.loading': 'Getting ready…',

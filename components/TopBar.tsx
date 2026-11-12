@@ -202,18 +202,21 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
           {t('topLinks.games')}
         </Link>
 
-        <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+        {/* <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" /> */}
         {/*
           H5 小游戏（2026-11-12 加）。排在「游戏库」后面：两者都是「去哪玩游戏」，
           但这里放的是**本站原创的网页游戏**，不是库里的复古 ROM，所以是并列的第二格，
           不是游戏库的子项。
+
+          2026-11-12 晚入口先下掉（注释而非删除，页面本身保留可达）：
+          前面那条分隔线也因此暂时空着，恢复时把注释解开即可。
         */}
-        <Link
+        {/* <Link
           href={localeHref('/h5')}
           className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
           {t('h5.title')}
-        </Link>
+        </Link> */}
 
         {/*
           账号那一格（2026-10-14 用户要求挪到「游戏库」**后面**：组顺序为

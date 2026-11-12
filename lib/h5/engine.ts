@@ -13,6 +13,7 @@ import { clamp, damp, pick, rand, randInt } from './math';
 import type { Point3 } from './math';
 import {
   ACTOR_DEATHS,
+  ACTOR_DEATH_TIME,
   ACTOR_FLAGS,
   ACTOR_GRENADES,
   ACTOR_HEIGHT,
@@ -65,6 +66,7 @@ import {
   num,
   str,
   weaponToIndex,
+  type ActorWire,
   type InputWire,
   type NetEvent,
   type RosterWire,
@@ -73,7 +75,7 @@ import {
 } from './net/protocol';
 import { ReplicaActor } from './net/replica';
 import type { SessionRole, ShipNetSession } from './net/session';
-import { rayWorld } from './physics';
+import { rayWorld, surfaceUnder } from './physics';
 import { Player, SCOPED_FOV, type PlayerDeps } from './player';
 import type {
   Actor,
@@ -91,6 +93,7 @@ import type {
   Team,
   WeaponId,
 } from './types';
+import { isPrimaryId } from './types';
 import { ViewModelLayer } from './viewmodel';
 import { WEAPONS, weaponFeel } from './weapons';
 
@@ -214,6 +217,17 @@ const MAX_NET_EVENTS = 96;
 /** 一帧里最多广播多少个弹着点（8 个人机对枪时一帧几十个，全发就是带宽黑洞） */
 const MAX_NET_IMPACTS = 24;
 
+/**
+ * 加入者自己的位置外推提前量（秒）。
+ *
+ * 快照里的位置是**半个快照间隔 + 一个来回之前**的：直接阻尼到它，自己走路
+ * 永远拖着 150~250ms 的尾（「像在泥里」）。快照同时带了房主模拟出的速度 ——
+ * 把阻尼目标沿速度往前推这段提前量，正好抵消管线延迟，残余滞后只剩阻尼
+ * 本身的 ~40ms，手感接近本地模拟。停下来的时候速度位先归零，多出去的一小段
+ * 由阻尼滑回来，肉眼无感。
+ */
+const SELF_POS_LEAD = 0.08;
+
 /* ============================================================
    手雷投掷物
    ============================================================ */
@@ -276,6 +290,12 @@ export class ShipGame {
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
   private readonly viewModel: ViewModelLayer;
+  /**
+   * 本帧视角增量（`InputFrame.lookYaw / lookPitch` 的原样转发）。
+   * 给枪模的视角摇晃用：房主 / 加入者两条 update 路各写一次，
+   * `updateViewModel` 只读。菜单 / 死亡冻结时两条路都会归零。
+   */
+  private readonly lookDelta = { yaw: 0, pitch: 0 };
   /** 环境贴图（PMREM），主场景与枪模场景共用；随 renderer 一起销毁 */
   private readonly envTexture: THREE.Texture;
   private readonly effects: Effects;
@@ -338,7 +358,8 @@ export class ShipGame {
   private readonly score: [number, number] = [0, 0];
   private timeLeft: number;
   private running = false;
-  private paused = false;
+  /** 游戏菜单（Esc 放锁）开着。**不冻结游戏** —— 世界照常跑，只把本机玩家输入归零 */
+  private menuOpen = false;
   private finished = false;
   private buyOpen = false;
   /** 上一帧的计分板可见状态，用来做边沿检测 */
@@ -349,6 +370,14 @@ export class ShipGame {
 
   private readonly feed: FeedEntry[] = [];
   private feedCounter = 0;
+
+  /**
+   * 别人的脚步累计：角色 id → 上一帧位置 + 已走距离。
+   *
+   * 之前只有玩家自己有脚步声，人机和对端真人走路是哑的 —— 绕后摸到脸上
+   * 完全没有预警，「听声辨位」少了一半。见 `updateActorFootsteps`。
+   */
+  private readonly stepTracker = new Map<string, { x: number; y: number; z: number; dist: number }>();
 
   /* ---- 死亡体验相关 ---- */
   /** hit-stop 剩余时长（秒）。大于 0 时整局按 `hitStopScale` 慢放 */
@@ -488,9 +517,17 @@ export class ShipGame {
     /* ---------- 输入 ---------- */
     this.input = new InputController(canvas, (locked) => {
       this.options.onLockChange(locked);
-      // Esc 放锁 = 暂停。浏览器规范强制退出锁定，拦不住，只能当成暂停信号。
-      // 换枪菜单会主动放锁（要能用鼠标点菜单），那种情况不算暂停。
-      if (!locked && this.running && !this.paused && !this.finished && !this.buyOpen) this.pause();
+      // Esc 放锁 = 弹出菜单，但**不冻结游戏**：联机暂停会卡住对面（根本不该有），
+      // 单机也统一取消 —— 世界照常跑，只有本机输入被归零。浏览器规范强制退出
+      // 锁定，拦不住，只能当成「开菜单」的信号。换枪菜单会主动放锁（要能用鼠标
+      // 点菜单），那种情况不算菜单。
+      if (!locked && this.running && !this.finished && !this.buyOpen) {
+        this.menuOpen = true;
+        this.options.onMenuChange(true);
+      } else if (locked && this.menuOpen) {
+        this.menuOpen = false;
+        this.options.onMenuChange(false);
+      }
     });
     this.input.sensitivity = options.settings.sensitivity;
 
@@ -548,7 +585,7 @@ export class ShipGame {
     bot.pos.copy(spawn);
     bot.respawn(new THREE.Vector3(spawn.x, spawn.y, spawn.z), 3);
 
-    const view = createActorView(team, 'bot');
+    const view = createActorView(team, 'bot', gun);
     view.group.position.copy(bot.pos);
     view.group.visible = true;
     this.scene.add(view.group);
@@ -638,7 +675,7 @@ export class ShipGame {
     this.viewModel.setWeapon(this.player.weapon);
 
     this.running = true;
-    this.paused = false;
+    this.menuOpen = false;
     this.input.enabled = true;
     this.input.requestLock();
 
@@ -652,7 +689,7 @@ export class ShipGame {
   /** 回到开始界面：停循环、放锁、静音，但不销毁引擎（场景留着当背景）。 */
   stop(): void {
     this.running = false;
-    this.paused = false;
+    this.menuOpen = false;
     this.finished = false;
     this.buyOpen = false;
     this.input.enabled = false;
@@ -662,24 +699,15 @@ export class ShipGame {
     this.deathCam.reset();
   }
 
-  pause(): void {
-    if (!this.running || this.paused || this.finished) return;
-    this.paused = true;
-    this.input.enabled = false;
-    this.input.exitLock();
-    gameAudio.setVolume(0);
-    this.options.onPauseChange(true);
-  }
-
+  /**
+   * 关掉游戏菜单并重新申请指针锁定（菜单里「返回战斗」按钮调用）。
+   * 没有对应的 `pause()` —— 游戏不存在暂停状态，菜单开着世界照常跑。
+   */
   resume(): void {
-    if (!this.running || !this.paused || this.finished) return;
-    this.paused = false;
-    this.input.enabled = true;
+    if (!this.running || this.finished) return;
+    this.menuOpen = false;
+    this.options.onMenuChange(false);
     this.input.requestLock();
-    gameAudio.setVolume(this.settings.volume);
-    this.options.onPauseChange(false);
-    // 把 dt 归零：暂停期间累积的时间不能算进这一帧
-    this.lastTime = performance.now();
   }
 
   /** 换主武器（换枪菜单调用）。只在复活窗口内有效。 */
@@ -715,7 +743,7 @@ export class ShipGame {
   closeBuyMenu(): void {
     if (!this.buyOpen) return;
     this.buyOpen = false;
-    if (this.running && !this.paused && !this.finished) this.input.requestLock();
+    if (this.running && !this.finished) this.input.requestLock();
     this.options.onHud(this.buildHud());
   }
 
@@ -725,7 +753,7 @@ export class ShipGame {
   }
 
   get isRunning(): boolean {
-    return this.running && !this.paused && !this.finished;
+    return this.running && !this.finished;
   }
 
   /* ============================================================
@@ -775,6 +803,82 @@ export class ShipGame {
     return bestList[randInt(0, bestList.length - 1)] ?? candidates[0]!;
   }
 
+  /** 全图可走格（复活候选）。nav 是关卡级常量，抽一次缓存就够。 */
+  private mapSpawnCells: { x: number; z: number }[] | null = null;
+
+  /**
+   * 全图选复活点：不再局限于双方出生线 —— 候选是 nav 里所有「走得到」的格子
+   * （泛洪过，集装箱死胡同进不来），评分口径和 `pickPlayerSpawn` 一致
+   * （掩体遮挡 + 离敌人距离），额外加一条硬淘汰：离任何存活敌人不足 8 米的
+   * 格子直接不评，杜绝「贴脸复活」。
+   *
+   * 全表约 600 格，逐格对每个敌人打射线太贵；随机抽 48 格评分足够随机，
+   * 一次复活的射线开销也压在几毫秒内。没有活敌（清场瞬间）时全格同分，
+   * 退化为均匀随机 —— 正是想要的行为。
+   */
+  private pickMapSpawn(team: Team): THREE.Vector3 {
+    if (!this.mapSpawnCells) {
+      const nav = this.level.nav;
+      const cells: { x: number; z: number }[] = [];
+      for (let i = 0; i < nav.walk.length; i += 1) {
+        if (nav.isWalkable(i)) cells.push(nav.center(i));
+      }
+      this.mapSpawnCells = cells;
+    }
+    const cells = this.mapSpawnCells;
+    const enemies = this.actors.filter((a) => a.alive && a.team !== team);
+
+    // 随机抽 48 格（不重复），先过「离敌人 ≥ 8 米」的硬淘汰
+    const candidates: { x: number; z: number }[] = [];
+    const picked = new Set<number>();
+    const samples = Math.min(48, cells.length);
+    for (let n = 0; n < samples * 4 && candidates.length < samples; n += 1) {
+      const index = Math.floor(Math.random() * cells.length);
+      if (picked.has(index)) continue;
+      picked.add(index);
+      const cell = cells[index]!;
+      let tooClose = false;
+      for (const enemy of enemies) {
+        if (Math.hypot(cell.x - enemy.pos.x, cell.z - enemy.pos.z) < 8) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (!tooClose) candidates.push(cell);
+    }
+    if (candidates.length === 0) {
+      // 敌人把地图铺满了（几乎不可能）：退回出生线兜底
+      return this.pickPlayerSpawn(team);
+    }
+
+    let bestScore = -Infinity;
+    let bestList: { x: number; z: number }[] = [];
+    for (const candidate of candidates) {
+      let score = 0;
+      let nearest = Infinity;
+      for (const enemy of enemies) {
+        const dx = candidate.x - enemy.pos.x;
+        const dz = candidate.z - enemy.pos.z;
+        nearest = Math.min(nearest, Math.hypot(dx, dz));
+        score += this.lineBlocked(
+          { x: enemy.pos.x, y: enemy.pos.y + 1.45, z: enemy.pos.z },
+          { x: candidate.x, y: 0.9, z: candidate.z },
+        ) ? 2 : -1;
+      }
+      score += Math.min(nearest, 30) * 0.1;
+      if (score > bestScore + 0.5) {
+        bestScore = score;
+        bestList = [candidate];
+      } else if (score > bestScore - 0.5) {
+        bestList.push(candidate);
+      }
+    }
+    const pick = bestList[randInt(0, bestList.length - 1)];
+    if (!pick) return this.pickPlayerSpawn(team);
+    // nav 格子都是甲板层（block 阈值过滤过高/过低的障碍），地面就是 y=0
+    return new THREE.Vector3(pick.x, 0, pick.z);
+  }
+
   /** 两点间视线是否被场景几何挡住。`from` 是眼睛高度，`to` 是胸口高度。 */
   private lineBlocked(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number }): boolean {
     const dx = to.x - from.x;
@@ -812,8 +916,9 @@ export class ShipGame {
     return Math.atan2(-(nearest.x - from.x), -(nearest.z - from.z));
   }
 
-  private respawnPlayer(): void {
-    const spawn = this.pickPlayerSpawn(this.player.team);
+  /** `useMapSpawn`：死亡复活 = 全图选点；开局 / 重开一局 = 回各自出生线。 */
+  private respawnPlayer(useMapSpawn = false): void {
+    const spawn = useMapSpawn ? this.pickMapSpawn(this.player.team) : this.pickPlayerSpawn(this.player.team);
     this.player.respawn(spawn);
     this.player.yaw = this.spawnFacingYaw(this.player.team, spawn);
     this.player.pitch = 0;
@@ -822,7 +927,13 @@ export class ShipGame {
     this.viewModel.setWeapon(this.player.weapon);
   }
 
-  private respawnBot(bot: Bot): void {
+  private respawnBot(bot: Bot, useMapSpawn = false): void {
+    if (useMapSpawn) {
+      // 全图复活不叠点也不加偏移：格心离障碍有 0.45m 余量，±0.8 的偏移反而
+      // 可能把 Bot 推进箱子里；重叠由分离力自己解开
+      bot.respawn(this.pickMapSpawn(bot.team), 3);
+      return;
+    }
     const spawns = this.level.spawns[bot.team];
     const spawn = spawns[randInt(0, spawns.length - 1)];
     // 复活点带一点随机偏移，否则多个 Bot 会精确重叠在同一格上
@@ -1002,8 +1113,15 @@ export class ShipGame {
         t: Math.round(endT * 10) / 10,
       });
 
+      // 听觉：所有 Bot 都「听到」这一枪（含本机玩家开的枪，必须在下面的
+      // self 早退之前）。只对敌方射手、且限距内感兴趣 —— 这是 Bot 主动
+      // 找人最主要的情报来源，没有它 Bot 只能靠巡逻撞见人。
+      for (const bot of this.bots) bot.hearShot(shooter);
+
       // 自己的枪在 handleFire 里已经响过、画过曳光了，这里只处理别人
       if (shooter === this.player) return;
+      // 射手的第三人称模型播开火动画（Fire 剪辑；找不到视图/无动画就静默跳过）
+      this.actorViewOf(shooter.id)?.playFire();
       const spec = WEAPONS[weapon];
       const feel = weaponFeel(weapon);
 
@@ -1563,7 +1681,7 @@ export class ShipGame {
     player.yaw = this.spawnFacingYaw(team, spawn);
     player.pitch = 0;
 
-    const view = createActorView(team, 'human');
+    const view = createActorView(team, 'human', primary);
     view.group.position.copy(player.pos);
     view.group.visible = true;
     this.scene.add(view.group);
@@ -1711,7 +1829,7 @@ export class ShipGame {
   }
 
   private respawnRemote(link: NetLink): void {
-    const spawn = this.pickPlayerSpawn(link.player.team);
+    const spawn = this.pickMapSpawn(link.player.team);
     link.player.respawn(spawn);
     link.player.yaw = this.spawnFacingYaw(link.player.team, spawn);
     link.player.pitch = 0;
@@ -1873,7 +1991,9 @@ export class ShipGame {
     const snapshot = this.latestSnapshot;
     if (snapshot) {
       this.latestSnapshot = null;
-      this.applySnapshot(snapshot);
+      // 带上真实帧步长：mirrorSelf 的阻尼按它算，固定 1/60 在低帧率下会
+      // 让「自己」比「别人」更快地飘向目标位
+      this.applySnapshot(snapshot, dt);
     }
 
     if (frame.actions.has('buy')) {
@@ -1882,8 +2002,16 @@ export class ShipGame {
     }
     if (this.buyOpen && !this.player.canChangeLoadout) this.closeBuyMenu();
 
-    const frozen = this.buyOpen || this.deathCam.busy;
-    if (this.player.alive && !frozen) this.player.look(this.scaleLookForAds(frame));
+    const frozen = this.buyOpen || this.menuOpen || this.deathCam.busy;
+    if (this.player.alive && !frozen) {
+      const lookFrame = this.scaleLookForAds(frame);
+      this.player.look(lookFrame);
+      this.lookDelta.yaw = lookFrame.lookYaw;
+      this.lookDelta.pitch = lookFrame.lookPitch;
+    } else {
+      this.lookDelta.yaw = 0;
+      this.lookDelta.pitch = 0;
+    }
 
     this.player.advanceVisual(dt);
 
@@ -1894,13 +2022,24 @@ export class ShipGame {
     this.netInputTimer += dt;
     if (this.netInputTimer >= 1 / INPUT_HZ) {
       this.netInputTimer = 0;
-      this.sendInputNow(frame);
+      // 冻结期间上行移动归零：不然加入者点着菜单，房主那边他还在满场跑
+      this.sendInputNow(frozen ? { ...frame, forward: 0, right: 0, fire: false } : frame);
     }
 
     for (const replica of this.replicas.values()) replica.step(dt);
+    // 副本（含自己 —— 加入者没有本地移动模拟，自己的脚步也在这里补）的脚步
+    this.updateActorFootsteps();
     for (const [id, view] of this.replicaViews) {
       const replica = this.replicas.get(id);
-      if (replica) view.sync(replica, dt);
+      if (!replica) continue;
+      // 尸体淡出和房主那条 `updateBotViews` 同一套时间轴：房主 5 秒后补人机 /
+      // 重生，快照里 `alive` 翻回来时 `sync` 自己会把透明度清掉 —— 这里只管
+      // 「快复活了」的最后 0.9 秒，否则加入者看到的尸体是永远不会消失的硬块
+      if (!replica.alive) {
+        const left = BOT_CORPSE_LIFE - replica.deathTime;
+        view.setOpacity(Math.max(0, left < CORPSE_FADE ? left / CORPSE_FADE : 1));
+      }
+      view.sync(replica, dt);
     }
 
     this.updateDropped(dt);
@@ -1989,7 +2128,7 @@ export class ShipGame {
   }
 
   private createReplicaView(replica: ReplicaActor): void {
-    const view = createActorView(replica.team, replica.isHuman ? 'human' : 'bot');
+    const view = createActorView(replica.team, replica.isHuman ? 'human' : 'bot', replica.weapon);
     view.group.position.copy(replica.pos);
     this.scene.add(view.group);
     this.replicaViews.set(replica.id, view);
@@ -2029,7 +2168,6 @@ export class ShipGame {
     player.health = num(wire, ACTOR_HP, player.health);
     player.kills = num(wire, ACTOR_KILLS, player.kills);
     player.deaths = num(wire, ACTOR_DEATHS, player.deaths);
-    player.weapon = indexToWeapon(num(wire, ACTOR_WEAPON, 0));
     player.height = clamp(num(wire, ACTOR_HEIGHT, 1.8), 0.9, 2);
     player.scoped = (flags & F_SCOPED) !== 0;
     player.reloading = (flags & F_RELOADING) !== 0;
@@ -2038,16 +2176,30 @@ export class ShipGame {
     player.netCanLoadout = (flags & F_LOADOUT) !== 0;
     player.grenades = num(wire, ACTOR_GRENADES, player.grenades);
     player.vel.set(num(wire, ACTOR_VX, 0), 0, num(wire, ACTOR_VZ, 0));
-    player.setNetAmmo(player.weapon, num(wire, ACTOR_MAG, 0));
+
+    // 武器是**换着来的**（买枪 / 数字键 / 刀 / 雷），不是每帧同值：
+    // 加入者不跑 `Player.update`，`onWeaponChange` 钩子永远不会走，
+    // 不在这里换第一人称枪模的话，切刀切雷之后手里还端着步枪的模型。
+    const wireWeapon = indexToWeapon(num(wire, ACTOR_WEAPON, 0));
+    if (wireWeapon !== player.weapon) {
+      player.weapon = wireWeapon;
+      if (isPrimaryId(wireWeapon)) player.primary = wireWeapon;
+      this.viewModel.setWeapon(wireWeapon);
+    }
+    player.setNetAmmo(wireWeapon, num(wire, ACTOR_MAG, 0));
 
     const x = num(wire, ACTOR_X, player.pos.x);
     const y = num(wire, ACTOR_Y, player.pos.y);
     const z = num(wire, ACTOR_Z, player.pos.z);
     if (alive) {
-      // 平滑而不是瞬移：房主的位置是 20Hz 来的，直接赋值会一抖一抖
-      player.pos.x = damp(player.pos.x, x, 26, dt);
+      // 平滑 + 速度外推：阻尼目标沿房主模拟出的速度往前推 `SELF_POS_LEAD`
+      // 秒，抵消「上行 → 房主模拟 → 快照回来」整条管线延迟。直接阻尼到原始
+      // 位置的话，自己走路永远拖着 150ms+ 的尾巴 —— 「巨卡」的主要来源。
+      // 房主输入断流时速度位会归零，外推自动收敛回来，不需要额外处理。
+      const lead = SELF_POS_LEAD;
+      player.pos.x = damp(player.pos.x, x + player.vel.x * lead, 26, dt);
       player.pos.y = damp(player.pos.y, y, 26, dt);
-      player.pos.z = damp(player.pos.z, z, 26, dt);
+      player.pos.z = damp(player.pos.z, z + player.vel.z * lead, 26, dt);
     } else {
       player.pos.set(x, y, z);
     }
@@ -2056,8 +2208,11 @@ export class ShipGame {
     player.deathTime = num(wire, ACTOR_DEATH_TIME, 0);
 
     if (alive && !wasAlive) {
-      // 房主已经让我复活了：镜头用 0.45 秒从观战位拉回第一人称（和单人一致）
+      // 房主已经让我复活了：位置**直接就位**（和副本那条 `apply(snap)` 同理，
+      // 否则镜头会先从死亡点往复活点滑 100ms），镜头再用 0.45 秒从观战位
+      // 拉回第一人称（和单人一致）
       player.deathTime = 0;
+      player.pos.set(x, y, z);
       this.deathCam.startRespawn(this.camera);
     } else if (!alive && wasAlive) {
       this.beginGuestDeath();
@@ -2231,6 +2386,8 @@ export class ShipGame {
     }
 
     if (spec.sound) gameAudio.shot(spec.sound, { x: origin.x, y: origin.y, z: origin.z });
+    // 开枪那个人的第三人称模型播开火动画（自己走上面那条第一人称分支）
+    this.actorViewOf(event.id)?.playFire();
     this.effects.spawnMuzzleFlash(muzzle, dir, { scale: feel.flashScale, life: feel.flashLife });
     const endT = event.t > 0 ? Math.min(event.t, 90) : 60;
     this.effects.spawnTracer(muzzle, {
@@ -2238,6 +2395,17 @@ export class ShipGame {
       y: origin.y + dir.y * endT,
       z: origin.z + dir.z * endT,
     });
+  }
+
+  /** 按角色 id 找它的第三人称视图（挂 Fire 动画用；找不到就静默跳过）。 */
+  private actorViewOf(id: string): ActorView | null {
+    for (const [bot, view] of this.botViews) {
+      if (bot.id === id) return view;
+    }
+    for (const link of this.links.values()) {
+      if (link.player.id === id) return link.view;
+    }
+    return this.replicaViews.get(id) ?? null;
   }
 
   private actorIdentity(id: string): { name: string; team: Team } {
@@ -2312,7 +2480,7 @@ export class ShipGame {
       dt *= DEATH_TIMELINE.hitStopScale;
     }
 
-    if (this.paused || this.finished) {
+    if (this.finished) {
       this.renderFrame();
       return;
     }
@@ -2334,13 +2502,16 @@ export class ShipGame {
       this.options.onScoreboard?.(frame.scoreboard);
     }
 
-    // 换枪菜单开着、或者相机正被死亡相机接管时冻结玩家。
+    // 换枪菜单、游戏菜单（Esc，不冻结世界但冻结本机输入）开着、或者相机正被
+    // 死亡相机接管时冻结玩家。
     // 后者包含「已经死了」和「重生后那 0.45 秒镜头还在往上拉」两段 ——
     // 不冻的话玩家会在镜头还贴在甲板上的时候就开始跑
-    const frozen = this.buyOpen || this.deathCam.busy;
+    const frozen = this.buyOpen || this.menuOpen || this.deathCam.busy;
     const playerFrame: InputFrame = frozen
       ? { ...frame, forward: 0, right: 0, fire: false, firePressed: false, aim: false, lookYaw: 0, lookPitch: 0 }
       : this.scaleLookForAds(frame);
+    this.lookDelta.yaw = playerFrame.lookYaw;
+    this.lookDelta.pitch = playerFrame.lookPitch;
 
     if (frame.actions.has('buy')) {
       if (this.buyOpen) this.closeBuyMenu();
@@ -2366,6 +2537,10 @@ export class ShipGame {
     if (DEBUG_ENABLED) this.checkTeleport(dt, rawDt);
 
     for (const bot of this.bots) bot.update(dt, this.botWorld);
+
+    // 所有非本地角色（人机 + 对端真人）的脚步。放在位移都算完之后，
+    // 这一帧走出来的路才算得准
+    this.updateActorFootsteps();
 
     this.updateGrenades(dt);
     this.updateRespawns();
@@ -2455,18 +2630,75 @@ export class ShipGame {
   private updateRespawns(): void {
     const player = this.player;
     if (!player.alive && player.deathTime >= DEATH_TIMELINE.respawnAt) {
-      this.respawnPlayer();
+      this.respawnPlayer(true);
       // 重生**不黑屏**：镜头从观战位姿用 0.45 秒插值回第一人称，
       // 中间没有任何一帧是纯色块
       this.deathCam.startRespawn(this.camera);
     }
     for (const bot of this.bots) {
-      if (!bot.alive && bot.deathTime >= BOT_CORPSE_LIFE) this.respawnBot(bot);
+      if (!bot.alive && bot.deathTime >= BOT_CORPSE_LIFE) this.respawnBot(bot, true);
     }
     // 网络对端：房主替他们重生，用的是和玩家完全一样的时间轴
     for (const link of this.links.values()) {
       if (!link.player.alive && link.player.deathTime >= DEATH_TIMELINE.respawnAt) {
         this.respawnRemote(link);
+      }
+    }
+  }
+
+  /**
+   * 别人的脚步声 —— 「听声辨位」的另一半。
+   *
+   * 按**逐帧位移**给每个角色累计步距（和 player.ts 自己那条同一套口径），
+   * 走够一步就在他的位置空间化地响一声。规则：
+   *
+   *   - 单人/房主模式下本机玩家跳过（player.ts 已经播了，再播就是一步两响）；
+   *     加入者反过来 —— 他没有本地移动模拟，自己的脚步只能在这里补，
+   *     走 `own: true` 不过节流、不空间化。
+   *   - 死亡清掉累计（尸体不走路，复活后从落点重新起算）。
+   *   - 竖直速度大 = 跳在半空，不计步距（空中没有落点）；一帧上下超过
+   *     0.25m 同理（上台阶的插值帧不当作「落地一步」）。
+   *   - 材质按脚下碰撞盒判：木箱上是空腔声，甲板上是钢板声。
+   *
+   * 多人齐步的并发靠 `gameAudio.step` 里那道 45ms 闸 —— 同帧几个人落步时
+   * 吞掉几声，听起来更像「一群人」而不是节拍器。
+   */
+  private updateActorFootsteps(): void {
+    for (const actor of this.actors) {
+      const isSelf = actor === this.player;
+      const selfGuest = isSelf && this.netRole === 'guest';
+      // 单人 / 房主：自己的脚步归 player.ts，这里不碰
+      if (isSelf && !selfGuest) continue;
+
+      const state = this.stepTracker.get(actor.id);
+      if (!actor.alive) {
+        if (state) this.stepTracker.delete(actor.id);
+        continue;
+      }
+      if (!state) {
+        this.stepTracker.set(actor.id, { x: actor.pos.x, y: actor.pos.y, z: actor.pos.z, dist: 0 });
+        continue;
+      }
+
+      const airborne = Math.abs(actor.vel.y) > 0.8 || Math.abs(actor.pos.y - state.y) > 0.25;
+      if (!airborne) state.dist += Math.hypot(actor.pos.x - state.x, actor.pos.z - state.z);
+      state.x = actor.pos.x;
+      state.y = actor.pos.y;
+      state.z = actor.pos.z;
+
+      if (state.dist > 2.1) {
+        state.dist = 0;
+        const surface = surfaceUnder(actor.pos.x, actor.pos.y, actor.pos.z, this.level.colliders);
+        if (selfGuest) {
+          gameAudio.step(surface, { own: true, gain: this.player.crouching ? 0.45 : 1 });
+        } else {
+          gameAudio.step(surface, {
+            x: actor.pos.x,
+            y: actor.pos.y + 0.1,
+            z: actor.pos.z,
+            gain: 0.9,
+          });
+        }
       }
     }
   }
@@ -2561,6 +2793,8 @@ export class ShipGame {
       reloading: player.reloading,
       reloadProgress: player.reloadProgress,
       scoped: player.scoped,
+      lookYaw: this.lookDelta.yaw,
+      lookPitch: this.lookDelta.pitch,
       bolt: player.boltView,
       dying,
       melee: player.meleeView,
@@ -2675,7 +2909,7 @@ export class ShipGame {
     this.input.sensitivity = settings.sensitivity;
     // 暂停 / 结算期间引擎把音量压到 0 了，这里不能因为「玩家在设置里拖了音量条」
     // 就把声音放回来 —— 面板是浮在暂停菜单上面的
-    gameAudio.setVolume(this.running && !this.paused && !this.finished ? settings.volume : 0);
+    gameAudio.setVolume(this.running && !this.finished ? settings.volume : 0);
     if (!this.player.scoped) {
       this.camera.fov = settings.fov;
       this.camera.updateProjectionMatrix();
@@ -2733,6 +2967,7 @@ export class ShipGame {
     this.replicaViews.clear();
     this.replicas.clear();
     this.links.clear();
+    this.stepTracker.clear();
 
     for (const grenade of this.grenades) this.scene.remove(grenade.mesh);
     this.grenades.length = 0;

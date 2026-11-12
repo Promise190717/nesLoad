@@ -22,6 +22,7 @@ import {
   moveEntity,
   rayWorld,
   resetMotionState,
+  surfaceUnder,
 } from './physics';
 import type { Actor, PrimaryId, Team, WeaponId } from './types';
 import { HEAVY_REACH_BONUS, SWITCH_PROFILES, WEAPONS, weaponFeel } from './weapons';
@@ -811,7 +812,15 @@ export class Player implements Actor {
       const stride = this.crouching ? 1.5 : frame.walk ? 1.9 : 2.1;
       if (this.stepDistance > stride) {
         this.stepDistance = 0;
-        if (!this.remote) gameAudio.step('metal');
+        if (!this.remote) {
+          // 响度跟着步态走：跑步全响、蹲下压到一半、静步只剩一点鞋底蹭地声。
+          // 材质按脚下碰撞盒判 —— 站上木箱是空腔「咚」，甲板是钢板声
+          const loud = this.crouching ? 0.45 : frame.walk ? 0.3 : 1;
+          gameAudio.step(surfaceUnder(this.pos.x, this.pos.y, this.pos.z, deps.colliders), {
+            own: true,
+            gain: loud,
+          });
+        }
       }
       this.bobPhase += dt * horizontalSpeed * 1.35;
     } else {
