@@ -266,8 +266,8 @@ export function meleeSwing(
     if (other === attacker || !other.alive || other.team === attacker.team) continue;
     if (options.already?.has(other)) continue;
 
-    // 从**胸口**量距离和角度：只用脚底的话，蹲着的人和站着的人判出来的
-    // 角度会差十几度，贴脸时表现成「砍空气」
+    // 从**胸口**量距离和角度：只用脚底的话，贴脸时判出来的角度偏差很大，
+    // 表现成「砍空气」
     const dx = other.pos.x - attacker.pos.x;
     const dz = other.pos.z - attacker.pos.z;
     const dy = other.pos.y + other.height * 0.5 - eye.y;
@@ -341,7 +341,6 @@ export interface AimState {
   /** 水平速度（米/秒） */
   speed: number;
   onGround: boolean;
-  crouching: boolean;
   scoped: boolean;
   /** 连射累积的额外散布 */
   accum: number;
@@ -359,7 +358,8 @@ const RUN_SPEED = 5.4;
  *      停火后自己衰减回 0）。累积**单独**夹在 0.85×max，给下面几项留出叠加空间；
  *   ② 移动 —— 按速度占奔跑速度的比例线性叠加。**是加法**，所以「移动连发」一定
  *      比「静止连发」更散，不会被连发累积先顶到上限而看不出区别；
- *   ③ 姿态 —— 蹲下更准（×<1）、空中更散（×>1），乘法叠加在①+②之上；
+ *   ③ 姿态 —— 空中更散（×>1），乘法叠加在①+②之上。这一项原来还管「蹲下更准」，
+ *      蹲下功能整体移除后只剩空中；
  *   ④ 开镜 —— ×0.05 只压「站桩」那部分散布；移动惩罚在开镜之后**再加一次全额**
  *      （2026-11-12 用户要求「开镜移动时子弹落点不要很准」）。之前移动惩罚先加、
  *      再被 ×0.05 一起压掉，开镜滑步等于指哪打哪；现在开镜急走约 +0.027 rad
@@ -382,7 +382,6 @@ export function currentSpread(spec: WeaponSpec, state: AimState): number {
   if (state.speed > 0.4) spread += s.move * Math.min(1, state.speed / RUN_SPEED);
 
   // ③ 姿态（乘法）
-  if (state.crouching) spread *= s.crouch;
   if (!state.onGround) spread *= s.air;
 
   // ④ 开镜：×0.05 之后把移动惩罚全额补回（站桩开镜依然是激光，移动开镜不准）

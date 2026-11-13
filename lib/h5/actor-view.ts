@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Actor, Team } from './types';
+import type { Actor, Team, WeaponId } from './types';
 
 /**
  * 把 `Actor` 的数据翻译成一个看得见的模型 —— **只管渲染，不懂 AI**。
@@ -16,10 +16,14 @@ import type { Actor, Team } from './types';
  * 回到纯几何体拼装 —— 但比最早的 Box 小人认真得多：
  *
  *   - 分节四肢（髋/膝、肩/肘两级 pivot），走路有屈膝、跑步有前倾；
- *   - 护甲 / 弹匣袋 / 背包 / 肩垫 / 头盔（半球）+ 风镜；真人露脸、人机戴面罩
- *     （机器人造型 —— 金属头/天线/发光眼 —— 被用户否掉：机械感太重）；
- *   - 双手持枪姿势，枪按武器换形（AK 默认 / AWM 长管+镜 / 霰弹粗管 / 手枪）；
- *   - 蹲姿（压身 + 屈膝 + 前倾，跟随 `Actor.height`）、开火后座（枪身后顶 + 枪口上跳）；
+ *   - 护甲 / 弹匣袋 / 背包 / 肩垫 / 头盔（半球）+ 风镜 + 脖子/领口、肩带、
+ *     电台与天线、护膝、头盔夜视仪底座；真人额外有鼻子/耳朵。人机只戴面罩，
+ *     不做金属头/天线/发光眼（机器人造型被用户否掉：机械感太重）；
+ *   - 双手持枪姿势（**枪在手里，不是挂在肚子上**），枪按武器换形，且
+ *     **AK / M4 必须长得不一样**（换主武器是最常见的换枪，同几何 = 看不出换了）：
+ *     AK 弯弹匣粗护木 / M4 直弹匣细护木 + 提把 / AWM 长管 + 镜 / 霰弹粗管 /
+ *     手枪 / 刀 / 手雷；`sync()` 每帧比对 `actor.weapon` 自动重建；
+ *   - 开火后座（枪身后顶 + 枪口上跳）；
  *   - 死亡沿用弹道倒地 + 落地余震 + 淡出。
  *
  * ## 敌我识别
@@ -43,7 +47,12 @@ export type ActorKind = 'human' | 'bot';
 
 export interface ActorView {
   readonly group: THREE.Group;
-  /** 每帧调用。位置、朝向、走路摆臂、倒地动画都在这里。 */
+  /**
+   * 每帧调用。位置、朝向、走路摆臂、倒地动画都在这里。
+   *
+   * 手里的武器模型也在这里**跟着 `actor.weapon` 自动换**：远端玩家/人机切到
+   * 手枪、刀或手雷时，别人看到的不再永远是出生时那把步枪。
+   */
   sync(actor: Actor, dt: number): void;
   /**
    * 被击杀的瞬间调用。`dx / dz` 是**弹道的水平方向**（从击杀者指向死者），
@@ -133,9 +142,6 @@ const FALL_ANGLE = Math.PI / 2;
 /** 落地那一下的回弹高度（米）。 */
 const FALL_BOUNCE = 0.14;
 
-/** 蹲姿判定：身高被 `damp` 到 1.45 以下就算蹲着（站 1.8 / 蹲 1.25）。 */
-const CROUCH_VISUAL_HEIGHT = 1.45;
-
 /** 开火后座动画在最后一枪之后继续保持的秒数（连发期间每枪刷新）。 */
 const FIRE_HOLD = 0.35;
 
@@ -144,7 +150,7 @@ const yawQuat = new THREE.Quaternion();
 const fallQuat = new THREE.Quaternion();
 const fallAxis = new THREE.Vector3();
 
-export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'ak47'): ActorView {
+export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: WeaponId = 'ak47'): ActorView {
   const materials = cloneMaterials(materialsFor(team, kind));
   const group = new THREE.Group();
 
@@ -182,7 +188,7 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
   };
 
   /**
-   * 整个身体挂在 `body` 下：走路上下起伏、蹲姿压身、跑步前倾都只动这一个
+   * 整个身体挂在 `body` 下：走路上下起伏、跑步前倾都只动这一个
    * 组，腿和上身不用分别算。
    */
   const body = new THREE.Group();
@@ -198,6 +204,8 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
     const knee = new THREE.Group();
     knee.position.set(0, -0.46, 0);
     knee.add(capsule(0.058, -0.02, -0.42, 0, 0, materials.clothDark)); // 小腿
+    // 护膝：压扁的球贴在膝盖正面，跑动时比光秃秃的胶囊腿更像战术装备
+    knee.add(blob(0.078, 0, -0.1, -0.055, materials.gear, 0.78));
     // 军靴：鞋就该有棱角，保留盒子；鞋头用球收圆
     knee.add(part(0.13, 0.16, 0.15, 0, -0.34, 0.01, materials.gear));
     knee.add(blob(0.065, 0, -0.395, -0.09, materials.gear));
@@ -235,6 +243,29 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
   // 肩垫：盖在肩球上的小扁球，撑出宽肩轮廓
   body.add(blob(0.085, -0.2, 1.52, 0, materials.vest, 0.7));
   body.add(blob(0.085, 0.2, 1.52, 0, materials.vest, 0.7));
+  // 肩带：从胸前跨过肩顶到后背的两条窄带。没有它，背心像一个套在身上的桶
+  body.add(part(0.06, 0.035, 0.24, -0.16, 1.535, -0.01, materials.gear));
+  body.add(part(0.06, 0.035, 0.24, 0.16, 1.535, -0.01, materials.gear));
+  // 左胸电台包 + 天线（小队通讯兵既视感），右胸一个小工具包。
+  // x 不能超过 ±0.11：背心是椭圆截面，再往外表面就缩到 z≈-0.07，包会浮空
+  body.add(part(0.07, 0.1, 0.05, -0.11, 1.42, -0.12, materials.vest));
+  body.add(part(0.012, 0.17, 0.012, -0.13, 1.55, -0.11, materials.trim));
+  body.add(part(0.06, 0.08, 0.04, 0.11, 1.42, -0.12, materials.gear));
+
+  // ---- 脖子 / 领口：头直接悬在躯干上会有一道缝，补一节脖子和一圈领口 ----
+  const neck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.058, 0.068, 0.11, 8),
+    kind === 'human' ? materials.skin : materials.clothDark,
+  );
+  neck.position.set(0, 1.55, 0);
+  neck.castShadow = true;
+  neck.receiveShadow = true;
+  body.add(neck);
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.11, 0.055, 10), materials.clothDark);
+  collar.position.set(0, 1.52, 0);
+  collar.castShadow = true;
+  collar.receiveShadow = true;
+  body.add(collar);
 
   // ---- 头：球头 + 球壳头盔 + 风镜（真人露脸，人机戴面罩） ----
   const head = new THREE.Group();
@@ -245,6 +276,10 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
     head.add(blob(0.11, 0, 0.02, 0, materials.skin));
     // 眼睛：一条深色横条，让正脸不是一整块肉色
     head.add(part(0.13, 0.03, 0.02, 0, 0.045, -0.1, materials.gear));
+    // 鼻子 / 耳朵：圆头侧面和正面各补一块，不然正脸像颗鸡蛋
+    head.add(blob(0.028, 0, 0.005, -0.108, materials.skin));
+    head.add(blob(0.026, -0.105, 0.02, 0, materials.skin));
+    head.add(blob(0.026, 0.105, 0.02, 0, materials.skin));
   } else {
     // 人机 = 戴面罩的士兵：整个头是布料色（巴拉克拉法帽），留风镜缝。
     // 不要金属头/天线/发光眼 —— 用户反馈机械感太重。
@@ -261,6 +296,8 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
   head.add(rim);
   // 风镜：哑光深色镜片，两边一样 —— 不再自发光（发光 = 机械感）
   head.add(part(0.16, 0.04, 0.03, 0, 0.045, -0.105, materials.trim));
+  // 头盔正面的夜视仪底座：一个很小的方块，侧面轮廓就多一层装备感
+  head.add(part(0.05, 0.03, 0.035, 0, 0.075, -0.125, materials.trim));
 
   // ---- 手臂：肩 pivot（大臂）→ 肘 pivot（小臂 + 手套），摆成持枪姿势 ----
   const makeArm = (side: number) => {
@@ -279,19 +316,25 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
   };
   const armL = makeArm(-1);
   const armR = makeArm(1);
-  // 持枪姿势：右手扶握把（抬一半），左手伸向前护木（抬更多 + 肘弯更多）。
+  // 持枪姿势：双手都要落在枪上，而不是垂在身体两侧。
+  // - 右臂：肘弯得大一点，右手停在握把高度；
+  // - 左臂：肩抬得更高、肘几乎伸直，左手前伸扶住机匣/护木；
+  // - `rotation.z`（±0.4）把两条上臂从肩膀向内收 —— 没有这一下，两只手
+  //   停在身体两侧，枪就只能像挂在肚子前面。
   // rotation.x 正 = 手往身前（-z）摆。
-  armR.shoulder.rotation.x = 0.55;
-  armR.elbow.rotation.x = 0.85;
-  armL.shoulder.rotation.x = 0.75;
-  armL.elbow.rotation.x = 1.0;
+  armR.shoulder.rotation.set(0.3, 0, -0.4);
+  armR.elbow.rotation.x = 1.15;
+  armL.shoulder.rotation.set(0.9, 0, 0.4);
+  armL.elbow.rotation.x = 0.5;
 
   // ---- 枪：按武器换形。挂在 body 上（不挂手臂 —— 双手 IK 太贵，姿势固定即可） ----
+  // y = 1.28 是胸口高度（不是肚子），z = -0.44 让机匣整体落在双手前方；
+  // 枪托尾端会藏进胸口，这是正常的 —— 真枪的枪托也贴着肩窝。
   const gun = new THREE.Group();
-  gun.position.set(0.03, 1.26, -0.34);
+  gun.position.set(0, 1.28, -0.44);
   const GUN_Z = gun.position.z;
-  const buildGun = (): void => {
-    if (weapon === 'awm') {
+  const buildGun = (id: WeaponId): void => {
+    if (id === 'awm') {
       // 狙击：长管 + 瞄准镜
       gun.add(part(0.05, 0.09, 0.5, 0, 0, 0, materials.gun));
       gun.add(part(0.028, 0.028, 0.5, 0, 0.01, -0.48, materials.gun));
@@ -302,18 +345,40 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
       gun.add(scope);
       gun.add(part(0.045, 0.14, 0.08, 0, -0.1, 0.06, materials.gun));
       gun.add(part(0.05, 0.1, 0.16, 0, -0.02, 0.32, materials.gun));
-    } else if (weapon === 'shotgun') {
+    } else if (id === 'shotgun') {
       // 霰弹：粗管 + 护木
       gun.add(part(0.06, 0.1, 0.4, 0, 0, 0, materials.gun));
       gun.add(part(0.05, 0.05, 0.34, 0, 0.01, -0.36, materials.gun));
       gun.add(part(0.055, 0.05, 0.14, 0, -0.06, -0.26, materials.gear));
       gun.add(part(0.05, 0.1, 0.16, 0, -0.02, 0.28, materials.gun));
-    } else if (weapon === 'usp') {
-      // 手枪：一小块
-      gun.add(part(0.04, 0.07, 0.2, 0, 0, -0.02, materials.gun));
-      gun.add(part(0.038, 0.11, 0.05, 0, -0.07, 0.06, materials.gun));
+    } else if (id === 'usp') {
+      // 手枪：套筒 + 握把。握把落在右手高度，枪口短，轮廓和步枪明显不同
+      gun.add(part(0.04, 0.07, 0.2, 0, -0.05, 0, materials.gun));
+      gun.add(part(0.038, 0.11, 0.05, 0, -0.12, 0.08, materials.gun));
+    } else if (id === 'knife') {
+      // 军刀：短握把 + 刀身 + 护手。刀身朝前（-z），一眼能和枪分开
+      gun.add(part(0.034, 0.045, 0.14, 0, -0.11, 0.1, materials.gear));
+      gun.add(part(0.012, 0.055, 0.24, 0, -0.095, -0.13, materials.trim));
+      gun.add(part(0.05, 0.018, 0.035, 0, -0.105, 0.02, materials.gear));
+    } else if (id === 'grenade') {
+      // 手雷：小圆球 + 顶盖 + 保险杆，握在右手位置。不是枪，轮廓必须明显不同
+      gun.add(blob(0.055, 0.02, -0.1, 0.04, materials.gear, 1.1));
+      gun.add(part(0.032, 0.022, 0.032, 0.02, -0.037, 0.04, materials.gun));
+      gun.add(part(0.012, 0.02, 0.075, 0.042, -0.03, 0.07, materials.trim));
+    } else if (id === 'm4a1') {
+      // M4：细护木 + 直弹匣 + 提把 + 伸缩托。**必须和 AK 分开** —— 换主武器是
+      // 最常见的换枪，两把枪要是一套几何，别人眼里就是「他怎么换都没变」。
+      gun.add(part(0.055, 0.095, 0.42, 0, 0, 0, materials.gun)); // 机匣
+      gun.add(part(0.026, 0.026, 0.36, 0, 0.015, -0.36, materials.gun)); // 枪管
+      gun.add(part(0.042, 0.045, 0.17, 0, 0.01, -0.22, materials.gear)); // 细护木
+      const straight = part(0.037, 0.15, 0.075, 0, -0.1, 0.05, materials.gun); // 直弹匣
+      straight.rotation.x = 0.06;
+      gun.add(straight);
+      gun.add(part(0.055, 0.022, 0.16, 0, 0.058, -0.02, materials.trim)); // 提把
+      gun.add(part(0.028, 0.05, 0.03, 0, 0.055, -0.38, materials.gear)); // 准星
+      gun.add(part(0.038, 0.085, 0.15, 0, -0.005, 0.29, materials.gun)); // 伸缩托
     } else {
-      // 默认步枪（AK / M4）：机匣 + 枪管 + 弹匣 + 枪托 + 准星
+      // AK：机匣 + 枪管 + 弯弹匣 + 木托 + 准星
       gun.add(part(0.06, 0.1, 0.46, 0, 0, 0, materials.gun));
       gun.add(part(0.03, 0.03, 0.34, 0, 0.015, -0.38, materials.gun));
       const mag = part(0.045, 0.16, 0.09, 0, -0.11, 0.04, materials.gun);
@@ -324,7 +389,28 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
       gun.add(part(0.03, 0.04, 0.12, 0, 0.075, -0.05, materials.gear));
     }
   };
-  buildGun();
+  let gunWeapon = weapon;
+  buildGun(gunWeapon);
+
+  /**
+   * 换枪模：远端切主武器/手枪/刀/雷时，别人看到的手里那把东西要跟着变。
+   *
+   * 用「清掉重建」而不是开局把六套模型都建好再切 visible：切枪一局也就几次，
+   * 每次只有六七个 BoxGeometry，远不是稳态开销；反过来常驻六套模型会让每个
+   * 角色多背几十个 Mesh，12 个人就是几百个节点，纯浪费。
+   * 旧几何体必须在这里 dispose —— `dispose()` 只遍历当前挂着的孩子，
+   * 被 clear 掉的不会有人再释放。
+   */
+  const setGunWeapon = (id: WeaponId): void => {
+    if (id === gunWeapon) return;
+    gunWeapon = id;
+    gun.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry?.dispose();
+    });
+    gun.clear();
+    buildGun(id);
+  };
   body.add(gun);
 
   /* ============================================================
@@ -336,7 +422,6 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
   let opacity = 1;
   let fireTimer = 0;
   let recoil = 0;
-  let crouchT = 0;
 
   /* ---- 倒地方向：世界坐标下的弹道方向，`impulseSet` 为假时退回「往前扑」 ---- */
   let impulseX = 0;
@@ -379,6 +464,9 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
 
   const sync = (actor: Actor, dt: number): void => {
     group.position.set(actor.pos.x, actor.pos.y, actor.pos.z);
+    // 手里武器变了就换模型。放在 `alive` 早退之前：死亡期间（观战/等待复活）
+    // 也可能收到切枪快照，复活第一帧就该是新枪
+    setGunWeapon(actor.weapon);
 
     if (!actor.alive) {
       // 倒地：绕「与弹道垂直的水平轴」旋转，往哪边倒跟着中弹方向走
@@ -421,9 +509,6 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
 
     const speed = Math.hypot(actor.vel.x, actor.vel.z);
     const speedFactor = Math.min(1, speed / 3.5);
-    const crouching = actor.height < CROUCH_VISUAL_HEIGHT;
-    // 蹲/站的视觉过渡用 damp 追，不跳变
-    crouchT = THREE.MathUtils.damp(crouchT, crouching ? 1 : 0, 14, dt);
 
     // ---- 后座：枪身后顶 + 枪口上跳，指数衰减 ----
     if (fireTimer > 0) fireTimer -= dt;
@@ -438,19 +523,19 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
     // 站立呼吸：极小幅度的起伏，站住时不是一尊雕像
     const breath = (1 - speedFactor) * Math.sin(animPhase * 1.6) * 0.008;
 
-    // ---- 蹲姿：压身 + 屈膝 + 前倾 ----
-    body.position.y = -0.32 * crouchT + bob + breath;
-    body.rotation.x = 0.1 * crouchT + 0.07 * speedFactor;
+    body.position.y = bob + breath;
+    body.rotation.x = 0.07 * speedFactor;
 
-    // ---- 腿：摆腿 + 屈膝（摆到前面的那条腿膝盖弯），蹲姿整体屈膝 ----
-    legL.hip.rotation.x = swing + 0.95 * crouchT;
-    legR.hip.rotation.x = -swing + 0.95 * crouchT;
-    legL.knee.rotation.x = -Math.max(0, swing) * 1.15 - 1.35 * crouchT;
-    legR.knee.rotation.x = -Math.max(0, -swing) * 1.15 - 1.35 * crouchT;
+    // ---- 腿：摆腿 + 屈膝（摆到前面的那条腿膝盖弯） ----
+    legL.hip.rotation.x = swing;
+    legR.hip.rotation.x = -swing;
+    legL.knee.rotation.x = -Math.max(0, swing) * 1.15;
+    legR.knee.rotation.x = -Math.max(0, -swing) * 1.15;
 
     // ---- 手臂：持枪姿势上叠一点随步伐的摆动，像端着枪在走 ----
-    armL.shoulder.rotation.x = 0.75 + swing * 0.08;
-    armR.shoulder.rotation.x = 0.55 - swing * 0.08;
+    // 基础角和上面 `armX.shoulder.rotation.set()` 保持一致；z（内收）不动
+    armL.shoulder.rotation.x = 0.9 + swing * 0.08;
+    armR.shoulder.rotation.x = 0.3 - swing * 0.08;
   };
 
   return {

@@ -93,7 +93,6 @@ export default function ShipSettingsPanel({
           <span>{h5Text(locale, 'settings.controls.fire')}</span>
           <span>{h5Text(locale, 'settings.controls.reload')}</span>
           <span>{h5Text(locale, 'settings.controls.jump')}</span>
-          <span>{h5Text(locale, 'settings.controls.crouch')}</span>
           <span>{h5Text(locale, 'settings.controls.weapon')}</span>
           <span>{h5Text(locale, 'settings.controls.grenade')}</span>
           <span>{h5Text(locale, 'settings.controls.pause')}</span>

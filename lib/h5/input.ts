@@ -3,7 +3,7 @@
  *
  * 分两类：
  *
- *   **持续量**（每帧读）：前后左右、蹲、走、开火、开镜。
+ *   **持续量**（每帧读）：前后左右、走、开火、开镜。
  *   **离散事件**（一次性）：跳、换弹、换枪、扔雷、开关换枪菜单。
  *
  * 离散事件用队列而不是布尔标志：`firePressed` 那种「按下就置 true、用完手动
@@ -50,7 +50,6 @@ export interface InputFrame {
   forward: number;
   /** 左右，-1..1（正 = 右移） */
   right: number;
-  crouch: boolean;
   /** 走路（静步，速度更慢但没脚步声） */
   walk: boolean;
   fire: boolean;
@@ -70,6 +69,36 @@ export interface InputFrame {
 
 /** 鼠标灵敏度基准。乘上设置里的 `sensitivity` 之后才是最终值。 */
 const BASE_SENSITIVITY = 0.0022;
+
+/**
+ * 单次 `mousemove` 允许累加的最大位移（像素）。
+ *
+ * 挡的是**浏览器给的假位移**：指针锁定重新建立的那一下（Esc 关菜单、换枪菜单、
+ * 切窗口回来），Chrome / Edge 偶尔会把「解锁期间鼠标在桌面上走过的距离」塞进
+ * `movementX`，一千多像素很常见。乘上 `BASE_SENSITIVITY` 就是两弧度（一百多度）
+ * —— 表现正是玩家说的「视角偶发跳动，突然不是我看的方向」。
+ *
+ * 180 这个上限不会误伤：一次事件是 8~16ms 的位移，再快的甩枪也就百来像素，
+ * 转 180° 是靠连续几十条事件累加出来的，不靠单条。
+ */
+const MAX_LOOK_STEP = 180;
+
+/**
+ * 锁定刚建立后的「静默窗口」（毫秒）。
+ *
+ * 之前只丢锁定后的**第一条** mousemove，但实测 Chrome / Edge 的假位移经常拆成
+ * 好几条吐出来（尤其解锁期间光标走得远时）：第一条丢了，第二三条每条都小于
+ * `MAX_LOOK_STEP` 的夹取线，累加起来照样是一记大跳。改成整个时间窗内一律忽略
+ * —— 120ms 内的假位移必然落在窗口里，而玩家刚点完「继续」，这 120ms 没人在
+ * 转视角，感知不到。
+ */
+const LOCK_GRACE_MS = 120;
+
+/** 把单次位移夹到 ±`MAX_LOOK_STEP`。非有限值一律当 0（坏事件不该污染视角）。 */
+function clampStep(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return value > MAX_LOOK_STEP ? MAX_LOOK_STEP : value < -MAX_LOOK_STEP ? -MAX_LOOK_STEP : value;
+}
 
 /**
  * 触屏转视角的额外倍率。
@@ -106,10 +135,19 @@ export class InputController {
   private lookX = 0;
   private lookY = 0;
 
+  /**
+   * 这之前到达的 `mousemove` 一律丢掉。
+   *
+   * 在**刚拿到指针锁定**和**窗口失焦**时置位。理由是补偿性的：锁定建立的那一刻，
+   * 浏览器的鼠标位置从「桌面坐标」跳到「锁定原点」，部分实现会把这段跳跃当成
+   * 位移报上来 —— 而且经常拆成好几条事件。按时间窗丢比按「第一条」丢可靠：
+   * 不赌事件顺序，窗口内的假位移一个都进不来（见 `LOCK_GRACE_MS`）。
+   */
+  private ignoreLookUntil = Number.NEGATIVE_INFINITY;
+
   /** 触屏虚拟摇杆的轴（-1..1） */
   private virtualX = 0;
   private virtualY = 0;
-  private virtualCrouch = false;
 
   private locked = false;
 
@@ -141,10 +179,30 @@ export class InputController {
   }
 
   requestLock(): void {
-    // `requestPointerLock` 在新版浏览器里返回 Promise，被非用户手势调用时会 reject。
-    // 不 catch 的话控制台每次暂停都会多一条 unhandled rejection，纯噪音。
-    const result = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
-    if (result && typeof result.catch === 'function') result.catch(() => undefined);
+    // 带上 `unadjustedMovement: true` 要**原始鼠标输入**：绕开 Windows 的「提高
+    // 指针精确度」（鼠标加速曲线）。开着加速时快速甩枪的位移会被系统放大出尖峰
+    // —— 「滑动鼠标视角经常跳」的另一个高频来源。Chrome 88+ / Edge 支持。
+    //
+    // 兼容路径：不认识这个参数的浏览器（旧 Safari / Firefox）要么同步抛
+    // TypeError，要么把 Promise reject 掉 —— 两种都退回无参调用，损失只是
+    // 「加速曲线还在」，锁定本身不受影响。
+    const lock = this.canvas.requestPointerLock as unknown as
+      | ((options?: { unadjustedMovement?: boolean }) => Promise<void> | void)
+      | undefined;
+    const relock = () => {
+      try {
+        const fallback = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+        if (fallback && typeof fallback.catch === 'function') fallback.catch(() => undefined);
+      } catch {
+        /* 用户手势过期之类的拒绝，本来就该静默 */
+      }
+    };
+    try {
+      const result = lock?.call(this.canvas, { unadjustedMovement: true });
+      if (result && typeof result.catch === 'function') result.catch(relock);
+    } catch {
+      relock();
+    }
   }
 
   exitLock(): void {
@@ -169,12 +227,6 @@ export class InputController {
   setAim(down: boolean): void {
     if (!this.enabled && down) return;
     this.mouseAim = down;
-  }
-
-  /** 触屏蹲下是「按住」而不是「点一下」，所以走持续量。 */
-  setCrouch(down: boolean): void {
-    if (!this.enabled && down) return;
-    this.virtualCrouch = down;
   }
 
   /** 虚拟摇杆。`x` 右正、`y` 前正。 */
@@ -210,7 +262,6 @@ export class InputController {
     const frame: InputFrame = {
       forward: 0,
       right: 0,
-      crouch: false,
       walk: false,
       fire: this.mouseFire,
       firePressed,
@@ -234,8 +285,12 @@ export class InputController {
     frame.forward = Math.abs(this.virtualY) > Math.abs(keyboardForward) ? this.virtualY : keyboardForward;
     frame.right = Math.abs(this.virtualX) > Math.abs(keyboardRight) ? this.virtualX : keyboardRight;
 
-    frame.crouch =
-      this.virtualCrouch || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyC');
+    // 蹲下已**整体移除**（2026-11-13 用户要求）。
+    //
+    // 它曾同时收 Ctrl（CF 习惯键）和 C。Ctrl 那一路必须永久放弃：蹲下 + 前进 =
+    // `Ctrl+W` = 关标签页，浏览器保留键，`preventDefault()` 拦不住、网页侧无解
+    // （玩家报的「游戏崩溃、整个 tab 消失」就是它）。改只认 C 之后依然没人用，
+    // 于是整条功能删掉。**别再恢复，也别给任何操作绑 Ctrl / Alt / Meta。**
     frame.walk = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     frame.scoreboard = this.keys.has('Tab');
 
@@ -254,9 +309,9 @@ export class InputController {
 
     if (!this.enabled) return;
 
-    // 蹲下键是 Ctrl：按住 Ctrl 再按 D/S/R（右移/后退/换弹）会被浏览器抢成
-    // 「收藏 / 保存 / 刷新」。游戏中对带修饰键的按键一律 preventDefault ——
-    // Ctrl+D/S/R/P/A 都能拦掉；Ctrl+W/T/N 是浏览器保留键拦不住，只能靠玩家少误触。
+    // 带修饰键的按键在游戏里一律 preventDefault：Ctrl+D/S/R/P/A 会被浏览器抢成
+    // 「收藏 / 保存 / 刷新 / 打印 / 全选」。但 **Ctrl+W / Ctrl+T / Ctrl+N 是保留键，
+    // 拦不住**（蹲下就是这么从 Ctrl 改到 C、再整个删掉的，见 `flush()` 里那段）。
     if (event.ctrlKey || event.metaKey || event.altKey) event.preventDefault();
 
     this.keys.add(event.code);
@@ -325,8 +380,11 @@ export class InputController {
   private readonly onMouseMove = (event: MouseEvent) => {
     // 只在锁定状态下累加：没锁定时鼠标是自由的，不该转视角
     if (!this.enabled || !this.locked) return;
-    this.lookX += event.movementX;
-    this.lookY += event.movementY;
+    // 锁定刚建立的静默窗口：这段时间内的位移大概率是浏览器补的「跳跃位移」
+    // （而且常拆成好几条），整窗丢掉
+    if (performance.now() < this.ignoreLookUntil) return;
+    this.lookX += clampStep(event.movementX);
+    this.lookY += clampStep(event.movementY);
   };
 
   private readonly onWheel = (event: WheelEvent) => {
@@ -352,15 +410,22 @@ export class InputController {
         performance.now() - this.lastFocusLostAt < 500);
 
     this.locked = locked;
-    if (!locked) {
+    if (locked) {
+      // 重新锁上：开静默窗口。「桌面坐标 → 锁定原点」的跳跃位移全部挡在窗外
+      this.ignoreLookUntil = performance.now() + LOCK_GRACE_MS;
+    } else {
       // 放掉锁 = 松开所有键，否则「按着 W 按 Esc」回来后人还在往前走
       this.keys.clear();
       this.mouseFire = false;
       this.mouseAim = false;
       this.virtualX = 0;
       this.virtualY = 0;
-      this.virtualCrouch = false;
     }
+    // 解锁前后攒下的视角增量一律作废（不管往哪个方向切）。不清的话，锁定期间
+    // 最后那几毫秒的位移会等到下次 `flush` 才生效 —— 而那往往已经是在菜单里
+    // 或者刚回到战斗的第一帧，表现成「一回来视角就跳了一下」
+    this.lookX = 0;
+    this.lookY = 0;
     this.onLockChange(locked, lostFocus);
   };
 
@@ -370,7 +435,12 @@ export class InputController {
     this.keys.clear();
     this.mouseFire = false;
     this.mouseAim = false;
-    this.virtualCrouch = false;
+    // 失去焦点期间浏览器可能又攒了一笔位移，回来不能直接用。
+    // 这里也开静默窗口：万一锁定没被浏览器收回（部分实现的 blur 不放锁），
+    // 回来瞬间那几条位移同样会跳视角
+    this.lookX = 0;
+    this.lookY = 0;
+    this.ignoreLookUntil = performance.now() + LOCK_GRACE_MS;
   };
 
   private bind(): void {

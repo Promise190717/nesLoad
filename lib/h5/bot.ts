@@ -104,7 +104,7 @@ export interface BotWorld {
    Bot
    ============================================================ */
 
-/** 站立身高 / 眼高。Bot 不会蹲 —— 蹲下会让它的命中盒和动画都对不上。 */
+/** 站立身高 / 眼高。本版身高恒定（蹲下功能已移除），人机的命中盒和动画才对得上。 */
 const STAND_HEIGHT = 1.8;
 const EYE_HEIGHT = 1.62;
 const RADIUS = 0.42;
@@ -667,7 +667,6 @@ export class Bot implements Actor {
     const spread = currentSpread(spec, {
       speed: Math.hypot(this.vel.x, this.vel.z),
       onGround: this.onGround,
-      crouching: false,
       scoped: false,
       accum: this.spreadAccum,
     });

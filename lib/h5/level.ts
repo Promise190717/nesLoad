@@ -12,33 +12,85 @@ import type { Surface } from './types';
  * ## 几何即碰撞
  *
  * 每一个 `block()` 调用同时做两件事：往场景里放一个 Mesh，往 `colliders` 里
- * 推一个 AABB。**只有一处例外**是 `collide: false` 的纯装饰（栏杆立柱、龙门吊
- * 横梁、狙击台护栏）—— 那些东西看得见但挡不住人，因为「能看见的横梁挡住子弹」
- * 会让玩家觉得子弹在空气里炸开。
+ * 推一个 AABB。**只有一处例外**是 `collide: false` 的纯装饰（栏杆立柱、吊机
+ * 桁架、狙击台护栏、甲板中线）—— 那些东西看得见但挡不住人，因为「能看见的
+ * 横梁挡住子弹」会让玩家觉得子弹在空气里炸开。
  *
  * ## 坐标系
  *
  * three 原生系：x 右、y 上、z 朝屏幕外。甲板顶面 `y = 0`。
  * 保卫者出生在 `z = SPAWN_Z[0]`（船头方向），潜伏者在 `SPAWN_Z[1]`。
- * 船体尺寸 `52 × 26` 米 —— 早期版本是 80 米长，实测「跑图五分钟、交火五秒钟」。
  *
- * ## 缩短的方式：删中段，不是等比缩小
+ * ## 尺寸沿革：80 → 52 → 42 → 50 → **44 × 22**
  *
- * 第一版缩图是把所有 z 坐标乘一个 `Z_SCALE = 52/80`（连集装箱长度一起缩到
- * 3.97 米）。那是错的：**箱子缩了、人没缩**，2.6 × 4.0 米的集装箱配 1.8 米的
- * 人物，看起来像儿童玩具货场，掩体的「高过人头 / 半身高」关系也全乱了。
+ * 前几轮一路在缩（「跑图太远、交火太少」），第六轮又按 CF 俯视图拉回 50 米。
+ * 这一轮用户要求「长度和宽度都缩小」，缩到 **44 × 22**（`HALF_L` 25 → 22，
+ * `HALF_W` 13 → 11），比例仍是 1:2 的细长条。
  *
- * 现在改回**固定尺寸 + 删排数**：`CW/CH/CL` 永远是 2.6 / 2.6 / 6.1 米，
- * 压缩的是「中段空旷甲板」和「每个货圈的排数」（内圈 3 排 → 2 排、
- * 外圈 3 排 → 2 排）。所有 z 坐标直接写死，不再有缩放系数。
+ * 出生的对穿距离 38 米，`SPEED_RUN` 5.5 m/s 合 6.9 秒 —— 比 50 米那版的 8 秒
+ * 收紧一档，但不至于像 42 米那版一样贴脸。
+ *
+ * 宽度是跟着**狙击台**走的：台体 3.4 宽、外沿要嵌进舷板 0.3 米，所以
+ * `HALF_W` 每减 1 米，台心就跟着内移 1 米（见第 3 节）。缩宽度不是简单
+ * 改一个常量，台子和楼梯的 x 必须同时挪，否则会穿出舷墙。
+ *
+ * ⚠️ 缩放只动**地图，不动箱子**。第一轮的教训是拿 `Z_SCALE = 52/80` 把
+ * 集装箱一起缩到 3.97 米 —— 箱子缩了、人没缩，2.6×4.0 的箱子配 1.8 米的人，
+ * 看起来像儿童玩具货场，掩体的「高过人头 / 半身高」关系全乱。
+ * `CW/CH/CL` 永远 2.6 / 2.6 / 6.1，改图只改坐标，不许再引入缩放系数。
+ *
+ * ## 第七轮（2026-11-13 晚）：照三张实景角度图重排 —— 当「货舱」摆，不当「关卡」摆
+ *
+ * 上一版只看了俯视剪影，把箱子当对称掩体在摆：每舷两只 20 尺箱、中场两条
+ * 错位方箱斜带、四组攀爬阶梯、一圈铁箱在场上铺开，配色沙黄锈橙。用户给了
+ * 三张实景角度图后指出「地图有问题」—— 问题不在箱子数量，在**它不像一条
+ * 装满货的船**。照图重读到四件事：
+ *
+ * 1. **舷侧是整排 40 尺箱**。实景里两条长边是首尾相接、长边平行舷墙的一整排，
+ *    从楼梯口一直铺到船尾，不是孤立的四个岛。当时每舷放了一只 12.2 米的
+ *    40 尺箱（`CL40`），占 z 9.8~22.0 —— 侧巷因此成了真正的「走廊」。
+ *    ⚠️ **这一条在第八轮被用户否掉了**，四只箱子已删，`CL40` 也一起删了。
+ * 2. **中路是空的 + 散货**。实景中段是一大片空甲板，只有几只散放的箱子和小
+ *    木箱。上一版那两条对称斜带 + 铁箱阵读起来像 CS 的 box 图，全删了。
+ * 3. **配色是冷调**。实景的箱体是米白 / 军绿 / 深绿 / 蓝灰，甲板是**蓝灰钢**
+ *    而不是中灰水泥。上一版的沙黄 + 锈橙太暖，俯视一眼不像货轮。
+ * 4. **吊机在一角**。实景的吊是立在船头的黄色格构吊臂，不是横跨全船的龙门
+ *    吊 —— 旧版那两根 x = ±12.7 的立柱正好顶在侧巷里，跑起来像钻门框。
+ *
+ * ## 第八轮（2026-11-13）：删舷侧四只箱 + 长宽各收一档
+ *
+ * 用户圈着俯视图上那四只贴舷的 40 尺箱，原话「两侧这四个箱子去除 另外地图
+ * 长度和宽度都缩小」。
+ *
+ * - **四只箱子连同 `CL40` / `container()` 的 `long` 选项一起删掉**。现在两条
+ *   长边是空甲板，掩体全压在中路散货和两座狙击台上 —— 也因此**别再把箱子
+ *   排成一条墙**，用户要的是敞开的舷侧。
+ * - **26 × 50 → 22 × 44**。宽度不是改个常量就完事：狙击台心 `cx` 必须跟着
+ *   `HALF_W` 内移 2 米（10.7 → 8.7），楼梯 12.05 → 10.05，否则台子穿出舷墙。
+ * - 散货坐标整体内收重排，**受导航格约束**（见第 4 节开头）：22 米宽之后
+ *   只剩 15 列格子，箱子外沿落在 5.55 附近会把整条侧巷判成不可达。
+ * - 吊机跟着船头角挪到 (-9.7, -20.9)，臂长 20 → 18 米（臂尖仍落在中偏船头）。
+ * - 甲板贴图 repeat 11×22、阴影相机 ±34 → ±30。
+ *
+ * ## 依然不做真旋转
+ *
+ * 实景中路那几只斜着摆的箱子是这张图最强的识别点，但物理层是纯 AABB
+ * （见 `physics.ts` 头部：「明确不做斜坡」），要上真旋转就得同时改
+ * `collideAt` / `rayWorld` / `buildNav`，还要给 `pushAxis` 定义「沿局部轴推出」
+ * —— 那是「偶发瞬移」那条 bug 的重灾区，收益配不上风险。
+ *
+ * 折中：散货用「一只平行 + 一只垂直（`alongX`）」错开，俯视读起来是散的而
+ * 不是对称的。`alongX` 是绕 y 转 90°，碰撞盒只是宽深互换，物理层零改动。
+ * 唯一真旋转的是船头吊臂 —— 它在 `THREE.Group` 里、**完全不进碰撞表**，
+ * 转多少度都不影响物理。
  */
 
 /* ============================================================
    尺寸常量
    ============================================================ */
 
-export const HALF_W = 13; // 船宽的一半，x ∈ [-13, 13] → 全宽 26 米
-export const HALF_L = 26; // 船长的一半，z ∈ [-26, 26] → 全长 52 米
+export const HALF_W = 11; // 船宽的一半，x ∈ [-11, 11] → 全宽 22 米
+export const HALF_L = 22; // 船长的一半，z ∈ [-22, 22] → 全长 44 米
 export const DECK_Y = 0;
 
 const CW = 2.6; // 集装箱宽
@@ -57,11 +109,18 @@ export const SPAWN_Z: readonly [number, number] = [-HALF_L + 3, HALF_L - 3];
 /**
  * 出生点横向分布。**6 个**：一队最多 6 人（6v6），第 0 个永远留给本机玩家。
  *
- * 最外侧 ±9（不是 ±9.5）：外圈集装箱在 x = 10.4~13.0，人机重生还带 ±0.8 的
- * 随机偏移，±9.5 + 偏移会把人塞进箱子里。中间四个等距插值（3.6 米一个），
- * 6 个并排也不会挤在一起。
+ * 最外侧从 ±9 收到 **±7.6**（2026-11-13 用户：「不要总在复活点的角落复活」）。
+ * 原来的 ±9 只离舷墙内壁（±10.6）1.6 米，两条长边现在又是空甲板 —— 从那儿
+ * 站起来纯粹是「又被塞进甲板角落」，既没有掩体收益也没有战术意义；俯视看
+ * 那两格就是地图的四个角。收进来之后离舷墙 3 米，`z` 不动，出生线仍是直线。
+ *
+ * 中间四格的坐标不能随便改：出生区正前方有掩体（`metalBox(0, ±16)`、
+ * `crate(±4.2, ±17)`），所以 **x = 0 和 x = ±4.2 附近必须空着**，否则复活
+ * 出来第一步就顶着箱子。再留出玩家 ±0.8 / 人机 ±0.5 的落脚偏移（最坏 1.3），
+ * 相邻两格至少要有 2.4 的距离 —— 下面这个 2.4 / 3.4 / 3.6 / 3.4 / 2.4 的
+ * 分布是照这两条约束算出来的，不是随手取整。
  */
-const SPAWN_X = [-9, -5.4, -1.8, 1.8, 5.4, 9] as const;
+const SPAWN_X = [-7.6, -5.2, -1.8, 1.8, 5.2, 7.6] as const;
 
 /** 站在出生点 ±这个距离内可以换枪。 */
 export const SPAWN_ZONE = 7;
@@ -136,17 +195,20 @@ function canvasTexture(
   return texture;
 }
 
-/** 甲板：防滑钢板，64px 一块，带锈斑。整块甲板铺 13×26 次（一块 2×2 米）。 */
+/** 甲板：防滑钢板，64px 一块，带锈斑。整块甲板铺 11×22 次（一块 2×2 米）。 */
 function textureDeck(): THREE.CanvasTexture {
   return canvasTexture(
     256,
     (g, w, h) => {
       // 贴图本身要偏亮：材质的 color 会**乘**在这上面，两张中灰相乘就是黑
-      g.fillStyle = '#9aa2a9';
+      //
+      // 基色是**蓝灰**，不是水泥灰 —— 实景俯视图里那块甲板明显偏冷（钢板刷的
+      // 防锈漆带蓝），上一版的 #9aa2a9 中性灰俯视读起来像停车场
+      g.fillStyle = '#7f8d98';
       g.fillRect(0, 0, w, h);
       for (let y = 0; y < h; y += 64) {
         for (let x = 0; x < w; x += 64) {
-          g.fillStyle = (x / 64 + y / 64) % 2 ? '#a4acb3' : '#8f979e';
+          g.fillStyle = (x / 64 + y / 64) % 2 ? '#8896a1' : '#76828d';
           g.fillRect(x + 1, y + 1, 62, 62);
         }
       }
@@ -177,10 +239,10 @@ function textureDeck(): THREE.CanvasTexture {
         g.fill();
       }
     },
-    // 重复次数 = 尺寸 / 2 米：x 方向 26 米铺 13 次，z 方向 52 米铺 26 次，
-    // 一块钢板永远是 2×2 米。船缩短之后这里要跟着改，否则砖块会被拉长
-    13,
-    26,
+    // 重复次数 = 尺寸 / 2 米：x 方向 22 米铺 11 次，z 方向 44 米铺 22 次，
+    // 一块钢板永远是 2×2 米。船长改了这里必须同步，否则砖块会被拉长
+    11,
+    22,
   );
 }
 
@@ -305,6 +367,11 @@ interface BlockOptions {
   /** 木箱可被子弹穿透 */
   pen?: boolean;
   surf?: Surface;
+  /**
+   * 空气墙：只挡人，不挡子弹 / 视线 / 手雷（见 `Collider.ghost`）。
+   * 舷墙上方那段「看不见的加高挡板」必须用它，否则两侧低处的天空会留下弹孔。
+   */
+  ghost?: boolean;
   cast?: boolean;
   receive?: boolean;
 }
@@ -331,6 +398,26 @@ export function buildLevel(scene: THREE.Scene): Level {
    * 高 metalness 的表面会渲染成死黑（只能反射到黑色）。0.2~0.3 之间还能靠
    * 直接光照出一点金属感，再高就开始发暗。
    */
+  /**
+   * 集装箱配色 —— **照三张实景角度图取的冷调工业漆**。
+   *
+   * 上一版是沙黄 / 卡其 / 锈橙，暖色占了大半，俯视一眼像货场而不是货轮。
+   * 实景里箱体压倒性是**米白**，其次军绿 / 深绿，再夹几只蓝灰和卡其。
+   * 顺序也照这个权重排 —— 五色里 bone 用得最多，slate / sand 是点缀。
+   * （上一版的锈橙整条删了：「锈」在俯视图里是暖橙色，而这张图的箱体没有
+   * 一只是那么暖的，留着反而把整片甲板往暖调拖。）
+   *
+   * ⚠️ 这里给的是**材质色**，显示出来会乘上 `texContainer` 的亮度（约 0.85，
+   * 波纹的暗部），所以每个值都比目标颜色亮一档。直接填截图里的 hex 会暗半级。
+   */
+  const PAINT = {
+    bone: 0,
+    olive: 1,
+    moss: 2,
+    slate: 3,
+    sand: 4,
+  } as const;
+
   const materials = {
     // ⚠️ 带贴图的材质一律 `color: 0xffffff`。
     //
@@ -344,11 +431,21 @@ export function buildLevel(scene: THREE.Scene): Level {
     metal: new THREE.MeshStandardMaterial({ map: texMetal, color: 0xffffff, roughness: 0.55, metalness: 0.3 }),
     steel: new THREE.MeshStandardMaterial({ color: 0x8d959d, roughness: 0.58, metalness: 0.3 }),
     dark: new THREE.MeshStandardMaterial({ color: 0x3b434a, roughness: 0.9, metalness: 0.15 }),
+    /** 甲板中线：CF 运输船甲板正中那条浅色通道带，俯视最直接的识别物 */
+    marking: new THREE.MeshStandardMaterial({ color: 0xc0bda9, roughness: 0.85, metalness: 0.1 }),
+    /** 吊机桁架：实景里那只吊是**黄色**的，是全图唯一的高饱和色，当路标用 */
+    crane: new THREE.MeshStandardMaterial({ color: 0xd8a521, roughness: 0.62, metalness: 0.22 }),
     containers: [
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0xc44f36, roughness: 0.74, metalness: 0.2 }),
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x3a76a8, roughness: 0.74, metalness: 0.2 }),
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x378c60, roughness: 0.74, metalness: 0.2 }),
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0xd39c2a, roughness: 0.74, metalness: 0.2 }),
+      // bone：米白，实景里占一半以上
+      new THREE.MeshStandardMaterial({ map: texContainer, color: 0xe2dccb, roughness: 0.78, metalness: 0.18 }),
+      // olive：军绿
+      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x76805c, roughness: 0.78, metalness: 0.18 }),
+      // moss：深绿，实景里那几只压在阴影里的箱子
+      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x50604a, roughness: 0.78, metalness: 0.18 }),
+      // slate：蓝灰，实景里少数几只
+      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x5c6874, roughness: 0.7, metalness: 0.26 }),
+      // sand：卡其，实景里那只偏黄的旧柜
+      new THREE.MeshStandardMaterial({ map: texContainer, color: 0xc0b195, roughness: 0.78, metalness: 0.18 }),
     ],
   };
 
@@ -381,26 +478,37 @@ export function buildLevel(scene: THREE.Scene): Level {
         max: { x: x + w / 2, y: y0 + h, z: z + d / 2 },
         pen: options.pen === true,
         surf: options.surf ?? 'metal',
+        ghost: options.ghost === true,
       });
     }
 
     return mesh;
   }
 
-  // 集装箱共用一份几何体：同尺寸的箱子有 20 多个，各建一份是纯浪费显存
+  // 集装箱共用几何体：同尺寸的箱子有十几只，各建一份是纯浪费显存
   const containerGeometry = new THREE.BoxGeometry(CW, CH, CL);
 
-  function container(x: number, z: number, level: number, colorIndex: number): void {
+  /**
+   * 放一只集装箱。
+   *
+   * `alongX` 是**绕 y 轴转 90°**，不是斜放 —— 所以碰撞盒只是把宽深互换，
+   * 依然是精确的 AABB，物理层一行都不用动（斜放才是禁区，见文件头）。
+   */
+  function container(x: number, z: number, level: number, colorIndex: number, options: { alongX?: boolean } = {}): void {
+    const { alongX = false } = options;
     const y0 = level * CH;
-    const mesh = new THREE.Mesh(containerGeometry, materials.containers[colorIndex % 4]!);
+    const mesh = new THREE.Mesh(containerGeometry, materials.containers[colorIndex]!);
+    if (alongX) mesh.rotation.y = Math.PI / 2;
     mesh.position.set(x, y0 + CH / 2, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     root.add(mesh);
 
+    const halfX = alongX ? CL / 2 : CW / 2;
+    const halfZ = alongX ? CW / 2 : CL / 2;
     colliders.push({
-      min: { x: x - CW / 2, y: y0, z: z - CL / 2 },
-      max: { x: x + CW / 2, y: y0 + CH, z: z + CL / 2 },
+      min: { x: x - halfX, y: y0, z: z - halfZ },
+      max: { x: x + halfX, y: y0 + CH, z: z + halfZ },
       pen: false,
       surf: 'metal',
     });
@@ -413,72 +521,57 @@ export function buildLevel(scene: THREE.Scene): Level {
   // 甲板：顶面正好 y = 0
   block(0, 0, HALF_W * 2, 2.2, HALF_L * 2, materials.deck, { y0: -2.2, surf: 'metal' });
 
-  // 舷侧：看得见 1.35 米高的挡板，碰撞体做到 5.35 米高 ——
-  // 目的是「跳不出去掉进海里」，而不是视觉上真的有一堵墙
-  block(-HALF_W, 0, 0.8, 1.35, HALF_L * 2, materials.rail, { y0: 0 });
-  block(HALF_W, 0, 0.8, 1.35, HALF_L * 2, materials.rail, { y0: 0 });
-  block(-HALF_W, 0, 0.8, 4.0, HALF_L * 2, materials.hull, { y0: 1.35, visible: false });
-  block(HALF_W, 0, 0.8, 4.0, HALF_L * 2, materials.hull, { y0: 1.35, visible: false });
+  // 甲板中线：CF 运输船甲板正中那条浅色通道带。俯视是这张图最直接的识别物，
+  // 第一人称下它还会在跑动时提供速度参照（纯色甲板跑起来像原地踏步）。
+  // 0.02 米高、不碰撞不投影 —— 站上去既没有台阶感也不会挡子弹。
+  block(0, 0, 1.6, 0.02, HALF_L * 2 - 3, materials.marking, {
+    y0: 0,
+    collide: false,
+    cast: false,
+  });
+
+  // 舷侧：看得见 1.55 米高的挡板（实景里那道舷墙大概到胸口以上），
+  // 碰撞体做到 5.55 米高 —— 目的是「跳不出去掉进海里」，
+  // 而不是视觉上真的有一堵墙。上面那段**看不见**的 4 米必须标成 `ghost`：
+  // 只挡人、不挡子弹，否则朝两侧低处的天空开枪会在半空留下弹孔和火花。
+  block(-HALF_W, 0, 0.8, 1.55, HALF_L * 2, materials.rail, { y0: 0 });
+  block(HALF_W, 0, 0.8, 1.55, HALF_L * 2, materials.rail, { y0: 0 });
+  block(-HALF_W, 0, 0.8, 4.0, HALF_L * 2, materials.hull, { y0: 1.55, visible: false, ghost: true });
+  block(HALF_W, 0, 0.8, 4.0, HALF_L * 2, materials.hull, { y0: 1.55, visible: false, ghost: true });
 
   // 船头 / 船尾挡墙
   block(0, -HALF_L, HALF_W * 2, 5, 1.4, materials.hull, { y0: 0 });
   block(0, HALF_L, HALF_W * 2, 5, 1.4, materials.hull, { y0: 0 });
 
-  // 舷侧栏杆立柱（纯装饰，不挡人也不挡子弹）
+  // 舷墙顶上的立柱 + 一道通长横杆：实景里舷墙上面那道铁丝网的骨架。
+  // 纯装饰 —— 2.5 米高的杆子挡住子弹，玩家只会觉得子弹在空气里炸开
   for (let z = -HALF_L + 2; z <= HALF_L - 2; z += 2.6) {
-    block(-HALF_W + 0.15, z, 0.12, 0.9, 0.12, materials.steel, { collide: false, cast: false });
-    block(HALF_W - 0.15, z, 0.12, 0.9, 0.12, materials.steel, { collide: false, cast: false });
+    block(-HALF_W + 0.15, z, 0.1, 1.0, 0.1, materials.steel, { y0: 1.55, collide: false, cast: false });
+    block(HALF_W - 0.15, z, 0.1, 1.0, 0.1, materials.steel, { y0: 1.55, collide: false, cast: false });
   }
+  block(-HALF_W + 0.15, 0, 0.08, 0.08, HALF_L * 2 - 3, materials.steel, { y0: 2.5, collide: false, cast: false });
+  block(HALF_W - 0.15, 0, 0.08, 0.08, HALF_L * 2 - 3, materials.steel, { y0: 2.5, collide: false, cast: false });
 
   /* ============================================================
-     2. 集装箱阵列（左右镜像）
+     2. 两侧狙击台（对称）
 
-     每个货圈**两排**（原来是三排），删掉的是最靠近船头/船尾那排 —— 那一排
-     原本只用来「填满中段空旷甲板」，删了正好把交战距离压下来，掩体密度不变。
+     缩宽度的**唯一锚点**：台体 3.4 宽、楼梯 1.7 宽，两者的相对位置是定死的
+     （楼梯贴台体外侧、外沿比台面多出 0.5 米）。舷板内壁在 `HALF_W - 0.4`，
+     楼梯外沿要嵌进去 0.3 米，于是
 
-     箱子长 6.1 米，所以同一列相邻两排的中心距必须 > 6.1 + 0.8（人要能过去），
-     下面每组间距都是按这条算的，别随手改数字。
-     ============================================================ */
+         stairX + 0.85 = HALF_W - 0.4 + 0.3  ⇒  stairX = HALF_W - 0.95
+         cx = stairX - 1.35                  ⇒  cx     = HALF_W - 2.3
 
-  // 内圈 x = ±5.4，z 槽位 ±7 / ±17（±7 那排离中线近，向心端配三级攀爬）
-  const innerPlan = [
-    { z: 7, levels: 1 },
-    { z: 17, levels: 2 },
-    { z: -7, levels: 1 },
-    { z: -17, levels: 2 },
-  ];
-  for (let i = 0; i < innerPlan.length; i += 1) {
-    const plan = innerPlan[i]!;
-    const color = (i * 7 + 1) % 4;
-    container(5.4, plan.z, 0, color);
-    if (plan.levels >= 2) container(5.4, plan.z, 1, (color + 1) % 4);
-    container(-5.4, plan.z, 0, (color + 2) % 4);
-    if (plan.levels >= 2) container(-5.4, plan.z, 1, (color + 3) % 4);
-  }
+     宽度 26 → 22 之后 `cx` 必须从 ±10.7 挪到 ±8.7、楼梯从 ±12.05 挪到
+     ±10.05。只改 `HALF_W` 不改这里，台子会整块穿出船外。
 
-  // 外圈 x = ±11.7，z 槽位 ±13.5 / ±22
-  // ⚠️ 13.5 是下限：狙击台钢梯一直铺到 z = 9.6，再往里就撞上了
-  const outerPlan = [
-    { z: 13.5, levels: 1 },
-    { z: 22, levels: 2 },
-    { z: -13.5, levels: 1 },
-    { z: -22, levels: 2 },
-  ];
-  for (let i = 0; i < outerPlan.length; i += 1) {
-    const plan = outerPlan[i]!;
-    const color = (i * 5 + 3) % 4;
-    container(11.7, plan.z, 0, color);
-    if (plan.levels >= 2) container(11.7, plan.z, 1, (color + 2) % 4);
-    container(-11.7, plan.z, 0, (color + 1) % 4);
-    if (plan.levels >= 2) container(-11.7, plan.z, 1, (color + 3) % 4);
-  }
-
-  /* ============================================================
-     3. 两侧狙击台（对称）
+     （原来这一节前面还有一段「舷侧 40 尺货排」—— 每舷两只长箱贴舷墙。
+     用户 2026-11-13 明确要求去掉那四只箱子，整段连同 `CL40` / `long`
+     选项一起删了。现在两条长边是空甲板，掩体全靠中路散货和两座台。）
      ============================================================ */
 
   function sniperDeck(side: number): void {
-    const cx = side * 10.7;
+    const cx = side * 8.7;
     // 台体：3.4 宽 × 3.2 高 × 10 长（尺寸不跟地图缩，和人物比例对齐）
     block(cx, 0, 3.4, 3.2, 10.0, materials.steel, { y0: 0, surf: 'metal' });
 
@@ -497,7 +590,7 @@ export function buildLevel(scene: THREE.Scene): Level {
     for (const zSign of [1, -1] as const) {
       for (let s = 0; s < steps; s += 1) {
         const z0 = zSign * (5 + s * run + run / 2);
-        block(side * 12.05, z0, 1.7, rise * (steps - s), run, materials.steel, { y0: 0 });
+        block(side * 10.05, z0, 1.7, rise * (steps - s), run, materials.steel, { y0: 0 });
       }
     }
   }
@@ -505,37 +598,84 @@ export function buildLevel(scene: THREE.Scene): Level {
   sniperDeck(-1);
 
   /* ============================================================
-     4. 龙门吊（两根立柱有碰撞，横梁纯装饰）
+     3. 船头吊机（照实景：立在船头一角的黄色格构吊臂）
+
+     旧版是全宽龙门吊，两根立柱在 x = ±12.7、横梁在 z = 0 —— 俯视像一座
+     门框扣在船上。实景里根本没有这东西：那只吊**立在船头一角**，桁架臂
+     斜伸到甲板上方，是整个剪影里最醒目的一笔，也是全图唯一的高饱和黄。
+
+     底座贴着船头挡墙（内壁 -21.3）站，**进深只做 1.2 米**：底座前沿
+     z = -20.3，而人机重生最靠前能到 z = -19.9（出生线 -19 再叠 -0.5 的
+     随机偏移，加 0.4 半径），留 0.4 米余量。这块必须让开，否则人机会
+     直接复活在吊机肚子里。
      ============================================================ */
 
-  block(-12.7, 0, 0.6, 9, 0.6, materials.steel, { y0: 0 });
-  block(12.7, 0, 0.6, 9, 0.6, materials.steel, { y0: 0 });
-  block(0, 0, 26, 0.9, 1.1, materials.steel, { y0: 9, collide: false });
-  block(0, 0, 26, 0.3, 0.5, materials.dark, { y0: 8.7, collide: false, cast: false });
-  // 吊具
-  block(3, 0, 2.4, 1.2, 2.4, materials.dark, { y0: 6.4, collide: false });
-  block(3, 0, 0.1, 2.0, 0.1, materials.steel, { y0: 7.6, collide: false, cast: false });
+  block(-9.7, -20.9, 2.2, 0.6, 1.2, materials.dark, { y0: 0 });
+  block(-9.7, -20.9, 0.85, 12.6, 0.85, materials.crane, { y0: 0.6 });
+
+  /**
+   * 吊臂：局部 +x 是臂长方向，整组只做一次 yaw（指向甲板）和一次轻微俯角。
+   *
+   * `rotation.y = -0.96` ⇒ 臂指向 (+x, +z) 约 55°，18 米长的臂尖落在
+   * (0.7, -6.1) 的甲板上方 11.4 米 —— 正中偏船头，和实景那张斜角图一致。
+   * 这一组**不进碰撞表**（Group 里的 Mesh 不经过 `block()`），所以旋转
+   * 是绝对安全的，不会碰到「斜放箱体」那条禁区。
+   */
+  const boom = new THREE.Group();
+  boom.position.set(-9.7, 12.6, -20.9);
+  boom.rotation.y = -0.96;
+  boom.rotation.z = -0.06; // 微微下垂：吊着载的臂不会是水平的
+  root.add(boom);
+
+  const BOOM_LEN = 18;
+  // 四根主弦杆
+  const chordGeometry = new THREE.BoxGeometry(BOOM_LEN, 0.13, 0.13);
+  for (const dy of [-0.55, 0.55]) {
+    for (const dz of [-0.55, 0.55]) {
+      const chord = new THREE.Mesh(chordGeometry, materials.crane);
+      chord.position.set(BOOM_LEN / 2, dy, dz);
+      chord.castShadow = true;
+      boom.add(chord);
+    }
+  }
+  // 横撑：每 2.2 米一道，只做左右两侧的立杆。四面全做是三十多个 draw call，
+  // 而俯视/第一人称都看不出差别
+  const braceGeometry = new THREE.BoxGeometry(0.1, 1.1, 0.1);
+  for (let i = 0; i < 8; i += 1) {
+    for (const dz of [-0.55, 0.55]) {
+      const brace = new THREE.Mesh(braceGeometry, materials.crane);
+      brace.position.set(1.8 + i * 2.2, 0, dz);
+      boom.add(brace);
+    }
+  }
+  // 吊钩：钢丝绳 + 滑轮组，纯视觉
+  const cable = new THREE.Mesh(new THREE.BoxGeometry(0.07, 4.2, 0.07), materials.dark);
+  cable.position.set(15, -2.1, 0);
+  boom.add(cable);
+  const hook = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.9), materials.crane);
+  hook.position.set(15, -4.7, 0);
+  hook.castShadow = true;
+  boom.add(hook);
 
   /* ============================================================
-     5. 掩体：木箱可穿，铁箱不可穿
+     4. 掩体：木箱可穿，铁箱不可穿
 
-     布局按「出生掩体 → 过渡场 → 开阔带 → 中央 crossing」分层，
-     全图关于原点**中心对称**（转 180° 两边互换），双方条件一致：
+     全图关于原点**中心对称**（转 180° 两边互换），双方条件一致。
+     这一版照实景重排，最大的区别是**「关卡掩体」换成了「散货」**：
+     上一版有两条对称的错位方箱斜带 + 四组攀爬阶梯 + 一圈铁箱，俯视是一张
+     对称图案；实景中段就是一大片空甲板加几只散箱。图案感越强越不像货轮。
 
-     - 中央一只集装箱横在 z=0：旧版 x=0 一线从出生点到出生点 46 米
-       完全通视（midCover 都在 ±2.4~±3.0，不在轴线上），AWM 能从船头
-       架到船尾 —— 「蹲守点」的根源。这只箱是唯一的大件遮挡。
-     - 内圈箱的向心端配三级攀爬（木箱 1.0 → 铁箱 1.9 → 箱顶 2.6，
-       落差 1.0/0.9/0.7 都在跳高 1.09m 内）。位置从旧版 (±2.5/±3.7,
-       ±4.8) 挪到 (±5.4, ±2.0/±3.3)：旧位置插在 crossing 出口把通道
-       挤窄，而且铁箱嵌进集装箱 0.25 米、和木箱叠 0.1 米（穿模）；
-       新位置面对面贴合、零嵌叠，也不占 crossing 的 2.8 米通道。
-     - 两片过渡场（z≈±4~10、±14~20）各放一对**斜错位**低箱+铁箱打断
-       场内长通视；开阔带（z≈±10~14）刻意全空 —— 正面交火发生在这里，
-       形成「掩体—开阔—掩体」的节奏。
-     - 侧巷（内圈箱与狙击台/外圈箱之间）各留两件掩体。坐标必须让
-       导航格心（x=8.25 / 9.75）落进缝隙，否则 Bot 的泛洪会把整条
-       巷判成不可达，永远只走中路。
+     ⚠️ 缩到 22 米宽之后，**所有 x 坐标都受导航格约束**：格子 1.5 米一格、
+     中心在 x = 0, ±1.5, ±3 …，`blockedAt` 还要吃 0.45 米半径。一件箱子的
+     外沿落在 x = 5.55 附近时，x = 6 那一格的判定就会连带被挡掉 —— 于是
+     「物理上 1.5 米能过人、导航却判整条巷不可达」，Bot 从此只走中路。
+     中段散货一律压在外沿 ≤ 5.3（x = 6 那格留空），就是为了这个。
+
+     - 中央（z ≈ 0）：一只**横放**的 20 尺箱拦腰截断出生对狙 —— 38 米直线
+       上 AWM 一枪 100 点，这条线不截掉就没法玩。
+     - 中场：三只 20 尺箱散放（两只平行、一只垂直），另有两摞木箱。
+     - 出生区（z ≈ ±16~17）：一只铁箱守正中 + 一只木箱偏侧。实景的出生段
+       基本是空的，别堆成迷宫。
      ============================================================ */
 
   function crate(x: number, z: number, size: number, height: number): void {
@@ -546,56 +686,67 @@ export function buildLevel(scene: THREE.Scene): Level {
     block(x, z, size, height, size, materials.metal, { y0: 0, pen: false, surf: 'metal' });
   }
 
-  // 中央 crossing：一只集装箱横在船中，拦腰截断出生对狙的 46 米通视，
-  // 两侧各留 2.8 米通道绕行
-  container(0, 0, 0, 1);
+  // 中央：横着的 20 尺箱（长轴沿 x，占 x ±3.05 / z ±1.3）。
+  // 两侧各留 3.95 米到狙击台内壁 —— 缩图后仍是全图最宽的一条横截面。
+  container(0, 0, 0, PAINT.bone, { alongX: true });
 
-  // 攀爬阶梯：贴内圈箱向心端，木箱→铁箱→箱顶；所有接触面贴合不嵌叠
-  function climbSet(sx: number, sz: number): void {
-    crate(sx * 5.4, sz * 2.0, 1.3, 1.0);
-    metalBox(sx * 5.4, sz * 3.3, 1.3, 1.9);
-  }
-  climbSet(1, 1);
-  climbSet(-1, 1);
-  climbSet(1, -1);
-  climbSet(-1, -1);
+  /**
+   * 攀爬链（180° 对称）：木箱 1.0 → 铁箱 1.9 → 箱顶 2.6，落差 0.9 / 0.7，
+   * 都跳得上去（跳高 1.09）。
+   *
+   * 三级**必须面贴面**：木箱左沿 = 铁箱右沿 = 4.15，铁箱左沿 = 箱体端面 = 3.05。
+   * 中间只要漏出 0.5 米，自动上台阶就够不着，人会掉进两道箱子的夹缝里 ——
+   * 那正是「卡在缝里」这类 bug 的经典形状。
+   *
+   * 尺寸从 1.3 收到 **1.1**：最外沿 5.25，离台体内壁 7.0 还剩 1.75 米，
+   * 正好让 x = 6 那一格导航通过（见本节开头）。
+   */
+  crate(4.7, 0, 1.1, 1.0);
+  metalBox(3.6, 0, 1.1, 1.9);
+  crate(-4.7, 0, 1.1, 1.0);
+  metalBox(-3.6, 0, 1.1, 1.9);
 
-  // 近场（z≈±4~10）：低箱 + 铁箱斜错摆放，两侧绕行空间都 ≥2 米
-  crate(-2.2, 6.6, 1.5, 1.05);
-  metalBox(2.5, 8.2, 1.6, 1.9);
-  crate(2.2, -6.6, 1.5, 1.05);
-  metalBox(-2.5, -8.2, 1.6, 1.9);
+  /**
+   * 散货：三对 20 尺箱，180° 对称。
+   *
+   * 实景里中段的箱子是**斜着散**的。这里用「一只平行 + 一只垂直」错开，
+   * 而不是真旋转 —— 真旋转要动 `collideAt` / `rayWorld` / `pushAxis`，
+   * 是「偶发瞬移」那条 bug 的重灾区，收益配不上风险（见文件头）。
+   */
+  container(4.0, 5.8, 0, PAINT.moss);
+  container(-4.0, -5.8, 0, PAINT.moss);
+  container(2.2, 12.4, 0, PAINT.slate, { alongX: true });
+  container(-2.2, -12.4, 0, PAINT.slate, { alongX: true });
+  container(-5.6, 10.6, 0, PAINT.sand);
+  container(5.6, -10.6, 0, PAINT.sand);
 
-  // 开阔带（z≈±10~14）：不放任何东西
+  /**
+   * 木箱：实景里中路散着几摞小木箱，是唯一「踩着能上箱顶」的矮掩体。
+   *
+   * ⚠️ 角落那两只是**贴死舷板**的：外沿 10.5，舷板内壁 10.6，中间 0.1 米
+   * 进不去人，不会留出一条钻得进出不来的缝。
+   */
+  crate(-1.9, 5.6, 1.4, 1.05);
+  crate(1.9, -5.6, 1.4, 1.05);
+  crate(9.9, 12.4, 1.2, 0.95);
+  crate(-9.9, -12.4, 1.2, 0.95);
 
-  // 远场（z≈±14~20）：同样斜错；低箱贴内圈箱内壁，读作「靠箱堆放」
-  metalBox(1.9, 16.2, 1.6, 1.9);
-  crate(-3.45, 15.8, 1.3, 1.05);
-  metalBox(-1.9, -16.2, 1.6, 1.9);
-  crate(3.45, -15.8, 1.3, 1.05);
+  // 楼梯口：接在台阶末端（台阶铺到 z = 9.6），挡楼梯下来的人正面视线。
+  // 刻意错开台阶本身，不占 z ∈ [5, 9.6] 的下台落脚区
+  metalBox(8.4, 10.2, 1.2, 1.6);
+  metalBox(-8.4, -10.2, 1.2, 1.6);
 
-  // 侧巷掩体：铁箱守楼梯脚（x=10.5 贴梯不堵巷），木箱守巷口
-  // （x=9.55 贴外圈箱外壁，留出 x∈[6.7,8.9] 的通行带）
-  metalBox(10.5, 8.0, 1.2, 1.6);
-  crate(9.55, 14.8, 1.3, 1.0);
-  metalBox(-10.5, -8.0, 1.2, 1.6);
-  crate(-9.55, -14.8, 1.3, 1.0);
-
-  // 出生点掩体：旧版 x=0 出生位正前方完全裸奔，正中补一只铁箱
-  // （1.9 米高，蹲站都藏得住；离最近出生位 ≥2.6 米，复活不卡模）
-  crate(2.6, 20.5, 1.6, 1.05);
-  crate(-2.6, 20.5, 1.6, 1.05);
-  crate(2.6, -20.5, 1.6, 1.05);
-  crate(-2.6, -20.5, 1.6, 1.05);
-  metalBox(0, 19.4, 1.5, 1.9);
-  metalBox(0, -19.4, 1.5, 1.9);
-  metalBox(-8.2, 20, 1.5, 1.9);
-  metalBox(8.2, 20, 1.5, 1.9);
-  metalBox(-8.2, -20, 1.5, 1.9);
-  metalBox(8.2, -20, 1.5, 1.9);
+  // 出生区掩体。⚠️ 六个出生位（x = ±7.6 / ±5.2 / ±1.8）的正前方都要留空，
+  // 这两件只能挡斜向枪线，不能挡复活后第一步（x = 0 / ±4.2 附近就是因此留空
+  // 的，见 `SPAWN_X`）。木箱前沿 17.7，人机最靠前复活在 18.1（出生线 19 − 0.5
+  // 偏移 − 0.4 半径），留 0.4 米余量。
+  metalBox(0, 16.0, 1.6, 1.9);
+  metalBox(0, -16.0, 1.6, 1.9);
+  crate(4.2, 17.0, 1.4, 1.05);
+  crate(-4.2, -17.0, 1.4, 1.05);
 
   /* ============================================================
-     6. 出生点
+     5. 出生点
      ============================================================ */
 
   for (const x of SPAWN_X) {
@@ -604,7 +755,7 @@ export function buildLevel(scene: THREE.Scene): Level {
   }
 
   /* ============================================================
-     7. 环境：天空球 / 海面 / 远景港口
+     6. 环境：天空球 / 海面 / 远景港口
      ============================================================ */
 
   const sky = new THREE.Mesh(
@@ -639,7 +790,7 @@ export function buildLevel(scene: THREE.Scene): Level {
   }
 
   /* ============================================================
-     8. 光照
+     7. 光照
      ============================================================ */
 
   // 天光：上蓝下灰，负责「阴影里也看得见东西」。
@@ -651,10 +802,13 @@ export function buildLevel(scene: THREE.Scene): Level {
   sun.position.set(46, 58, 24);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -36;
-  sun.shadow.camera.right = 36;
-  sun.shadow.camera.top = 36;
-  sun.shadow.camera.bottom = -36;
+  // 包住 22 × 44 的甲板：对角半径 = √(11² + 22²) ≈ 24.6，取 30（≈1.2 倍余量）。
+  // 改船长 / 船宽之后这里必须跟着走，不然远端集装箱会掉出阴影相机、
+  // 影子直接消失
+  sun.shadow.camera.left = -30;
+  sun.shadow.camera.right = 30;
+  sun.shadow.camera.top = 30;
+  sun.shadow.camera.bottom = -30;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 220;
   sun.shadow.bias = -0.0006;
@@ -665,7 +819,7 @@ export function buildLevel(scene: THREE.Scene): Level {
   scene.add(sun.target);
 
   /* ============================================================
-     9. 导航网格
+     8. 导航网格
      ============================================================ */
 
   const nav = buildNav(colliders);
@@ -840,7 +994,7 @@ function buildNav(colliders: readonly Collider[]): NavGrid {
  * 最近的可走格点。
  *
  * 掉出船体 / 坐标被写成 NaN 时用。**不回出生点** —— 死亡已经够打断节奏了，
- * 再让人从船头重跑一趟就是「跑马拉松」。线性扫全表（18×34 ≈ 600 格）只在
+ * 再让人从船头重跑一趟就是「跑马拉松」。线性扫全表（15×29 ≈ 435 格）只在
  * 出错时调一次，不值得为它建索引。
  */
 export function nearestWalkablePoint(

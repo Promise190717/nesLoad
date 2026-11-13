@@ -21,6 +21,14 @@ export interface Collider extends Aabb {
   /** 木箱可穿透（伤害 ×0.4） */
   pen: boolean;
   surf: Surface;
+  /**
+   * 「空气墙」：**只挡人**，子弹 / 视线 / 手雷射线一律穿过。
+   *
+   * 舷墙上方那段看不见的加高碰撞体用它（见 `level.ts`）—— 那里视觉上就是
+   * 天空，子弹打过去应该直接飞走，而不是在半空留下弹孔和火花。
+   * 移动碰撞（`collideAt`）不看这个标记，所以人依然跳不出船。
+   */
+  ghost?: boolean;
 }
 
 /** 会动的东西（玩家、Bot、手雷）。`pos` 是**脚底**位置。 */
@@ -342,6 +350,8 @@ export function rayWorld(
 
   for (let i = 0; i < colliders.length; i += 1) {
     const collider = colliders[i]!;
+    // 空气墙只挡人（移动走 `collideAt`），射线当作不存在
+    if (collider.ghost) continue;
     const result = rayBox(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, collider, bestT);
     if (result && result.t > minT && result.t < bestT) {
       bestT = result.t;

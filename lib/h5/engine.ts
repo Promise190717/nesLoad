@@ -32,7 +32,6 @@ import {
   ACTOR_YAW,
   ACTOR_Z,
   F_ALIVE,
-  F_CROUCH,
   F_GROUND,
   F_HUMAN,
   F_LOADOUT,
@@ -45,7 +44,6 @@ import {
   INPUT_HZ,
   IN_AIM,
   IN_AIM_PRESSED,
-  IN_CROUCH,
   IN_CYCLE_NEXT,
   IN_CYCLE_PREV,
   IN_FIRE,
@@ -296,10 +294,9 @@ interface NetLink {
   player: Player;
   view: ActorView;
   deps: PlayerDeps;
-  /** 持续量：前后左右 / 蹲 / 走 / 开火 / 开镜 */
+  /** 持续量：前后左右 / 走 / 开火 / 开镜 */
   forward: number;
   right: number;
-  crouch: boolean;
   walk: boolean;
   fire: boolean;
   aim: boolean;
@@ -673,6 +670,8 @@ export class ShipGame {
     this.botSerial += 1;
     bot.pos.copy(spawn);
     bot.respawn(new THREE.Vector3(spawn.x, spawn.y, spawn.z), 3);
+    // 和真人复活同一条朝向规则：面朝敌方复活点
+    bot.yaw = this.spawnFacingYaw(team, spawn);
 
     const view = createActorView(team, 'bot', gun);
     view.group.position.copy(bot.pos);
@@ -868,40 +867,51 @@ export class ShipGame {
      ============================================================ */
 
   /**
+   * 每个角色上一次站过的出生位。候选点就是 `level.spawns` 里那 6 个对象，
+   * 所以直接比引用，不用存下标（下标会随 `SPAWN_X` 调整而错位）。
+   */
+  private readonly lastSpawn = new WeakMap<Actor, THREE.Vector3>();
+
+  /**
    * 复活选点：**只在本方出生线**（= 己方最后面那 3 米横带）里挑，绝不跨到
    * 中路或敌人家门口。真人和人机共用这一套（2026-11-13 用户：人机也得在自己家
    * 复活，否则玩家会看到敌人从背后凭空冒出来）。
    *
-   * 排点是**分层**的，不是简单加权：
-   *   ① 先比「被几个存活敌人看见」—— 从每个敌人眼睛向候选点胸口打射线，
-   *      全被场景几何挡住才算「看不见」；看见的人越少越安全，0 就是标准掩体后。
-   *   ② 看见人数相同，再比离最近敌人的距离（越远越好，30 米封顶）。
+   * 选点是**带权随机**，不是「越安全越优先」：
+   *   · 每个候选点先数「被几个存活敌人看见」—— 从敌人眼睛向候选点胸口打射线，
+   *     被场景几何挡住才算看不见；
+   *   · 权重 = 1 / (1 + 0.5 × 看见人数)：全遮挡 1，被 1 人看见 0.67，被 4 人
+   *     看见 0.33。掩护只影响概率，不会把半条出生线直接判死（更早的版本用
+   *     1/(1+seen)，5 个敌人全看见时权重掉到 1/6，等于「必须躲进掩体」）；
+   *   · **刚站过的那一格再乘 0.3**：连着两次从同一个角落冒出来正是用户
+   *     2026-11-13 第二次反馈的点（「不要总在复活点的角落复活」）。这里改成
+   *     软惩罚而不是硬排除 —— 出生线只有 6 格，硬排除会让下一次落点变成
+   *     「排除掉一个之后的 5 选 1」，反而更好猜。
    *
-   * 早期版本把遮挡和距离直接相加，会出现「掩体后但离敌人 3 米」输给「裸奔但
-   * 离敌人 25 米」的情况，复活瞬间就被远处狙击手点名；分层后只要存在全遮挡位
-   * 就一定选它，没有全遮挡位才退化成「暴露面最小的那个」。
+   * 曾经是严格分层（先比被看见人数，再比离最近敌人的距离）：6 个出生位里最外侧
+   * 的两个角落同时满足「狙击台帮它挡视线」和「离中场最远」，评分永远独占第一档 ——
+   * 玩家几乎每次都从同一个角落站起来。现在掩护只决定被抽中的**概率**。
    *
-   * 并列最优的候选里随机挑一个，避免每次复活都精确落在同一格。这里**不加**
-   * 随机偏移（Bot 在 `respawnBot` 里自己叠）—— 偏移可能把人推进掩体模型里。
+   * 出生线本身在 `level.ts` 里也收窄了（±9 → ±7.6），从源头去掉「甲板四个角」。
+   *
+   * 这里**不加**随机偏移（Bot 在 `respawnBot`、玩家在 `respawnPlayer` 里自己叠）。
    *
    * `self` 是「谁要复活」：真人是 `this.player`，Bot 传自己。只用来从敌人名单
-   * 里排除自己，默认值让玩家那条路径不用改。
+   * 里排除自己、以及记住他上一格；默认值让玩家那条路径不用改。
    */
   private pickHomeSpawn(team: Team, self: Actor | null = this.player): THREE.Vector3 {
     const candidates = this.level.spawns[team];
     // 排除**自己**而不是固定排除玩家：Bot 复用时敌我判断不能漏掉玩家
     const enemies = this.actors.filter((a) => a !== self && a.alive && a.team !== team);
+    const last = self ? this.lastSpawn.get(self) : undefined;
 
-    let bestSeen = Infinity;
-    let bestNear = -Infinity;
-    let bestList: THREE.Vector3[] = [];
+    // 每个候选点的「被看见人数」→ 权重。场上没有活敌（开局 / 清场）时全是 0，
+    // 自然退化成出生线上 6 个点等概率随机
+    const weights: number[] = [];
+    let total = 0;
     for (const candidate of candidates) {
       let seen = 0;
-      let nearest = Infinity;
       for (const enemy of enemies) {
-        const dx = candidate.x - enemy.pos.x;
-        const dz = candidate.z - enemy.pos.z;
-        nearest = Math.min(nearest, Math.hypot(dx, dz));
         // 敌人眼睛 → 候选点胸口；打穿了才算暴露
         const blocked = this.lineBlocked(
           { x: enemy.pos.x, y: enemy.pos.y + 1.45, z: enemy.pos.z },
@@ -909,20 +919,24 @@ export class ShipGame {
         );
         if (!blocked) seen += 1;
       }
-      // 无活敌（开局/清场）时全是 Infinity，退化为均匀随机
-      const near = nearest === Infinity ? 999 : nearest;
-      if (seen < bestSeen) {
-        bestSeen = seen;
-        bestNear = near;
-        bestList = [candidate];
-      } else if (seen === bestSeen && near > bestNear + 0.5) {
-        bestNear = near;
-        bestList = [candidate];
-      } else if (seen === bestSeen && near > bestNear - 0.5) {
-        bestList.push(candidate);
-      }
+      let weight = 1 / (1 + seen * 0.5);
+      if (candidate === last) weight *= 0.3;
+      weights.push(weight);
+      total += weight;
     }
-    return bestList[randInt(0, bestList.length - 1)] ?? candidates[0]!;
+
+    const remember = (spawn: THREE.Vector3): THREE.Vector3 => {
+      if (self) this.lastSpawn.set(self, spawn);
+      return spawn;
+    };
+
+    let roll = rand(0, total);
+    for (let i = 0; i < candidates.length; i += 1) {
+      roll -= weights[i]!;
+      if (roll <= 0) return remember(candidates[i]!);
+    }
+    // 浮点误差兜底
+    return remember(candidates[candidates.length - 1] ?? candidates[0]!);
   }
 
   /** 两点间视线是否被场景几何挡住。`from` 是眼睛高度，`to` 是胸口高度。 */
@@ -938,28 +952,31 @@ export class ShipGame {
   }
 
   /**
-   * 复活朝向：面对最近的存活敌人（掩体就在这条视线上，探头即接敌）；
-   * 场上没有敌人（开局清场等）就朝对方出生线 —— 和地图设计的攻防方向一致。
+   * 复活朝向：**始终面对敌方出生线**（地图的攻防轴）。
+   *
+   * 曾经是「朝向最近的存活敌人」—— 敌人绕到侧翼时，玩家一复活就被迫看着侧面，
+   * 甚至背对敌方出生线，起身第一件事是转回来找方向。现在固定朝敌方复活点中心：
+   * 从自己的家看对面的家，和地图设计的攻防方向一致，也方便玩家一眼判断该往哪推。
    *
    * 位置、朝向、相机在 `respawn` 一次设齐：死亡相机从甲板拉起来的那 0.45s
    * 里玩家位置已经就位，不存在「先出现在旧位置再瞬移」。
    */
   private spawnFacingYaw(team: Team, from: THREE.Vector3): number {
-    let nearest: { x: number; z: number } | null = null;
-    let bestDist = Infinity;
-    for (const actor of this.actors) {
-      if (actor === this.player || !actor.alive || actor.team === team) continue;
-      const dx = actor.pos.x - from.x;
-      const dz = actor.pos.z - from.z;
-      const d = dx * dx + dz * dz;
-      if (d < bestDist) {
-        bestDist = d;
-        nearest = { x: actor.pos.x, z: actor.pos.z };
-      }
+    const enemySpawns = this.level.spawns[team === 0 ? 1 : 0];
+    if (enemySpawns.length === 0) return team === 0 ? Math.PI : 0;
+
+    // 敌方出生线是一排点：取中点当「敌方复活点」，复活朝向不随己方出生位乱歪
+    let tx = 0;
+    let tz = 0;
+    for (const spawn of enemySpawns) {
+      tx += spawn.x;
+      tz += spawn.z;
     }
-    if (!nearest) return team === 0 ? Math.PI : 0;
+    tx /= enemySpawns.length;
+    tz /= enemySpawns.length;
+
     // 玩家前向 = (-sin yaw, -cos yaw)，反解 yaw 使前向指向目标
-    return Math.atan2(-(nearest.x - from.x), -(nearest.z - from.z));
+    return Math.atan2(-(tx - from.x), -(tz - from.z));
   }
 
   /**
@@ -972,8 +989,13 @@ export class ShipGame {
    */
   private respawnPlayer(): void {
     const spawn = this.pickHomeSpawn(this.player.team);
-    this.player.respawn(spawn);
-    this.player.yaw = this.spawnFacingYaw(this.player.team, spawn);
+    // 横向 ±0.8 的落脚偏移：出生位只有 6 格，不加偏移的话每次复活都精确站在
+    // 同一个坐标上，「又是这个点」的感觉比随机落点强得多。最外侧 ±7 离舷墙
+    // 内壁（±10.6）还有 3.6 米，0.8 推不进任何几何体。只偏 x 不偏 z —— z 上
+    // 一偏就可能站到出生线外，换枪窗口虽然按时间算，出生线仍然要保持整齐。
+    const pos = new THREE.Vector3(spawn.x + rand(-0.8, 0.8), spawn.y, spawn.z);
+    this.player.respawn(pos);
+    this.player.yaw = this.spawnFacingYaw(this.player.team, pos);
     this.player.pitch = 0;
     // 重生是瞬移，自检的基准点要跟着重置，否则每次复活都报一条假警
     this.dbg.ready = false;
@@ -993,7 +1015,10 @@ export class ShipGame {
    */
   private respawnBot(bot: Bot): void {
     const spawn = this.pickHomeSpawn(bot.team, bot);
-    bot.respawn(new THREE.Vector3(spawn.x + rand(-0.5, 0.5), spawn.y, spawn.z + rand(-0.5, 0.5)), 3);
+    const pos = new THREE.Vector3(spawn.x + rand(-0.5, 0.5), spawn.y, spawn.z + rand(-0.5, 0.5));
+    bot.respawn(pos, 3);
+    // 和真人同一条规则：复活瞬间朝敌方复活点，而不是保留上一次的朝向
+    bot.yaw = this.spawnFacingYaw(bot.team, pos);
   }
 
   /* ============================================================
@@ -1202,8 +1227,15 @@ export class ShipGame {
         });
       }
       // 别人的枪口焰也按他那把枪的口径走 —— 听见远处一声闷响 + 看见一团大火光，
-      // 就能判断出「那边是 AWM 还是 M4」
-      this.effects.spawnMuzzleFlash(muzzle, dir, { scale: feel.flashScale, life: feel.flashLife });
+      // 就能判断出「那边是 AWM 还是 M4」。
+      // ⚠️ 深度测试必须开、点光必须关：这是别人位置的火光，没有阴影的点光会穿过
+      // 掩体把这一侧照出一团光，加上透墙的 Sprite 就是「隔着箱子看火光找人」
+      this.effects.spawnMuzzleFlash(muzzle, dir, {
+        scale: feel.flashScale,
+        life: feel.flashLife,
+        depthTest: true,
+        light: false,
+      });
 
       // 曳光终点用本次击发的真实命中距离（调用方从 fireWeapon 结果里取最远的
       // t 传进来），没打中任何东西就画到默认射程 —— 与玩家自己那条曳光同款
@@ -1819,7 +1851,7 @@ export class ShipGame {
     // ① 摘人机
     this.removeBot(bot);
 
-    // ② 放真人：站在本方**安全复活点**（掩体后、远离交火），朝最近的敌人
+    // ② 放真人：站在本方**安全复活点**（掩体后、远离交火），朝敌方复活点
     const player = new Player({ id, name, team, local: false, primary });
     player.respawn(spawn);
     player.yaw = this.spawnFacingYaw(team, spawn);
@@ -1850,7 +1882,6 @@ export class ShipGame {
       deps,
       forward: 0,
       right: 0,
-      crouch: false,
       walk: false,
       fire: false,
       aim: false,
@@ -1906,7 +1937,6 @@ export class ShipGame {
     link.right = clamp(Number(input.r) || 0, -1, 1);
 
     const keys = typeof input.k === 'number' ? input.k : 0;
-    link.crouch = (keys & IN_CROUCH) !== 0;
     link.walk = (keys & IN_WALK) !== 0;
     link.fire = (keys & IN_FIRE) !== 0;
     link.aim = (keys & IN_AIM) !== 0;
@@ -1957,7 +1987,6 @@ export class ShipGame {
       const frame: InputFrame = {
         forward: stale ? 0 : link.forward,
         right: stale ? 0 : link.right,
-        crouch: link.crouch,
         walk: link.walk,
         fire: stale ? false : link.fire,
         firePressed: stale ? false : link.firePressed,
@@ -2060,11 +2089,10 @@ export class ShipGame {
     if (actor instanceof Player) {
       if (actor.scoped) flags |= F_SCOPED;
       if (actor.reloading) flags |= F_RELOADING;
-      if (actor.crouching) flags |= F_CROUCH;
       if (actor.canChangeLoadout) flags |= F_LOADOUT;
       if (actor.onGround) flags |= F_GROUND;
     } else {
-      // 人机不蹲、不开镜、不换弹。`onGround` 是私有的 —— 副本只用它算走路相位，
+      // 人机不开镜、不换弹。`onGround` 是私有的 —— 副本只用它算走路相位，
       // 给 1 就够了（人机不会飞）
       flags |= F_GROUND;
     }
@@ -2188,10 +2216,11 @@ export class ShipGame {
       this.player.updateNetMovement(dt, moveFrame, this.playerDeps);
     }
 
-    // 开火表现本地预测（枪声 / 枪口焰 / 后坐 / 曳光 / 破空声）
+    // 开火表现本地预测（枪声 / 枪口焰 / 后坐 / 曳光 / 破空声 / 挥砍动作）
     this.updateNetFireFeedback(dt, frame, frozen);
 
-    this.player.advanceVisual(dt);
+    // 挥砍的时间轴也在这里推进（只推画面，判定被 `meleeVisual` 关掉）
+    this.player.advanceVisual(dt, this.playerDeps);
 
     // 上行：一次性动作攒起来，到点一次性发（60Hz）。
     // 开火 / 开镜的**边沿**不等节拍：那是玩家手感的临界事件，多等 8~16ms
@@ -2242,7 +2271,6 @@ export class ShipGame {
     if (!session || this.netRole !== 'guest') return;
 
     let keys = 0;
-    if (frame.crouch) keys |= IN_CROUCH;
     if (frame.walk) keys |= IN_WALK;
     if (frame.fire) keys |= IN_FIRE;
     if (frame.aim) keys |= IN_AIM;
@@ -2298,13 +2326,14 @@ export class ShipGame {
 
     if (spec.kind === 'melee') {
       // 近战：轻击 = firePressed，重击 = 按住右键时的 aimPressed（和房主
-      // `handleMelee` 同一套判定）。本地只补一声破空 —— 刀本来就没有枪口焰，
-      // 挥砍的第一人称动画仍由房主回显驱动不了，维持现状
+      // `handleMelee` 同一套判定）。刀没有枪口焰，要补的是**整套挥砍动作 +
+      // 破空声** —— 以前只补一声 whoosh，加入者按下攻击时刀一动不动
       const heavy = frame.aim;
       const wants = frame.firePressed || (heavy && frame.aimPressed);
       if (!wants || this.netFireFeelCd > 0) return;
       this.netFireFeelCd = heavy ? (spec.heavyInterval ?? 1) : spec.interval;
-      gameAudio.knife(heavy);
+      // 纯画面：判定被 `meleeVisual` 关掉，命中/血量仍等房主的快照
+      this.player.playMeleeView(heavy);
       return;
     }
 
@@ -2332,7 +2361,14 @@ export class ShipGame {
         z: origin.z + dir.z * 0.6 - Math.sin(this.player.yaw) * 0.16,
       };
 
-    this.effects.spawnMuzzleFlash(muzzle, dir, { scale: feel.flashScale, life: feel.flashLife });
+    // 自己这一枪：枪口就在镜头前，关深度测试防止贴墙时火焰被墙切一半；
+    // 点光也只给自己 —— 本机位置在相机这边，不存在「光从掩体后面漏过来」
+    this.effects.spawnMuzzleFlash(muzzle, dir, {
+      scale: feel.flashScale,
+      life: feel.flashLife,
+      depthTest: false,
+      light: true,
+    });
     this.effects.spawnTracer(muzzle, {
       x: muzzle.x + dir.x * 60,
       y: muzzle.y + dir.y * 60,
@@ -2348,8 +2384,7 @@ export class ShipGame {
       this.player.yaw,
     );
     if (spec.sound) gameAudio.shot(spec.sound, { own: true });
-    const punchScale = this.player.crouching ? 0.85 : 1;
-    this.player.addPunch(feel.punchPitch * punchScale, feel.punchRoll * punchScale);
+    this.player.addPunch(feel.punchPitch, feel.punchRoll);
     if (feel.shake > 0) this.player.addShake(feel.shake);
     this.viewModel.triggerKick(feel.kick);
   }
@@ -2485,8 +2520,6 @@ export class ShipGame {
     player.height = clamp(num(wire, ACTOR_HEIGHT, 1.8), 0.9, 2);
     player.scoped = (flags & F_SCOPED) !== 0;
     player.reloading = (flags & F_RELOADING) !== 0;
-    // 蹲的姿态位照抄无害：本帧随后的 `applyCrouch` 按本地输入重新判定，永远赢
-    player.crouching = (flags & F_CROUCH) !== 0;
     player.netCanLoadout = (flags & F_LOADOUT) !== 0;
     const wireGrenades = num(wire, ACTOR_GRENADES, player.grenades);
     // 加入者不跑本地玩法：快照里雷少了一颗 = 房主刚把他手里那颗扔出去了。
@@ -2502,6 +2535,9 @@ export class ShipGame {
       player.weapon = wireWeapon;
       if (isPrimaryId(wireWeapon)) player.primary = wireWeapon;
       this.viewModel.setWeapon(wireWeapon);
+      // 房主换武器 = 他那边已经 `cancelMelee()` —— 本地补演的挥砍跟着作废，
+      // 否则刀刺到一半被切走，收势会挂在新武器的第一帧上
+      player.cancelMeleeView();
     }
     player.setNetAmmo(wireWeapon, num(wire, ACTOR_MAG, 0));
 
@@ -2547,6 +2583,10 @@ export class ShipGame {
       player.pos.set(x, y, z);
       player.vel.set(0, 0, 0);
       player.onGround = true;
+      // 房主快照不带视角，加入者的 yaw 是本地事实：复活这一帧按同一条规则
+      // （面朝敌方复活点）自己纠一次，否则会保留死亡瞬间的朝向
+      player.yaw = this.spawnFacingYaw(player.team, player.pos);
+      player.pitch = 0;
       this.deathCam.end();
     } else if (!alive && wasAlive) {
       this.beginGuestDeath();
@@ -2713,7 +2753,13 @@ export class ShipGame {
     if (spec.sound) gameAudio.shot(spec.sound, { x: origin.x, y: origin.y, z: origin.z });
     // 开枪那个人的第三人称模型播开火动画（自己走上面那条第一人称分支）
     this.actorViewOf(event.id)?.playFire();
-    this.effects.spawnMuzzleFlash(muzzle, dir, { scale: feel.flashScale, life: feel.flashLife });
+    // 别人的枪口焰：和房主 `onShot` 同一条规矩 —— 被箱子挡住，且不给场景点光
+    this.effects.spawnMuzzleFlash(muzzle, dir, {
+      scale: feel.flashScale,
+      life: feel.flashLife,
+      depthTest: true,
+      light: false,
+    });
     const endT = event.t > 0 ? Math.min(event.t, 90) : 60;
     this.effects.spawnTracer(muzzle, {
       x: origin.x + dir.x * endT,
@@ -3168,7 +3214,6 @@ export class ShipGame {
       grenades: player.grenades,
       reloading: player.reloading,
       scoped: player.scoped,
-      crouching: player.crouching,
       dead: !player.alive,
       respawnIn: player.alive ? 0 : Math.max(0, DEATH_TIMELINE.respawnAt - player.deathTime),
       deathPhase: player.alive ? 'alive' : deathPhaseAt(player.deathTime),

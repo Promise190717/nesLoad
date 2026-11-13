@@ -54,11 +54,10 @@ export default function ShipTouchControls({
   const stickPointer = useRef<number | null>(null);
 
   // 控制层卸载（死亡 / 换枪菜单 / 暂停都会整块摘掉）时，按住的虚拟输入必须清掉，
-  // 否则摇杆轴和蹲下会一直卡在「按下」，重生后角色自己往前跑
+  // 否则摇杆轴会一直卡在「按下」，重生后角色自己往前跑
   useEffect(() => {
     return () => {
       controller?.setMoveAxis(0, 0);
-      controller?.setCrouch(false);
       controller?.setAim(false);
       controller?.setFire(false);
     };
@@ -183,11 +182,6 @@ export default function ShipTouchControls({
           {/* 换枪：触屏上没有 B 键，所以用 `touch.buy` 而不是 `hud.spawnHint`
               （后者写的是「按 B 换枪」，在手机上不成立） */}
           <TouchButton label={h5Text(locale, 'touch.buy')} onTap={onOpenBuy} small />
-          <TouchButton
-            label={h5Text(locale, 'touch.crouch')}
-            onDown={() => controller?.setCrouch(true)}
-            onUp={() => controller?.setCrouch(false)}
-          />
           <TouchButton
             label={h5Text(locale, 'touch.aim')}
             onDown={() => controller?.setAim(true)}

@@ -175,7 +175,7 @@ export type JoinRejectReason = 'team-full' | 'match-ended' | 'already-joined' | 
  *   7  weapon    number  `WEAPON_ORDER` 的下标
  *   8  x         9 y      10 z
  *   11 yaw       12 pitch
- *   13 height    number  蹲下时变矮，命中盒跟着走
+ *   13 height    number  身高（本版恒定 1.8，字段保留不删：位号一动整包错位）
  *   14 deathTime number  死亡后经过的秒数（重生倒计时靠它）
  *   15 vx        16 vz   水平速度（给走路摆臂用，别让副本自己求导）
  *   17 mag       number  当前弹匣余量（只有本机 HUD 用得到）
@@ -232,8 +232,11 @@ export const F_HUMAN = 1 << 1;
 export const F_SCOPED = 1 << 2;
 /** 正在换弹 */
 export const F_RELOADING = 1 << 3;
-/** 蹲着 */
-export const F_CROUCH = 1 << 4;
+/**
+ * ⚠️ `1 << 4` 曾经是「蹲着」。蹲下功能已整体移除（2026-11-13），这一位**空着不复用**：
+ * Service Worker 会把旧前端缓存下来，老客户端仍按旧位图收发，位号一挪就会把
+ * 「蹲」读成别的状态。同理见 `IN_*` 的 `1 << 0`。
+ */
 /** 当前有换枪资格（复活 5 秒内且未开过枪） */
 export const F_LOADOUT = 1 << 5;
 /** 站在地上（副本推进走路相位要用） */
@@ -312,7 +315,7 @@ export type InputWire = {
   k: number;
 };
 
-export const IN_CROUCH = 1 << 0;
+/** ⚠️ `1 << 0` 曾是「蹲下」，已移除 —— 空位保留，别把后面的位往前挪（旧缓存的客户端仍按旧位图收发）。 */
 export const IN_WALK = 1 << 1;
 export const IN_FIRE = 1 << 2;
 export const IN_AIM = 1 << 3;

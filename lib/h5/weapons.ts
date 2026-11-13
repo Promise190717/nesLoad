@@ -45,8 +45,6 @@ export interface SpreadSpec {
   max: number;
   /** 满速移动时额外增加的散布 */
   move: number;
-  /** 蹲下的散布倍率（<1 = 更准） */
-  crouch: number;
   /** 空中的散布倍率 */
   air: number;
 }
@@ -213,7 +211,6 @@ const RIFLE_SPREAD = (base: number, perShot: number, max: number, move: number):
   perShot,
   max,
   move,
-  crouch: 0.62,
   air: 2.4,
 });
 
@@ -287,7 +284,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 3.5,
     perShell: false,
     pellets: 1,
-    spread: { base: 0.012, perShot: 0.02, max: 0.06, move: 0.06, crouch: 0.75, air: 3 },
+    spread: { base: 0.012, perShot: 0.02, max: 0.06, move: 0.06, air: 3 },
     recoil: { up: 3.4, side: 0.7, recover: 4.5 },
     // 全表最重的一档：枪模往后砸、枪口焰大且挂得久（0.09s 能看见「喷出来」而不是
     // 一闪）。侧倾 1.05° 是「一枪把人掀一下」的来源，衰减 60ms，不影响瞄准；
@@ -321,7 +318,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 0.55,
     perShell: true,
     pellets: 8,
-    spread: { base: 0.055, perShot: 0.006, max: 0.075, move: 0.012, crouch: 0.85, air: 1.6 },
+    spread: { base: 0.055, perShot: 0.006, max: 0.075, move: 0.012, air: 1.6 },
     recoil: { up: 2.6, side: 0.9, recover: 4 },
     // 12 号霰弹：枪模砸得比 AK 重、枪口焰最宽（8 颗弹丸一起出膛，火光本来就大）。
     // 泵动间隔 0.83s，所以侧倾可以给到 0.85° 而不至于连成抖动
@@ -374,7 +371,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 0,
     perShell: false,
     pellets: 1,
-    spread: { base: 0, perShot: 0, max: 0, move: 0, crouch: 1, air: 1 },
+    spread: { base: 0, perShot: 0, max: 0, move: 0, air: 1 },
     recoil: { up: 0, side: 0, recover: 1 },
     falloff: null,
     pen: 0,
@@ -405,7 +402,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 0,
     perShell: false,
     pellets: 1,
-    spread: { base: 0, perShot: 0, max: 0, move: 0, crouch: 1, air: 1 },
+    spread: { base: 0, perShot: 0, max: 0, move: 0, air: 1 },
     recoil: { up: 0, side: 0, recover: 1 },
     falloff: null,
     pen: 0,

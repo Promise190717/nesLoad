@@ -270,7 +270,7 @@ export interface Actor {
   vel: Vector3;
   /** 碰撞圆柱半径（判定盒是方柱，不是圆 —— 够用且便宜） */
   radius: number;
-  /** 当前身高（蹲下会变），命中盒跟着它走 */
+  /** 身高，命中盒跟着它走。蹲下功能已移除，现在全站恒定 1.8（快照仍带这一位） */
   height: number;
   yaw: number;
   pitch: number;
@@ -357,7 +357,6 @@ export interface HudSnapshot {
   grenades: number;
   reloading: boolean;
   scoped: boolean;
-  crouching: boolean;
 
   dead: boolean;
   /** 剩余重生秒数 */

@@ -494,9 +494,25 @@ export class Effects {
    *
    * `scale` / `life` 由武器表（`WeaponSpec.feel`）给：AWM 的焰要大一圈、挂 90ms，
    * M4 的小而短（42ms）—— 同一套表现参数下，口径差异才看得出来。
+   *
+   * ## 谁能「透墙」：只有本机自己的枪口
+   *
+   * 默认 `depthTest: true` —— 别人的枪口焰必须被集装箱正常挡住。之前整个池子
+   * 都关着深度测试（为了本机贴墙开枪时火焰不被墙切一半），代价是隔着箱子也能
+   * 看见对面开枪的那团光，等于送了一个「看火光找人」的透视。现在按**这一发是
+   * 谁**逐发决定：本机（第一人称枪口就在镜头前 0.6 米）传 false，其余一律 true。
+   *
+   * `light` 同理：被挡住的枪口光不该把甲板/箱体照亮（点光没有阴影，光会从掩体
+   * 里漏出来）。所以默认只在 `depthTest: false`（本机自己）时点灯；远处别人的
+   * 火光只画 Sprite，不给场景打光。
    */
-  spawnMuzzleFlash(point: Point3, dir: Point3, opts: { scale?: number; life?: number } = {}): void {
+  spawnMuzzleFlash(
+    point: Point3,
+    dir: Point3,
+    opts: { scale?: number; life?: number; depthTest?: boolean; light?: boolean } = {},
+  ): void {
     const size = rand(0.28, 0.42) * (opts.scale ?? 1);
+    const depthTest = opts.depthTest ?? true;
     this.takeFlash(
       this.flashes,
       this.flashCursor,
@@ -508,11 +524,15 @@ export class Effects {
       size,
       opts.life ?? 0.05,
       0xffffff,
+      depthTest,
     );
 
-    // 枪口光照亮枪身和近处环境。强度随焰的大小走，否则大狙和小手枪一样亮
-    this.muzzleLight.position.set(point.x, point.y, point.z);
-    this.muzzleLight.intensity = 45 * (opts.scale ?? 1);
+    // 枪口光照亮枪身和近处环境。强度随焰的大小走，否则大狙和小手枪一样亮。
+    // 只给「本机自己的枪」点灯：别人的位置在掩体后面，点光会穿过去把这一侧照亮
+    if (opts.light ?? !depthTest) {
+      this.muzzleLight.position.set(point.x, point.y, point.z);
+      this.muzzleLight.intensity = 45 * (opts.scale ?? 1);
+    }
   }
 
   /**
@@ -538,7 +558,7 @@ export class Effects {
     );
   }
 
-  /** 从池里取一个火光，改位置 / 尺寸 / 朝向 / 颜色。池满时覆盖最老的那个。 */
+  /** 从池里取一个火光，改位置 / 尺寸 / 朝向 / 颜色 / 是否被遮挡。池满时覆盖最老的那个。 */
   private takeFlash(
     pool: FlashEntry[],
     cursor: { index: number },
@@ -546,6 +566,7 @@ export class Effects {
     size: number,
     life: number,
     color: number,
+    depthTest = true,
   ): void {
     const entry = pool[cursor.index];
     cursor.index = (cursor.index + 1) % pool.length;
@@ -556,6 +577,10 @@ export class Effects {
     entry.material.rotation = Math.random() * Math.PI * 2;
     entry.material.color.setHex(color);
     entry.material.opacity = 1;
+    // 池子是本地/远端共用的，所以深度测试必须**逐发**设 —— 建池时写死会让
+    // 本机的贴墙火焰和别人的透墙火焰只能二选一。depthTest 是渲染状态不是
+    // shader 参数，逐发改不会触发材质重编。
+    entry.material.depthTest = depthTest;
     entry.life = life;
     entry.max = life;
   }
@@ -565,9 +590,10 @@ export class Effects {
       map: this.flashTexture,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      // 枪口焰关深度测试：贴墙开枪时枪口在墙里，关掉才不会「火焰被墙切一半」。
-      // 弹着点反过来 —— 它必须被掩体正常遮挡，否则隔着箱子也能看见对面墙上的
-      // 命中光点，那就成了「未命中却显示命中」的观感
+      // 初始值只是占位：枪口焰池在 `takeFlash` 里按「本机 / 别人」逐发设
+      // `material.depthTest`（本机 false 防贴墙切焰，别人 true 防透箱）。
+      // 弹着点池反过来 —— 它必须被掩体正常遮挡，否则隔着箱子也能看见对面墙上
+      // 的命中光点，那就成了「未命中却显示命中」的观感
       depthTest,
       transparent: true,
       opacity: 0,

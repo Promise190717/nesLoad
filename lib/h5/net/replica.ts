@@ -22,7 +22,6 @@ import {
   ACTOR_YAW,
   ACTOR_Z,
   F_ALIVE,
-  F_CROUCH,
   F_GROUND,
   F_HUMAN,
   F_LOADOUT,
@@ -72,7 +71,6 @@ export class ReplicaActor implements Actor {
   readonly target = new Vector3();
   targetVx = 0;
   targetVz = 0;
-  crouching = false;
   scoped = false;
   reloading = false;
   canChangeLoadout = false;
@@ -137,7 +135,6 @@ export class ReplicaActor implements Actor {
     this.mag = num(wire, ACTOR_MAG, 0);
     this.grenades = num(wire, ACTOR_GRENADES, 0);
 
-    this.crouching = (flags & F_CROUCH) !== 0;
     this.scoped = (flags & F_SCOPED) !== 0;
     this.reloading = (flags & F_RELOADING) !== 0;
     this.canChangeLoadout = (flags & F_LOADOUT) !== 0;

@@ -16,7 +16,6 @@ import { PITCH_LIMIT, clamp, damp, dirFromAngles, easeInOutCubic, easeOutCubic, 
 import type { Point3 } from './math';
 import {
   type Collider,
-  collideAt,
   createMotionState,
   isOutOfWorld,
   moveEntity,
@@ -31,7 +30,8 @@ import { HEAVY_REACH_BONUS, SWITCH_PROFILES, WEAPONS, weaponFeel } from './weapo
  *
  * 它同时是 `Actor`（能被子弹打到、能上计分板）和一台「第一人称控制器」。
  * 两者合一是有意的：玩家的命中盒和相机必须来自同一份 `pos / height`，
- * 一旦拆成两个对象，蹲下时就会出现「人蹲了但命中盒还站着」这种 bug。
+ * 一旦拆成两个对象，就会出现「人蹲了但命中盒还站着」这类 bug（蹲下功能后来
+ * 已整体移除，但这份契约没变 —— 命中盒和相机仍然只认一个身高源）。
  *
  * ## 相机与准星为什么不能分家
  *
@@ -48,11 +48,13 @@ const GRAVITY = 20;
 const JUMP_SPEED = 6.6;
 const SPEED_RUN = 5.5;
 const SPEED_WALK = 2.8;
-const SPEED_CROUCH = 2.0;
 const STEP_UP = 0.45;
 
+/**
+ * 身高。**恒定** —— 蹲下功能已整体移除（2026-11-13 用户要求，起因为 Ctrl+W 关标签页，
+ * 见 `input.ts` 的 `flush()`）。命中盒和眼高都读它，所以这个值不许在某些分支里被改。
+ */
 const STAND_HEIGHT = 1.8;
-const CROUCH_HEIGHT = 1.25;
 const RADIUS = 0.4;
 
 /** 开镜时的 FOV，引擎拿它做插值目标 */
@@ -242,7 +244,6 @@ export class Player implements Actor {
    */
   netCanLoadout: boolean | null = null;
 
-  crouching = false;
   scoped = false;
   reloading = false;
   onGround = false;
@@ -313,6 +314,22 @@ export class Player implements Actor {
   private readonly meleeHits = new Set<Actor>();
   /** 这一刀已经磕过墙了（一次挥砍只磕一下，否则窗口里 9 帧会放成烟花） */
   private meleeBumped = false;
+  /**
+   * 这一刀是**纯画面**的（加入者的本地补演，见 `playMeleeView`）。
+   *
+   * 它为 true 时 `updateMelee` 跳过 `meleeStrike` —— 加入者绝不能自己算命中：
+   * 伤害、击杀、比分在房主那边已经算过一遍，本地再算就是双倍伤害。
+   */
+  private meleeVisual = false;
+  /**
+   * 被**切枪闸**挡住的那一下攻击（`null` = 没有待补的）。
+   *
+   * 只对近战生效，值是「按下那一刻有没有按右键」（重击）。近战是单发点击武器
+   * （`auto = false`），少算这一下玩家就得再点一次；而切枪锁 0.4s 里没有任何
+   * 视觉提示说他不能砍 —— 加入者那边尤其容易撞上：他的切枪动画是快照驱动的，
+   * 手里已经看到刀了，房主的闸还在走。
+   */
+  private pendingMelee: boolean | null = null;
 
   /* ---- 后坐与散布 ---- */
   private recoilPitch = 0;
@@ -404,7 +421,7 @@ export class Player implements Actor {
     this.primary = options.primary ?? 'ak47';
     this.weapon = this.primary;
     // 面向敌方半场：保卫者（出生在 z 负）朝 +z 看，潜伏者朝 -z 看。
-    // 和 `Bot` 的初值同一条规则，引擎重生时还会按最近的敌人再纠一次
+    // 和 `Bot` 的初值同一条规则，引擎重生时还会按敌方复活点再纠一次
     this.yaw = this.team === 0 ? Math.PI : 0;
     this.ammo[this.primary].mag = WEAPONS[this.primary].magazine;
   }
@@ -569,7 +586,6 @@ export class Player implements Actor {
     this.aliveTime = 0;
     this.ammoSpent = false;
 
-    this.crouching = false;
     this.scoped = false;
     this.reloading = false;
     this.reloadTimer = 0;
@@ -627,6 +643,10 @@ export class Player implements Actor {
    */
   switchTo(weapon: WeaponId, deps: PlayerDeps, instant = false): void {
     if (!this.alive || this.weapon === weapon) return;
+    // 雷扔完就没有雷槽了：数字键 4 / 滚轮 / Q 任何一条路切过来都当没发生。
+    // 否则手里会端出一颗「空雷」—— 模型还在，数却是 0，开火也扔不出去。
+    // 放在 `switchTo` 里是因为它是所有换武器路径的唯一出口（和 `canChangeLoadout` 同一个思路）
+    if (weapon === 'grenade' && this.grenades <= 0) return;
 
     this.previousWeapon = this.weapon;
     this.weapon = weapon;
@@ -669,13 +689,26 @@ export class Player implements Actor {
    * 没有单独一套逻辑，也就不会出现「Q 和数字键走的不是同一套动画」。
    */
   private quickSwitch(deps: PlayerDeps): void {
+    // 上一把是已经扔空的雷槽：Q 不能把人送回空雷里，退回主武器
+    if (this.previousWeapon === 'grenade' && this.grenades <= 0) {
+      this.switchTo(this.primary, deps);
+      return;
+    }
     this.switchTo(this.previousWeapon, deps);
   }
 
   cycleSlot(direction: number, deps: PlayerDeps): void {
-    const slots: WeaponId[] = [this.primary, 'usp', 'knife', 'grenade'];
+    // 没雷了就把雷槽从循环里摘掉 —— 滚轮 / 上下切枪不会停在一个切不进去的空槽上
+    const slots: WeaponId[] = [this.primary, 'usp', 'knife'];
+    if (this.grenades > 0) slots.push('grenade');
     const current = slots.indexOf(this.weapon);
-    const next = (current + direction + slots.length) % slots.length;
+    // 当前武器不在槽位表里（例如刚被摘掉的空雷）时，按方向直接从头 / 尾开始
+    const next =
+      current < 0
+        ? direction > 0
+          ? 0
+          : slots.length - 1
+        : (current + direction + slots.length) % slots.length;
     this.switchTo(slots[next] as WeaponId, deps);
   }
 
@@ -707,12 +740,15 @@ export class Player implements Actor {
    *
    * 加入者的位置、朝向、存活、血量全部由房主的快照决定（见 `engine.updateGuest`），
    * 所以这里不跑 `update()`。但画面还需要几样东西继续动：走路浮动、台阶补偿、
-   * 受击抖动、开火冲击、换弹进度 —— 它们全是相机/枪模的输入，不影响任何人。
+   * 受击抖动、开火冲击、换弹进度、挥砍动作 —— 它们全是相机/枪模的输入，不影响任何人。
    *
    * 换弹进度是**近似**的：房主只发「在换弹」这一位，时长按武器表本地推。
    * 真按快照逐帧同步反而更差（20Hz 的进度条会一格一格跳）。
+   *
+   * `deps` 只为了让 `updateMelee` 的签名和权威那条路共用 —— 加入者的刀是
+   * `playMeleeView` 起的纯画面（`meleeVisual`），扫人的那一步根本不会走。
    */
-  advanceVisual(dt: number): void {
+  advanceVisual(dt: number, deps: PlayerDeps): void {
     const speed = Math.hypot(this.vel.x, this.vel.z);
     if (this.onGround && speed > 0.6) this.bobPhase += dt * speed * 1.35;
     else this.bobPhase += dt * 0.6;
@@ -722,6 +758,10 @@ export class Player implements Actor {
     this.punchRoll = damp(this.punchRoll, 0, 16, dt);
     this.recoilPitch = damp(this.recoilPitch, 0, 7.5, dt);
     this.recoilYaw = damp(this.recoilYaw, 0, 7.5, dt);
+
+    // 挥砍的时间轴也要在这里推进：加入者不跑 `update()`，不推的话刀永远不动
+    // （判定被 `meleeVisual` 关掉，`deps` 只是签名要，不会真的扫人）
+    this.updateMelee(dt, deps);
 
     if (this.reloading) {
       const spec = WEAPONS[this.weapon];
@@ -745,8 +785,8 @@ export class Player implements Actor {
    * 联机加入者专用：**本地移动预测**。
    *
    * 加入者的位置事实在房主那边（快照要一个来回），等它 = 走路拖 100ms+ 的
-   * 尾巴。解法是标准的客户端预测：本地用**和房主同一条** `applyCrouch` /
-   * `applyMovement` 跑自己的移动，房主快照到了由 `engine.mirrorSelf` 对账
+   * 尾巴。解法是标准的客户端预测：本地用**和房主同一条** `applyMovement`
+   * 跑自己的移动，房主快照到了由 `engine.mirrorSelf` 对账
    * （小偏差忽略、大偏差拉回）。两台机器跑同一段代码，正常情况偏差只有
    * 厘米级。
    *
@@ -756,7 +796,6 @@ export class Player implements Actor {
    */
   updateNetMovement(dt: number, frame: InputFrame, deps: PlayerDeps): void {
     if (!this.alive) return;
-    this.applyCrouch(dt, frame, deps.colliders);
     this.applyMovement(dt, frame, deps);
   }
 
@@ -786,6 +825,28 @@ export class Player implements Actor {
     this.throwQuick = quick;
   }
 
+  /**
+   * 加入者专用：补演一次挥砍（**纯画面**）。
+   *
+   * 加入者不跑 `Player.update`，`handleMelee` 永远不会被调用 —— 刀就一动不动，
+   * 连「起手 → 刺出 → 收刀」这段最核心的打击反馈都没有。这里复用同一条状态机
+   * （所以刀走多深、节奏多快和房主完全一致），但把**判定**关掉：命中、伤害、
+   * 击杀全部由房主结算，本地再扫一次就是双倍伤害。
+   *
+   * 和 `playThrowView` 同一个思路，也是同一个限制：时机以房主为准，这边只是
+   * 「按下就演」。被切枪闸挡住的那一下在房主那边会延后生效（见 `pendingMelee`），
+   * 两边的刀因此可能差几十毫秒 —— 自己看不出来，血量以快照为准。
+   */
+  playMeleeView(heavy: boolean): void {
+    if (!this.alive || this.meleeActive) return;
+    this.startMelee(heavy, true);
+  }
+
+  /** 加入者专用：房主把武器换走了 —— 本地这段补演的挥砍跟着作废（对齐 `switchTo`）。 */
+  cancelMeleeView(): void {
+    this.cancelMelee();
+  }
+
   update(dt: number, frame: InputFrame, deps: PlayerDeps): void {
     if (!this.alive) {
       // 死了就只剩「倒计时」这一件事。相机不归这里管 —— 倒地、观战、重生
@@ -799,7 +860,6 @@ export class Player implements Actor {
     this.applyLook(frame);
     // 复活窗口计时：只在存活时累计，死亡期间冻结（respawn 时归零）
     this.aliveTime += dt;
-    this.applyCrouch(dt, frame, deps.colliders);
     this.applyMovement(dt, frame, deps);
     this.applyRecoil(dt);
     this.advanceSwitch(dt);
@@ -839,19 +899,6 @@ export class Player implements Actor {
     this.pitch = clamp(this.pitch + frame.lookPitch, -PITCH_LIMIT, PITCH_LIMIT);
   }
 
-  private applyCrouch(dt: number, frame: InputFrame, colliders: readonly Collider[]): void {
-    if (!frame.crouch && this.crouching) {
-      // 站起来之前先看头顶有没有东西 —— 否则会卡在集装箱缝里
-      const blocked = collideAt(this.pos.x, this.pos.y, this.pos.z, this.radius, STAND_HEIGHT, colliders);
-      if (!blocked) this.crouching = false;
-    } else if (frame.crouch) {
-      this.crouching = true;
-    }
-
-    const targetHeight = this.crouching ? CROUCH_HEIGHT : STAND_HEIGHT;
-    this.height = damp(this.height, targetHeight, 16, dt);
-  }
-
   private applyMovement(dt: number, frame: InputFrame, deps: PlayerDeps): void {
     const forwardX = -Math.sin(this.yaw);
     const forwardZ = -Math.cos(this.yaw);
@@ -867,8 +914,7 @@ export class Player implements Actor {
     }
 
     let speed = SPEED_RUN;
-    if (this.crouching) speed = SPEED_CROUCH;
-    else if (frame.walk) speed = SPEED_WALK;
+    if (frame.walk) speed = SPEED_WALK;
     if (this.scoped) speed *= 0.45;
     if (this.reloading) speed *= 0.92;
 
@@ -996,7 +1042,8 @@ export class Player implements Actor {
     if (actions.has('slotPrimary')) this.switchTo(this.primary, deps);
     if (actions.has('slotSecondary')) this.switchTo('usp', deps);
     if (actions.has('slotMelee')) this.switchTo('knife', deps);
-    if (actions.has('slotThrowable')) this.switchTo('grenade', deps);
+    // 空雷槽不进：`switchTo` 里还有一层同样的闸，这里写出来只是为了让意图一眼可见
+    if (actions.has('slotThrowable') && this.grenades > 0) this.switchTo('grenade', deps);
     if (actions.has('cycleNext')) this.cycleSlot(1, deps);
     if (actions.has('cyclePrev')) this.cycleSlot(-1, deps);
     if (actions.has('quickSwitch')) this.quickSwitch(deps);
@@ -1118,7 +1165,15 @@ export class Player implements Actor {
 
     // 切枪期间什么都打不出去 —— 枪还没落位。这是「切枪不可被打断」的另一半：
     // 收起 / 掏出那 0.4~0.65 秒里，开火、扔雷、出刀全被挡在外面
-    if (this.switchTimer > 0) return;
+    if (this.switchTimer > 0) {
+      // …但**近战那一下不丢**：刀是单发点击（`auto = false`），吞掉就得再点一次，
+      // 而切枪锁期间画面没有任何提示。记下轻重，闸一开由 `handleMelee` 补出来。
+      // 枪械照旧作废 —— 自动武器按住本就持续触发，半自动补一枪反而像走火
+      if (frame.firePressed && WEAPONS[this.weapon].kind === 'melee') {
+        this.pendingMelee = frame.aim;
+      }
+      return;
+    }
 
     const spec = WEAPONS[this.weapon];
 
@@ -1193,7 +1248,7 @@ export class Player implements Actor {
     const shotDir = results[0]?.dir ?? aim;
 
     // 后坐
-    const kick = spec.recoil.up * (this.crouching ? 0.78 : 1) * (this.scoped ? 0.55 : 1);
+    const kick = spec.recoil.up * (this.scoped ? 0.55 : 1);
     this.recoilPitch += kick * (Math.PI / 180);
     this.recoilYaw += rand(-1, 1) * spec.recoil.side * (Math.PI / 180);
     this.spreadAccum = Math.min(this.spreadAccum + spec.spread.perShot, spec.spread.max * 0.85);
@@ -1203,8 +1258,7 @@ export class Player implements Actor {
      * 两者分开是刻意的：AWM 的冲击可以给到 1°，但它的后坐角度是表里的 3.4° ——
      * 调手感时不会互相牵连。 */
     const feel = weaponFeel(this.weapon);
-    const punchScale = this.crouching ? 0.85 : 1;
-    this.addPunch(feel.punchPitch * punchScale, feel.punchRoll * punchScale);
+    this.addPunch(feel.punchPitch, feel.punchRoll);
     // 随机震屏只给最重的两把、而且很小（0.06~0.08）—— 这是「有后坐」而不是「镜头在抖」
     if (feel.shake > 0) this.addShake(feel.shake);
 
@@ -1217,7 +1271,16 @@ export class Player implements Actor {
         z: origin.z + aim.z * 0.6 - Math.sin(this.yaw) * 0.16,
       };
 
-    deps.effects.spawnMuzzleFlash(muzzle, shotDir, { scale: feel.flashScale, life: feel.flashLife });
+    // 火光/曳光必须被箱子挡住，**只有本机自己的枪口焰例外**（贴在镜头前，
+    // 贴墙时关深度测试才不会被墙切一半）。房主替网络对端跑 `handleFire` 时
+    // `remote === true` —— 那团火是「别人」的，透墙就是透视挂
+    // （`depthTest` 跟着 remote：本机 false、对端 true；点光反过来，只给本机）
+    deps.effects.spawnMuzzleFlash(muzzle, shotDir, {
+      scale: feel.flashScale,
+      life: feel.flashLife,
+      depthTest: this.remote,
+      light: !this.remote,
+    });
 
     // 抛壳口：枪身右侧、比枪口近一点。弹壳从**枪口**飞出来一眼就假，
     // 所以这里单独算一个位置（右向量 = (cos yaw, 0, -sin yaw)）
@@ -1273,19 +1336,27 @@ export class Player implements Actor {
     // 动作没播完不接受新输入：0.5 秒一刀，连点的效果是「这一刀收完立刻起下一刀」
     if (this.meleeActive) return;
 
+    // 切枪闸期间按下的那一下（见 `pendingMelee`）：闸已经开了，把它补出来。
+    // 取出即清 —— 一次点击只换一刀
+    const pending = this.pendingMelee;
+    this.pendingMelee = null;
+
     const heavy = frame.aim;
-    const wantsAttack = frame.firePressed || (heavy && frame.aimPressed);
+    const wantsAttack = frame.firePressed || (heavy && frame.aimPressed) || pending !== null;
     if (!wantsAttack) return;
 
-    this.startMelee(heavy);
+    // 补出来的那一下按「按下时的右键状态」算轻重：闸挡着的这段时间里玩家
+    // 可能已经松开右键了，按现在的状态算会把重击悄悄降成轻击
+    this.startMelee(pending !== null ? pending : heavy);
   }
 
-  private startMelee(heavy: boolean): void {
+  private startMelee(heavy: boolean, visualOnly = false): void {
     const spec = WEAPONS.knife;
 
     this.meleeActive = true;
     this.meleeTimer = 0;
     this.meleeHeavy = heavy;
+    this.meleeVisual = visualOnly;
     this.meleeDuration = heavy ? (spec.heavyInterval ?? 1) : spec.interval;
     // 蓄力（前摇）→ 刺击判定 → 收刀。判定窗口和刺击动画共用同一个进度 t，
     // 所以「刀什么时候在往前走」和「什么时候能判定命中」天然同步
@@ -1336,8 +1407,14 @@ export class Player implements Actor {
       }
 
       // 判定窗口内**每帧**扫一次 —— 窗口和刺击段重合，命中的时机就是刀尖
-      // 走到身上的时机，不会「还没刺出就掉血」或「刀收回去了才判定」
-      if (t >= w0 && t <= w1 && this.meleeHits.size < MELEE_MAX_TARGETS) {
+      // 走到身上的时机，不会「还没刺出就掉血」或「刀收回去了才判定」。
+      // 加入者的补演（`meleeVisual`）整段跳过：他那一刀只是画面
+      if (
+        !this.meleeVisual &&
+        t >= w0 &&
+        t <= w1 &&
+        this.meleeHits.size < MELEE_MAX_TARGETS
+      ) {
         this.meleeStrike(deps);
       }
 
@@ -1404,6 +1481,8 @@ export class Player implements Actor {
   private cancelMelee(): void {
     this.meleeActive = false;
     this.meleeTimer = 0;
+    this.meleeVisual = false;
+    this.pendingMelee = null;
     this.meleeHits.clear();
     this.meleeBumped = false;
 
@@ -1448,7 +1527,6 @@ export class Player implements Actor {
     return currentSpread(WEAPONS[weapon], {
       speed: Math.hypot(this.vel.x, this.vel.z),
       onGround: this.onGround,
-      crouching: this.crouching,
       scoped: this.scoped,
       accum: this.spreadAccum,
     });

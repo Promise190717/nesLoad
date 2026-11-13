@@ -194,7 +194,8 @@ export default async function sitemap({
      * 不在于被搜到。
      */
     entry(origin, locale, '/h5', { changeFrequency: 'weekly', priority: 0.7 }),
-    entry(origin, locale, '/h5/toy-gunfight', { changeFrequency: 'monthly', priority: 0.6 }),
+    /* ⚠️ id 必须和 `lib/h5/catalog.ts` 的 `H5GameId` 一致（旧值 toy-gunfight 已不存在） */
+    entry(origin, locale, '/h5/transport-ship', { changeFrequency: 'monthly', priority: 0.6 }),
     entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*
      * 详情页给 0.8。
