@@ -1,15 +1,29 @@
 import * as THREE from 'three';
 import type { Collider } from './physics';
-import { surfaceMaps, type SurfaceMaps } from './surface-textures';
+import { SKY_OBJECT_NAME } from './sky';
+import { surfaceMaps, type SurfaceKind, type SurfaceMaps } from './surface-textures';
 import type { Surface } from './types';
 
 /**
  * 程序化关卡「运输船」—— 船体、集装箱阵列、狙击台、掩体、环境光。
  *
- * **没有任何外部资源**：几何体全是 Box / Cylinder / Sphere 拼的，贴图全部由
- * Canvas 2D 现画（见 `surface-textures.ts`：每种表面一张底色 + 一张法线 +
- * 一张粗糙度）。这不是「省事」，是硬要求 —— 商用贴图要么有版权风险，要么
- * 得打几百 KB 的包。
+ * **几何体零外部资源**：全是 Box / Cylinder / Sphere 拼的。这不是「省事」——
+ * 关卡是**精确 AABB 碰撞 + 平面 2D 导航网格**（见文件尾 `buildNav`），换成
+ * 下载来的 3D 模型意味着每只箱子的碰撞盒、Bot 的寻路格、子弹射线全都要重做，
+ * 而收益只是轮廓上的倒角。
+ *
+ * ## 表面：三层叠起来（2026-11-13 「像使命召唤」轮）
+ *
+ *   1. `surface-textures.ts` 用 Canvas 2D 现画一份 PBR 三件套 —— **同步**建好，
+ *      保证关卡不依赖网络；
+ *   2. `hd-textures.ts` 异步拉 ambientCG 的实拍扫描图（CC0），到货后由
+ *      `applySurfaceTextures()` 整批换掉材质上的贴图引用；
+ *   3. 本文件里**集装箱的角件与门锁杆是几何**（`InstancedMesh`），不画在贴图上 ——
+ *      实拍扫描的钢板图里当然没有锁杆，而这两样恰恰是眼睛认出「真的集装箱」
+ *      的地方。
+ *
+ * 天空同理：`sky.ts` 的 2K HDR（Poly Haven，CC0）负责背景与 IBL，本文件里的
+ * 天空球降级成「HDR 解码失败时的兜底」，由引擎按对象名藏掉。
  *
  * ## 贴图为什么按「米」铺（2026-11-13 真实度轮）
  *
@@ -175,6 +189,15 @@ export interface Level {
   nav: NavGrid;
   /** 低画质要关阴影，得能拿到它 */
   sun: THREE.DirectionalLight;
+  /**
+   * 实拍 PBR 贴图到货后调用：把已建好的材质上的三张图换成高清版。
+   *
+   * 只换**图**，不碰几何 UV / `tileMeters` / `repeat` —— 那些在 `buildLevel` 时
+   * 就按 `surface-textures` 的 SPEC 铺死了，换图时把同一套 repeat 重新应用到新的
+   * Texture 实例上（端门 / 箱顶是特例，见 `doorRepeat` / `roofRepeat`）。
+   * 重复调用是幂等的，缺哪类就跳过哪类（`hd-textures.ts` 一张失败会整类剔除）。
+   */
+  applySurfaceTextures(maps: ReadonlyMap<SurfaceKind, SurfaceMaps>): void;
   dispose(): void;
 }
 
@@ -321,7 +344,6 @@ export function buildLevel(scene: THREE.Scene): Level {
   const containerTex = surfaceMaps('container');
   const doorTex = surfaceMaps('containerDoor');
   const roofTex = surfaceMaps('containerRoof');
-  const steelTex = surfaceMaps('steel');
   const woodTex = surfaceMaps('wood');
   const texSky = textureSky();
 
@@ -358,8 +380,14 @@ export function buildLevel(scene: THREE.Scene): Level {
    * `roughness` 固定 1 是刻意的：它是**乘在 roughnessMap 上的系数**，贴图里
    * 已经把「漆面 0.72 / 裸钢 0.34 / 晒褪 0.8」写死了，这里再乘一个 0.8 只会
    * 把整张图的层次压平。
+   *
+   * 第一个参数 `kind` 只用来登记「这个材质吃哪一类贴图」—— HD 实拍图到货后
+   * 要按它整批换（见 `applySurfaceTextures`）。同一个材质对象可能被登记多次
+   * （箱体侧面一个材质供三个面槽位），换图时按对象去重。
    */
-  function pbr(maps: SurfaceMaps, color: number, metalness: number, normalScale = 1): THREE.MeshStandardMaterial {
+  const surfaceBindings: { kind: SurfaceKind; material: THREE.MeshStandardMaterial }[] = [];
+
+  function pbr(kind: SurfaceKind, maps: SurfaceMaps, color: number, metalness: number, normalScale = 1): THREE.MeshStandardMaterial {
     const material = new THREE.MeshStandardMaterial({
       map: maps.map,
       normalMap: maps.normalMap,
@@ -371,6 +399,7 @@ export function buildLevel(scene: THREE.Scene): Level {
     });
     // `block()` 靠它把 UV 乘成「面宽 / 米数」，见 `fitBoxUv`
     material.userData.tileM = maps.tileMeters;
+    surfaceBindings.push({ kind, material });
     return material;
   }
 
@@ -382,38 +411,67 @@ export function buildLevel(scene: THREE.Scene): Level {
    * 这是「像贴纸」最主要的来源之一。
    */
   function containerMaterials(tint: number): THREE.MeshStandardMaterial[] {
-    const side = pbr(containerTex, tint, 0.16, 1.15);
-    const roof = pbr(roofTex, tint, 0.16, 1);
-    const door = pbr(doorTex, tint, 0.16, 1);
-    // 端门是「一整面一张图」：几何 UV 按 2 米铺出来是 1.3 个 tile，用贴图
-    // 自身的 repeat 压回 1（2/2.6 = 0.769），门框和锁杆才刚好占满一面。
+    const side = pbr('container', containerTex, tint, 0.16, 1.15);
+    const roof = pbr('containerRoof', roofTex, tint, 0.16, 1);
+    const door = pbr('containerDoor', doorTex, tint, 0.16, 1);
+    // 端门是「一整面一张图」：几何 UV 按 3.2 米铺出来是 1.23 个 tile，用贴图
+    // 自身的 repeat 压回 1（2.6/3.2 = 0.8125），门框和锁杆才刚好占满一面。
     // 🔴 **三张贴图必须一起压**：three 的每张图有独立的 uvTransform，只压 map
-    // 的话法线/粗糙度还是 1.3 个 tile —— 锁杆的凹凸会和底色错开半根
-    // 同时把 tileM 改回 2：这个材质的 UV 基准是几何那边的 2 米，不是图自己的 2.6
+    // 的话法线/粗糙度还是 1.23 个 tile —— 锁杆的凹凸会和底色错开半根
+    // 同时把 tileM 改回 containerTex 的：这个材质的 UV 基准是几何那边的 3.2 米
     door.userData.tileM = containerTex.tileMeters;
     return [side, side, roof, side, door, door];
   }
 
   const doorRepeat = containerTex.tileMeters / CW;
+  const roofRepeat = containerTex.tileMeters / roofTex.tileMeters;
   for (const texture of [doorTex.map, doorTex.normalMap, doorTex.roughnessMap]) {
     texture.repeat.set(doorRepeat, containerTex.tileMeters / CH);
   }
+  // 箱顶同理：几何 UV 是按箱体的 3.2 米铺的，但箱顶那张横波纹图一张只有
+  // 1.2 米 → 不设 repeat 的话 15 道波纹会被摊到 3.2 米上，一道 21 厘米，
+  // 看起来像大瓦楞而不是集装箱顶
+  for (const texture of [roofTex.map, roofTex.normalMap, roofTex.roughnessMap]) {
+    texture.repeat.set(roofRepeat, roofRepeat);
+  }
 
+  /**
+   * 🔴 2026-11-13 用户要求：**墙面上的金属板全部用甲板那张防滑钢板贴图**。
+   *
+   * 原来舷墙 / 狙击台 / 吊臂走的是 `'steel'`（一张涂漆钢板），甲板走
+   * `'deck'`（DiamondPlate 菱形防滑板）。用户比对之后觉得甲板那张才真实，
+   * 于是所有金属大件统一成它 —— 这本来也更接近实船：舷墙内板、台面、吊机
+   * 走台用的就是花纹钢板。
+   *
+   * 统一之后 `tileMeters` 也跟着从 2 变成 2.8（`deck` 的 SPEC）。任何**手写
+   * tile 值**传给 `fitBoxUv` 的地方都必须改用 `deckTex.tileMeters`（吊臂的
+   * 主弦杆 / 横撑就是两处），否则纹素密度和材质对不上，杆子上会出现
+   * 明显更粗的花纹。
+   */
   const materials = {
     // ⚠️ 带贴图的材质，`color` 是**乘在贴图上的**：贴图 #6d737a × 颜色 #b6bbc1
     // 的乘积只有 0.07 的反照率，比水泥还黑。甲板 / 木板 / 钢板的底色由贴图
     // 自己承担（所以给白），只有「一张灰度图染五种箱色」这种才需要染。
-    deck: pbr(deckTex, 0xffffff, 0.22, 1),
-    hull: pbr(steelTex, 0x6d7a85, 0.26, 0.9),
-    rail: pbr(steelTex, 0x58636e, 0.3, 0.9),
-    wood: pbr(woodTex, 0xffffff, 0.02, 1),
-    metal: pbr(steelTex, 0xbfc7ce, 0.3, 1),
-    steel: pbr(steelTex, 0x99a2aa, 0.3, 1),
-    dark: pbr(steelTex, 0x40474f, 0.16, 0.9),
-    /** 甲板中线：CF 运输船甲板正中那条浅色通道带，俯视最直接的识别物 */
-    marking: new THREE.MeshStandardMaterial({ color: 0xc0bda9, roughness: 0.85, metalness: 0.1 }),
+    // 甲板贴图现在是去色的实拍防滑钢板（均值 ≈ 0.77），蓝灰由 `color` 染上来。
+    // 给 0xffffff 的话甲板会比原来亮 50%，整张图往灰白跑，冷调就没了
+    deck: pbr('deck', deckTex, 0x9aa6b0, 0.22, 1),
+    hull: pbr('deck', deckTex, 0x6d7a85, 0.26, 0.9),
+    rail: pbr('deck', deckTex, 0x58636e, 0.3, 0.9),
+    wood: pbr('wood', woodTex, 0xffffff, 0.02, 1),
+    metal: pbr('deck', deckTex, 0xbfc7ce, 0.3, 1),
+    steel: pbr('deck', deckTex, 0x99a2aa, 0.3, 1),
+    dark: pbr('deck', deckTex, 0x40474f, 0.16, 0.9),
+    /**
+     * 甲板中线：CF 运输船甲板正中那条浅色通道带，俯视最直接的识别物。
+     *
+     * 以前是纯色材质（`MeshStandardMaterial({color})`），贴一张图都没有 ——
+     * 一条 40 米长、1.6 米宽的**绝对光滑的色块**横在甲板上，近看就是一块塑料。
+     * 现在吃同一张防滑钢板贴图，只把 `color` 提亮成刷过漆的米白：标线本来就
+     * 是漆在钢板上的，底下的绊钉纹理应该还在。
+     */
+    marking: pbr('deck', deckTex, 0xd6d2c0, 0.12, 0.7),
     /** 吊机桁架：实景里那只吊是**黄色**的，是全图唯一的高饱和色，当路标用 */
-    crane: pbr(steelTex, 0xe8b325, 0.24, 0.9),
+    crane: pbr('deck', deckTex, 0xe8b325, 0.24, 0.9),
     containers: [
       // bone：米白，实景里占一半以上
       containerMaterials(0xe6dfce),
@@ -428,8 +486,57 @@ export function buildLevel(scene: THREE.Scene): Level {
     ],
   };
 
-  /* ---------- 积木工具 ---------- */
+  /**
+   * 集装箱的**接触阴影**（贴地的一圈软黑边）。
+   *
+   * 太阳投影（`sun.castShadow`）解决的是「光从哪来」，解决不了「这东西压在地上」：
+   * 阴影相机的分辨率和 bias 决定了箱底那几厘米永远是糊的，而真实物体与地面
+   * 相接的地方一定有一条最深的暗线 —— 少了它，十几只箱子会像**浮在甲板上**。
+   *
+   * 做法是常见的廉价近似：箱底铺一张略大于箱体的贴片，从中心到边缘 alpha
+   * 渐变到 0。箱子本体遮住中间，露出来的就是四周一圈软边。不进碰撞、不投影、
+   * `depthWrite: false`（它只是叠在甲板上的半透明黑）。
+   */
+  function makeContactShadowTexture(): THREE.CanvasTexture {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('surface-textures: 2d context unavailable');
+    const image = ctx.createImageData(size, size);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        // 切比雪夫距离 = 矩形环，正好贴合箱体的方形轮廓（radial 会做成椭圆，
+        // 在长边集装箱上会明显地「两头亮中间黑」）
+        const u = Math.abs((x + 0.5) / size - 0.5) * 2;
+        const v = Math.abs((y + 0.5) / size - 0.5) * 2;
+        const d = Math.max(u, v);
+        const t = Math.min(1, Math.max(0, (d - 0.55) / 0.45));
+        const alpha = 0.6 * (1 - t * t * (3 - 2 * t));
+        const p = (y * size + x) * 4;
+        image.data[p] = 0;
+        image.data[p + 1] = 0;
+        image.data[p + 2] = 0;
+        image.data[p + 3] = Math.round(alpha * 255);
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
 
+  const contactShadowTexture = makeContactShadowTexture();
+  const contactShadowGeometry = new THREE.PlaneGeometry(1, 1);
+  const contactShadowMaterial = new THREE.MeshBasicMaterial({
+    map: contactShadowTexture,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
+
+  /* ---------- 积木工具 ---------- */
   function block(
     x: number,
     z: number,
@@ -470,9 +577,31 @@ export function buildLevel(scene: THREE.Scene): Level {
   }
 
   // 集装箱共用几何体：同尺寸的箱子有十几只，各建一份是纯浪费显存。
-  // UV 按 2 米铺（和侧板贴图的 tileMeters 一致），端门靠贴图 repeat 再压回 1 面
+  // UV 按 container 贴图的 tileMeters 铺，端门 / 箱顶靠贴图 repeat 再校正
   const containerGeometry = new THREE.BoxGeometry(CW, CH, CL);
   fitBoxUv(containerGeometry, CW, CH, CL, containerTex.tileMeters);
+
+  /**
+   * 集装箱的**铸件细节**（角件 + 端门锁杆），全部是几何而不是画在贴图上的。
+   *
+   * 这一条是 2026-11-13 「像贴纸」的第三个病根：旧版把锁杆、门框、角件全画进
+   * 端门那张 512 的 canvas 里。程序化图换成实拍扫描图之后这些结构就没了 ——
+   * 真实扫描的集装箱钢板图里当然没有锁杆。而一只集装箱最能被眼睛认出「这是
+   * 真的箱子」的地方恰恰是那 8 只铸钢角件和门上的 4 根锁杆。
+   *
+   * 每只箱 8 角件 + 8 锁杆（两端都做），十几只箱 ≈ 250 个实例。走
+   * `InstancedMesh` 分两组，一共 2 个 draw call，比十几个独立 Mesh 省得多。
+   * 它们**不进碰撞表**：角件凸出箱体只有 2 厘米，锁杆贴门面 3 厘米，物理层
+   * 那套 AABB 本来就当它们不存在，让人贴着箱子走也不会被 2 厘米卡住。
+   */
+  const castingMatrices: THREE.Matrix4[] = [];
+  const lockRodMatrices: THREE.Matrix4[] = [];
+  const instPos = new THREE.Vector3();
+  const instRot = new THREE.Quaternion();
+  const INST_SCALE = new THREE.Vector3(1, 1, 1);
+
+  const CASTING = 0.24; // 真实角件约 180mm 见方，这里略大一点才在远处看得见
+  const ROD_OFFSETS = [-0.95, -0.35, 0.35, 0.95] as const;
 
   /**
    * 放一只集装箱。
@@ -483,15 +612,76 @@ export function buildLevel(scene: THREE.Scene): Level {
   function container(x: number, z: number, level: number, colorIndex: number, options: { alongX?: boolean } = {}): void {
     const { alongX = false } = options;
     const y0 = level * CH;
-    const mesh = new THREE.Mesh(containerGeometry, materials.containers[colorIndex]!);
+
+    /**
+     * 每只箱子错开 UV。
+     *
+     * 十五只箱子共用一个材质、一张 2048 的贴图、3.2 米一个 tile —— 不错开的话
+     * 相邻两只的锈斑、划痕、脏污位置**一模一样**，站高一点俯看就是明摆着的
+     * 复制粘贴。代价是几何体从「全船一份」变成「每只一份」：一个 24 顶点的
+     * 盒子，十五份加起来还不够一只集装箱的零头。
+     *
+     * 偏移量取 0..1 之间（一个 tile 内），`RepeatWrapping` 保证跨缝连续。
+     * 用 sin 打散而不是 `Math.random()`：同一个坐标每次进游戏都是同一块锈，
+     * 方便对图调参。
+     */
+    const geometry = containerGeometry.clone();
+    const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+    const offsetU = Math.abs(Math.sin(x * 12.9898 + z * 78.233)) % 1;
+    const offsetV = Math.abs(Math.sin(x * 39.346 + z * 11.135)) % 1;
+    for (let i = 0; i < uv.count; i += 1) {
+      uv.setXY(i, uv.getX(i) + offsetU, uv.getY(i) + offsetV);
+    }
+    uv.needsUpdate = true;
+
+    const mesh = new THREE.Mesh(geometry, materials.containers[colorIndex]!);
     if (alongX) mesh.rotation.y = Math.PI / 2;
     mesh.position.set(x, y0 + CH / 2, z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     root.add(mesh);
 
+    // 接触阴影：比箱体大 1 米（每侧 0.5），贴地。y 抬到 0.024 是为了压在
+    // 甲板中线（0.02 高）之上，否则中线恰好从箱底穿过时阴影会被它切掉一截
+    const shadow = new THREE.Mesh(contactShadowGeometry, contactShadowMaterial);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.set(x, 0.024, z);
+    shadow.scale.set((alongX ? CL : CW) + 1, (alongX ? CW : CL) + 1, 1);
+    root.add(shadow);
+
     const halfX = alongX ? CL / 2 : CW / 2;
     const halfZ = alongX ? CW / 2 : CL / 2;
+
+    // 8 只角件：外表面比箱体凸出 2cm（真实角件就是这样包住箱角的），
+    // 中心因此内缩 `CASTING/2 - 0.02`
+    const inset = CASTING / 2 - 0.02;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        for (const top of [false, true]) {
+          instPos.set(
+            x + sx * (halfX - inset),
+            y0 + (top ? CH - inset : inset),
+            z + sz * (halfZ - inset),
+          );
+          castingMatrices.push(new THREE.Matrix4().compose(instPos, instRot, INST_SCALE));
+        }
+      }
+    }
+
+    // 端门锁杆：两端各 4 根，贴门面外 3cm。`alongX` 时门面法线是 ±x，
+    // 门宽方向落在 z 上 —— 两个方向的偏移要跟着换，不能只转箱子
+    for (const sz of [-1, 1]) {
+      const face = halfZ + 0.03;
+      for (const offset of ROD_OFFSETS) {
+        instPos.set(
+          alongX ? x + sz * face : x + offset,
+          y0 + CH / 2,
+          alongX ? z + offset : z + sz * face,
+        );
+        lockRodMatrices.push(new THREE.Matrix4().compose(instPos, instRot, INST_SCALE));
+      }
+    }
+
     colliders.push({
       min: { x: x - halfX, y: y0, z: z - halfZ },
       max: { x: x + halfX, y: y0 + CH, z: z + halfZ },
@@ -537,6 +727,25 @@ export function buildLevel(scene: THREE.Scene): Level {
   }
   block(-HALF_W + 0.15, 0, 0.08, 0.08, HALF_L * 2 - 3, materials.steel, { y0: 2.5, collide: false, cast: false });
   block(HALF_W - 0.15, 0, 0.08, 0.08, HALF_L * 2 - 3, materials.steel, { y0: 2.5, collide: false, cast: false });
+
+  /**
+   * 舷墙内侧的**竖向加强筋**（每隔 2.6 米一道，凸出 7 厘米）。
+   *
+   * 舷墙本身是一块 44 米长、1.55 米高、0.8 米厚的盒子 —— 贴图再真实，它也是
+   * 一块**绝对平整**的巨型钢板，贴着跑过去的时候最假。真船上这块板永远有
+   * 一道道竖向扁钢加强筋，间隔和舷侧立柱对齐。这三十几道筋让侧墙在任何角度
+   * 都有明暗起伏，比调贴图参数有效得多。
+   *
+   * 不进碰撞表：凸出 7 厘米，物理层当它不存在，贴着墙跑不会被卡住。
+   */
+  const ribMatrices: THREE.Matrix4[] = [];
+  for (let z = -HALF_L + 1.3; z <= HALF_L - 1.3; z += 2.6) {
+    for (const side of [-1, 1]) {
+      // 舷墙内表面在 ±(HALF_W - 0.4)，筋的半厚 0.07 → 中心内收 0.07
+      instPos.set(side * (HALF_W - 0.4 - 0.07), 0.66, z);
+      ribMatrices.push(new THREE.Matrix4().compose(instPos, instRot, INST_SCALE));
+    }
+  }
 
   /* ============================================================
      2. 两侧狙击台（对称）
@@ -648,7 +857,7 @@ export function buildLevel(scene: THREE.Scene): Level {
   // 四根主弦杆。UV 必须按真实长度铺：18 米的杆子上，2 米的板缝要重复 9 次，
   // 吃 0..1 的话整根杆只有一块板、一颗螺栓，远看是一根纯黄的方条
   const chordGeometry = new THREE.BoxGeometry(BOOM_LEN, 0.13, 0.13);
-  fitBoxUv(chordGeometry, BOOM_LEN, 0.13, 0.13, steelTex.tileMeters);
+  fitBoxUv(chordGeometry, BOOM_LEN, 0.13, 0.13, deckTex.tileMeters);
   for (const dy of [-0.55, 0.55]) {
     for (const dz of [-0.55, 0.55]) {
       const chord = new THREE.Mesh(chordGeometry, materials.crane);
@@ -660,7 +869,7 @@ export function buildLevel(scene: THREE.Scene): Level {
   // 横撑：每 2.2 米一道，只做左右两侧的立杆。四面全做是三十多个 draw call，
   // 而俯视/第一人称都看不出差别
   const braceGeometry = new THREE.BoxGeometry(0.1, 1.1, 0.1);
-  fitBoxUv(braceGeometry, 0.1, 1.1, 0.1, steelTex.tileMeters);
+  fitBoxUv(braceGeometry, 0.1, 1.1, 0.1, deckTex.tileMeters);
   for (let i = 0; i < 8; i += 1) {
     for (const dz of [-0.55, 0.55]) {
       const brace = new THREE.Mesh(braceGeometry, materials.crane);
@@ -788,6 +997,9 @@ export function buildLevel(scene: THREE.Scene): Level {
       depthWrite: false,
     }),
   );
+  // 这是**兜底**天空：`sky.ts` 的 HDR 到位后引擎按这个名字把它藏掉。
+  // 之所以不删：HDR 解码失败（老 Safari / 显存不足）时它是唯一的天。
+  sky.name = SKY_OBJECT_NAME;
   scene.add(sky);
 
   const sea = new THREE.Mesh(
@@ -839,7 +1051,47 @@ export function buildLevel(scene: THREE.Scene): Level {
   scene.add(sun.target);
 
   /* ============================================================
-     8. 导航网格
+     8. 集装箱铸件（InstancedMesh）
+     ============================================================ */
+
+  /**
+   * 两组实例一次交上去。`frustumCulled = false` 是**故意的**：InstancedMesh 的
+   * 视锥剔除用的是 geometry 的包围球（0.24 米见方），而实例散布在整条船上 ——
+   * 不关掉的话，镜头一转整箱子的角件就成批消失。两组实例的顶点数加起来比
+   * 一只集装箱还少，剔除它们毫无收益。
+   */
+  function addInstanced(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    matrices: readonly THREE.Matrix4[],
+  ): void {
+    if (matrices.length === 0) return;
+    const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
+    for (let i = 0; i < matrices.length; i += 1) mesh.setMatrixAt(i, matrices[i]!);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    root.add(mesh);
+  }
+
+  // UV 必须按米铺：角件只有 24 厘米，吃 0..1 的话整张 3.2 米的钢板图会被压进
+  // 一颗 24 厘米的立方体，纹素放大十几倍，近看是一块糊掉的深灰方块
+  const castingGeometry = new THREE.BoxGeometry(CASTING, CASTING, CASTING);
+  fitBoxUv(castingGeometry, CASTING, CASTING, CASTING, materials.dark.userData.tileM as number);
+  addInstanced(castingGeometry, materials.dark, castingMatrices);
+
+  const lockRodGeometry = new THREE.CylinderGeometry(0.018, 0.018, CH - 0.24, 8, 1, false);
+  addInstanced(lockRodGeometry, materials.metal, lockRodMatrices);
+
+  // 舷墙加强筋（矩阵在船体那一节收集）。UV 同样按米铺，不然 44 米长的墙上
+  // 每一道筋都是同一块「被拉伸的 3.2 米钢板」
+  const ribGeometry = new THREE.BoxGeometry(0.14, 1.24, 0.18);
+  fitBoxUv(ribGeometry, 0.14, 1.24, 0.18, materials.steel.userData.tileM as number);
+  addInstanced(ribGeometry, materials.steel, ribMatrices);
+
+  /* ============================================================
+     9. 导航网格
      ============================================================ */
 
   const nav = buildNav(colliders);
@@ -850,6 +1102,40 @@ export function buildLevel(scene: THREE.Scene): Level {
     spawns,
     nav,
     sun,
+    /**
+     * 实拍贴图换装。只改材质引用的三个 Texture，**不动 UV、不动 tileMeters**
+     * （几何 UV 是 buildLevel 时按 SPEC 铺死的，换了米数整片纹素密度就错）。
+     *
+     * 两处例外要重新套一遍 `repeat`：端门和箱顶的名字看着一样，但它们的贴图
+     * 覆盖米数与箱体不一致（门 2.6 米、箱顶 1.2 米），repeat 记在**旧的**
+     * 程序化 Texture 上；新 Texture 是干净实例，不重设就退回「一张图铺满一面」
+     * 的默认，门的锁杆和箱顶的横波纹全部错位。
+     *
+     * 🔴 **不要设 `material.needsUpdate`**：三类贴图槽位都还在（map / normalMap /
+     * roughnessMap），shader define 没变，设了只会让全场景重新编译一遍 ——
+     * 那是几百毫秒的卡顿，而 uniform 里的贴图引用本来就会在下一帧自动同步。
+     */
+    applySurfaceTextures(hd: ReadonlyMap<SurfaceKind, SurfaceMaps>): void {
+      const applied = new Set<THREE.MeshStandardMaterial>();
+      for (const binding of surfaceBindings) {
+        if (applied.has(binding.material)) continue;
+        const maps = hd.get(binding.kind);
+        if (!maps) continue;
+        applied.add(binding.material);
+        if (binding.kind === 'containerDoor') {
+          for (const texture of [maps.map, maps.normalMap, maps.roughnessMap]) {
+            texture.repeat.set(doorRepeat, containerTex.tileMeters / CH);
+          }
+        } else if (binding.kind === 'containerRoof') {
+          for (const texture of [maps.map, maps.normalMap, maps.roughnessMap]) {
+            texture.repeat.set(roofRepeat, roofRepeat);
+          }
+        }
+        binding.material.map = maps.map;
+        binding.material.normalMap = maps.normalMap;
+        binding.material.roughnessMap = maps.roughnessMap;
+      }
+    },
     dispose() {
       const geometries = new Set<THREE.BufferGeometry>();
       const seenMaterials = new Set<THREE.Material>();
@@ -875,6 +1161,9 @@ export function buildLevel(scene: THREE.Scene): Level {
       sky.geometry.dispose();
       const skyMaterial = sky.material as THREE.MeshBasicMaterial;
       skyMaterial.map?.dispose();
+      // 接触阴影的贴图是这一份 level 自己画的，不像 surface-textures 那样是
+      // 模块级缓存 —— 必须随 level 一起释放
+      contactShadowTexture.dispose();
       collectMaterial(skyMaterial);
       sea.geometry.dispose();
       collectMaterial(sea.material as THREE.Material);

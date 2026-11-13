@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { type Point3, rand } from './math';
 import type { WeaponId } from './types';
-import { type ViewModel, buildWeaponModel, disposeWeaponModel } from './weapons';
+import { type ViewModel, buildWeaponModel, disposeWeaponModel, stripFirstPersonArms } from './weapons';
 
 /**
  * 掉在地上的武器 —— 死亡瞬间从手里脱手的那一把。
@@ -27,7 +27,7 @@ const LIFE = 14;
 
 const GRAVITY = 20;
 
-/** 躺平时的离地高度。枪模原点在握把附近，抬 4.5cm 才不穿甲板。 */
+/** 躺平时的离地高度。原点按包围盒居中（见 `recenter`），半个枪身厚就够。 */
 const REST_Y = 0.045;
 
 interface Dropped {
@@ -39,6 +39,21 @@ interface Dropped {
   groundY: number;
   life: number;
   rest: boolean;
+}
+
+/**
+ * 把模型内容挪到 group 原点（= 包围盒中心）。
+ *
+ * 🔴 必须做：外部枪模的原点在**眼睛**那一端 —— 资产是按第一人称机位导出的，
+ * `applyFpFraming` 只把 `inner` 摆到位、原点一动不动。不居中的话枪身整个躺在
+ * 落点前方 30~40cm，落地弹跳和「躺平」（绕 z 转 90°）都会绕着枪托外侧那一点转，
+ * 看起来像枪自己在空中划圈。程序化刀 / 雷本来就居中，挪一次是零代价的幂等操作。
+ */
+function recenter(group: THREE.Group): void {
+  group.updateMatrixWorld(true);
+  const center = new THREE.Box3().setFromObject(group).getCenter(new THREE.Vector3());
+  for (const child of group.children) child.position.sub(center);
+  group.updateMatrixWorld(true);
 }
 
 export class DroppedWeapons {
@@ -64,6 +79,9 @@ export class DroppedWeapons {
     const rz = nx;
 
     const model = buildWeaponModel(weapon);
+    // 地上的枪不能长手：外部枪模自带第一人称手臂（蒙皮网格），摘掉
+    stripFirstPersonArms(model);
+    recenter(model.group);
     const pos = new THREE.Vector3(origin.x, origin.y, origin.z);
     model.group.position.copy(pos);
     // 枪模朝 -z：想让它朝 (nx, nz)，yaw 就是 atan2(-nx, -nz)

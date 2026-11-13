@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { TEAM_CLOTH, surfaceMaps } from './surface-textures';
 import type { PrimaryId, SlotId, WeaponId } from './types';
-import { type PbrTextureSet, type WeaponTextureLibrary, weaponTextures } from './weapon-textures';
+import { type PbrTextureSet, weaponTextures } from './weapon-textures';
 
 /**
  * 全部武器的数值表 + 第一人称枪模。
@@ -819,16 +821,39 @@ function rivet(parent: THREE.Object3D, x: number, y: number, z: number, mat: THR
   parent.add(mesh);
 }
 
+/**
+ * 换弹动画用的弹匣装配。**换弹是唯一一件「枪身上零件真的离开枪」的动作**，
+ * 只把整把枪往下压是糊弄不过去的（用户 2026-11-13 明确否掉「换弹就是枪口向下」）。
+ *
+ * 外部枪模每个文件只有一个 `Magazine` 节点，装不出「旧匣掉出去 + 新匣插进来」，
+ * 所以加载时把该节点**克隆一份当备用匣**（`spare`）：前段原匣拔出画面外后隐藏，
+ * 后段备用匣从下方升进弹匣井，到位的那一帧两者交换 —— 肉眼看是两颗匣在换。
+ * 程序化枪模没有克隆件（`spare = null`），此时退化成原匣自己升回去。
+ */
+export interface WeaponMagazine {
+  /** 枪上原有的弹匣（静止位姿 = `rest`） */
+  body: THREE.Group;
+  /** 备用弹匣（同一份几何的克隆，平时隐藏） */
+  spare: THREE.Group | null;
+  /** 脱出方向（`body` 父空间的单位向量，指向弹匣井外） */
+  dir: THREE.Vector3;
+  /** 完全脱出弹匣井所需的行程（米） */
+  travel: number;
+  /** `body` 的静止位置（父空间） */
+  rest: THREE.Vector3;
+  /** `body` 的静止旋转（父空间）。拔匣时在它上面叠一点前倾，收尾要能还原 */
+  restRot: THREE.Euler;
+}
+
 export interface ViewModel {
   group: THREE.Group;
   /** 枪口位置（局部坐标），引擎用它算火光的世界坐标 */
   muzzle: THREE.Object3D;
   /**
-   * 可拆卸弹匣（独立子组，静止位姿已摆好）。
-   * 换弹时由 `viewmodel.ts` 驱动它「拔出 → 插入」；霰弹枪逐发装填、刀、雷为 null。
-   * GLB 枪模是整块网格，没有独立弹匣节点 —— 恒为 null（见下方 GLB 一节的妥协说明）。
+   * 可拆卸弹匣。换弹由 `viewmodel.ts` 驱动「拔出 → 掉出画面 → 新匣插入」；
+   * 霰弹枪（泵动）、刀、雷为 null。
    */
-  magazine: THREE.Group | null;
+  magazine: WeaponMagazine | null;
   /**
    * 可动画的枪栓（独立子组，静止位姿已摆好）。
    * 拉栓时由 `viewmodel.ts` 驱动它「提栓 → 后拉 → 推回 → 压下」；只有 AWM 有，其余为 null。
@@ -836,19 +861,61 @@ export interface ViewModel {
    */
   bolt: THREE.Group | null;
   /**
-   * 第一人称手臂（手 + 小臂，`buildFirstPersonArms` 装上，挂成 group 的子节点，
-   * 枪的一切动画自动带动它）。**掉在地上的枪没有手臂**（恒 null）——
-   * `dropped.ts` 走同一个构建函数但不调它，地上的枪不能长手。
+   * 第一人称手臂，挂成 group 的子节点，枪的一切动画自动带动它。
+   *
+   * 两个来源：① 外部枪模自带的蒙皮手臂（`FPArms`，有皮肤贴图，加载时就绪）；
+   * ② 程序化手臂（`buildFirstPersonArms`，刀 / 手雷 / 枪模就绪前的兜底）。
+   * `buildFirstPersonArms` 见 `arms` 已存在就直接返回，不会叠出四只手。
+   * **掉在地上的枪恒为 null** —— `dropped.ts` 用 `stripFirstPersonArms` 摘掉。
    */
-  arms: THREE.Group | null;
+  arms: THREE.Object3D | null;
+  /**
+   * 资产自带的第一人称取景（`extras.fp.hip`），直接给 `viewmodel.ts` 当基准位姿用。
+   *
+   * 🔴 **必须用它，不能再用 `BASE_POSES`**：这套资产是「枪 + 手臂」按真人尺寸在
+   * 同一个骨架里摆好姿势导出的，二者的相对关系是死的。用脚本位姿（z −0.55）
+   * 摆放时整条枪被推远到 40cm 外 —— 枪看着还行，但**手臂是对角着从镜头里穿出来的**：
+   * 装订好的肘部位置假定手在 15cm 处，推远 3 倍之后肘部（离眼 20cm）会被压到
+   * 画面正中，小臂变成一根横在准星下方的巨柱。取景是纯角度量，整体平移不是
+   * `BASE_POSES` 那种「挪一点更顺眼」，它改的是手与枪的透视关系。
+   * 没有元数据的旧模型（程序化刀 / 雷）仍是 null，走 `BASE_POSES`。
+   */
+  pose: WeaponPose | null;
+  /** 左手 IK（换弹时去抓弹匣 / 拉护木 / 拉栓）。程序化武器为 null */
+  hands: FpHands | null;
+  /**
+   * 换弹时左手去抓的部件。
+   *
+   * - 弹匣枪 = 弹匣上的**握持插槽**（`MagazineGrip` / `MagazineGripSocket`），位置由
+   *   `magazine` 那套动画驱动；`spareChild` 是它在备用匣里的同名子节点 —— 新匣升上来
+   *   之后手要改抓新匣，靠这个名字在克隆体里找回同一个点。
+   * - 霰弹 = 护木、AWM = 隐形锚点（这两件要自己往复，见 `stroke`）。
+   */
+  handPart: {
+    node: THREE.Object3D;
+    rest: THREE.Vector3;
+    stroke: number;
+    /** 弹匣枪专用：备用匣（`MagazineSpare`）里同名的握持子节点 */
+    spareChild: string | null;
+  } | null;
+}
+
+/** 武器在枪模相机空间里的基准位姿（弧度） */
+export interface WeaponPose {
+  x: number;
+  y: number;
+  z: number;
+  rotX: number;
+  rotY: number;
+  rotZ: number;
 }
 
 /**
  * 各武器枪口在模型局部坐标里的位置 —— **GLB 与程序化两条路共用这一份**。
  *
  * 引擎的契约（火光世界坐标、`muzzleScreen` 的准星对齐）全挂在这个点上：
- * GLB 归一化时把枪管轴线精确对到这里的 y/z，程序化分支直接用它摆 `muzzle`。
- * 改任何一个数，两条路都要同时验。
+ * GLB 优先用模型自带的 `MuzzleDeviceTip` / `MuzzleSocket` 节点，找不到才退回这里；
+ * 程序化分支直接用它摆 `muzzle`。改任何一个数，两条路都要同时验。
  */
 const MUZZLE_POS: Record<WeaponId, readonly [number, number, number]> = {
   ak47: [0, 0.018, -0.7],
@@ -865,184 +932,533 @@ const MUZZLE_POS: Record<WeaponId, readonly [number, number, number]> = {
    ============================================================ */
 
 /**
- * 外部枪模。来源：Quaternius「Ultimate Guns Pack」（经 poly.pizza 分发），
- * **CC0 公有领域** —— 可商用、免署名。文件已重命名放进 `public/h5/guns/`，
- * 刀与手雷没有合适的 CC0 模型，**仍走程序化路线**（kukri 的挤出剖面也比低模刀好）。
+ * 外部枪模 —— **写实 PBR 资产包**，文件在 `public/h5/guns/*-real.glb`。
+ * 刀与手雷没有合适的对应模型，**仍走程序化路线**（kukri 的挤出剖面也比低模刀好）。
  *
- * ## 归一化（关键：为什么引擎完全不用改）
+ * ## 为什么是这一套（第四代）
  *
- * GLB 原始朝向是「枪口朝 +x、上为 +y」（对五个模型逐顶点实测确认）。加载时：
+ * 前三代依次被否：① 程序化盒子「太塑料」→ ② Quaternius「太低清」→
+ * ③ 3dassets.dev 的高模「不够真实」—— 它有 3.7 万面，但**材质是纯 PBR 参数，
+ * 零贴图**，表面只能靠几何和光照撑，近看就是一块上色的铁。
  *
- *   1. `rotation.y = π/2` 把枪口转到 -z（和程序化枪模同向）
- *   2. 按 `scale` 压到程序化模型的包络长度（AK 1.12m、AWM 1.33m……）
- *   3. 按 `offset` 把**枪管轴线**对齐到 `MUZZLE_POS[id]` 的 y/z
+ * 现在这套每把枪都带完整贴图集：**baseColor + metallicRoughness + normal + AO**，
+ * 1024²（手枪 2048²）WebP，另加第一人称手臂（14800 面的蒙皮网格，带皮肤贴图）。
+ * 「真实质感」是贴图给的，不是面数给的。
  *
- * 于是枪口火光位置、`muzzleScreen` 的准星对齐、`BASE_POSES` 的持枪位姿
- * 这些引擎契约**原封不动** —— 枪托落点与程序化模型的偏差实测都在毫米级。
+ * ## 取景与尺寸（`applyFpFraming`）
+ *
+ * 资产是 Unreal 口径：**+Y up、枪口朝 -Z**（与引擎一致，不用转 180°），
+ * 整体按真实尺寸的 **2 倍**建模（AK 量出来 1.76m）。所以加载时只做一件事：
+ * 缩 `1/K`（K 来自资产元数据，=2）。**位置和朝向不在这里定**，而是读
+ * `glTF node.extras.fp.hip`（资产在 Blender 里对着 34 张商用 FPS 截图量出来的
+ * 机位），交给 `viewmodel.ts` 当基准位姿用。
+ *
+ * 🔴 **不能再按「握把 → GRIP_POS」自己摆**（第三代的做法）。手臂和枪是同一副
+ * 骨架、同一个刚体，脚本位姿把整条枪推到 40cm 外之后，枪看着还算正常，但
+ * 肘部会被压到画面正中，小臂变成一根横在准星下方的巨柱 —— 用户 2026-11-13
+ * 的四张截图就是这个现象。取景是**纯角度量**，平移改的是手与枪的透视关系，
+ * 不是「挪一点更顺眼」。
+ *
+ * 🔴 包围盒**必须排掉蒙皮网格**（`FPArms`）：蒙皮几何的包围盒是绑定空间的，
+ * 和摆好姿势的手完全不是一回事，混进去会把整把枪缩成一根火柴。
+ *
+ * ## 换弹（左手是真的在动）
+ *
+ * 骨架给了 `IK_Hand_Cntrl_L`（腕控制器）和 `BoneTwist_01.L_end`（前臂末端），
+ * 于是 `FpHands` 能对左臂做解析两骨 IK：把手拉到弹匣 / 护木 / 拉机柄上。
+ * 右臂不动 —— 它本来就随枪走，动了反而会脱开握把。
  *
  * ## 生命周期（与 `materials()` 同一条铁律）
  *
- * 模板在模块级缓存存一份，`buildWeaponModel` 返回 `clone(true)`：
+ * 模板在模块级缓存存一份，`buildWeaponModel` 返回克隆：
  * 几何体与材质全场共享，所以 `disposeWeaponModel` 对 GLB 克隆**必须跳过
  * dispose**（打穿模板 = 下次切枪拿到已释放几何体，枪变全黑）。
+ * **克隆必须走 `SkeletonUtils.clone`**：模型里有一条手臂骨架，`Object3D.clone()`
+ * 只会复制蒙皮网格、骨架仍指向模板那一份，手会按模板的世界矩阵变形 —— 表现为
+ * 手臂被拉成两倍长、飞出画面。
  *
- * 已知妥协：GLB 是整块网格，没有独立弹匣节点，换弹拔匣在 GLB 路径上退化为
- * 整体动作（`magazine` 传 null，`viewmodel.ts` 对 null 已有兼容分支）。
- * **AWM 拉栓不在此列**：拉机柄是 DarkMetal 网格里一簇可按质心干净切出的
- * 三角形（见 `splitBoltHandle`），加载时切出来装进动画组，原装手柄自己动。
- * USP 本体不带消音器 → 程序化 `attachSuppressor` 附加件补上。
+ * ## 换弹 / 拉栓
+ *
+ *   - **弹匣是真的会掉出来的**：每个文件都有独立的 `Magazine` 节点，加载时按
+ *     「节点 → 匣体质心」的方向算出脱出轴、按匣体最长边算出行程，并克隆一份
+ *     备用匣（见 `WeaponMagazine`）。换弹时间轴在 `viewmodel.ts`。
+ *   - **左手去抓它**：`FpHands` 把左腕 IK 到弹匣上（霰弹抓 `Pump`、M24 抓一个
+ *     隐形的机匣锚点），弹匣滑到哪手跟到哪。
+ *   - **AWM 的拉机柄仍然没有独立节点**：这套 M24 的栓体是 `Body` 网格的一部分，
+ *     按坐标盒切会从机匣撕下一块（这条坑在第三代就踩过）。`bolt` 传 null，
+ *     `viewmodel.ts` 有兼容分支；换弹时靠上面那个隐形锚点让手「拉一趟」。
  */
 interface GlbGunConfig {
   /** public 下的资源路径 */
   file: string;
-  /** 统一缩放：GLB 原始包围盒压到程序化模型的包络长度 */
-  scale: number;
-  /** 内层偏移：把枪管轴线对齐到 `MUZZLE_POS[id]`（实测值，见上方说明） */
-  offset: [number, number, number];
+  /**
+   * 枪身总长（米）= 真实枪械全长，**只在资产没有 `extras.fp` 元数据时**用来算缩放。
+   * 有元数据的模型按 `1/K` 缩，这里的数只是对照值（K=2 时两边等价）。
+   */
+  length: number;
 }
 
+/**
+ * 文件对应关系（武器 id → 资产）：
+ *
+ *   ak47    → ak47.glb      8 个材质、独立的弹匣/拉机柄节点
+ *   m4a1    → m4a1.glb      单材质图集
+ *   awm     → m24.glb       栓动狙击 + 瞄准镜镜片
+ *   shotgun → shotgun.glb   泵动（`Pump` 节点可往复）
+ *   usp     → p226.glb      手枪，2048² 图集
+ *
+ * 手臂贴图 `arms_basecolor.webp` / `arms_normal.webp` 是 GLB 里的**外置**引用
+ * （相对路径），必须和 glb 放在同一个目录 —— 少了这两个文件，手臂会变成白模。
+ */
 const GLB_GUNS: Partial<Record<WeaponId, GlbGunConfig>> = {
-  ak47: { file: '/h5/guns/ak47.glb', scale: 0.2066, offset: [0, -0.1148, 0.0885] },
-  m4a1: { file: '/h5/guns/m4a1.glb', scale: 0.2196, offset: [0, -0.1279, 0.0926] },
-  awm: { file: '/h5/guns/awm.glb', scale: 0.1823, offset: [0, -0.0465, 0.1073] },
-  shotgun: { file: '/h5/guns/shotgun.glb', scale: 0.2066, offset: [0, -0.0126, 0.1501] },
-  usp: { file: '/h5/guns/usp.glb', scale: 0.1237, offset: [0, -0.0409, 0.0646] },
+  ak47: { file: '/h5/guns/ak47-real.glb', length: 0.88 },
+  m4a1: { file: '/h5/guns/m4a1-real.glb', length: 0.84 },
+  awm: { file: '/h5/guns/awm-real.glb', length: 1.09 },
+  shotgun: { file: '/h5/guns/shotgun-real.glb', length: 1.01 },
+  usp: { file: '/h5/guns/usp-real.glb', length: 0.2 },
 };
+
+/** 模型里弹匣节点 / 备用匣节点的名字（`clone(true)` 保留 name） */
+const MAG_BODY_NAME = 'Magazine';
+const MAG_SPARE_NAME = 'MagazineSpare';
+
+/**
+ * 每把枪的弹匣「往哪个方向拔」。**枪空间**（= 弹匣节点父空间，父节点无旋转），
+ * 未归一化时就用 —— 单位向量，不需要长度。
+ *
+ * 方向不是随手写的：AK 的弹匣井向前倾（匣体往前下方挂），M4 接近垂直，
+ * 手枪的握把向后倾 20°，所以匣是往**后下方**退出来的。
+ */
+const MAG_DROP: Partial<Record<WeaponId, readonly [number, number, number]>> = {
+  ak47: [0, -1, -0.34],
+  m4a1: [0, -1, -0.12],
+  usp: [0, -1, 0.2],
+};
+
+/** 加载时量出来的弹匣参数（脱出方向 / 行程），克隆时照抄 */
+const magRigs = new Map<WeaponId, { dir: THREE.Vector3; travel: number }>();
+
+/** 枪口节点在模板局部坐标里的位置（模型自带的 `MuzzleDeviceTip` / `MuzzleSocket`） */
+const muzzleOffsets = new Map<WeaponId, THREE.Vector3>();
 
 const glbTemplates = new Map<WeaponId, THREE.Group>();
 const glbJobs = new Map<WeaponId, Promise<boolean>>();
-
+/** 资产自带的取景（相机空间位姿），`viewmodel.ts` 用它替掉 `BASE_POSES` */
+const rigPoses = new Map<WeaponId, WeaponPose>();
 /**
- * GLB 材质按名字挂上 Canvas PBR 贴图（法线 + 粗糙度 + AO）。
+ * 换弹时左手去抓的节点名，加载后按资产结构决定。
  *
- * Quaternius 模型全是无贴图的顶点色材质 —— 轮廓是真枪的，表面却是塑料。
- * 名字里带 wood / metal / glass 的按语义分派，其余一律当聚合物处理；
- * 底色保留 GLB 原色（贴图是灰度，只在上面叠纹理）。
- * **不挂 metalnessMap**：ORM 的 B 通道恒为 1，会把聚合物也变金属。
+ * `spareChild` 只有弹匣枪有：`Magazine` 的克隆体（备用匣）里还留着同名的
+ * `MagazineGrip`，新匣升上来时按名字在克隆体里找同一个握点。
  */
-function tuneGlbMaterial(src: THREE.MeshStandardMaterial, tex: WeaponTextureLibrary): THREE.MeshStandardMaterial {
-  const name = src.name.toLowerCase();
-  const mat = new THREE.MeshStandardMaterial({ color: src.color.clone() });
-  mat.aoMapIntensity = 0.7;
-  if (name.includes('glass')) {
-    // 镜片：低粗糙 + 环境反射出高光（与程序化 m.glass 同参）
-    mat.roughness = 0.12;
-    mat.metalness = 0.5;
-    return mat;
-  }
-  const set = name.includes('wood') ? tex.wood : name.includes('metal') ? tex.metal : tex.polymer;
-  mat.map = set.map;
-  mat.normalMap = set.normalMap;
-  mat.normalScale = new THREE.Vector2(0.8, 0.8);
-  mat.roughnessMap = set.ormMap;
-  mat.aoMap = set.ormMap;
-  mat.roughness = name.includes('metal') ? 0.78 : 1;
-  mat.metalness = name.includes('metal') ? 0.9 : name.includes('wood') ? 0 : 0.08;
-  return mat;
-}
+const handPartNames = new Map<
+  WeaponId,
+  { node: string; stroke: number; spareChild: string | null }
+>();
 
 /**
- * 三平面投射生成 UV。Quaternius 的 GLB 大多不带 TEXCOORD（没有贴图就不导出），
- * 而我们的噪声 / 划痕贴图必须有 UV 才能采样。按法线主导轴把局部坐标投影出去，
- * 对噪声类贴图完全够用，还省去了逐部件展 UV 的功夫。
+ * ⚠️ 旧的两件套 `tuneGlbMaterial`（给无贴图低模挂 Canvas 噪声贴图）与
+ * `generateUv`（三平面 UV）在 2026-11-13 换高清枪模时**一起删了**。
+ * 现在的枪自带 1024/2048 PBR 贴图与展好的 UV，那套补丁只会把高清贴图
+ * 换成 512px 手绘噪声。别再按「模型没贴图」的理由加回来 —— 真的需要时，
+ * 应该在资产侧修，而不是在运行时用投影 UV 掩盖。
  */
-function generateUv(geometry: THREE.BufferGeometry): void {
-  const pos = geometry.attributes.position;
-  const nor = geometry.attributes.normal;
-  if (!pos || !nor) return;
-  const uv = new Float32Array(pos.count * 2);
-  for (let i = 0; i < pos.count; i += 1) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    const nx = Math.abs(nor.getX(i));
-    const ny = Math.abs(nor.getY(i));
-    const nz = Math.abs(nor.getZ(i));
-    let u: number;
-    let v: number;
-    if (nx >= ny && nx >= nz) {
-      u = z;
-      v = y;
-    } else if (ny >= nz) {
-      u = x;
-      v = z;
-    } else {
-      u = x;
-      v = y;
-    }
-    uv[i * 2] = u * 8;
-    uv[i * 2 + 1] = v * 8;
-  }
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-}
 
-/* ---------- AWM 拉机柄切分（GLB 拉栓动画的前提） ---------- */
+/* ---------- AWM 拉栓动画组的名字（当前不产出，见下方说明） ---------- */
 
 /** 拉栓动画组挂到克隆体上后用名字找回来（`clone(true)` 保留 name） */
 const AWM_BOLT_NAME = 'awm_bolt';
 
 /**
- * 拉机柄的质心判定区域（**归一化坐标**，对 `awm.glb` 逐三角形实测得出）。
+ * 拉机柄切分**已删除**（2026-11-13 换高清枪模时）。
  *
- * GLB 的拉机柄是 DarkMetal 网格里一小簇 42 个三角形（x 0.021~0.055、
- * z 0.053~0.063、轴线下方），与机匣壁（质心 x ≤ 0.013）之间有干净的空隙，
- * 按质心切一刀不会伤到机匣 —— 切出来的手柄装进动画组，原装件自己动，
- * 比另造一个程序化手柄盖上去少一层「双拉机柄」的破绽。
+ * 旧实现从 Quaternius 的 AWM 网格里按一簇固定坐标的三角形切出拉机柄，坐标是
+ * 对着那一份模型逐三角形量的。新 AWM 是 10.6k 面的另一套模型，同一个坐标盒
+ * 会命中完全不相干的三角形 —— 轻则拉栓飞出镜头，重则机匣被撕开一个洞。
+ *
+ * 新模型自带 `bolt cycle` 动画（4 个 clip），但要接上得改成按 GLB 节点名驱动
+ * `AnimationMixer`，与现有「程序化拉栓行程」那套合同（`viewmodel.ts` 的
+ * `bolt.position.z`）不是一条路。所以这一轮**先不做**：`bolt` 传 null，
+ * `viewmodel` 已有兼容分支（整体动作代替），枪身完整优先。
  */
-const BOLT_REGION = { xMin: 0.017, yMax: 0.002, zMin: 0.045, zMax: 0.075 };
+
+/** 枪贴图的各向异性上限：4x 足够把导轨的横向拉丝在斜视时拉清楚 */
+const MAX_GUN_ANISOTROPY = 4;
 
 /**
- * 从 GLB 网格中切出拉机柄，返回烘到归一化坐标的手柄几何体；
- * 原网格的索引同步剔除手柄三角形（几何体数组共享，只有索引分家）。
- * 找不到手柄（结构不符预期 / 非索引网格）返回 null，调用方静默跳过 ——
- * 宁可没有拉栓动画，也不能把机匣撕个洞。
+ * 高清枪模的材质「轻加工」：**不改颜色、不换贴图**，只补采样质量。
+ *
+ * 上一代 `tuneGlbMaterial` 会给材质挂 Canvas 灰度噪声 + 三平面 UV，那是给
+ * 没有 TEXCOORD 的低模补细节用的。新模型自带 baseColor / normal / metal-rough，
+ * 再盖一层 512px 手绘噪声，等于用噪声替换 2048px 的真实贴图 —— 越「优化」越糊。
  */
-function splitBoltHandle(mesh: THREE.Mesh): THREE.BufferGeometry | null {
-  const geo = mesh.geometry;
-  const index = geo.getIndex();
-  const pos = geo.getAttribute('position');
-  const nor = geo.getAttribute('normal');
-  if (!index || !pos || !nor) return null;
-
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
-  const c = new THREE.Vector3();
-  const centroid = new THREE.Vector3();
-  const boltIdx: number[] = [];
-  const keepIdx: number[] = [];
-  for (let t = 0; t < index.count; t += 3) {
-    const ia = index.getX(t);
-    const ib = index.getX(t + 1);
-    const ic = index.getX(t + 2);
-    a.fromBufferAttribute(pos, ia);
-    b.fromBufferAttribute(pos, ib);
-    c.fromBufferAttribute(pos, ic);
-    centroid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-    // matrixWorld = raw → 归一化坐标的完整链（节点 ×100 / -90°X + 外层摆位）
-    mesh.localToWorld(centroid);
-    const hit =
-      centroid.x > BOLT_REGION.xMin &&
-      centroid.y < BOLT_REGION.yMax &&
-      centroid.z > BOLT_REGION.zMin &&
-      centroid.z < BOLT_REGION.zMax;
-    (hit ? boltIdx : keepIdx).push(ia, ib, ic);
+function tuneHdMaterial(src: THREE.Material): THREE.Material {
+  const std = src as THREE.MeshStandardMaterial;
+  if (!std.isMeshStandardMaterial) return src;
+  std.side = THREE.FrontSide;
+  for (const texture of [std.map, std.normalMap, std.roughnessMap, std.metalnessMap, std.aoMap]) {
+    if (texture) texture.anisotropy = MAX_GUN_ANISOTROPY;
   }
-  // 两边都得有货：全判成手柄说明区域写错了，此时绝不能动原网格
-  if (boltIdx.length === 0 || keepIdx.length === 0) return null;
+  std.needsUpdate = true;
+  return std;
+}
 
-  const handleGeo = new THREE.BufferGeometry();
-  // position / normal **必须克隆**：applyMatrix4 是原地变换属性数组，共享的话
-  // 烘矩阵会把原网格的顶点一起烘掉 —— 原网格对象树上还挂着同一条 ×18 的
-  // 变换链，等于被双重变换，整个枪身金属件直接糊到镜头上。uv 无变换，可共享。
-  handleGeo.setAttribute('position', pos.clone());
-  handleGeo.setAttribute('normal', nor.clone());
-  const uv = geo.getAttribute('uv');
-  if (uv) handleGeo.setAttribute('uv', uv);
-  handleGeo.setIndex(boltIdx);
-  handleGeo.applyMatrix4(mesh.matrixWorld); // 烘死变换，动画组直接挂最终坐标
+/** 枪械静态资源目录（手臂贴图是 GLB 里的相对引用，必须同目录） */
+const GUN_ASSET_BASE = '/h5/guns/';
 
-  geo.setIndex(keepIdx); // 原网格只剩机匣部分
-  return handleGeo;
+/**
+ * **只统计非蒙皮网格**的包围盒。
+ *
+ * 🔴 不能直接用 `Box3.setFromObject`：模型里挂着一条 14800 面的手臂蒙皮网格，
+ * 它的几何包围盒属于「绑定空间」（还没乘骨骼矩阵），和摆好姿势的手臂完全不是
+ * 一回事 —— 实测是一块 ±1m 的空盒子。混进去会把整把枪缩成一根火柴。
+ */
+function gunBounds(root: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3();
+  const corner = new THREE.Vector3();
+  root.updateMatrixWorld(true);
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
+    const geometry = mesh.geometry;
+    if (!geometry) return;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const bb = geometry.boundingBox;
+    if (!bb) return;
+    for (let i = 0; i < 8; i += 1) {
+      corner.set(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z);
+      box.expandByPoint(corner.applyMatrix4(mesh.matrixWorld));
+    }
+  });
+  return box;
+}
+
+/**
+ * 握把锚点（武器坐标系里的常数值，四把长枪共用）。
+ *
+ * 「把这个点摆到 `GRIP_POS`」而不是「把枪口摆到 `MUZZLE_POS`」——
+ * 换到真实尺寸之后这一条变得关键：真枪比之前那套充气比例的模型短 20cm，
+ * 按枪口锚定会把整把枪往前推 20cm，握把离镜头 60cm，手臂得伸直才够得着，
+ * 看起来像举着一把玩具。按握把锚定，**手的位置不动**，短掉的那截从枪口那头减。
+ *
+ * 数值是和 `BASE_POSES` 一起定的：步枪 `BASE.z = -0.55`，握把落在 −0.15
+ * → 世界坐标 −0.40（手离眼 40cm）；AK 的握把到枪口 0.63，于是枪口在 −1.03，
+ * 枪托在 −0.15 —— 抵肩的构图。
+ */
+const GRIP_POS: readonly [number, number, number] = [0, -0.05, 0.15];
+
+/**
+ * 资产自带的取景元数据（`glTF node.extras.fp`，字符串化的 JSON）。
+ *
+ * `hip.pos` 是**相机空间**（x 右、y 前、z 上，米）里「握把上方那条膛线点」的位置，
+ * `hip.rot` 是同一点的俯仰 / 偏航 / 横滚（度），`hip.boreRef` 是那个点在自己的
+ * 枪身坐标系（K 倍空间）里的位置，`K` 是建模倍率。这套数在 Blender 里对着 34 张
+ * 商用 FPS 截图逐张量出来的（资产方 `docs/FP_FRAMING.md`），比自己拍脑袋写
+ * `BASE_POSES` 靠谱得多 —— 那份文档里连「托手应落在 x 45~65%、y 62~85%」都有。
+ *
+ * 实测：按这套数摆，AK 的托手落 55%/77%、小臂 33%/98%（从画面左下入库），
+ * M4 的照门 69%/57% —— 和文档的目标带逐项吻合。
+ */
+interface FpMeta {
+  K: number;
+  hip: {
+    pos: [number, number, number];
+    rot: [number, number, number];
+    boreRef: [number, number, number];
+  };
+}
+
+/** 从加载好的场景里捞出 `extras.fp`（three 会把 glTF extras 塞进 `userData`） */
+function readFpMeta(root: THREE.Object3D): FpMeta | null {
+  let meta: FpMeta | null = null;
+  root.traverse((object) => {
+    if (meta) return;
+    const raw = object.userData?.fp;
+    if (typeof raw !== 'string') return;
+    try {
+      const parsed = JSON.parse(raw) as FpMeta;
+      if (parsed?.hip?.pos && parsed?.hip?.boreRef) meta = parsed;
+    } catch {
+      // 元数据坏了就当没有：下面会退回按握把锚定的老路
+    }
+  });
+  return meta;
+}
+
+/**
+ * 各武器的「取景推远系数」。资产方的 `FP_TUNE.hipPush`：以眼睛为原点整体缩放
+ * 机位，屏幕构图不变、但离眼睛更远（枪看起来略小一圈）。
+ *
+ * 手枪给 1.3 是资产方自己调过的 —— 手枪的托手离眼太近，不推远会把整个手背
+ * 糊在画面下沿之外。步枪 1.05 / 1.12 是同源的小幅修正。
+ */
+const HIP_PUSH: Partial<Record<WeaponId, number>> = {
+  ak47: 1.05,
+  m4a1: 1.12,
+  usp: 1.3,
+};
+
+/**
+ * 把模型缩到真人尺寸（`1/K`），并算出它相对**枪模相机**的基准位姿。
+ *
+ * 关键点：位姿算的是「整条枪 + 两条手臂」这个刚体的位置，不再按握把锚定。
+ * `boreRef` 那一步是把「膛线点」对到 `hip.pos` 上 —— 换模型不用重调，改构图
+ * 只改资产里的元数据。
+ *
+ * 返回的位姿写进 `rigPoses`，由 `viewmodel.ts` 当作 `BASE_POSES` 的替代品。
+ */
+function applyFpFraming(inner: THREE.Group, id: WeaponId, meta: FpMeta): WeaponPose {
+  const k = meta.K > 0 ? meta.K : 2;
+  inner.scale.setScalar(1 / k);
+  inner.position.set(0, 0, 0);
+  inner.rotation.set(0, 0, 0);
+  inner.updateMatrixWorld(true);
+
+  // 相机空间 (x 右, y 前, z 上) → three 空间 (x 右, y 上, z 后)
+  const toScene = (v: readonly [number, number, number]) => new THREE.Vector3(v[0], v[2], -v[1]);
+  const deg = Math.PI / 180;
+  const rot = new THREE.Euler(meta.hip.rot[0] * deg, meta.hip.rot[1] * deg, meta.hip.rot[2] * deg, 'YXZ');
+  const bore = toScene(meta.hip.boreRef).applyEuler(rot);
+  const push = HIP_PUSH[id] ?? 1;
+  const pos = toScene(meta.hip.pos).sub(bore).multiplyScalar(push);
+
+  // 资产给的旋转是 **YXZ** 阶，而 `group.rotation` 是 XYZ —— 必须过一遍四元数
+  // 重新分解，不能把 yxz 的三个分量直接塞进 XYZ（AK 只有 roll 时等价，
+  // 一旦俯仰和偏航同时非零就会差出零点几度，换成别的资产会放大）
+  const order = new THREE.Euler().setFromQuaternion(
+    new THREE.Quaternion().setFromEuler(rot),
+    'XYZ',
+  );
+  return { x: pos.x, y: pos.y, z: pos.z, rotX: order.x, rotY: order.y, rotZ: order.z };
+}
+
+/** 没有元数据的旧模型兜底：按 `GripR` → `GRIP_POS` 摆（第三代资产用的算法） */
+function alignByGrip(inner: THREE.Group, length: number): WeaponPose {
+  inner.updateMatrixWorld(true);
+  const rawSize = gunBounds(inner).getSize(new THREE.Vector3());
+  inner.scale.setScalar(length / Math.max(rawSize.z, 1e-4));
+  inner.updateMatrixWorld(true);
+  const grip = inner.getObjectByName('GripR');
+  const base: WeaponPose = { x: 0.15, y: -0.105, z: -0.55, rotX: -0.012, rotY: 0.055, rotZ: 0.06 };
+  const box = gunBounds(inner);
+  const anchor = grip
+    ? grip.getWorldPosition(new THREE.Vector3())
+    : new THREE.Vector3(0, (box.min.y + box.max.y) / 2, box.max.z);
+  inner.position.x += GRIP_POS[0] - anchor.x;
+  inner.position.y += GRIP_POS[1] - anchor.y;
+  inner.position.z += GRIP_POS[2] - anchor.z;
+  inner.updateMatrixWorld(true);
+  return base;
+}
+
+/**
+ * 左手的两骨 IK。
+ *
+ * 素材里两条手臂和枪是同一副骨架：右臂随枪刚性移动，左臂要能离开护木去抓弹匣。
+ * 这套骨架给了 `IK_Hand_Cntrl_L`（手腕控制器，`Hand_L` 是它的子节点）和
+ * `BoneTwist_01.L_end`（前臂末端），正好够解一个解析两骨 IK：肩固定、肘保持
+ * 建模时的弯曲平面，把肘摆到解出来的位置，再转前臂让腕落到目标点。
+ *
+ * 只对左臂做 —— 右臂本来就是「随枪走」，动它反而会脱开握把。
+ */
+export class FpHands {
+  private readonly root: THREE.Object3D;
+  private readonly up: THREE.Object3D | null;
+  private readonly fo: THREE.Object3D | null;
+  private readonly end: THREE.Object3D | null;
+  private readonly ctrl: THREE.Object3D | null;
+  private readonly hand: THREE.Object3D | null;
+  /** 三个受控骨骼的静止位姿，每帧解算前先还原 */
+  private readonly rest: { b: THREE.Object3D; p: THREE.Vector3; q: THREE.Quaternion }[] = [];
+  /** 静止时手腕在 group 局部空间的位置（第一次解算时记下） */
+  private home: THREE.Vector3 | null = null;
+  /**
+   * 「腕 → 抓点」的偏移（group 局部空间）。
+   *
+   * 骨架里的 `Hand_L` 是**腕关节**，不是掌心：建模姿势下腕在护木握点后方 5cm、
+   * 下方 4cm。要把握把 / 弹匣摆到手心，目标点必须先减去这段偏移 —— 直接把腕
+   * 拉到弹匣上，掌心会越过去插进匣体里。
+   *
+   * 偏移量不写死：拿资产自带的 `GripL`（托手握点）当场量一次。没有 `GripL`
+   * 的手枪用 `GripR`（双手握把点，也是一回事）。
+   */
+  private gripOffset: THREE.Vector3 | null = null;
+
+  constructor(root: THREE.Object3D) {
+    this.root = root;
+    const find = (names: string[]) => {
+      for (const name of names) {
+        const node = root.getObjectByName(name);
+        if (node) return node;
+      }
+      return null;
+    };
+    this.up = find(['UpArm_L']);
+    this.fo = find(['Forearm_L']);
+    // 资产里是 `BoneTwist_01.L_end`，另一份导出写成 `BoneTwist_01L_end`
+    this.end = find(['BoneTwist_01.L_end', 'BoneTwist_01L_end']);
+    this.ctrl = find(['IK_Hand_Cntrl_L']);
+    this.hand = find(['Hand_L']);
+    if (!this.up || !this.fo || !this.end || !this.ctrl || !this.hand) return;
+    for (const bone of [this.up, this.fo, this.ctrl]) {
+      this.rest.push({ b: bone, p: bone.position.clone(), q: bone.quaternion.clone() });
+    }
+    // 量「腕 → 抓点」：必须在对 root 做任何变换**之前**量，两边都是局部坐标
+    const socket = find(['GripL']) ?? find(['GripR']);
+    if (socket) {
+      root.updateMatrixWorld(true);
+      const wrist = root.worldToLocal(this.hand.getWorldPosition(new THREE.Vector3()));
+      const point = root.worldToLocal(socket.getWorldPosition(new THREE.Vector3()));
+      this.gripOffset = wrist.sub(point);
+    }
+  }
+
+  /** 这套骨架解不了 IK（缺节点）时为 false，调用方就别再算了 */
+  get ok(): boolean {
+    return this.rest.length === 3;
+  }
+
+  /** 回到模型自带的持枪姿势 */
+  reset(): void {
+    for (const r of this.rest) {
+      r.b.position.copy(r.p);
+      r.b.quaternion.copy(r.q);
+    }
+    this.home = null;
+  }
+
+  /**
+   * 把左手拉到 `target`（group 局部坐标，**抓点**：弹匣 / 护木 / 拉机柄的位置），
+   * `weight` 0..1 与自带姿势插值。
+   *
+   * 先按静止姿势记下腕关节位置，再线性过渡过去，起手 / 收手都是连续的，
+   * 不会在换弹开始那一帧「啪」地跳到弹匣上。
+   */
+  reach(target: THREE.Vector3, weight: number): void {
+    if (!this.ok) return;
+    this.reset();
+    if (weight <= 0.001) return;
+
+    const root = this.root;
+    root.updateMatrixWorld(true);
+    const ctrl = this.ctrl!;
+    const up = this.up!;
+    const fo = this.fo!;
+    const end = this.end!;
+    const hand = this.hand!;
+
+    if (!this.home) this.home = root.worldToLocal(ctrl.getWorldPosition(new THREE.Vector3()));
+    // 抓点 → 腕：掌心要落在抓点上，腕得退回建模时那段偏移
+    const wristGoal = target.clone();
+    if (this.gripOffset) wristGoal.add(this.gripOffset);
+    const toWorld = (local: THREE.Vector3) => local.clone().applyMatrix4(root.matrixWorld);
+    const goal = toWorld(this.home).lerp(toWorld(wristGoal), Math.min(1, weight));
+
+    const shoulder = up.getWorldPosition(new THREE.Vector3());
+    const elbow0 = fo.getWorldPosition(new THREE.Vector3());
+    const wrist0 = end.getWorldPosition(new THREE.Vector3());
+
+    // 手腕控制器直接搬过去 —— `Hand_L` 是它的子节点，搬控制器就是搬整只手
+    ctrl.position.copy(ctrl.parent ? ctrl.parent.worldToLocal(goal.clone()) : goal);
+    ctrl.updateMatrixWorld(true);
+    const wrist = hand.getWorldPosition(new THREE.Vector3());
+
+    const upper = elbow0.distanceTo(shoulder);
+    const fore = wrist0.distanceTo(elbow0);
+    const span = wrist.clone().sub(shoulder);
+    // 夹到可达范围：目标太近 / 太远时不硬拉断手臂，长度不够就伸到极限
+    const dist = THREE.MathUtils.clamp(span.length(), Math.abs(upper - fore) + 1e-4, upper + fore - 1e-4);
+    const axis = span.normalize();
+
+    // 弯曲平面沿用建模时的：把静止的「肩→肘」相对「肩→腕」的分量随新轴线转过去
+    const bend0 = elbow0.clone().sub(shoulder);
+    const axis0 = wrist0.clone().sub(shoulder).normalize();
+    bend0.addScaledVector(axis0, -bend0.dot(axis0));
+    const bend = bend0.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(axis0, axis));
+    bend.addScaledVector(axis, -bend.dot(axis)).normalize();
+
+    const cosA = (upper * upper + dist * dist - fore * fore) / (2 * upper * dist);
+    const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+    const elbow = shoulder
+      .clone()
+      .addScaledVector(axis, upper * cosA)
+      .addScaledVector(bend, upper * sinA);
+
+    // 上臂：把静止的肘方向旋到解出来的肘方向
+    const swing = new THREE.Quaternion().setFromUnitVectors(
+      elbow0.clone().sub(shoulder).normalize(),
+      elbow.clone().sub(shoulder).normalize(),
+    );
+    this.setWorldQuaternion(up, swing.multiply(up.getWorldQuaternion(new THREE.Quaternion())));
+
+    // 前臂：把当前的腕再摆到目标上
+    const elbow1 = fo.getWorldPosition(new THREE.Vector3());
+    const wrist1 = end.getWorldPosition(new THREE.Vector3());
+    const fold = new THREE.Quaternion().setFromUnitVectors(
+      wrist1.clone().sub(elbow1).normalize(),
+      wrist.clone().sub(elbow1).normalize(),
+    );
+    this.setWorldQuaternion(fo, fold.multiply(fo.getWorldQuaternion(new THREE.Quaternion())));
+  }
+
+  /** 世界空间给骨骼定姿：先把世界四元数换进父空间，再写回本地 */
+  private setWorldQuaternion(bone: THREE.Object3D, world: THREE.Quaternion): void {
+    const parent = bone.parent;
+    if (parent) {
+      bone.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(world));
+    } else {
+      bone.quaternion.copy(world);
+    }
+    bone.updateMatrixWorld(true);
+  }
+}
+
+
+/**
+ * 读模型自带的枪口节点 → 模板局部坐标。
+ *
+ * 模型给的是 `MuzzleDeviceTip`（AK）或 `MuzzleSocket`（M4 / M24 / M870 / P226）。
+ * 用它比用 `MUZZLE_POS` 准：枪口火光正好落在消焰器口，而不是「大约在枪管前端」。
+ * 找不到就退回 `MUZZLE_POS` —— 火光位置宁可差一点，也不能没有。
+ */
+function findMuzzleOffset(inner: THREE.Group, id: WeaponId): THREE.Vector3 {
+  const node =
+    inner.getObjectByName('MuzzleDeviceTip') ??
+    inner.getObjectByName('MuzzleSocket') ??
+    inner.getObjectByName('MuzzleDevice');
+  if (!node) return new THREE.Vector3(...MUZZLE_POS[id]);
+  return node.getWorldPosition(new THREE.Vector3());
+}
+
+/**
+ * 量弹匣：脱出方向 + 行程，并克隆一份备用匣挂回同一父节点（见 `WeaponMagazine`）。
+ *
+ * 方向用 `MAG_DROP` 的先验，而不是「节点 → 匣体质心」现算：手枪的匣体是对称件，
+ * 质心几乎落在节点原点上，现算会得到一条零向量。先验写的是枪空间方向，
+ * 这里再按父节点的世界四元数逆变换转进父空间（这几个父节点其实都没旋转，
+ * 但一旦哪天资产换了，这行能兜住）。
+ */
+function prepareMagazine(inner: THREE.Group, id: WeaponId): void {
+  const body = inner.getObjectByName(MAG_BODY_NAME) as THREE.Group | null;
+  if (!body || !body.parent) return;
+
+  const preset = MAG_DROP[id] ?? [0, -1, 0];
+  const parentQuat = body.parent.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const dir = new THREE.Vector3(preset[0], preset[1], preset[2]).applyQuaternion(parentQuat).normalize();
+
+  // 行程 = 匣体最长边（弹匣的长轴就是它自己的长度）+ 5% 余量，确保整颗出井。
+  // 🔴 `setFromObject` 给的是**世界单位**，而动画里是加在 `body.position` 上的
+  // **父空间**位移 —— 中间夹着归一化的 0.5 和模型自带的 1.2575，必须除掉世界缩放，
+  // 否则弹匣只滑出一半就停住（看着像卡在井里）。
+  const size = new THREE.Box3().setFromObject(body).getSize(new THREE.Vector3());
+  const parentScale = body.parent.getWorldScale(new THREE.Vector3());
+  const travel = (Math.max(size.x, size.y, size.z) * 1.05) / Math.max(parentScale.x, 1e-6);
+  magRigs.set(id, { dir, travel });
+
+  const spare = body.clone(true);
+  spare.name = MAG_SPARE_NAME;
+  spare.visible = false;
+  body.parent.add(spare);
 }
 
 async function loadGlbWeapon(id: WeaponId, config: GlbGunConfig): Promise<boolean> {
@@ -1051,55 +1467,57 @@ async function loadGlbWeapon(id: WeaponId, config: GlbGunConfig): Promise<boolea
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buffer = await res.arrayBuffer();
     const loader = new GLTFLoader();
+    // 资产用 EXT_meshopt_compression 压过几何、KHR_mesh_quantization 量化过顶点。
+    // 不挂解码器 `parse` 会直接抛错，整把枪退回程序化盒子。
+    loader.setMeshoptDecoder(MeshoptDecoder);
     const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
-      loader.parse(buffer, '', resolve, reject);
+      // base 路径必须给对：手臂贴图是 GLB 里的**外置**相对引用
+      // （`arms_basecolor.webp` / `arms_normal.webp`），给空串会按页面根目录取 → 404 → 白模手臂
+      loader.parse(buffer, GUN_ASSET_BASE, resolve, reject);
     });
 
     const inner = gltf.scene;
-    inner.rotation.y = Math.PI / 2; // 枪口 +x → -z（实测五把枪枪口都在 +x）
-    inner.scale.setScalar(config.scale);
-    inner.position.set(...config.offset);
+    // 资产里还带一颗「备用弹匣」（`SpareMagazine`，挂在骨架腰侧，是给原包自家
+    // 换弹动画当道具的）。我们不播那套动画，留着它就是一颗悬在腰前的匣
+    // —— AK 量出来在握把下方 35cm，正好落在画面下沿里。摘掉。
+    inner.getObjectByName('SpareMagazine')?.removeFromParent();
 
-    const tex = weaponTextures();
-    const tuned = new Map<THREE.Material, THREE.MeshStandardMaterial>();
+    // 取景：优先用资产自带的 `extras.fp.hip`（对过 34 张商用 FPS 截图的目标带），
+    // 没有元数据才退回「握把 → GRIP_POS」的老算法
+    const meta = readFpMeta(inner);
+    const pose = meta ? applyFpFraming(inner, id, meta) : alignByGrip(inner, config.length);
+    rigPoses.set(id, pose);
+
+    // 高清模自带 UV 与 PBR 贴图：**不要再走 `tuneGlbMaterial` 那套 Canvas 贴图**。
+    // 那套是给「没有 TEXCOORD 的低模」补细节的（灰度噪声 + 三平面 UV），
+    // 盖到已经有 2048 贴图的模型上等于把高清贴图换成噪声，越换越糊。
+    const tuned = new Map<THREE.Material, THREE.Material>();
     inner.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh || !mesh.geometry) return;
-      mesh.frustumCulled = false; // 枪永远在视野里（与程序化枪模同一策略）
-      generateUv(mesh.geometry);
-      const src = mesh.material as THREE.MeshStandardMaterial;
+      // 枪永远在视野里；手臂是蒙皮网格，绑定空间的包围盒和实际姿势对不上，
+      // 开着剔除会让手臂在画面边缘整条消失
+      mesh.frustumCulled = false;
+      const src = mesh.material as THREE.Material;
       let mat = tuned.get(src);
       if (!mat) {
-        mat = tuneGlbMaterial(src, tex);
+        mat = tuneHdMaterial(src);
         tuned.set(src, mat);
       }
       mesh.material = mat;
     });
 
+    prepareMagazine(inner, id);
+    // 换弹时左手抓哪一件：有弹匣抓弹匣（位置由弹匣那套驱动），
+    // 霰弹抓护木、AWM 抓拉机柄 —— 这两件没有弹匣，得靠 `stroke` 自己往复，
+    // 否则「换弹」就只是枪在抖、手不动。
+    const part = pickHandPart(inner);
+    if (part) handPartNames.set(id, part);
+    muzzleOffsets.set(id, findMuzzleOffset(inner, id));
+
     const root = new THREE.Group();
     root.userData.shared = true; // disposeWeaponModel 见此跳过 dispose
     root.add(inner);
-
-    // AWM：切出拉机柄装进动画组（viewmodel 的拉栓动画合同见 ViewModel.bolt）。
-    // 组挂在 **root**（最终坐标）而不是 inner —— inner 带 0.18 缩放，会把
-    // position.z 的 0.085 拉栓行程也缩掉。轴心 = 枪管轴线（提栓绕轴转 66°）。
-    if (id === 'awm') {
-      root.updateMatrixWorld(true); // localToWorld / matrixWorld 需要
-      inner.traverse((child) => {
-        const mesh = child as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const handleGeo = splitBoltHandle(mesh);
-        if (!handleGeo) return;
-        const boltGroup = new THREE.Group();
-        boltGroup.name = AWM_BOLT_NAME;
-        boltGroup.position.set(0, MUZZLE_POS.awm[1], 0);
-        const handle = new THREE.Mesh(handleGeo, mesh.material);
-        handle.position.set(0, -MUZZLE_POS.awm[1], 0); // 静止位姿与原位重合
-        handle.frustumCulled = false;
-        boltGroup.add(handle);
-        root.add(boltGroup);
-      });
-    }
 
     glbTemplates.set(id, root);
     return true;
@@ -1113,10 +1531,11 @@ async function loadGlbWeapon(id: WeaponId, config: GlbGunConfig): Promise<boolea
 /**
  * 预载全部 GLB 枪模（幂等：并发调用共享同一个任务）。在 viewmodel 层开局时调用。
  *
- * `onProgress` 是给**载入页的进度条**用的：五把枪各自 50~130KB，逐个回一个
- * `(已完成, 总数)`。计数器是**每次调用独立**的 —— 任务本身被 `glbJobs` 共享，
- * 但「等的人」可能不止一个（引擎构造时先起一次，载入页紧接着再等一次），
- * 共用同一个计数器会出现「第二次调用一上来就 5/5」。
+ * `onProgress` 是给**载入页的进度条**用的：写实 PBR 枪模 1.0~2.0MB 一把
+ * （低模时代是 50~130KB），五把合计约 7MB，逐个回一个 `(已完成, 总数)`。计数器是
+ * **每次调用独立**的 —— 任务本身被 `glbJobs` 共享，但「等的人」可能不止一个
+ * （引擎构造时先起一次，载入页紧接着再等一次），共用同一个计数器会出现
+ * 「第二次调用一上来就 5/5」。
  */
 export function preloadWeaponGlbs(
   onProgress?: (done: number, total: number) => void,
@@ -1151,17 +1570,118 @@ export function hasGlbTemplate(id: WeaponId): boolean {
   return glbTemplates.has(id);
 }
 
-/** 从模板克隆一把 GLB 枪。几何体与材质共享模板，dispose 侧跳过 */
-function cloneGlbViewModel(id: WeaponId, template: THREE.Group, m: Record<string, THREE.MeshStandardMaterial>): ViewModel {
-  const group = template.clone(true);
-  if (id === 'usp') attachSuppressor(group, m); // GLB 本体不带消音器
+/** 加载时决定「换弹那只手抓哪里」。行程在资产各自的枪空间（K 倍空间）里 */
+function pickHandPart(
+  inner: THREE.Object3D,
+): { node: string; stroke: number; spareChild: string | null } | null {
+  const mag = inner.getObjectByName(MAG_BODY_NAME);
+  if (mag) {
+    // 抓握持插槽而不是弹匣节点本身：`Magazine` 的原点在弹匣井口，掌心落在那里
+    // 就成了「扶着井口」，看着像没抓匣。资产给的 `MagazineGrip` 才是手该握的位置
+    // （AK 在匣体下方 11cm、M4 在下方 16cm）。
+    const socket = mag.getObjectByName('MagazineGrip') ?? mag.getObjectByName('MagazineGripSocket');
+    return {
+      node: socket ? socket.name : MAG_BODY_NAME,
+      stroke: 0,
+      spareChild: socket ? socket.name : null,
+    };
+  }
+  // 泵动霰弹：护木往射手方向退 9cm（模型局部是 K 空间，0.18 × 1/K = 9cm），再推回去
+  if (inner.getObjectByName('Pump')) return { node: 'Pump', stroke: 0.18, spareChild: null };
+  if (inner.getObjectByName('ChargingHandle'))
+    return { node: 'ChargingHandle', stroke: 0.12, spareChild: null };
+
+  // M24 这种「枪机是机匣网格的一部分、没有独立节点」的栓动枪：造一个隐形锚点挂在
+  // 机匣上方（握把**上方** 4cm、**前方** 9cm —— 也就是拉栓手柄那儿），让左手
+  // 在那儿前后走一趟。枪机本体不能动（按坐标盒切三角形会撕开机匣，第三代踩过这个坑），
+  // 但「手在拉栓」这件事必须看得见。
+  //
+  // 🔴 偏移是**模型局部的 K 空间**（`inner` 已经被 `1/K` 缩过），写 0.08 / −0.18
+  // 等于世界上 4cm / 9cm。前一版写的是 +0.05 / −0.35（世界上 17.5cm 前方），
+  // 那个点离肩 0.42m、比整条手臂（0.348m）还长，IK 直接被夹断 ——
+  // 表现是掌心停在半空、离锚点差 5cm，看着像手在瞎摸。
+  // 这一版实测锚点落 71%/79%、臂展 0.197m，可达。
+  const grip = inner.getObjectByName('GripR');
+  if (!grip) return null;
+  const local = inner.worldToLocal(grip.getWorldPosition(new THREE.Vector3()));
+  const anchor = new THREE.Object3D();
+  anchor.name = 'ReloadHandAnchor';
+  anchor.position.set(local.x, local.y + 0.08, local.z - 0.18);
+  inner.add(anchor);
+  return { node: 'ReloadHandAnchor', stroke: 0.2, spareChild: null };
+}
+
+/**
+ * 从模板克隆一把 GLB 枪。几何体与材质共享模板，dispose 侧跳过。
+ *
+ * 🔴 必须用 `SkeletonUtils.clone` 而不是 `template.clone(true)`：模型里有一条
+ * 手臂骨架，普通 clone 只复制蒙皮网格、骨架仍指向模板那一份 —— 手会按模板的
+ * 世界矩阵被拉变形（表现为手臂飞出画面）。
+ */
+function cloneGlbViewModel(id: WeaponId, template: THREE.Group): ViewModel {
+  const group = cloneSkinned(template) as THREE.Group;
+
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(...MUZZLE_POS[id]);
+  const offset = muzzleOffsets.get(id);
+  if (offset) muzzle.position.copy(offset);
+  else muzzle.position.set(...MUZZLE_POS[id]);
   group.add(muzzle);
-  // AWM：模板里预切好的拉机柄动画组（loadGlbWeapon 内 splitBoltHandle 产物）；
-  // 切分失败 / 结构不符时为 undefined → 退回整体动作的兜底分支
+
+  const rig = magRigs.get(id);
+  let magazine: WeaponMagazine | null = null;
+  if (rig) {
+    const body = group.getObjectByName(MAG_BODY_NAME) as THREE.Group | null;
+    const spare = group.getObjectByName(MAG_SPARE_NAME) as THREE.Group | null;
+    if (body) {
+      magazine = {
+        body,
+        spare,
+        dir: rig.dir.clone(),
+        travel: rig.travel,
+        rest: body.position.clone(),
+        restRot: body.rotation.clone(),
+      };
+    }
+  }
+
+  // AWM：模板里预切好的拉机柄动画组；这套模型不产出（见上方说明）→ null
   const bolt = id === 'awm' ? (group.getObjectByName(AWM_BOLT_NAME) as THREE.Group | undefined) : undefined;
-  return { group, muzzle, magazine: null, bolt: bolt ?? null, arms: null };
+  // 模型自带第一人称手臂（蒙皮网格）：挂进 ViewModel 后 `buildFirstPersonArms`
+  // 会自动跳过，程序化手臂不会叠上来
+  const arms = (group.getObjectByName('FPArms') ?? null) as THREE.Object3D | null;
+
+  // 左手 IK：骨架是从模板克隆出来的**新**对象，骨骼引用必须在这一份上重新抓，
+  // 否则解算会去动模板的骨头（=`SkeletonUtils.clone` 那条坑的另一面）
+  const hands = arms ? new FpHands(group) : null;
+
+  // 换弹时左手抓的节点（克隆体上按名字找回来）+ 它自己的静止位置
+  const spec = handPartNames.get(id);
+  const node = spec ? group.getObjectByName(spec.node) : null;
+  const handPart =
+    spec && node
+      ? { node, rest: node.position.clone(), stroke: spec.stroke, spareChild: spec.spareChild }
+      : null;
+
+  return {
+    group,
+    muzzle,
+    magazine,
+    bolt: bolt ?? null,
+    arms,
+    pose: rigPoses.get(id) ?? null,
+    hands: hands?.ok ? hands : null,
+    handPart,
+  };
+}
+
+/** 掉在地上的枪不能长手：摘掉模型自带的蒙皮手臂（`dropped.ts` 用） */
+export function stripFirstPersonArms(model: ViewModel): void {
+  if (!model.arms) return;
+  model.arms.removeFromParent();
+  model.arms = null;
+  // 手没了，IK 的骨骼引用也就成了悬空指针 —— 一起清掉
+  model.hands = null;
+  model.handPart = null;
 }
 
 /* ---------- 尼泊尔军刀（kukri）---------- */
@@ -1252,18 +1772,20 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
 
   // GLB 模板就绪 → 外部模型。没有模板时走程序化兜底，之后由 viewmodel 层热替换
   const template = glbTemplates.get(id);
-  if (template) return cloneGlbViewModel(id, template, m);
+  if (template) return cloneGlbViewModel(id, template);
 
   const group = new THREE.Group();
   const muzzle = new THREE.Object3D();
-  let magazine: THREE.Group | null = null;
+  // 用对象包一层：`let` 变量在闭包里赋值后，TS 的控制流分析会在函数末尾
+  // 把它窄化成 null（认不出闭包已经跑过），下面读 `.position` 会报 never
+  const magHolder: { body: THREE.Group | null } = { body: null };
   let bolt: THREE.Group | null = null;
 
   /** 弹匣独立成组：换弹动画只挪这个组，枪身不动。调用一次即登记到 `magazine` */
   const magGroup = (): THREE.Group => {
     const g = new THREE.Group();
     group.add(g);
-    magazine = g;
+    magHolder.body = g;
     return g;
   };
 
@@ -1471,23 +1993,41 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
   }
 
   group.add(muzzle);
-  return { group, muzzle, magazine, bolt, arms: null };
+  // 程序化枪的弹匣是「一个组整块往下走」（组内零件位置已摆好），
+  // 没有克隆件 —— `spare` 给 null，viewmodel 会让这颗匣自己升回去
+  const magazineBody = magHolder.body as THREE.Group | null;
+  const magazine: WeaponMagazine | null = magazineBody
+    ? {
+        body: magazineBody,
+        spare: null,
+        dir: new THREE.Vector3(0, -1, 0),
+        travel: 0.16,
+        rest: magazineBody.position.clone(),
+        restRot: magazineBody.rotation.clone(),
+      }
+    : null;
+  // 程序化武器（刀 / 雷 / 枪模未就绪兜底）：位姿仍走 viewmodel 的 `BASE_POSES`，
+  // 没有骨架也就没有 IK —— 三个新字段一律 null
+  return { group, muzzle, magazine, bolt, arms: null, pose: null, hands: null, handPart: null };
 }
 
 /** 释放一把枪模的几何体（材质是共享的，不能 dispose）。 */
 export function disposeWeaponModel(model: ViewModel): void {
-  // 手臂几何是每次现建的（不像 GLB 枪体与模板共享），无条件释放。
-  // 程序化枪的手臂在 group 里，下面的 traverse 会再扫一遍 —— dispose 两次无害
+  // GLB 模板克隆（userData.shared）：几何体与材质和模块级模板共享，
+  // dispose 会把模板打穿 —— 下次切枪拿到已释放几何体，枪变全黑。
+  // 与 materials() 缓存「不能清」是同一条铁律。
+  // ⚠️ 必须**放在手臂之前**判断：GLB 的手臂也是模板里的共享几何，先 traverse 一遍
+  // 手臂 = 直接把模板的蒙皮网格打穿（下一把手变全黑、手消失）。
+  if (model.group.userData.shared === true) return;
+
+  // 程序化手臂几何是每次现建的（不像 GLB 与模板共享），无条件释放。
+  // 它们也在 group 里，下面的 traverse 会再扫一遍 —— dispose 两次无害
   if (model.arms) {
     model.arms.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (mesh.geometry) mesh.geometry.dispose();
     });
   }
-  // GLB 模板克隆（userData.shared）：几何体与材质和模块级模板共享，
-  // dispose 会把模板打穿 —— 下次切枪拿到已释放几何体，枪变全黑。
-  // 与 materials() 缓存「不能清」是同一条铁律。
-  if (model.group.userData.shared === true) return;
   model.group.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.geometry) mesh.geometry.dispose();

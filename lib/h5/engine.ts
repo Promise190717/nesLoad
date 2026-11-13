@@ -9,6 +9,8 @@ import { DroppedWeapons } from './dropped';
 import { Effects, TRACER_COLOR_BOT, TRACER_COLOR_HUMAN } from './effects';
 import { InputController, type InputAction, type InputFrame } from './input';
 import { buildLevel, type Level } from './level';
+import { loadHdSurfaces } from './hd-textures';
+import { SKY_FOG_COLOR, SKY_OBJECT_NAME, loadSkyEnvironment, type SkyEnvironment } from './sky';
 import { clamp, damp, dirFromAngles, pick, rand, randInt } from './math';
 import type { Point3 } from './math';
 import {
@@ -368,6 +370,41 @@ export class ShipGame {
   private readonly lookDelta = { yaw: 0, pitch: 0 };
   /** 环境贴图（PMREM），主场景与枪模场景共用；随 renderer 一起销毁 */
   private readonly envTexture: THREE.Texture;
+  /**
+   * 真实天空（HDR 背景 + PMREM 环境）。异步到位：到位前用 RoomEnvironment
+   * 兜底，到位后整条光照换掉（见 `applySkyEnvironment`）。
+   * **不在这里 dispose** —— 模块级缓存，重进游戏要复用（`sky.ts` 顶部有原因）。
+   */
+  private skyEnv: SkyEnvironment | null = null;
+  /** 天空请求的幂等闸：同一实例只发一次 */
+  private skyRequested = false;
+  /**
+   * 实拍 PBR 贴图（`hd-textures.ts`）的幂等闸。
+   *
+   * 和天空一样是「先建关卡、后换皮」：`buildLevel` 是同步的，关卡不能等
+   * 5MB 的 webp 才落地（载入条会空转）；程序化 canvas 图先顶上，实拍图到货后
+   * 由 `level.applySurfaceTextures()` 整批替换材质引用。
+   */
+  private surfacesRequested = false;
+
+  /**
+   * 动态分辨率：`pixelScale` 是叠在画质档基准 DPR 上的缩放。
+   *
+   * 为什么要它：换了真实 HDR 之后，`scene.environment` 是每像素都要采样的
+   * 预过滤环境图，叠加 2048 阴影 + 全屏 PBR，集成显卡在 1080p 下会掉到
+   * 40 出头。**分辨率是唯一「降了也不改玩法手感」的性能旋钮** —— 降模型、
+   * 关阴影、减粒子都会改变画面信息量，只有像素密度是纯画质交易。
+   *
+   * 上下限：最低 0.6（1080p ≈ 648p，还能看清准星和掩体边缘），最高 1.0
+   * （不再往上冲，超过基准 DPR 只会白烧 GPU）。带 3 个统计窗的冷却，
+   * 防止在阈值上反复横跳造成画面「呼吸」。
+   */
+  private pixelScale = 1;
+  /** 画质档对应的 DPR 基准（`applySettings` 换档时重算） */
+  private basePixelRatio: number;
+  private frameAccum = 0;
+  private frameSamples = 0;
+  private ratioCooldown = 0;
   private readonly effects: Effects;
   private readonly level: Level;
   private readonly input: InputController;
@@ -546,7 +583,8 @@ export class ShipGame {
       antialias: options.settings.quality !== 'low',
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, options.settings.quality === 'high' ? 2 : 1.5));
+    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, options.settings.quality === 'high' ? 2 : 1.5);
+    this.renderer.setPixelRatio(this.basePixelRatio);
     // 用 Neutral 而不是 ACES：ACES 会把中间调整体压低一档（这是它的「电影感」，
     // 但对一个需要看清掩体边缘的射击游戏是负作用，实测画面发灰发暗）。
     // Neutral 保住中间调，只压高光。
@@ -589,6 +627,12 @@ export class ShipGame {
     this.scene.environmentIntensity = 0.3;
     this.viewModel.scene.environment = this.envTexture;
     this.viewModel.scene.environmentIntensity = 0.85;
+
+    // 真实天空在后台拉：HDR 解码 + PMREM 烘焙是几十毫秒的同步 GPU 活，不能
+    // 塞进构造期 —— 那时 React 正等着 `new ShipGame()` 返回去渲染载入条。
+    this.applySkyEnvironment();
+    // 同一套逻辑：实拍贴图（5MB webp）在后台拉，到货后整批换掉材质上的贴图
+    this.applyHdSurfaces();
 
     /* ---------- 角色 ---------- */
     this.player = new Player();
@@ -3112,6 +3156,7 @@ export class ShipGame {
     if (!render) return;
     this.renderFrame();
     this.pushHud(dt);
+    this.adaptResolution(rawDt);
   }
 
   /**
@@ -3410,6 +3455,49 @@ export class ShipGame {
     this.renderer.render(this.viewModel.scene, this.viewModel.camera);
   }
 
+  /**
+   * 帧时长驱动的动态分辨率 —— 「保证 60fps」的唯一无损手段。
+   *
+   * 判据是 `rawDt`（真实墙钟）而不是 `dt`：`dt` 被 MAX_DT 夹过、还可能被
+   * hit-stop 缩放过，拿它算帧率会把「慢放演出」误判成「跑得很流畅」。
+   *
+   * 两个窗口 + 冷却：
+   *   - 45 帧（约 0.75s）平均一次，避开单帧毛刺；
+   *   - 降档阈值 18ms（≈55fps），升档 12.5ms（≈80fps）—— 中间留 6ms 死区，
+   *     60Hz 屏上 16.7ms 正好落在死区里，不会来回抖；
+   *   - 每次调整后冷却 3 个窗口，`setPixelRatio` 会重建 drawing buffer，
+   *     连续调等于每半秒糊一帧。
+   *
+   * 只动像素密度：视野、准星、后坐、命中判定全都与分辨率无关。
+   */
+  private adaptResolution(rawDt: number): void {
+    // 切标签页回来、首帧编译、载入瞬间 —— 这些尖峰不是 GPU 带不动
+    if (rawDt <= 0 || rawDt > 0.08) return;
+
+    this.frameAccum += rawDt;
+    this.frameSamples += 1;
+    if (this.frameSamples < 45) return;
+
+    const avg = this.frameAccum / this.frameSamples;
+    this.frameAccum = 0;
+    this.frameSamples = 0;
+
+    if (this.ratioCooldown > 0) {
+      this.ratioCooldown -= 1;
+      return;
+    }
+
+    let next = this.pixelScale;
+    if (avg > 0.018) next = Math.max(0.6, next - 0.1);
+    else if (avg < 0.0125) next = Math.min(1, next + 0.05);
+    if (next === this.pixelScale) return;
+
+    this.pixelScale = next;
+    this.ratioCooldown = 3;
+    // `setPixelRatio` 内部会按当前 CSS 尺寸重设 drawing buffer，不用再 resize()
+    this.renderer.setPixelRatio(this.basePixelRatio * next);
+  }
+
   /* ============================================================
      HUD
      ============================================================ */
@@ -3494,9 +3582,67 @@ export class ShipGame {
     this.resize();
   };
 
+  /**
+   * 把真实天空接上（背景 + IBL）。异步、幂等，失败静默保持兜底。
+   *
+   * 换掉的是两样东西，不是一张图：
+   *   - `scene.background`：等距柱状 HDR 直接当天球；
+   *   - `scene.environment`：同一份 HDR 经 PMREM 预过滤，成为所有 PBR 材质的
+   *     反射源。旧实现是 `RoomEnvironment`（摄影棚灰箱），所以枪身和集装箱
+   *     的金属永远没有「天是蓝的、海是灰的」这层信息，看起来像塑料。
+   *
+   * 强度是**两套场景分开给**的（沿用原注释里的理由）：主场景只要补反射，
+   * 给太高整张图会发白发灰；枪模场景要足量，枪的金属质感主要靠它。
+   */
+  private applySkyEnvironment(): void {
+    if (this.skyRequested) return;
+    this.skyRequested = true;
+
+    void loadSkyEnvironment(this.renderer).then((env) => {
+      if (!env || this.disposed) return;
+      this.skyEnv = env;
+
+      this.scene.background = env.background;
+      this.scene.backgroundIntensity = 1;
+      this.scene.environment = env.environment;
+      this.scene.environmentIntensity = 0.55;
+      this.viewModel.scene.environment = env.environment;
+      this.viewModel.scene.environmentIntensity = 1;
+
+      // 手绘天空球（BackSide、depthWrite:false、半径 600）会整个盖住背景，
+      // 必须让位。留着对象不删：HDR 被浏览器拒绝解码时它还是唯一的天。
+      const sky = this.scene.getObjectByName(SKY_OBJECT_NAME);
+      if (sky) sky.visible = false;
+
+      // 雾跟着地平线走，否则 90m 外是「天空亮、雾偏蓝灰」的硬边
+      const fog = this.scene.fog;
+      if (fog) fog.color.setHex(SKY_FOG_COLOR);
+    });
+  }
+
+  /**
+   * 实拍 PBR 贴图换装（`hd-textures.ts`）。
+   *
+   * 到位后关卡里所有大件（甲板 / 集装箱 / 舷墙 / 狙击台 / 木箱）的底色、法线、
+   * 粗糙度一起换成 ambientCG 的扫描图。和换天空是同一种模式：先同步把关卡建好，
+   * 异步资源到货再换，失败就安静地留在程序化版本 —— 一局游戏不能因为少一张
+   * webp 就打不开。
+   *
+   * 不用管「换装时玩家可能已经在跑」：换的是贴图引用，几何 / 碰撞 / 导航一律
+   * 没动，最多是那一帧多传几十兆纹理。
+   */
+  private applyHdSurfaces(): void {
+    if (this.surfacesRequested) return;
+    this.surfacesRequested = true;
+
+    void loadHdSurfaces().then((maps) => {
+      if (!maps || this.disposed) return;
+      this.level.applySurfaceTextures(maps);
+    });
+  }
+
   /** 组件在容器尺寸变化时也可以主动调。 */
-  resize(): void {
-    const width = this.canvas.clientWidth || this.canvas.width;
+  resize(): void {    const width = this.canvas.clientWidth || this.canvas.width;
     const height = this.canvas.clientHeight || this.canvas.height;
     if (width === 0 || height === 0) return;
 
@@ -3535,7 +3681,14 @@ export class ShipGame {
 
     // 粒子池容量是构造时按画质定死的，改画质不重建它 —— 换一个池等于把正在飞的
     // 火花全部丢掉，而「低/中/高」在这里只影响几百颗粒子的上限，不值得。
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, settings.quality === 'high' ? 2 : 1.5));
+    // 自适应降下来的倍率在这里必须归 1：换档是用户主动设的画质，先按新档跑满，
+    // 真的带不动再让 `adaptResolution` 自己降
+    this.basePixelRatio = Math.min(window.devicePixelRatio || 1, settings.quality === 'high' ? 2 : 1.5);
+    this.pixelScale = 1;
+    this.ratioCooldown = 3;
+    this.frameAccum = 0;
+    this.frameSamples = 0;
+    this.renderer.setPixelRatio(this.basePixelRatio);
     this.resize();
   }
 
@@ -3610,6 +3763,9 @@ export class ShipGame {
     this.dropped.dispose();
     this.level.dispose();
     this.envTexture.dispose();
+    // 天空的 HDR / PMREM **只清引用不 dispose**：`sky.ts` 模块级缓存，下一局
+    // 进来要直接复用（重新解码 2048×1024 半浮点 + 重新烘焙 PMREM 是几百毫秒）
+    this.skyEnv = null;
 
     this.renderer.dispose();
   }

@@ -40,9 +40,10 @@ export type SurfaceKind =
   | 'skin';
 
 export interface SurfaceMaps {
-  map: THREE.CanvasTexture;
-  normalMap: THREE.CanvasTexture;
-  roughnessMap: THREE.CanvasTexture;
+  /** 底色。程序化兜底是 CanvasTexture，HD 换装后是 webp 的 Texture */
+  map: THREE.Texture;
+  normalMap: THREE.Texture;
+  roughnessMap: THREE.Texture;
   /** 这张图覆盖多少米 —— `fitBoxUv` 靠它换算 UV，改图案密度必须一起改 */
   tileMeters: number;
 }
@@ -1044,17 +1045,30 @@ interface SurfaceSpec {
 }
 
 /**
- * 尺寸取舍：甲板是唯一铺满全屏的表面，512（4 米一张 → 7.8mm/像素）够用；
- * 其余 512（2 米一张 → 3.9mm/像素）。人物 256 就够 —— 士兵整个才 1.8 米高，
+ * 尺寸取舍：甲板是唯一铺满全屏的表面，512（2.8 米一张 → 5.5mm/像素）够用；
+ * 其余 512（2~3.2 米一张 → 3.9~6mm/像素）。人物 256 就够 —— 士兵整个才 1.8 米高，
  * 屏幕上最多占几百像素，再大纯烧显存。
+ *
+ * 🔴 `tileMeters` 是**几何 UV 的唯一基准**（`level.ts` 的 `fitBoxUv` 用它算
+ * `u *= 面宽 / tile`），HD 实拍贴图到货时只换图、不换这个值 —— 所以这里的数字
+ * 必须按「实拍图一张覆盖多少米」来定，不能按程序化图案的喜好定：
+ *
+ *   deck          DiamondPlate009  2048px 里 34 个菱形 → 12 个/米的真实绊钉密度
+ *   container     CorrugatedSteel005 竖波纹 → 10.6cm 一道（真箱 28.6cm，但纹素
+ *                 密度优先：铺到 8 米去凑波纹间距，近看就是一片糊）
+ *   containerDoor 名义 2.6（= CW），真正生效的是 `level.ts` 的 doorRepeat 把它
+ *                 压成「一张图铺满一面门」，这里的值只用于 `pbr()` 的初值
+ *   containerRoof CorrugatedSteel009 横向细波纹 → 8cm 一道（真实箱顶）
+ *   steel         划痕 / 掉漆尺度，2 米一张正好
+ *   wood          Planks021 一张 12 块板 → 20cm 一块
  */
 const SPECS: Record<SurfaceKind, SurfaceSpec> = {
-  deck: { size: 512, tileMeters: 4, seed: 0x1a2b, normalStrength: 5, paint: paintDeck },
-  container: { size: 512, tileMeters: 2, seed: 0x2b3c, normalStrength: 6, paint: paintContainer },
+  deck: { size: 512, tileMeters: 2.8, seed: 0x1a2b, normalStrength: 5, paint: paintDeck },
+  container: { size: 512, tileMeters: 3.2, seed: 0x2b3c, normalStrength: 6, paint: paintContainer },
   containerDoor: { size: 512, tileMeters: 2.6, seed: 0x3c4d, normalStrength: 6, paint: paintContainerDoor },
-  containerRoof: { size: 256, tileMeters: 2, seed: 0x4d5e, normalStrength: 5, paint: paintContainerRoof },
+  containerRoof: { size: 512, tileMeters: 1.2, seed: 0x4d5e, normalStrength: 5, paint: paintContainerRoof },
   steel: { size: 512, tileMeters: 2, seed: 0x5e6f, normalStrength: 4, paint: paintSteel },
-  wood: { size: 512, tileMeters: 1.2, seed: 0x6f70, normalStrength: 5, paint: paintWood },
+  wood: { size: 512, tileMeters: 2.4, seed: 0x6f70, normalStrength: 5, paint: paintWood },
   cloth: { size: 256, tileMeters: 1, seed: 0x7081, normalStrength: 2.5, paint: paintCloth },
   vest: { size: 256, tileMeters: 0.7, seed: 0x8192, normalStrength: 4, paint: paintVest },
   gear: { size: 256, tileMeters: 0.5, seed: 0x92a3, normalStrength: 3, paint: paintGear },
@@ -1062,6 +1076,17 @@ const SPECS: Record<SurfaceKind, SurfaceSpec> = {
 };
 
 const cache = new Map<SurfaceKind, SurfaceMaps>();
+
+/**
+ * 这张贴图覆盖多少米 —— **不建图，只读元数据**。
+ *
+ * `hd-textures.ts` 拉完实拍图后要用它填 `SurfaceMaps.tileMeters`，但如果直接调
+ * `surfaceMaps()` 就会白画一遍 512² 的程序化图（每类十几毫秒，六类加起来够卡
+ * 一个帧）。几何 UV 已经在 `buildLevel` 里按这个数字铺死了，两边必须是同一个来源。
+ */
+export function surfaceTileMeters(kind: SurfaceKind): number {
+  return SPECS[kind].tileMeters;
+}
 
 export function surfaceMaps(kind: SurfaceKind): SurfaceMaps {
   const cached = cache.get(kind);

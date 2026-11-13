@@ -37,7 +37,9 @@ import {
  *            速度按武器 `WeaponSpec.feel.kick` 缩放：AWM 2.0 最重、USP 0.6 最轻）
  *            🔴 抬头**必须很小**：视角后坐已经由 `Player.recoilPitch` 负责了，枪模再抬
  *            一大截就是「枪口朝上」，2026-11-13 用户明确否掉过（0.14 → 0.03）
- *   换弹  → 下沉 14cm + 前倾 49°  （`reloadArc`）
+ *   换弹  → 枪身滚动 24° + 枪口上抬 8° + 上移 2cm（`RELOAD_POSE`），
+ *            弹匣抽出 / 备用匣升入（`magazine`），左手两骨 IK 跟着抓
+ *            （`FpHands.reach`）
  *   走路  → 12mm 横摆 + 10mm 上下（`bobAmount`）
  *   开镜  → 退到画面正下方并隐藏
  *   切枪  → 收起（右下出画）→ 掏出（从下方升起 + 过冲回弹）→ 就绪
@@ -48,6 +50,10 @@ import {
  * 枪模是一个 `THREE.Group`，所有动作都是对它的 `position` / `rotation` 做
  * tween。没有骨骼、没有动画文件 —— 加一把武器只需要在 `SWITCH_PROFILES`
  * 里配一行参数，不用再导一套动画。
+ *
+ * 唯一的例外是**换弹时的左手**：外部枪模自带一条手臂骨架，手要从护木挪到
+ * 弹匣上，这不是「挪一个 Group」能表达的，于是走了骨架 IK（`FpHands`）。
+ * 右臂仍然刚性随枪 —— 它本来就握着握把。
  */
 
 /** 枪模相机的 FOV。比主相机窄，枪看起来更「近」。 */
@@ -55,6 +61,17 @@ const VIEW_FOV = 50;
 
 /** 军刀待机时转一次刀用多久（秒）。 */
 const KNIFE_SPIN_TIME = 1.05;
+
+/**
+ * 平滑阶跃（两端一阶导为 0）。
+ *
+ * 换弹包络专用：`sin` 在 0 和 π 处的斜率是 ±1，用它当包络会在起手那一帧
+ * 「抽」一下再稳住 —— smoothstep 进出都是软着陆。
+ */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp((x - edge0) / Math.max(edge1 - edge0, 1e-6), 0, 1);
+  return t * t * (3 - 2 * t);
+}
 
 interface BasePose {
   x: number;
@@ -95,6 +112,49 @@ const BASE_POSES: Record<WeaponId, BasePose> = {
   usp: PISTOL_POSE,
   grenade: GRENADE_POSE,
   knife: { x: 0.3, y: -0.26, z: -0.82, rotX: 0, rotY: 0, rotZ: 0 },
+};
+
+/**
+ * 换弹时把枪摆成「弹匣井朝向自己」的偏移（相机空间，米 / 弧度）。
+ *
+ * 🔴 **这套数是按近距取景（`extras.fp.hip`，枪离眼 15~30cm）重新解出来的**，
+ * 不能沿用 `BASE_POSES` 时代「枪在 55cm 外」那一版 —— 距离差 2~3 倍时，
+ * 同样的角度偏移在屏幕上的落点完全不同（旧数在近距下把掌心送到 103%，
+ * 也就是整只手掉到画面下沿之外，看着像「换弹时手不见了」）。
+ *
+ * 目标带（16:9，vFOV 52°）：**掌心落在 y 70~85%、x 45~70%**，枪口仍在 y 35~50%。
+ *
+ *   - 步枪：抬枪口 8~9°（`rx`）+ 上移 2cm（`y`）+ 向内滚 24°（`rz`）。
+ *     俯仰是抬弹匣的主力杠杆：弹匣在基准位姿下正好躺在画面下沿（y≈97%），
+ *     绕镜头转一下就整颗进画 —— 而且「枪口上抬」本来就是换弹该有的样子。
+ *   - M4 的弹匣几乎压在旋转轴上（离 `group` 原点只有 3cm），俯仰对它的
+ *     屏幕位移几乎为零（实测 rx 0.06→0.36 只挪 1%），只能靠**上移 5.5cm**
+ *     把井口顶进画面（78%）—— 所以它单独一份。
+ *   - 手枪：弹匣在握把里、比步枪低 7cm，滚得更多（29°）并且抬 6cm
+ *     （105% → 85%）。
+ */
+interface ReloadOffset {
+  x: number;
+  y: number;
+  z: number;
+  rx: number;
+  ry: number;
+  rz: number;
+}
+
+const RELOAD_RIFLE: ReloadOffset = { x: -0.018, y: 0.02, z: 0.018, rx: 0.15, ry: 0.12, rz: -0.42 };
+const RELOAD_POSE: Record<WeaponId, ReloadOffset> = {
+  ak47: RELOAD_RIFLE,
+  // 弹匣压在旋转轴上，俯仰无效 → 多抬 3.5cm
+  m4a1: { x: -0.018, y: 0.055, z: 0.018, rx: 0.16, ry: 0.12, rz: -0.42 },
+  // 栓动：左手去够机匣上方的拉栓点（见 `pickHandPart` 的隐形锚点），枪翻得少一点
+  awm: { x: -0.018, y: 0.02, z: 0.018, rx: 0.2, ry: 0.1, rz: -0.38 },
+  // 霰弹是护木后拉，弹匣井不存在，枪只微翻
+  shotgun: { x: -0.01, y: 0.02, z: 0.01, rx: 0.12, ry: 0.1, rz: -0.25 },
+  usp: { x: -0.012, y: 0.06, z: 0.02, rx: 0.08, ry: 0.08, rz: -0.5 },
+  // 刀 / 雷没有换弹动画，占位即可
+  knife: RELOAD_RIFLE,
+  grenade: RELOAD_RIFLE,
 };
 
 export interface ViewModelParams {
@@ -138,6 +198,8 @@ type SwitchPhase = 'ready' | 'holster' | 'draw';
 
 /** 枪口世界坐标的复用向量（每帧最多查一次，不值得 new） */
 const muzzleTmp = new THREE.Vector3();
+/** 换弹时左手的目标点（同上：每帧一次，复用） */
+const handTmp = new THREE.Vector3();
 
 /** `flourishAt` 的返回值：叠加在通用 tween 之上的偏移量。 */
 interface FlourishOffset {
@@ -310,11 +372,13 @@ export class ViewModelLayer {
       this.model = null;
     }
 
-    const pose = BASE_POSES[weapon];
     const model = buildWeaponModel(weapon);
     // 第一人称手臂（手套 + 小臂）：挂成 group 的子节点，枪的一切动画自动带动。
     // 掉在地上的枪（dropped.ts）不走这里，所以地上的枪没有手
     buildFirstPersonArms(weapon, model);
+    // 取景：GLB 枪用资产自带的基准位姿（手臂与枪的相对关系是建模时定死的，
+    // 拿脚本位姿去摆会让小臂横穿画面），程序化武器仍用 `BASE_POSES`
+    const pose = model.pose ?? BASE_POSES[weapon];
     model.group.position.set(pose.x, pose.y, pose.z);
     model.group.rotation.set(pose.rotX, pose.rotY, pose.rotZ);
     this.scene.add(model.group);
@@ -518,33 +582,59 @@ export class ViewModelLayer {
     this.burstHeat = damp(this.burstHeat, 0, 5, dt);
     this.idleTime += dt;
 
-    const pose = BASE_POSES[this.weapon ?? 'ak47'];
+    const pose = model.pose ?? BASE_POSES[this.weapon ?? 'ak47'];
     const isKnife = this.weapon === 'knife';
     const isGrenade = this.weapon === 'grenade';
 
-    // 换弹动画：整把枪往下压再回位，用 sin 做「压下 → 抬起」
-    const reloadArc = params.reloading ? Math.sin(Math.min(params.reloadProgress, 1) * Math.PI) : 0;
+    /* ---- 换弹：把枪往身侧一翻，让弹匣井朝向自己 ----
+     * 用户 2026-11-13 明确否掉了「换弹就是枪口向下」（旧版 rotX −49° + 下沉 14cm，
+     * 整把枪直接栽出画面）。真实的换弹是：**枪口基本停在视线高度**，枪身绕枪管轴
+     * 滚转、稍稍收回怀里 —— 动作的主体交给「弹匣掉出去、新匣插进来」和左手。
+     *
+     * 包络用 smoothstep 不用 sin：sin 在两端有非零斜率，起手和收尾会「抽」一下。 */
+    const rp = params.reloading ? clamp(params.reloadProgress, 0, 1) : 0;
+    const reloadIn = params.reloading ? smoothstep(0.03, 0.2, rp) * (1 - smoothstep(0.86, 1, rp)) : 0;
+    // 拍匣：新匣到位那一下的短促顶撞
+    const slap = params.reloading ? Math.sin(clamp((rp - 0.8) / 0.14, 0, 1) * Math.PI) : 0;
 
-    // 弹匣自己的「拔出 → 插入」：整枪下沉翻转之外，弹匣必须真的离开弹匣井，
-    // 否则精细模型配假换弹一眼就露馅。时序：前段加速拔出（旧匣掉落藏起），
-    // 后段新匣减速插入。进度来自 player 的 reloadProgress，联机两边一致
+    /* ---- 弹匣：拔出 → 掉出画面 → 备用匣升入 ----
+     *   0.14~0.34 旧匣沿弹匣井轴加速拔出（`easeInCubic`，越掉越快）
+     *   0.34~0.86 旧匣不可见（手在摸新匣），空井
+     *   0.54~0.84 备用匣从井外减速升入（`easeOutCubic`）
+     *   ≥0.86     两匣都在静止位姿 —— 位置完全重合，交换看不出来
+     * 上一版只有一颗匣、靠 `visible = false` 硬切，匣会在半空里凭空消失。 */
     const magazine = model.magazine;
     if (magazine) {
-      let drop = 0;
-      if (params.reloading) {
-        const p = Math.min(params.reloadProgress, 1);
-        if (p < 0.32) {
-          const t = Math.max(0, Math.min(1, (p - 0.06) / 0.26));
-          drop = easeInCubic(t);
-        } else if (p < 0.52) {
-          drop = 1;
-        } else if (p < 0.8) {
-          drop = 1 - easeOutCubic((p - 0.52) / 0.28);
+      const seat = params.reloading && rp >= 0.86;
+      const outT = clamp((rp - 0.14) / 0.2, 0, 1);
+      const inT = clamp((rp - 0.54) / 0.3, 0, 1);
+      // 归位（seat）时 out 必须回 0，否则可见的旧匣会停在井外
+      const out = params.reloading && !seat ? easeInCubic(outT) : 0;
+
+      magazine.body.position.copy(magazine.rest).addScaledVector(magazine.dir, out * magazine.travel);
+      // 掉出去时要带前倾：只平移像被一根直线抽走，不像「掉」
+      magazine.body.rotation.set(
+        magazine.restRot.x + out * 0.32,
+        magazine.restRot.y,
+        magazine.restRot.z + out * 0.16,
+      );
+
+      if (magazine.spare) {
+        const insert = params.reloading && !seat ? 1 - easeOutCubic(inT) : 1;
+        magazine.spare.position
+          .copy(magazine.rest)
+          .addScaledVector(magazine.dir, insert * magazine.travel);
+        magazine.spare.visible = params.reloading && rp >= 0.54 && !seat;
+        magazine.body.visible = !params.reloading || rp < 0.34 || seat;
+      } else {
+        // 程序化兜底（枪模还没加载完的那几帧）：同一颗匣自己升回去
+        if (params.reloading && rp >= 0.54 && !seat) {
+          magazine.body.position
+            .copy(magazine.rest)
+            .addScaledVector(magazine.dir, (1 - easeOutCubic(inT)) * magazine.travel);
         }
+        magazine.body.visible = true;
       }
-      magazine.position.y = -drop * 0.16;
-      // 拔到底的旧弹匣直接藏起（它已经「掉出画面」），新匣从下方升回来
-      magazine.visible = drop < 0.98;
     }
 
     /* ---- 拉栓：提栓 → 后拉 → 推回 → 压下 ----
@@ -585,11 +675,13 @@ export class ViewModelLayer {
     const bobY = Math.abs(Math.cos(params.bobPhase)) * 0.01 * bobAmount;
 
     let targetX = pose.x + bobX;
-    let targetY = pose.y + bobY - reloadArc * 0.14;
+    let targetY = pose.y + bobY + slap * 0.014;
     let targetZ = pose.z + this.kick * 0.055;
-    let targetRotX = pose.rotX + this.kickRotation * 0.03 - reloadArc * 0.85;
-    let targetRotY = pose.rotY;
-    let targetRotZ = pose.rotZ - reloadArc * 0.35 + Math.sin(params.bobPhase) * 0.01 * bobAmount;
+    // 换弹的枪身姿态照资产的换弹关键帧来：向托手那侧滚、枪口略抬、向怀里偏航
+    const rl = RELOAD_POSE[this.weapon ?? 'ak47'];
+    let targetRotX = pose.rotX + this.kickRotation * 0.03 + reloadIn * rl.rx + slap * 0.05;
+    let targetRotY = pose.rotY + reloadIn * rl.ry;
+    let targetRotZ = pose.rotZ + reloadIn * rl.rz - slap * 0.03 + Math.sin(params.bobPhase) * 0.01 * bobAmount;
 
     // 后坐的「另外两个轴」：枪托被顶住时枪身会**微微上跳 + 朝持枪侧拧一下**。
     // 只做后退 + 抬头（上一版）看起来像枪被往后拉；补上这两个小分量，
@@ -801,6 +893,26 @@ export class ViewModelLayer {
       }
     }
 
+    /* ---- 近距取景的平移补偿 ----
+     * GLB 枪的基准位姿把枪放到离眼 15~20cm（资产按真机位取景），而 `BASE_POSES`
+     * 时代枪在 40cm 外。同一段「后坐 5.5cm」「走路晃 1.2cm」放近 2~3 倍之后，
+     * 角位移会成比例放大 —— 一枪打完枪整个横飞出画面。所以**只对平移**按 0.6 折，
+     * 旋转不动（旋转本来就是角度量，与距离无关）。
+     * 这一段必须排在「开镜 / 死亡」那两块**绝对覆盖**之前，否则会把那两处也缩掉。 */
+    if (model.pose) {
+      const k = 0.6;
+      targetX = pose.x + (targetX - pose.x) * k;
+      targetY = pose.y + (targetY - pose.y) * k;
+      targetZ = pose.z + (targetZ - pose.z) * k;
+    }
+
+    /* ---- 换弹的位移（不再折 0.6：这是「摆到弹匣井朝自己」的绝对构图） ---- */
+    if (reloadIn > 0) {
+      targetX += reloadIn * rl.x;
+      targetY += reloadIn * rl.y;
+      targetZ += reloadIn * rl.z;
+    }
+
     /* ---- 开镜 / 死亡：直接覆盖，不是叠加 ---- */
     if (params.scoped) {
       // 开镜：枪退到画面正下方，视线上没有遮挡
@@ -842,6 +954,40 @@ export class ViewModelLayer {
     group.visible = !params.scoped && params.dying < 0.95;
     // 死亡 = 武器脱手：枪滑出画面的同时手臂留在画外，不能跟着枪一起飞
     if (model.arms) model.arms.visible = params.dying <= 0;
+
+    /* ---- 换弹：左手真的去干活 ----
+     * 之前换弹只有「枪一翻、弹匣一抽」，两只手全程焊死在护木和握把上 ——
+     * 用户一眼就看出来是假动作。这里用骨架自带的两骨 IK 把**左腕**拉到目标上：
+     * 弹匣枪跟着匣上的握持插槽走，霰弹抓护木、M24 抓机匣上方的隐形拉栓锚点
+     * （后两件顺带自己往复，手跟着它走才像在「拉」）。权重两头收到 0，
+     * 收手后自然回到建模姿势。 */
+    const hands = model.hands;
+    const part = model.handPart;
+    if (hands) {
+      const w = params.reloading ? smoothstep(0.04, 0.2, rp) * (1 - smoothstep(0.87, 1, rp)) : 0;
+      if (w > 0.001 && part) {
+        // 护木 / 拉机柄自己往复（弹匣枪的行程由上面那套弹匣动画驱动）
+        if (part.stroke > 0) {
+          const stroke = Math.sin(clamp((rp - 0.46) / 0.4, 0, 1) * Math.PI);
+          part.node.position.z = part.rest.z + part.stroke * stroke;
+        }
+        // 0.54 之后从井外升上来的是**备用匣**，旧匣已经停在「掉出去」的位置不动了 ——
+        // 只认 `part.node` 的话，手会跟着那颗看不见的旧匣卡在下面，新匣自己升上来。
+        // 抓的是匣上的握持插槽，所以换匣时要在**新匣里按名字找回同一个点**
+        // （`spareChild`），不能直接拿备用匣的原点（那是井口，不是手心）。
+        const spare = model.magazine?.spare;
+        const follow =
+          part.spareChild && spare?.visible
+            ? (spare.getObjectByName(part.spareChild) ?? spare)
+            : part.node;
+        group.updateMatrixWorld(true);
+        follow.getWorldPosition(handTmp);
+        hands.reach(group.worldToLocal(handTmp), w);
+      } else {
+        if (part && part.stroke > 0) part.node.position.copy(part.rest);
+        hands.reach(handTmp.set(0, 0, 0), 0);
+      }
+    }
   }
 
   dispose(): void {
