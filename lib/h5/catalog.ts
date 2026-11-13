@@ -29,7 +29,7 @@ export interface H5GameEntry {
 
 export const H5_GAMES: readonly H5GameEntry[] = [
   // accent 是 CF 的橙金。卡片高亮、封面准星、按钮都用它，别改成原来的珊瑚橘。
-  // 'online' = 支持局域网联机（Trystero P2P，10 人 + 局中加入，见 `lib/h5/net/`）。
+  // 'online' = 支持局域网联机（Trystero P2P，1v1~6v6 + 局中加入，见 `lib/h5/net/`）。
   { id: 'transport-ship', accent: '#f0a020', badges: ['online', 'bots', 'touch'], live: true },
 ];
 

@@ -1,31 +1,35 @@
 'use client';
 
-import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import type { Team } from '@/lib/h5/types';
-import { CODE_LENGTH, normalizeRoomCode, type NetErrorCode, type RosterWire } from '@/lib/h5/net/protocol';
-import type { LobbyEntry } from '@/lib/h5/net/session';
+import type { NetErrorCode, RosterWire } from '@/lib/h5/net/protocol';
 import { h5Text, teamLabel, type H5TextKey } from '@/lib/h5/ui-text';
+import H5Cover from './H5Cover';
 import { GameButton, GamePanel, PanelTitle } from './ui';
 import { TEAM_COLOR } from './weapon-label';
 
 /**
  * 联机面板 —— **纯展示**，所有网络副作用都在 `ShipGameShell` 里。
  *
+ * 2026-11-13 起它只剩「过程页」：建房 / 加房 / 名字 / 房间码 / 附近房间全搬到了
+ * 模式页（`ShipModeSelect`），点完即意图，不再有「先点继续、再选建房还是加房」
+ * 这一层。所以这里只有四个状态：
+ *
+ *   连接中（房主握手）──就绪──▶（宿主直接开局，面板消失）
+ *   选阵营（加入者）──选好──▶ 等待回执 ──就绪──▶ 载入页 ──▶（开局）
+ *   出错 / 房主走了 / 对局结束 ──▶ 回模式页
+ *
+ * 注意「选阵营」现在排在**载入之前**：点「加入房间」就落这一屏（会话先连上，
+ * 人数才是实时的），选完才去拉资源。所以这一屏常常是引擎还没建的状态 ——
+ * `cover` 就是为它准备的背景图。
+ *
  * 为什么不做成「面板自己开会话」：会话活到对局里（要一直推快照），而面板只在
  * 开局前存在。让面板持有会话，就得在它卸载时把会话交接给宿主，中间任何一次
  * 提前卸载都会把房间悄悄关掉。宿主本来就是唯一活过整局的东西，会话归它管。
- *
- * 屏幕状态（`screen`）由宿主算，面板只按它画：
- *
- *   menu ──建房──▶ connecting ──就绪──▶（宿主直接开局，面板消失）
- *     │                └──失败──▶ error
- *     └──加入──▶ team ──选阵营──▶ connecting ──就绪──▶（开局）
- *                    └──房主拒绝──▶ error / ended
- *   对局中房主离开 ──▶ left
  */
 
-export type NetScreen = 'menu' | 'connecting' | 'team' | 'error' | 'left' | 'ended';
+/** 联机面板能出现的四个「过程」状态。没有 menu —— 那一页已经并进模式页了 */
+export type NetScreen = 'connecting' | 'team' | 'error' | 'left' | 'ended';
 
 export interface ShipNetPanelProps {
   locale: Locale;
@@ -36,20 +40,16 @@ export interface ShipNetPanelProps {
   roster: RosterWire | null;
   /** 正在加入的房间码（阵营界面标题上显示） */
   code: string;
-  /** 本机玩家名（受控） */
-  name: string;
-  onName: (next: string) => void;
-  /** 附近的房间（大厅广播） */
-  rooms: readonly LobbyEntry[];
   /** 正在等房主回执 —— 阵营卡片全部禁用 */
   joining: boolean;
-  onCreate: () => void;
-  onJoin: (code: string) => void;
+  /**
+   * 引擎还没建（加入者选阵营时就是这样）：面板背后什么都没有，铺一张运输船封面。
+   * 有引擎时不开 —— 那时画布上是真实场景，盖图反而把战况挡住。
+   */
+  cover: boolean;
   onPickTeam: (team: Team) => void;
-  /** 回开始界面（会顺带退出联机） */
+  /** 回模式页（会顺带退出联机）。连接中、选阵营、出错、房主走了，全走这一条 */
   onBack: () => void;
-  /** 取消等待，回到 menu */
-  onCancel: () => void;
 }
 
 export default function ShipNetPanel({
@@ -58,34 +58,27 @@ export default function ShipNetPanel({
   error,
   roster,
   code,
-  name,
-  onName,
-  rooms,
   joining,
-  onCreate,
-  onJoin,
+  cover,
   onPickTeam,
   onBack,
-  onCancel,
 }: ShipNetPanelProps) {
   const text = (key: H5TextKey, vars?: Record<string, string | number>) => h5Text(locale, key, vars);
 
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center overflow-y-auto bg-[#070a0e]/84 px-5 py-8 backdrop-blur-[3px]">
-      <GamePanel className="w-[min(560px,100%)]">
-        {screen === 'menu' ? (
-          <MenuScreen
-            locale={locale}
-            name={name}
-            onName={onName}
-            initialCode={code}
-            rooms={rooms}
-            onCreate={onCreate}
-            onJoin={onJoin}
-            onBack={onBack}
-          />
-        ) : null}
+      {/* 没有引擎时背后是纯黑：铺一张和模式页同一套的甲板图，进来出去像同一屏 */}
+      {cover ? (
+        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute right-[-10%] bottom-[-14%] w-[min(1100px,150%)] opacity-25">
+            <H5Cover accent="#f0a020" />
+          </div>
+          <div className="absolute inset-0 bg-[linear-gradient(100deg,#080b0f_0%,rgba(8,11,15,.94)_32%,rgba(8,11,15,.56)_68%,rgba(8,11,15,.9)_100%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_74%_14%,rgba(240,160,32,.13),transparent_62%)]" />
+        </div>
+      ) : null}
 
+      <GamePanel className="relative w-[min(560px,100%)]">
         {screen === 'team' ? (
           <TeamScreen
             locale={locale}
@@ -93,7 +86,7 @@ export default function ShipNetPanel({
             roster={roster}
             joining={joining}
             onPick={onPickTeam}
-            onCancel={onCancel}
+            onCancel={onBack}
           />
         ) : null}
 
@@ -102,8 +95,8 @@ export default function ShipNetPanel({
             <PanelTitle title={text('net.title')} subtitle={text('net.connecting')} />
             <p className="text-[12px] leading-5 text-white/45">{text('net.waitingHost')}</p>
             <div className="mt-5 flex justify-end">
-              <GameButton variant="ghost" onClick={onCancel}>
-                {text('net.back')}
+              <GameButton variant="ghost" onClick={onBack}>
+                {text('mode.back')}
               </GameButton>
             </div>
           </>
@@ -114,7 +107,7 @@ export default function ShipNetPanel({
             <PanelTitle title={text('net.title')} subtitle={error ? text(`net.err.${error}`) : text('net.err.join-failed')} />
             <div className="mt-5 flex justify-end gap-2">
               <GameButton variant="ghost" onClick={onBack}>
-                {text('net.single')}
+                {text('mode.back')}
               </GameButton>
             </div>
           </>
@@ -127,132 +120,12 @@ export default function ShipNetPanel({
               subtitle={screen === 'left' ? text('net.leftHint') : text('net.endedHint')}
             />
             <div className="mt-5 flex justify-end">
-              <GameButton onClick={onBack}>{text('net.single')}</GameButton>
+              <GameButton onClick={onBack}>{text('mode.back')}</GameButton>
             </div>
           </>
         ) : null}
       </GamePanel>
     </div>
-  );
-}
-
-/* ============================================================
-   菜单
-   ============================================================ */
-
-function MenuScreen({
-  locale,
-  name,
-  onName,
-  initialCode,
-  rooms,
-  onCreate,
-  onJoin,
-  onBack,
-}: {
-  locale: Locale;
-  name: string;
-  onName: (next: string) => void;
-  /** 邀请链接带来的码（`?shiproom=`）。没有就是空串 */
-  initialCode: string;
-  rooms: readonly LobbyEntry[];
-  onCreate: () => void;
-  onJoin: (code: string) => void;
-  onBack: () => void;
-}) {
-  // 只在挂载时取初值：这个屏幕切走就卸载，回来时重新读一遍 `initialCode`
-  const [draft, setDraft] = useState(initialCode);
-  const code = normalizeRoomCode(draft);
-  const ready = code !== null;
-
-  return (
-    <>
-      <PanelTitle title={h5Text(locale, 'net.title')} subtitle={h5Text(locale, 'net.subtitle')} />
-
-      <label className="block">
-        <span className="mb-1 text-[11px] tracking-wide text-white/45">{h5Text(locale, 'net.name')}</span>
-        <input
-          value={name}
-          onChange={(event) => onName(event.target.value.slice(0, 16))}
-          placeholder={h5Text(locale, 'net.namePlaceholder')}
-          maxLength={16}
-          className="w-full border border-[#343a42] bg-black/45 px-3 py-2 text-[13px] text-white outline-none focus:border-[#f0a020]/70"
-        />
-      </label>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <GameButton onClick={onCreate} className="px-5 py-2.5 text-[13px]">
-          {h5Text(locale, 'net.create')}
-        </GameButton>
-        <span className="text-[11px] text-white/32">{h5Text(locale, 'net.startHint')}</span>
-      </div>
-
-      <div className="my-4 h-px w-full bg-white/8" />
-
-      <div className="flex items-end gap-2">
-        <label className="flex-1">
-          <span className="mb-1 block text-[11px] tracking-wide text-white/45">{h5Text(locale, 'net.code')}</span>
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value.toUpperCase())}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && ready) onJoin(code);
-            }}
-            placeholder={h5Text(locale, 'net.codePlaceholder')}
-            maxLength={CODE_LENGTH + 2}
-            autoCapitalize="characters"
-            autoComplete="off"
-            spellCheck={false}
-            className="w-full border border-[#343a42] bg-black/45 px-3 py-2 font-mono text-[15px] tracking-[0.3em] text-white uppercase outline-none focus:border-[#f0a020]/70"
-          />
-        </label>
-        <GameButton variant="ghost" disabled={!ready} onClick={() => ready && onJoin(code)}>
-          {h5Text(locale, 'net.join')}
-        </GameButton>
-      </div>
-
-      <div className="mt-5">
-        <div className="mb-1.5 flex items-baseline justify-between">
-          <span className="text-[11px] tracking-wide text-white/45">{h5Text(locale, 'net.rooms')}</span>
-          <span className="font-mono text-[10px] text-white/25">{rooms.length}</span>
-        </div>
-
-        {rooms.length === 0 ? (
-          <p className="border border-dashed border-white/12 px-3 py-3 text-[11px] leading-5 text-white/30">
-            {h5Text(locale, 'net.roomsEmpty')}
-          </p>
-        ) : (
-          <div className="max-h-[168px] overflow-y-auto border border-[#343a42]">
-            {rooms.map((room) => (
-              <button
-                key={room.code}
-                type="button"
-                onClick={() => onJoin(room.code)}
-                className="flex w-full items-center gap-2 border-b border-white/6 px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-white/6"
-              >
-                <span className="font-mono text-[13px] font-bold tracking-[0.18em] text-[#f0a020]">{room.code}</span>
-                <span className="min-w-0 flex-1 truncate text-[11px] text-white/50">{room.host}</span>
-                <span className="font-mono text-[10px] tabular-nums text-white/35">
-                  {h5Text(locale, 'net.humans', { count: room.humans })} · {h5Text(locale, 'net.bots', { count: room.bots })}
-                </span>
-                <span
-                  className={`shrink-0 text-[10px] font-bold ${room.open ? 'text-[#7f9a6b]' : 'text-white/25'}`}
-                >
-                  {room.open ? h5Text(locale, 'net.canJoin') : h5Text(locale, 'net.full')}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="mt-5 flex items-center justify-between border-t border-white/8 pt-3">
-        <GameButton variant="ghost" onClick={onBack}>
-          {h5Text(locale, 'net.single')}
-        </GameButton>
-        <span className="text-[10px] text-white/22">{h5Text(locale, 'net.entry')}</span>
-      </div>
-    </>
   );
 }
 
@@ -313,9 +186,7 @@ function TeamScreen({
                     <span className="text-[13px] font-bold" style={{ color: TEAM_COLOR[team] }}>
                       {teamLabel(locale, team)}
                     </span>
-                    <span
-                      className={`text-[10px] font-bold ${canJoin ? 'text-[#7f9a6b]' : 'text-white/30'}`}
-                    >
+                    <span className={`text-[10px] font-bold ${canJoin ? 'text-[#7f9a6b]' : 'text-white/30'}`}>
                       {canJoin ? h5Text(locale, 'net.canJoin') : h5Text(locale, 'net.full')}
                     </span>
                   </div>

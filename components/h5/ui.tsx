@@ -115,6 +115,67 @@ export function Segmented<T extends string | number>({
   );
 }
 
+export interface TabOption<T extends string> {
+  value: T;
+  label: string;
+  /** 页签下方的小字（模式规模、人数上限之类）。可省略 */
+  hint?: string;
+}
+
+/**
+ * 页签条 —— 模式选择那张表的两个页签走这里。
+ *
+ * 和 `Segmented` 的分工：`Segmented` 是「同一个面板里换一档参数」（难度、画质），
+ * 尺寸小、嵌在字段行里；这里的页签是**换一整块内容**，所以用 CF 的写法 ——
+ * 直角、无底色、选中项底部一道橙金，未选中只有灰字。
+ */
+export function Tabs<T extends string>({
+  value,
+  options,
+  onChange,
+  className = '',
+}: {
+  value: T;
+  options: readonly TabOption<T>[];
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  return (
+    <div className={`flex gap-1 border-b border-[#343a42] ${className}`} role="tablist">
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(option.value)}
+            className={`relative -mb-px flex min-w-[112px] flex-col items-start gap-0.5 border-b-2 px-4 py-2.5 text-left transition-colors sm:min-w-[148px] ${
+              active
+                ? 'border-[#f0a020] bg-[#f0a020]/8'
+                : 'border-transparent hover:border-white/25 hover:bg-white/4'
+            }`}
+          >
+            <span
+              className={`text-[14px] leading-none font-bold tracking-wide ${
+                active ? 'text-[#f0a020]' : 'text-white/55'
+              }`}
+            >
+              {option.label}
+            </span>
+            {option.hint ? (
+              <span className={`font-mono text-[10px] leading-none ${active ? 'text-white/45' : 'text-white/25'}`}>
+                {option.hint}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Slider({
   label,
   value,

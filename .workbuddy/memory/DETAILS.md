@@ -272,6 +272,59 @@
 - 分层：`lib/h5/` 15 个引擎文件（除 `net.ts` 标 `'use client'`，其余无 React/DOM 依赖，服务端 import 安全）；`components/h5/` 8 个只管 React；页面只做取数与外壳。
 - **零静态资源**：墙/船体/集装箱贴图运行时 Canvas 2D 画（`textures.ts`），人物与三把枪是 three 几何体（`character.ts` / `viewmodel.ts`），音效全 WebAudio 合成。`sprites.ts` 已删 —— 2D 帧画法别复活。
 
+### 入口 / 载入（2026-11-13）
+
+- 进游戏只有一条路：`ShipModeSelect` →（单人「开始战斗」/ 联机「创建房间」「加入房间」）→ **单人/建房** `ShipLoading` 载完直接开局；**加房**则是：点「加入房间」→ 阵营选择（此时还没载入，会话已连上所以人数实时）→ 选完 → 房主回执 → `acceptJoin()` 跑 `runLoad` → `finishJoin()` 用回执里的快照 `attachNet` 再 `startMatch()`。`ShipGameShell` 的 phase 是 `mode|loading|lobby|playing|menu|result`，初始 `mode`。
+- 2026-11-13 的三次收口，主题都是**去掉「点完还有一页要选」**：①人机强度搬进单人卡（`Segmented`）；②建房/加房/名字/房间码/附近房间整块搬进联机卡（`ShipNetPanel` 的 menu 屏已删，只剩 connecting/team/error/left/ended）；③`ShipStartScreen.tsx` 已删，别再补任何中间准备页。设置挂模式页右上角（`mode.settings`）。Esc 菜单的「退出对局」= 回模式页（`switchMode`）。
+- 联机意图走 `NetIntent = {kind:'create'} | {kind:'join', code}`：`enterMode(mode, intent)` 里 **create 走载入后 `startHosting()`**（prewarmAudio + phase→lobby + createRoom），**join 直接 `joinRoom()` 不载入**（`setPhase('lobby')` → 阵营面板）。所以**模式页上点的那一下就是最终决定**，中间没有面板。
+- 🔴 **加房顺序：选阵营 → 载入 → 开局**（2026-11-13 用户要求）。`runLoad(canvas, seq, then)` 现在只负责「把引擎和枪模准备好」，跑完调 `then`，不再是写死的 `next: GameMode` 分支。回执比引擎早到：`pendingJoinRef` 暂存 `{id, snap}`，`finishJoin()` 建好引擎后立刻 `attachNet(session, id, snap)` + `startMatch()`；面板 z-20 在载入页 z-40 之下，所以 `acceptJoin` 先 `setNetScreen(null)`。房主撤了 / 被拒时 `handleNetStatus` 会 `loadSeq += 1` 作废流水线并回 `lobby` 露出错误面板，`finishJoin` 见 pending 为空也不再开局。
+- 🔴 **加房的音频解锁点在 `pickTeam`**：载入被挪到回执之后，选阵营那一下是整条路里唯一还在手势窗口内的点击，所以那里直接调 `gameAudio.unlock()`（引擎可能还没建）。否则 Chrome 把 ctx 停在 suspended，开局没枪声。
+- 阵营屏在**引擎还没建**时出现，背后没有场景 —— `ShipNetPanel` 加 `cover` prop（`!controller` 时为真）铺模式和页同款的甲板图 + 渐变。有引擎的对局中状态（left/ended/error）不铺，免得挡住冻结的战况。
+- 大厅（房间列表）连接时机改成「联机页签一露头」：`useEffect([phase, mode, netRooms.length])` 里 `ensureLobby()` + 微任务点灯（`startRoomScan`），不再挂在面板出现上。
+- 🔴 **载入取消用批次号 `loadSeq`**，不是布尔：载入页「返回」只改 phase，流水线还在 await 里；用布尔会在下次点按钮时被重置、旧流水线复活并建出第二个 WebGL 上下文。`switchMode()` 里 `loadSeq += 1` + `loadingRef = false`。
+- 🔴 **引擎不在挂载时构造**：`enterMode()` → `runLoad()` 里才 `new ShipGame`。所以「返回专栏」离开页面不会白建一个 WebGL 上下文；切回模式页再进来也**不重建、不出进度条**（`engineRef.current` 判断）。
+- 进度四段都是真节点：5%（先 rAF 两次让加载页画出来，否则同步建引擎把它顶住）→ 14%（建引擎，同步，进度会停在这一格）→ 52→86%（`preloadWeaponGlbs` 五个 GLB 逐个回调）→ 94%（等两帧，shader 编译落屏）→ 100%（停 `LOAD_TAIL_MS` 240ms 再切）。🔴 GLB 回调用 `prev.stage === 'weapons'` 守着 —— 8s 超时（`GLB_WAIT_MS`）之后迟到的回调不许把进度条拽回去。
+- `preloadWeaponGlbs(onProgress?)`：计数器**每次调用独立**（任务由 `glbJobs` 共享），共用计数器会出现「第二次调用一上来 5/5」。超时后用程序化枪模开打，后台下完由 viewmodel 自己的 `then` 热替换。
+- `leaveNet()` 现在回**模式页**（以前回开始界面），联机面板里的返回用 `mode.back`。`net.single` / `start.switchMode` / `start.eyebrow` / `start.settings` 这些键已删，`start.begin` 现在挂在模式页单人的主按钮上。
+- 模式页 `z-30`、载入页 `z-40`；模式页要 `touch-auto`（父层 `touch-none` 会一路继承，矮屏滚不动）。
+- 模式页整列 `max-w-[720px]`（原 980），页签 / 正文 / 开始按钮**合成一张卡片**（橙金顶条 + 1px `#3a4149` 外框 + 外层 1px 纯黑描边 + 大阴影）。以前三段各缩各的，窄屏下轮廓断成三截、跟甲板图分不开。页头（eyebrow / 标题 / 副标题）留在卡片外。
+- 🔴 模式页背景**不压插画**：以前右下角放 `H5Cover` 打 25%，但那个 SVG 第一笔是铺满 320×180 的**不透明天空矩形**，缩到角落就是一块硬边补丁（用户直接问「为什么右下角有一小块背景图」）。现在只有 `repeating-linear-gradient` 细网格 + 74%/14% 的暖色辉光，铺满整屏、无边界，和 `ShipLoading` 同一套质感。要给这张页加画面感就加「铺满且渐变淡出」的东西，别再往角落贴带矩形底的插画。
+
+### 手雷动作（2026-11-13）
+
+- 两段动画，全部由 `player.ts` 的进度驱动、`viewmodel.ts` 只认 0..1：
+  `grenadeCook`（按住左键前 0.22s 抬手，`GRENADE_COOK_LIFT`）、`grenadeThrow`（松手后 0.42s，`GRENADE_THROW_TIME`）。
+  投掷曲线四段：起手（只有 G 有，从右下画外拔上来）→ 蓄力后拉（0.36 最满）→ 甩出（0.40~0.62 前下方砸出画外）→ 收手（0.66 之后整体乘系数抹回 0）。整段 `snap`（不走 damp）。
+- 🔴 **根因**：`quickGrenade` 以前在同一个帧里 `switchTo('grenade', instant)` → 抛 → `switchTo(back, instant)`，手雷模型根本没机会上屏，玩家只看到原枪沉一下 —— 这就是「拉手雷缺动画」。现在改成 `throwReturn` + `advanceThrow()`：演满 0.42s 再切回，且切回那一下不覆盖 `previousWeapon`（Q 应回到拿雷之前那把）。
+- `advanceThrow` 放在 `handleFire` 里、**早于切枪闸**（`switchTimer` 只管能不能开火，收尾本身要发起一次切枪）。
+- 两条防呆：`throwGrenade` 里必须清 `cooking`/`cookTimer`（G 绕过松手分支，不清会在 0.42s 后凭空再扔一颗）；`throwTimer > 0` 时 `handleGrenadeCook` 直接 return；`switchTo` 里清 `throwReturn`（玩家自己换枪不该被抢回去）。
+- 加入者：`mirrorSelf` 看到快照雷数下降就 `playThrowView()` 补演，`advanceVisual` 只推进计时器、**不发起切枪**（换枪仍由快照驱动）。捏雷抬手加入者没有（wire 里没有 cooking 位，没加标志位）。
+- `viewmodel.ts` 的 `cookView` damp 22：松手那一帧 `grenadeCook` 从 1 跳回 0，直接用会让手闪一下。
+- 没做：拉保险销的独立动作（雷模型的销/环不是独立 group）、投掷音效。
+
+### 手雷的联机可见性（2026-11-13 下午）
+
+- 症状：**加入者**扔雷，自己屏幕上看不见那颗雷飞出去，只有 1.4 秒后落地一声爆炸。房主那边一直正常（房主本地有完整投掷物模拟）。
+- 根因：加入者**没有任何投掷物模拟**（谁的雷、飞哪儿、炸到谁全在房主算），而快照里从来没有「投掷物」这一行，`detonate` 只推了一条 `boom`。所以加入者只能看到爆炸，看不到球。
+- 修法：`Snapshot.g`（**可选**字段，没人扔就不带）+ `GrenadeWire = [id, x, y, z]`（`encodeGrenade`）。房主 `buildSnapshot` 里按 `this.grenades` 铺；`Grenade.id` 由 `grenadeSeq` 发号（只增不减），加入者靠它认出「同一颗」。
+- 加入者侧：`syncGrenadeViews()` 只在出现/消失时建删 mesh、位置只写 `target`；`updateGrenadeViews(dt)` 每帧 `damp(..., 30)` 追过去（60Hz 快照下一帧位移 <30cm，33ms 收敛就够顺）+ 装饰性翻滚（两端各转各的，不一致）。`syncGrenadeViews` 放在 `applySnapshot` 的**事件之前** —— 爆炸那一帧先撤球再演火球。
+- 生命周期：`start()` / `stop()` / `detachNet()` / `dispose()` 统一走 `clearGrenades()`。不清的后果两条：房主在飞的那颗会跨局继续飞、继续炸；加入者的球会作为一团冻在空中的球留在回模式页的背景里。
+- 为什么不发速度/引信：加入者不模拟弹道，两端各自积分只会越跑越偏，60Hz 的位置流本身就是最准的轨迹。加的是可选字段，老加入者不读它，**不升 `NET_VERSION`**。
+
+### 菜单只认 Esc（2026-11-13）
+
+- 🔴 暂停菜单的唯一入口 = 玩家按 Esc。浏览器在**标签页隐藏 / 窗口失焦时会强制退出指针锁定**，走的是同一个 `pointerlockchange` —— 以前不看来源，切个 tab 回来菜单就开着。
+- 判据在 `input.ts` `onPointerLockChange`：解锁时算 `lostFocus = document.hidden || !document.hasFocus() || performance.now() - lastFocusLostAt < 500`（`lastFocusLostAt` 在 `blur` 里写），作为 `onLockChange(locked, lostFocus)` 的第二个参数；`engine.ts` 里 `lostFocus` 为真就**不弹菜单**。三条判据同时看是因为事件顺序在浏览器之间不一致，`document.hasFocus()` 可能晚于 `pointerlockchange` 才翻转。
+- 失焦回来：不弹菜单，但 `locked` 是 false，`ShipGameShell` 照旧画「点击画面继续」提示（phase 仍是 `playing`），点画布由 `onMouseDown` 重新 `requestLock`。
+- 菜单里的**房间号行**（2026-11-13）：`ShipGameMenu` 收 `net?: NetHud | null`（`hud.net` 原样传），联机局才画「房间号 + 复制」。复制的是**码本体**，`?shiproom=` 邀请链接仍归 HUD 左上角那个角标；因为这是主动点的入口，多了 `execCommand` 兜底（写法抄 `ShareGameButton`），复制失败静默（码还印在画面上）。文案键 `gamemenu.roomCode` / `gamemenu.copyCode`（`net.copied` 复用）。
+
+### 击杀确认音（2026-11-13：采样 → 合成，别再加人声）
+
+- 历史：合成人声六版全被否（滴滴/破锣/短叮/低频重击/哨声 formant）→ 2026-11-12 换 CC0 惨叫采样（`public/h5/audio/scream-*.mp3`）→ 2026-11-13 用户要求「改成自己合成的一个短暂的提示音」，**采样路径与两个 mp3 一并删除**，`public/h5/audio/` 目录也不存在了。
+- 现行 `audio.ts` `bakeKill()`：0.22s、峰值归一化 0.9、出口 gain 0.8（feedback 总线 1.15）。结构 = 4ms 高通噪声「咔」+ 40ms 0.72f→f 上滑音（**相位分段积分**，直接写 `sin(2π·f(t)·t)` 会双倍频移）+ 非谐分音群 1 / 2.01 / 3.41 / 5.13（爆头多 7.1），越高的分音 τ 越小。爆头版基频高一个纯五度（A5 → E6）。
+- **刻意不用「递进双音」**：等距两音听着像普通界面提示（旧史里被否的「滴滴」）。金属非谐分音 + 上滑音才像「叮↗」的确认。
+- 两版都在 `schedulePrewarm()` 里提前烘好（枪声之后排），`killConfirm` 只做 `BufferSource + playbackRate`；连杀每杀抬半个音（封顶 4 个半音），每次 ±3% 变速。
+
 ### 渲染层（2026-11-12 当天大改：光线投射 → three.js）
 
 > 起因：用户截图《穿越火线》「运输船」，要求真 3D。手写 WebGL2 版（`render3d.ts` 700 行 + `math3d.ts`）写到一半被「我记得有一些现成的库吧」问停，评估后**换 three.js 并删掉手写那版**。结论：这类场景的性能上限在 draw call 和填充率，不在引擎；three 的合批/裁剪/状态排序是现成的正确做法。
@@ -302,7 +355,7 @@
 - 枪按 `Actor.weapon` 换形（createActorView 第三参）：awm 长管+镜、shotgun 粗管、usp 手枪、默认步枪。
 - 动画：走路摆腿+屈膝+body 起伏+站立呼吸；蹲姿 = damp 的 crouchT（`Actor.height<1.45`）压身+屈膝+前倾；开火 = `playFire()`（引擎 `onShot` 早退后 + `replayShot` 非自己分支，`actorViewOf(id)` 三张表找视图）→ recoil=1 指数衰减（枪身后顶+枪口上跳）；死亡 = 弹道倒地+余震+淡出（整组 quaternion 旋转，pivot 在脚底）。
 - 配色（第五轮按 CF 做旧军服调过）：cloth 0 队 0x35597e 钢蓝 / 1 队 0x9c4530 锈红、clothDark 各自深化；vest 深橄榄 0x3a4034；全材质 metalness 0。色相保留敌我识别、饱和度压低（用户嫌高饱和「不搭」）。
-- 🔴 **敌我识别第二层 = 头顶发光倒三角 Sprite**（y=2.14、色 0 队 0x3f8cff / 1 队 0xff5a3c、Canvas 纹理模块级按色缓存全场共享、死亡熄灭、只 dispose SpriteMaterial 不 dispose 纹理）。
+- 🔴 **头顶标记已整体删除（2026-11-13）**：先是在 2026-11-12 把敌方（1 队）的红三角去掉（等于透视挂），2026-11-13 用户要求**连蓝方队友的也去掉**（「蓝色方人物上方的指示箭头去除了」）。`markerTextureFor` / `MARKER_COLOR` / Sprite 创建 / 死亡熄灭 / 淡出联动 / dispose 全部移除。**敌我识别只剩阵营色布料这一层，别按「只给队友挂」加回来。**
 - `TeamMaterials` 有 7 个槽位（cloth/clothDark/vest/gear/skin/gun/trim），模板按「阵营+造型」缓存、逐视图 clone（transparent 预开，防淡出瞬间 shader 重编译）。
 
 ### 人物（历史：shanebrumback soldier_rigged 第一轮 / 旧 Box 造型 —— 均已弃用）

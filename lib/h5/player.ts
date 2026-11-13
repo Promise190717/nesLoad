@@ -22,7 +22,6 @@ import {
   moveEntity,
   rayWorld,
   resetMotionState,
-  surfaceUnder,
 } from './physics';
 import type { Actor, PrimaryId, Team, WeaponId } from './types';
 import { HEAVY_REACH_BONUS, SWITCH_PROFILES, WEAPONS, weaponFeel } from './weapons';
@@ -80,6 +79,21 @@ export const SPAWN_PROTECT = 3;
 
 /** 初始手雷数 */
 const START_GRENADES = 2;
+
+/**
+ * 投掷动画时长（秒）—— 从松手到「手收回来」。
+ *
+ * 它同时是「扔完这颗雷之后才切回原武器」的延迟：立刻切走会在 0.16s 的收枪
+ * 里把挥臂整段剪掉，玩家看到的只是原枪沉了一下又回来，手雷凭空消失。
+ * 与 `viewmodel.ts` 的投掷曲线共用这一个时间轴（那边按 0..1 进度演）。
+ */
+const GRENADE_THROW_TIME = 0.42;
+
+/**
+ * 捏雷抬手的起势时长（秒）。按住的**前 0.22s** 演完抬臂，之后一直保持 ——
+ * 不用整条引信（3s）当进度，否则手会以蜗牛速度抬起来。
+ */
+const GRENADE_COOK_LIFT = 0.22;
 
 /**
  * 开火**预输入**窗口（秒）。
@@ -339,10 +353,28 @@ export class Player implements Actor {
   /* ---- 手雷 ---- */
   private cooking = false;
   private cookTimer = 0;
+  /**
+   * 投掷动画还剩多久（秒）。> 0 时 `viewmodel.ts` 会按 `grenadeThrow` 演
+   * 「蓄力 → 甩出 → 收手」。
+   */
+  private throwTimer = 0;
+  /** 这一次投掷的总时长，算进度用 */
+  private throwTotal = 0;
+  /**
+   * 这一次投掷是「快速扔雷」（G）：模型是这一帧才凭空换出来的，
+   * 起手得多一段「从画面下方拔出来」，否则手雷会硬生生出现在手里。
+   */
+  private throwQuick = false;
+  /**
+   * 扔完之后要切回的武器（null = 不切）。
+   *
+   * 🔴 不能当场切：`switchTo` 会立刻开始收枪，挥臂那一段直接没有了 ——
+   * 这正是「拉雷没有动画」的来源。等 `throwTimer` 走完再切，动画才有地方演。
+   */
+  private throwReturn: WeaponId | null = null;
 
   /* ---- 相机 ---- */
   private bobPhase = 0;
-  private stepDistance = 0;
   private shake = 0;
   /**
    * 上台阶的**视觉补偿**。
@@ -464,6 +496,23 @@ export class Player implements Actor {
     return Math.min(1, 1 - this.boltTimer / this.boltTotal);
   }
 
+  /** 捏雷抬手进度 0..1（没在捏 = 0）。前 `GRENADE_COOK_LIFT` 秒从 0 抬到 1，之后保持 */
+  get grenadeCook(): number {
+    if (!this.cooking) return 0;
+    return Math.min(1, this.cookTimer / GRENADE_COOK_LIFT);
+  }
+
+  /** 投掷动画进度 0..1。没在投掷时恒 0 */
+  get grenadeThrow(): number {
+    if (this.throwTimer <= 0 || this.throwTotal <= 0) return 0;
+    return Math.min(1, 1 - this.throwTimer / this.throwTotal);
+  }
+
+  /** 这一次投掷是不是「快速扔雷」（G）。手雷模型需要一段额外的「拔出来」起手 */
+  get grenadeThrowQuick(): boolean {
+    return this.throwTimer > 0 && this.throwQuick;
+  }
+
   get currentAmmo(): Ammo {
     if (this.weapon === 'knife') return { mag: 0 };
     if (this.weapon === 'grenade') return { mag: this.grenades };
@@ -525,6 +574,11 @@ export class Player implements Actor {
     this.reloading = false;
     this.reloadTimer = 0;
     this.cooking = false;
+    this.cookTimer = 0;
+    this.throwTimer = 0;
+    this.throwTotal = 0;
+    this.throwQuick = false;
+    this.throwReturn = null;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
     this.spreadAccum = 0;
@@ -594,6 +648,9 @@ export class Player implements Actor {
 
     // 手里那把刀已经收回去了，挥到一半的动作跟着作废
     this.cancelMelee();
+    // 玩家自己换枪 = 放弃「扔完自动切回」：否则扔完那颗雷会把枪抢回来，
+    // 手感上就是「我按了 1，它过 0.4 秒又自己切走了」
+    this.throwReturn = null;
 
     const profile = SWITCH_PROFILES[weapon];
     // 切枪本身不可被打断：这段时间里开火和换弹都被挡住
@@ -674,11 +731,59 @@ export class Player implements Actor {
       this.reloadTimer = 0;
       this.reloadDuration = 0;
     }
+
+    // 投掷动画也只推进计时器：`advanceThrow` 会发起切枪，加入者不该自己换枪
+    this.throwTimer = Math.max(0, this.throwTimer - dt);
   }
 
   /** 联机副本专用：只吃视角增量（本地即时瞄准），不碰其它任何状态。 */
   look(frame: InputFrame): void {
     this.applyLook(frame);
+  }
+
+  /**
+   * 联机加入者专用：**本地移动预测**。
+   *
+   * 加入者的位置事实在房主那边（快照要一个来回），等它 = 走路拖 100ms+ 的
+   * 尾巴。解法是标准的客户端预测：本地用**和房主同一条** `applyCrouch` /
+   * `applyMovement` 跑自己的移动，房主快照到了由 `engine.mirrorSelf` 对账
+   * （小偏差忽略、大偏差拉回）。两台机器跑同一段代码，正常情况偏差只有
+   * 厘米级。
+   *
+   * 刻意**不含** `handleFire` / `handleActions` / `updateScope`：开火和换枪
+   * 的资格、弹匣、雷数全是房主的事实，本地擅自演会两端对不上；跳跃单独走
+   * `predictJump`（一次性的速度突变，不对账的话起跳要等一个来回才离地）。
+   */
+  updateNetMovement(dt: number, frame: InputFrame, deps: PlayerDeps): void {
+    if (!this.alive) return;
+    this.applyCrouch(dt, frame, deps.colliders);
+    this.applyMovement(dt, frame, deps);
+  }
+
+  /**
+   * 联机加入者专用：本地预跳。
+   *
+   * 和 `handleActions` 里的跳是同一个式子（`JUMP_SPEED` + 清 `onGround`），
+   * 抄一份而不是把 handleActions 开放出来，是因为后者还带着切枪 / 换弹 /
+   * 扔雷这些不能在本地演的动作。对账由 `mirrorSelf` 的位置纠偏兜底。
+   */
+  predictJump(): void {
+    if (!this.onGround) return;
+    this.vel.y = JUMP_SPEED;
+    this.onGround = false;
+  }
+
+  /**
+   * 加入者专用：补演一次投掷动作（**纯画面**）。
+   *
+   * 加入者不跑 `update()`，扣雷和出手都在房主那边；能观测到的信号只有快照里
+   * 「雷少了一颗」。看到它就把投掷动画演一遍，否则加入者扔雷时手里什么也不动。
+   * 不发起切枪 —— 武器换回原枪由快照驱动（见 `engine.mirrorSelf`）。
+   */
+  playThrowView(quick = false): void {
+    this.throwTimer = GRENADE_THROW_TIME;
+    this.throwTotal = GRENADE_THROW_TIME;
+    this.throwQuick = quick;
   }
 
   update(dt: number, frame: InputFrame, deps: PlayerDeps): void {
@@ -805,23 +910,9 @@ export class Player implements Actor {
       this.addShake(0.14);
     }
 
-    // 脚步与相机浮动
+    // 相机浮动（脚步声已移除 —— 2026-11-13 用户要求整体去掉脚步功能）
     const horizontalSpeed = Math.hypot(this.vel.x, this.vel.z);
     if (this.onGround && horizontalSpeed > 0.6) {
-      this.stepDistance += horizontalSpeed * dt;
-      const stride = this.crouching ? 1.5 : frame.walk ? 1.9 : 2.1;
-      if (this.stepDistance > stride) {
-        this.stepDistance = 0;
-        if (!this.remote) {
-          // 响度跟着步态走：跑步全响、蹲下压到一半、静步只剩一点鞋底蹭地声。
-          // 材质按脚下碰撞盒判 —— 站上木箱是空腔「咚」，甲板是钢板声
-          const loud = this.crouching ? 0.45 : frame.walk ? 0.3 : 1;
-          gameAudio.step(surfaceUnder(this.pos.x, this.pos.y, this.pos.z, deps.colliders), {
-            own: true,
-            gain: loud,
-          });
-        }
-      }
       this.bobPhase += dt * horizontalSpeed * 1.35;
     } else {
       this.bobPhase += dt * 0.6;
@@ -912,23 +1003,69 @@ export class Player implements Actor {
     if (actions.has('quickGrenade')) this.quickGrenade(deps);
   }
 
-  /** 快速扔雷：切到雷 → 立刻抛一颗 → 切回原武器。 */
+  /**
+   * 快速扔雷：切到雷 → 抛出 → 演完投掷动作再切回原武器。
+   *
+   * 🔴 切回**必须延后到 `GRENADE_THROW_TIME` 之后**。以前是同一帧里切走：
+   * 手雷模型根本没机会上屏（`setWeapon` 之后立刻又被换掉），玩家看到的只是
+   * 原枪往下一沉再回来 —— 也就是「拉手雷没有动画」。
+   */
   private quickGrenade(deps: PlayerDeps): void {
     if (this.grenades <= 0) return;
-    const previous: WeaponId = this.weapon === 'grenade' ? this.primary : this.weapon;
+    // 一次一颗：投掷动作还在演的时候连按 G 不再起第二颗，否则动画会被反复打断
+    if (this.throwTimer > 0) return;
+    // 已经端着雷（数字键 4）时按 G：模型本来就在手里，不该再演一遍「拔出来」
+    const holding = this.weapon === 'grenade';
+    const previous: WeaponId = holding ? this.primary : this.weapon;
     // 借一下手雷槽，不该污染 Q 的「上一把」记忆
     const memory = this.previousWeapon;
     this.switchTo('grenade', deps, true);
-    this.throwGrenade(1.4, deps);
-    this.switchTo(this.grenades > 0 ? previous : this.primary, deps, true);
+    this.throwGrenade(1.4, deps, !holding);
+    if (this.grenades > 0) this.throwReturn = previous;
     this.previousWeapon = memory;
   }
 
-  private throwGrenade(fuse: number, deps: PlayerDeps): void {
+  /**
+   * 扣一颗雷并抛出。
+   *
+   * @param quick 「快速扔雷」那条路（模型是这一帧才换出来的，动画要补一段起手）
+   */
+  private throwGrenade(fuse: number, deps: PlayerDeps, quick = false): void {
     if (this.grenades <= 0) return;
     this.grenades -= 1;
+    // 出手 = 结束捏雷。G 那条路会绕过 `handleGrenadeCook` 的松手分支，
+    // 不在这里清掉的话 `cooking` 会挂着，0.42 秒后凭空再扔一颗
+    this.cooking = false;
+    this.cookTimer = 0;
     deps.onThrowGrenade(Math.max(0.02, fuse));
-    if (this.grenades <= 0) this.switchTo(this.primary, deps, true);
+
+    // 投掷动作从头演一遍（捏着的那段抬手到此为止，换成「甩出去」）
+    this.throwTimer = GRENADE_THROW_TIME;
+    this.throwTotal = GRENADE_THROW_TIME;
+    this.throwQuick = quick;
+
+    // 最后一颗：等动作演完再换回主武器。当场切走会把挥臂剪掉
+    if (this.grenades <= 0) this.throwReturn = this.primary;
+  }
+
+  /**
+   * 推进投掷动画，并在演完那一帧执行「切回原武器」。
+   *
+   * 放在 `handleFire` 里**早于切枪闸**调用：切枪锁（`switchTimer`）管的是
+   * 「能不能开火」，跟这段收尾动画无关；而且收尾本身就要发起一次切枪。
+   */
+  private advanceThrow(dt: number, deps: PlayerDeps): void {
+    if (this.throwTimer <= 0) return;
+    this.throwTimer = Math.max(0, this.throwTimer - dt);
+    if (this.throwTimer > 0) return;
+
+    const next = this.throwReturn;
+    this.throwReturn = null;
+    if (!next || this.weapon !== 'grenade') return;
+    // 收尾切枪不该改写「上一把」—— Q 应该回到拿雷之前那把，而不是回到空雷槽
+    const memory = this.previousWeapon;
+    this.switchTo(next, deps);
+    this.previousWeapon = memory;
   }
 
   /* ---------- 开镜 ---------- */
@@ -976,6 +1113,8 @@ export class Player implements Actor {
   private handleFire(dt: number, frame: InputFrame, deps: PlayerDeps): void {
     this.fireCooldown -= dt;
     this.advanceBolt(dt);
+    // 投掷动作的收尾（含「演完再切回原武器」）跑在切枪闸之前 —— 见 `advanceThrow`
+    this.advanceThrow(dt, deps);
 
     // 切枪期间什么都打不出去 —— 枪还没落位。这是「切枪不可被打断」的另一半：
     // 收起 / 掏出那 0.4~0.65 秒里，开火、扔雷、出刀全被挡在外面
@@ -1277,6 +1416,10 @@ export class Player implements Actor {
   private handleGrenadeCook(dt: number, frame: InputFrame, deps: PlayerDeps): void {
     const spec = WEAPONS.grenade;
     const fuse = spec.fuse ?? 3;
+
+    // 投掷动作还在演（0.42s）：不接受新的捏雷。没有这一条的话，按着左键再按 G
+    // 会在「甩出去」这段里又起一次捏雷，收手时白白多扔一颗
+    if (this.throwTimer > 0) return;
 
     if (frame.firePressed && this.grenades > 0) {
       this.cooking = true;

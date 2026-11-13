@@ -150,10 +150,16 @@ export class ReplicaActor implements Actor {
   /** 每帧平滑。`dt` 是真实帧步长。 */
   step(dt: number): void {
     if (!this.alive) return;
-    // 22 的 λ ≈ 45ms 收敛到 63%：20Hz 的快照下既不抖也不拖
-    this.pos.x = damp(this.pos.x, this.target.x, 22, dt);
+    /*
+     * 22 的 λ ≈ 45ms 收敛到 63%：快照间隔下既不抖也不拖。阻尼目标沿速度
+     * 前推 0.05 秒 —— 平滑本身的滞后（≈45ms）加上半个管线（≈40ms），
+     * 不推的话看到的别人永远慢小一拍，对枪时他的真实位置已经在曳光落点
+     * 前面几十厘米了。前推量刻意只盖掉一半：推满会在目标急停时冲过头。
+     */
+    const lead = 0.05;
+    this.pos.x = damp(this.pos.x, this.target.x + this.targetVx * lead, 22, dt);
     this.pos.y = damp(this.pos.y, this.target.y, 22, dt);
-    this.pos.z = damp(this.pos.z, this.target.z, 22, dt);
+    this.pos.z = damp(this.pos.z, this.target.z + this.targetVz * lead, 22, dt);
     this.vel.x = damp(this.vel.x, this.targetVx, 18, dt);
     this.vel.z = damp(this.vel.z, this.targetVz, 18, dt);
     this.yaw += normalizeAngle(this.targetYaw - this.yaw) * Math.min(1, dt * 18);

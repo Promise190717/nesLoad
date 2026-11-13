@@ -81,7 +81,15 @@ const TOUCH_LOOK_GAIN = 2.6;
 
 export class InputController {
   private readonly canvas: HTMLCanvasElement;
-  private readonly onLockChange: (locked: boolean) => void;
+  /**
+   * 锁定状态回调。
+   *
+   * 第二个参数 `lostFocus` 只在**解锁**时有意义：`true` 表示这次解锁不是玩家按
+   * Esc 主动放锁，而是标签页隐藏 / 窗口失焦被浏览器顺手收回的。引擎据此决定
+   * 要不要弹菜单 —— 切标签页和按 Esc 都走同一套 pointerlockchange，分不开就会
+   * 「切个 tab 回来菜单开着」。
+   */
+  private readonly onLockChange: (locked: boolean, lostFocus: boolean) => void;
 
   /** 关掉之后所有输入都被丢弃（菜单、暂停、结算期间）。 */
   enabled = false;
@@ -105,10 +113,20 @@ export class InputController {
 
   private locked = false;
 
+  /**
+   * 最近一次失焦（`blur`）的时间戳。
+   *
+   * 用途只有一个：给 `onPointerLockChange` 判断「这次解锁是不是被失焦带走的」。
+   * 事件顺序在浏览器之间并不严格一致，`document.hasFocus()` 又可能在 blur 处理
+   * 完之前还返回 true，所以再留一个时间窗兜底 —— 只要刚失焦过，就一律不认成
+   * 「玩家按了 Esc」。
+   */
+  private lastFocusLostAt = Number.NEGATIVE_INFINITY;
+
   /** 鼠标灵敏度倍率，由引擎在设置变化时写入。 */
   sensitivity = 1;
 
-  constructor(canvas: HTMLCanvasElement, onLockChange: (locked: boolean) => void) {
+  constructor(canvas: HTMLCanvasElement, onLockChange: (locked: boolean, lostFocus: boolean) => void) {
     this.canvas = canvas;
     this.onLockChange = onLockChange;
     this.bind();
@@ -322,8 +340,19 @@ export class InputController {
   };
 
   private readonly onPointerLockChange = () => {
-    this.locked = document.pointerLockElement === this.canvas;
-    if (!this.locked) {
+    const locked = document.pointerLockElement === this.canvas;
+    // 解锁有三条来路：玩家按 Esc（浏览器强制放锁，规范如此）、本模块主动
+    // `exitLock()`（换枪菜单要鼠标）、以及**标签页隐藏 / 窗口失焦时浏览器顺手
+    // 收回**。前两条是玩家意图，第三条不是 —— 只有它不该被当成「开菜单」。
+    // 判据三选一：页面已隐藏、文档已失焦、刚刚失焦过（时间窗见 lastFocusLostAt）。
+    const lostFocus =
+      !locked &&
+      (document.hidden ||
+        !document.hasFocus() ||
+        performance.now() - this.lastFocusLostAt < 500);
+
+    this.locked = locked;
+    if (!locked) {
       // 放掉锁 = 松开所有键，否则「按着 W 按 Esc」回来后人还在往前走
       this.keys.clear();
       this.mouseFire = false;
@@ -332,11 +361,12 @@ export class InputController {
       this.virtualY = 0;
       this.virtualCrouch = false;
     }
-    this.onLockChange(this.locked);
+    this.onLockChange(locked, lostFocus);
   };
 
   private readonly onBlur = () => {
-    // 切标签页回来时按键状态会卡在「按下」，这里清一遍
+    // 切标签页 / 切窗口回来时按键状态会卡在「按下」，这里清一遍
+    this.lastFocusLostAt = performance.now();
     this.keys.clear();
     this.mouseFire = false;
     this.mouseAim = false;

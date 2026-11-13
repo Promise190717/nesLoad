@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { ShipGame } from '@/lib/h5/engine';
+import { gameAudio } from '@/lib/h5/audio';
 import type { InputController } from '@/lib/h5/input';
 import {
   DEFAULT_RULES,
@@ -11,7 +11,6 @@ import {
   sanitizeSettings,
   type DeathInfo,
   type DeathPhase,
-  type Difficulty,
   type GameSettings,
   type HitSpot,
   type HitTier,
@@ -22,13 +21,15 @@ import {
   type Team,
 } from '@/lib/h5/types';
 import {
-  ACTOR_TOTAL,
+  LOBBY_ANNOUNCE_MS,
   NET_STORAGE_KEY,
   readRoomCodeFromLocation,
   type NetErrorCode,
   type RosterWire,
+  type Snapshot,
 } from '@/lib/h5/net/protocol';
 import { ShipLobby, ShipNetSession, type LobbyEntry, type SessionStatus } from '@/lib/h5/net/session';
+import { preloadWeaponGlbs } from '@/lib/h5/weapons';
 import { h5Text, type H5TextKey } from '@/lib/h5/ui-text';
 import ShipBuyMenu from './ShipBuyMenu';
 import { ShipCrosshair, ShipDamageArc, ShipDamageVignette, ShipHitMarker, ShipLowHpPulse } from './ShipCrosshair';
@@ -36,12 +37,13 @@ import ShipDeathOverlay from './ShipDeathOverlay';
 import ShipHud from './ShipHud';
 import ShipKillIcon, { ShipKillPulse } from './ShipKillIcon';
 import ShipKillFeed, { ShipStreakBanner } from './ShipKillFeed';
+import ShipLoading, { type LoadStage } from './ShipLoading';
+import ShipModeSelect, { type GameMode } from './ShipModeSelect';
 import ShipNetPanel, { type NetScreen } from './ShipNetPanel';
 import ShipGameMenu from './ShipGameMenu';
 import ShipResultPanel from './ShipResultPanel';
 import ShipScoreboard from './ShipScoreboard';
 import ShipSettingsPanel from './ShipSettingsPanel';
-import ShipStartScreen from './ShipStartScreen';
 import ShipTouchControls from './ShipTouchControls';
 
 /**
@@ -55,16 +57,29 @@ import ShipTouchControls from './ShipTouchControls';
  *
  * ## 状态机
  *
- *   ready ──开始──▶ playing ──Esc──▶ menu（不冻结）──返回战斗──▶ playing
- *     │                │
- *     └──设置──▶（设置面板，可从 ready / menu 打开）
- *                      └──打满时间 / 到人头──▶ result ──再来一局──▶ playing
+ *   mode ──单人 / 建房──▶ loading ──资源就绪──▶ playing ──Esc──▶ menu
+ *     │                                  │           │
+ *     │                                  │           └──打满时间 / 到人头──▶ result
+ *     └──加入房间──▶ lobby(选阵营) ──房主同意──▶ loading ──资源就绪──▶ playing
+ *
+ * 前两格是 2026-11-13 加的：**先选模式，再加载资源**。以前引擎在页面一挂载就建好，
+ * 访客看到的是一个已经能点的开始界面，却分不清「单人」和「多人」是两条路；
+ * 而且建引擎那几百毫秒里页面是卡的，没有任何提示。现在选择在前、加载居中。
+ *
+ * **加房是个例外：阵营选完才载入**（2026-11-13 用户要求）。选阵营要先看见两边
+ * 现在有几个人，所以先连房间（开会话不需要引擎）、后拉资源 —— 载入页落在选择
+ * 之后，正好当他确认完的等待反馈。单人 / 建房没有要先看一眼的东西，仍然是
+ * 「点一下 → 载入 → 开局」。
+ *
+ * 单人**没有中间站**：人机强度长在模式页的单人卡里，载入一结束就直接开局 ——
+ * 以前那张「开始界面」要多点一次才开枪，现在那一次就是 `start.begin`。
+ * 房间面板（`lobby`）的「返回」直接回 `mode`。
  *
  * ## 引擎只建一次
  *
- * 换难度、换画质、重开一局**都不重建引擎** —— 引擎提供了 `setDifficulty` /
- * `applySettings` / `start()`，重建一次的代价是重新生成整张地图的贴图（几十毫秒
- * 的同步卡顿，还伴随一次 WebGL 上下文重建）。
+ * 换难度、换画质、重开一局、切回模式页再进来**都不重建引擎** —— 引擎提供了
+ * `setDifficulty` / `applySettings` / `start()`，重建一次的代价是重新生成整张地图的
+ * 贴图（几十毫秒的同步卡顿，还伴随一次 WebGL 上下文重建）。
  *
  * ## 为什么不用 useCallback / useMemo
  *
@@ -73,7 +88,59 @@ import ShipTouchControls from './ShipTouchControls';
  * 这个组件本来就要按 10Hz 被 HUD 数据推着重渲染，多几个闭包无感。
  */
 
-type Phase = 'ready' | 'playing' | 'menu' | 'result';
+type Phase = 'mode' | 'loading' | 'lobby' | 'playing' | 'menu' | 'result';
+
+/**
+ * 联机要干的那件事。
+ *
+ * 模式页点「创建房间 / 加入房间」时把意图带进 `enterMode`：建房要等引擎建好
+ * 再执行（载入在前），加房则立刻进阵营选择、载入推后（见 `acceptJoin`）。
+ * 以前这一步是「先进房间面板、再点一次」，现在点击即意图，中间没有第二页。
+ */
+type NetIntent = { kind: 'create' } | { kind: 'join'; code: string };
+
+/** 载入页的状态。`pct` 只增不减，`detail` 是进度条右侧的小字（枪模 `3/5`）。 */
+interface LoadState {
+  pct: number;
+  stage: LoadStage;
+  detail: string;
+}
+
+/**
+ * 等枪模的上限。
+ *
+ * 五个 GLB 是本作唯一的外部资源。超时就直接用程序化枪模开打 —— 下载不会取消，
+ * 就绪后 viewmodel 会自己热替换（见 `viewmodel.ts` 构造里的那个 `then`）。
+ * 宁可先拿一把朴素点的枪，也不能把人按在载入页上干等。
+ */
+const GLB_WAIT_MS = 8000;
+
+/** 100% 停留多久再切走。闪一下就消失等于没画。 */
+const LOAD_TAIL_MS = 240;
+
+/**
+ * 「正在搜索房间」至少亮多久。
+ *
+ * 大厅连上 ≠ 马上有房间：房主每 `LOBBY_ANNOUNCE_MS`（2s）才广播一次，连接建好
+ * 还要等对面报一轮。给一个广播周期 + 一点握手里程碑，超时就老实说「没发现房间」
+ * —— 那比一直转圈不说结果好。真晚到的房间照样会冒出来（列表是活的）。
+ */
+const ROOM_SCAN_MS = LOBBY_ANNOUNCE_MS + 1200;
+
+/** 等浏览器真画过一帧。同步的重活（建引擎）必须排在它后面，否则加载页根本露不出来。 */
+const nextFrame = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+
+const waitFrames = async (count: number): Promise<void> => {
+  for (let i = 0; i < count; i += 1) await nextFrame();
+};
+
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 
 /**
  * 设置存档键。
@@ -106,9 +173,13 @@ const DEATH_SATURATION: Record<DeathPhase, number> = {
 
 export default function ShipGameShell({ locale, backHref }: { locale: Locale; backHref: string }) {
   const text = (key: H5TextKey, vars?: Record<string, string | number>) => h5Text(locale, key, vars);
-  const router = useRouter();
 
-  const [phase, setPhase] = useState<Phase>('ready');
+  const [phase, setPhase] = useState<Phase>('mode');
+  /** 当前选中的模式。选完才加载资源，加载完的落点（开始界面 / 房间列表）由它决定 */
+  const [mode, setMode] = useState<GameMode>('solo');
+  const [load, setLoad] = useState<LoadState>({ pct: 0, stage: 'boot', detail: '' });
+  /** 引擎构造抛错（多半是没有 WebGL）。载入页据此换掉「卡住」的样子 */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [hud, setHud] = useState<HudSnapshot | null>(null);
   const [result, setResult] = useState<MatchResult | null>(null);
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_SETTINGS);
@@ -152,6 +223,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
   const [netError, setNetError] = useState<NetErrorCode | null>(null);
   const [netRoster, setNetRoster] = useState<RosterWire | null>(null);
   const [netRooms, setNetRooms] = useState<LobbyEntry[]>([]);
+  /** 大厅刚连上、还没收到第一条广播 —— 面板上「附近的房间」那块显示加载标识 */
+  const [netScanning, setNetScanning] = useState(false);
   const [netJoining, setNetJoining] = useState(false);
   const [netCode, setNetCode] = useState('');
   const [playerName, setPlayerName] = useState('');
@@ -162,6 +235,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
   const damageTimer = useRef<number | null>(null);
   const netRef = useRef<ShipNetSession | null>(null);
   const lobbyRef = useRef<ShipLobby | null>(null);
+  /** 「正在搜索房间」的超时闸（见 `ROOM_SCAN_MS`） */
+  const scanTimer = useRef<number | null>(null);
   /**
    * 联机是否已经开局。
    *
@@ -169,58 +244,194 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
    * 开始界面 —— 那时候人已经在场上打了。开局前的错误才是「这个房间进不去」。
    */
   const netLiveRef = useRef(false);
+  /**
+   * 房主同意了加入、但引擎还没建好时暂存的回执。
+   *
+   * 加房的新顺序是「选阵营 → 载入 → 开局」，回执会比引擎早到；`ack.snap` 是房主
+   * 替换完人机后的**完整快照**，丢了就得等下一帧快照才站到正确位置（会先闪一下
+   * 原点）。所以先存在这里，`finishJoin` 建好引擎后立刻用上。
+   */
+  const pendingJoinRef = useRef<{ id: string; snap: Snapshot } | null>(null);
 
   // ── 建引擎 ────────────────────────────────────────────────────────
-  // 放在微任务里：引擎构造时就会同步回调 `onHud`，在 effect 体内直接 setState
-  // 会触发 `react-hooks/set-state-in-effect`（项目里其它组件也是这么绕开的）。
-  useEffect(() => {
+  /**
+   * 组件还活在页面上吗。载入流程跨了好几个 await（两帧 / 枪模 / 尾帧），
+   * 每次醒来都要问一遍 —— 用户可能已经点返回专栏走了，那时候再 setState
+   * 只会报警告，建出来的引擎也没人回收。
+   */
+  const aliveRef = useRef(true);
+  /** 载入是否在跑。挡连点：模式页的按钮连点两下不能建两个 WebGL 上下文 */
+  const loadingRef = useRef(false);
+  /**
+   * 载入批次号。每次 `enterMode` 领一个新号，`runLoad` 手里那个号一旦过期就整个作废。
+   *
+   * 为什么需要它：载入页的「返回模式选择」只把 phase 改回 `mode`，流水线还在 await 里
+   * 睡着 —— 醒来后照样会 `startMatch()` / 建房，人明明已经退回模式页，几秒后却被拽进
+   * 对局。光靠 `aliveRef` 拦不住（组件还活着），也不能用「回来后再点一次」重置一个布尔
+   * 标记 —— 旧流水线会跟着复活，最后建出两个 WebGL 上下文。
+   */
+  const loadSeq = useRef(0);
+
+  /**
+   * 引擎构造参数。
+   *
+   * 以前这段写死在 effect 里（挂载即建）；现在由 `runLoad` 在用户选完模式之后调用，
+   * 所以抽成函数 —— 回调全部指向 React 的 setState，和引擎的生命周期无关。
+   */
+  const createEngine = (canvas: HTMLCanvasElement) =>
+    new ShipGame(canvas, {
+      rules,
+      settings: settingsRef.current,
+      onHud: (snapshot) => setHud(snapshot),
+      onFinish: (matchResult) => {
+        setResult(matchResult);
+        setPhase('result');
+      },
+      onMenuChange: (open) => setPhase(open ? 'menu' : 'playing'),
+      onLockChange: (value) => setLocked(value),
+      onHitMarker: (tier, spot) => setHitMarker({ at: Date.now(), tier, spot }),
+      onKillFeedback: (info) => {
+        setKillFx({ at: Date.now(), head: info.head, streak: info.streak });
+        // 每次击杀准星都「放大回弹」一下：普通击杀走小一档、爆头走大档 ——
+        // 「每次击杀都有确认」和「爆头仍然更值钱」同时成立（与 ShipCrosshair 的档位注释对齐）
+        setCrosshairPulse({ at: Date.now(), strong: info.head });
+      },
+      onDamage: (strength) => {
+        setDamage(strength);
+        if (damageTimer.current !== null) window.clearTimeout(damageTimer.current);
+        damageTimer.current = window.setTimeout(() => setDamage(0), DAMAGE_FLASH_MS);
+      },
+      onDeath: (info) => {
+        setDeathInfo(info);
+        // 死了就把击杀特效清掉。死亡期间击杀勋章已经卸下，重生时它会重新挂载，
+        // 留着旧时间戳就会在新一局开局凭空弹一个「你击杀了」的勋章
+        setCrosshairPulse({ at: 0, strong: false });
+        setKillFx({ at: 0, head: false, streak: 0 });
+      },
+      onStreak: (count) => setStreak({ count, at: Date.now() }),
+      onScoreboard: (visible) => setScoreboardOpen(visible),
+    });
+
+  /**
+   * 载入流水线。四段进度对应四件真事，不是定时器摆出来的：
+   *
+   *   5%   加载页自己先画出来（同步建引擎之前必须让出一帧）
+   *   14%  建引擎：WebGL 上下文、货场贴图、环境反射、首帧（这一段是同步的，进度会停住）
+   *   52%  五个 GLB 枪模，逐个回调 → 86%
+   *   94%  等首帧落屏（shader 编译在这一帧里发生）
+   *   100% 停 240ms 再切走
+   *
+   * 跑完调 `then` —— 它只负责「把引擎和枪模准备好」，接下来做什么由调用方决定：
+   * 单人直接开局、房主建完房开局、加入者把房主给的角色挂上去再开局。
+   */
+  const runLoad = async (canvas: HTMLCanvasElement, seq: number, then: () => void) => {
+    /** 组件没了 / 这一批被用户取消（又开了一批）：流水线到此为止 */
+    const stopped = () => !aliveRef.current || loadSeq.current !== seq;
+
+    await waitFrames(2);
+    if (stopped()) return;
+
+    setLoad({ pct: 14, stage: 'engine', detail: '' });
+
+    let engine: ShipGame;
+    try {
+      engine = createEngine(canvas);
+    } catch (error) {
+      // 没有 WebGL / 上下文数量超限：留在这一页给一个出口，别让人对着 0% 干等。
+      // 进度条**不补到 100%** —— 那看起来像「加载完了」，可实际什么都没建起来
+      console.error('[h5] engine build failed:', error);
+      loadingRef.current = false;
+      setLoadFailed(true);
+      return;
+    }
+
+    if (stopped()) {
+      engine.dispose();
+      return;
+    }
+    engineRef.current = engine;
+    setController(engine.controller);
+
+    setLoad({ pct: 52, stage: 'weapons', detail: '' });
+
+    await Promise.race([
+      preloadWeaponGlbs((done, total) => {
+        if (stopped()) return;
+        // 只在「枪模」这一段里更新：超时（GLB_WAIT_MS）之后流程已经往前走了，
+        // 迟到的回调不能再把进度条拽回去 —— 进度只许往前
+        setLoad((prev) =>
+          prev.stage === 'weapons'
+            ? { pct: Math.max(prev.pct, 52 + Math.round((done / total) * 34)), stage: 'weapons', detail: `${done}/${total}` }
+            : prev,
+        );
+      }),
+      delay(GLB_WAIT_MS),
+    ]);
+    if (stopped()) return;
+
+    setLoad({ pct: 94, stage: 'warmup', detail: '' });
+    await waitFrames(2);
+    if (stopped()) return;
+
+    setLoad({ pct: 100, stage: 'done', detail: '' });
+    await delay(LOAD_TAIL_MS);
+    if (stopped()) return;
+
+    loadingRef.current = false;
+    then();
+  };
+
+  /**
+   * 模式页上按下的那一下：单人「开始战斗」/ 联机「创建房间」/「加入房间」。
+   *
+   * **加入别人的房间是个例外：不载入，直接进阵营选择**（2026-11-13 用户要求）。
+   * 阵营界面上的人数得是实时的，所以先开会话（不需要引擎）；选完阵营、房主
+   * 回执到手，才在 `acceptJoin` 里拉资源。其余两条路（单人 / 建房）仍然是
+   * 「先载入，载完就开局」—— 它们没有需要先看一眼的东西。
+   *
+   * 已经建过引擎（切回模式页再进来）就跳过载入 —— WebGL 上下文、地图贴图、
+   * 枪模全在，重来一遍只是白卡几百毫秒。这时进度条根本不出现，动作直接执行。
+   */
+  const enterMode = (next: GameMode, intent: NetIntent | null = null) => {
+    if (loadingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    let cancelled = false;
-    void Promise.resolve().then(() => {
-      if (cancelled) return;
+    // 领新号：上一次没跑完的流水线（如果还有）从这一刻起作废
+    const seq = ++loadSeq.current;
+    setMode(next);
+    setLoadFailed(false);
 
-      const engine = new ShipGame(canvas, {
-        rules: DEFAULT_RULES,
-        settings: settingsRef.current,
-        onHud: (snapshot) => setHud(snapshot),
-        onFinish: (matchResult) => {
-          setResult(matchResult);
-          setPhase('result');
-        },
-        onMenuChange: (open) => setPhase(open ? 'menu' : 'playing'),
-        onLockChange: (value) => setLocked(value),
-        onHitMarker: (tier, spot) => setHitMarker({ at: Date.now(), tier, spot }),
-        onKillFeedback: (info) => {
-          setKillFx({ at: Date.now(), head: info.head, streak: info.streak });
-          // 每次击杀准星都「放大回弹」一下：普通击杀走小一档、爆头走大档 ——
-          // 「每次击杀都有确认」和「爆头仍然更值钱」同时成立（与 ShipCrosshair 的档位注释对齐）
-          setCrosshairPulse({ at: Date.now(), strong: info.head });
-        },
-        onDamage: (strength) => {
-          setDamage(strength);
-          if (damageTimer.current !== null) window.clearTimeout(damageTimer.current);
-          damageTimer.current = window.setTimeout(() => setDamage(0), DAMAGE_FLASH_MS);
-        },
-        onDeath: (info) => {
-          setDeathInfo(info);
-          // 死了就把击杀特效清掉。死亡期间击杀勋章已经卸下，重生时它会重新挂载，
-          // 留着旧时间戳就会在新一局开局凭空弹一个「你击杀了」的勋章
-          setCrosshairPulse({ at: 0, strong: false });
-          setKillFx({ at: 0, head: false, streak: 0 });
-        },
-        onStreak: (count) => setStreak({ count, at: Date.now() }),
-        onScoreboard: (visible) => setScoreboardOpen(visible),
-      });
-      engineRef.current = engine;
-      setController(engine.controller);
+    // 加房：先把房间连上，在阵营选择里看着实时人数选边（引擎此时还没建）
+    if (intent?.kind === 'join') {
+      setPhase('lobby');
+      joinRoom(intent.code);
+      return;
+    }
+
+    if (engineRef.current) {
+      if (intent) startHosting();
+      else startMatch();
+      return;
+    }
+
+    loadingRef.current = true;
+    setLoad({ pct: 5, stage: 'boot', detail: '' });
+    setPhase('loading');
+    void runLoad(canvas, seq, () => {
+      if (intent) startHosting();
+      else startMatch();
     });
+  };
 
+  // 卸载：联机资源先关（`detachNet` 要在引擎还活着的时候跑，它要摘人机、补人机），
+  // 再销毁引擎。**这里不建引擎** —— 建与不建由用户选模式决定，见 `enterMode`。
+  useEffect(() => {
+    aliveRef.current = true;
     return () => {
-      cancelled = true;
+      aliveRef.current = false;
       if (damageTimer.current !== null) window.clearTimeout(damageTimer.current);
-      // 联机资源必须先关：`detachNet` 要在引擎还活着的时候跑（它要摘人机、补人机）
+      if (scanTimer.current !== null) window.clearTimeout(scanTimer.current);
       engineRef.current?.detachNet();
       void netRef.current?.leave();
       netRef.current = null;
@@ -266,9 +477,17 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     }
   };
 
-  const changeDifficulty = (difficulty: Difficulty) => {
-    setRules((current) => ({ ...current, difficulty }));
-    engineRef.current?.setDifficulty(difficulty);
+  /**
+   * 模式页改对局参数（时长 / 目标人头 / 人机强度）。
+   *
+   * 引擎只建一次，所以这里必须**立刻**同步进去：等到开局再传就晚了 ——
+   * `startMatch` 只负责开跑，不认识「这次的规则变了」。
+   */
+  const changeRules = (patch: Partial<MatchRules>) => {
+    const next = { ...rules, ...patch };
+    setRules(next);
+    engineRef.current?.setRules(next);
+    if (patch.difficulty) engineRef.current?.setDifficulty(patch.difficulty);
   };
 
   // ── 对局动作 ──────────────────────────────────────────────────────
@@ -292,6 +511,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     setResult(null);
     resetTransient();
     setPhase('playing');
+    // 开局前把最新规则交给引擎（时长决定时钟、人头决定结算），再 start
+    engineRef.current?.setRules(rules);
     engineRef.current?.start();
   };
 
@@ -304,25 +525,31 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     setResult(null);
     resetTransient();
     setPhase('playing');
+    engineRef.current?.setRules(rules);
     engineRef.current?.start();
   };
 
-  const quitToStart = () => {
-    // 联机局退出对局 = 退出联机：光停循环的话，房主那边还会等你 6 秒才补人机
+  /**
+   * 回模式选择页（Esc 菜单的「退出对局」、结算页的「返回」都走这里）。
+   * 引擎**不销毁** —— 场景继续当背景，重新进来不用再加载一遍。
+   * 联机局从这里退出去时会顺带退出联机（`leaveNet`），不然房间还挂着。
+   */
+  const switchMode = () => {
+    // 载入途中按返回：作废手上那一批流水线，并把「载入中」松开，否则回来再点按钮会被挡
+    loadSeq.current += 1;
+    loadingRef.current = false;
     if (netRef.current) {
       leaveNet();
       return;
     }
     engineRef.current?.stop();
+    setSettingsOpen(false);
     setResult(null);
-    setPhase('ready');
+    setPhase('mode');
   };
 
-  /** 结算页的「返回专栏」：真的回列表页，不是回开始界面。 */
-  const leaveToCatalog = () => {
-    engineRef.current?.stop();
-    router.push(backHref);
-  };
+  /** 结算页的「返回」：回模式选择页，不是回专栏列表。 */
+  const leaveMatch = switchMode;
 
   const selectPrimary = (id: PrimaryId) => {
     engineRef.current?.selectPrimary(id);
@@ -332,6 +559,32 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
      联机
      ============================================================ */
 
+  /** 收掉「正在搜索」标识（幂等）。列表空了也是它 —— 超时和「收到第一批」共用。 */
+  const stopRoomScan = () => {
+    if (scanTimer.current !== null) {
+      window.clearTimeout(scanTimer.current);
+      scanTimer.current = null;
+    }
+    setNetScanning(false);
+  };
+
+  /**
+   * 点亮「正在搜索房间」。
+   *
+   * 放在**打开面板的那一刻**而不是「连上之后」：动态 import + MQTT 握手正是最该有
+   * 反馈的那一段，而且这段里列表必然空着（房间靠广播，广播得等连接建好）。
+   * 已经拿到过房间就不亮 —— 列表本身已经是结果，再盖一层「搜索中」只是噪声。
+   */
+  const startRoomScan = (known: number) => {
+    if (known > 0) return;
+    if (scanTimer.current !== null) window.clearTimeout(scanTimer.current);
+    setNetScanning(true);
+    scanTimer.current = window.setTimeout(() => {
+      scanTimer.current = null;
+      setNetScanning(false);
+    }, ROOM_SCAN_MS);
+  };
+
   /**
    * 打开（或复用）房间列表连接。
    *
@@ -340,13 +593,19 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
    */
   const ensureLobby = async (): Promise<ShipLobby | null> => {
     if (lobbyRef.current) return lobbyRef.current;
-    const lobby = await ShipLobby.open((entries) => setNetRooms(entries));
+    const lobby = await ShipLobby.open((entries) => {
+      setNetRooms(entries);
+      // 收到第一条广播就撤标识：再转下去只会盖住真实列表
+      if (entries.length > 0) stopRoomScan();
+    });
     if (lobbyRef.current) {
       // 竞态：两次点击各开了一个，留先到的那个
       void lobby.close();
       return lobbyRef.current;
     }
     lobbyRef.current = lobby;
+    // 连不上（没有 crypto.subtle / joinRoom 抛错）就别装着还在扫，直接给「没发现」
+    if (!lobby.live) stopRoomScan();
     return lobby;
   };
 
@@ -363,10 +622,19 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     }
   };
 
-  const openNetMenu = () => {
+  /**
+   * 建房（引擎就绪之后才调；`enterMode` 保证这一点）。
+   *
+   * 这里才把 phase 推进 `lobby`：模式页 z-30、房间面板 z-20，不先收掉模式页
+   * 面板会被它盖住。建房立刻开局（`createRoom` 内部 `startMatch`）。
+   */
+  const startHosting = () => {
+    // 用户手势里就把 AudioContext 建好、音效烘焙排进后台：真正开局时不用再付这笔开销
+    engineRef.current?.prewarmAudio();
     setNetError(null);
     setNetRoster(null);
-    setNetScreen('menu');
+    setPhase('lobby');
+    createRoom();
   };
 
   /**
@@ -383,6 +651,14 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     setNetError(error ?? 'join-failed');
     // 「对局已经结束」有自己的一套说法（需求三.7 要明确提示），不混进通用错误
     setNetScreen(error === 'match-ended' ? 'ended' : 'error');
+    // 已经选完阵营、正在载入时被拒（房间刚好满 / 房主刚好撤了）：作废这批流水线，
+    // 不然载入页 z-40 会一直压着错误面板，人对着 100% 的进度条不知道发生了什么
+    if (loadingRef.current) {
+      loadSeq.current += 1;
+      loadingRef.current = false;
+      pendingJoinRef.current = null;
+      setPhase('lobby');
+    }
   };
 
   /** 收摊：停循环、摘联机、退房间、停报到。所有联机退出口都走这里。 */
@@ -392,26 +668,26 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     void netRef.current?.leave();
     netRef.current = null;
     netLiveRef.current = false;
+    pendingJoinRef.current = null;
     lobbyRef.current?.stopAnnounce();
+    stopRoomScan();
     setNetRoster(null);
     setNetJoining(false);
     setNetError(null);
   };
 
-  /** 回开始界面，真的退出联机（开始界面里的「单人」、结算页的「返回」都走它）。 */
+  /**
+   * 回模式选择，真的退出联机。
+   *
+   * 房间面板（连接中 / 选阵营 / 出错 / 房主走了）里的每一个「返回」都走这一条 ——
+   * 建房和加房都是模式页上按的，退回的自然是那一页，不再是某个中间菜单。
+   */
   const leaveNet = () => {
     teardownNet();
     setNetScreen(null);
     setNetCode('');
-    setPhase('ready');
+    setPhase('mode');
     setResult(null);
-  };
-
-  /** 从「连接中 / 选阵营」退回菜单，不关大厅连接。 */
-  const cancelNet = () => {
-    teardownNet();
-    setNetCode('');
-    setNetScreen('menu');
   };
 
   /**
@@ -440,6 +716,9 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
       if (!engine) {
         void session.leave();
         setNetScreen(null);
+        // 没有引擎（理论上到不了：`startHosting` 只在引擎就绪后才跑）——
+        // 别把人留在空场上，退回模式页
+        setPhase('mode');
         return;
       }
 
@@ -454,7 +733,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
         code: session.code,
         host: name,
         humans: 1,
-        bots: ACTOR_TOTAL - 1,
+        // 场上人数 = 2 × 每队人数，自己算一个真人，剩下都是人机
+        bots: rules.teamSize * 2 - 1,
         open: true,
       });
 
@@ -466,9 +746,12 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
   /**
    * 用房间码加入。
    *
-   * 先把会话开起来（这样阵营选择界面上的人数就是**实时**的，需求三.2），
-   * 但**不**挂到引擎上 —— 引擎一旦进 guest 模式就会把人机全清掉，那时候
-   * 万一被房主拒绝，回单人局还得再摆一次。所以挂引擎只发生在拿到回执之后。
+   * 只开会话、不载入：阵营选择界面上的人数得是**实时**的（需求三.2），而这一页
+   * 在「点加入房间」之后立刻就要出现 —— 载入要建 WebGL、拉枪模，放在它前面
+   * 就是让人先干等一秒才看见自己该选什么（2026-11-13 用户要求把顺序倒过来）。
+   *
+   * 也**不**挂到引擎上：引擎一旦进 guest 模式就会把人机全清掉，那时候万一被
+   * 房主拒绝，回单人局还得再摆一次。挂引擎只发生在回执之后（`acceptJoin`）。
    */
   const joinRoom = (code: string) => {
     const name = resolveName();
@@ -486,23 +769,15 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
         onRoster: (roster) => setNetRoster(roster),
         onAck: (ack) => {
           if (ack.ok !== 1) return; // 拒绝已经由 onStatus 走了一遍，这里不重复处理
-          const engine = engineRef.current;
-          if (!self || !engine) return;
-
-          engine.setPlayerName(name);
-          // 回执里带着房主**替换完之后**生成的完整快照：先用它摆位再开循环。
-          // 不然开局那一下会站在房主世界的原点，然后被下一帧拽过去（需求六.2）
-          engine.attachNet(self, ack.id, ack.snap);
-          netLiveRef.current = true;
-          setNetJoining(false);
-          setNetScreen(null);
-          startMatch();
+          if (!self) return;
+          acceptJoin({ id: ack.id, snap: ack.snap });
         },
         onHostLeft: () => {
-          // 房主走了 = 这一局没有裁判了。立刻收摊，别让人对着冻结的场面继续打
+          // 房主走了 = 这一局没有裁判了。立刻收摊，别让人对着冻结的场面继续打。
+          // 面板自己带背景，所以这里只把 phase 退回 'lobby'（联机落点就是房间面板）
           teardownNet();
           setNetScreen('left');
-          setPhase('ready');
+          setPhase('lobby');
           setResult(null);
         },
       });
@@ -518,10 +793,68 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     })();
   };
 
+  /**
+   * 房主同意了加入 —— **到这一步才开始载入游戏**。
+   *
+   * 回执里带着房主替换完人机之后的完整快照，先存进 `pendingJoinRef`：引擎这
+   * 会儿可能还不存在，等它建好再由 `finishJoin` 用上（不然加入者会先站在房主
+   * 世界的原点，下一帧才被拽过去，需求六.2）。
+   *
+   * 引擎已经在（切回模式页再进来）就不用再载，直接挂上开局。
+   */
+  const acceptJoin = (ack: { id: string; snap: Snapshot }) => {
+    pendingJoinRef.current = ack;
+    setNetScreen(null);
+
+    if (engineRef.current) {
+      finishJoin();
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      setPhase('lobby');
+      return;
+    }
+
+    const seq = ++loadSeq.current;
+    setLoadFailed(false);
+    loadingRef.current = true;
+    setLoad({ pct: 5, stage: 'boot', detail: '' });
+    setPhase('loading');
+    void runLoad(canvas, seq, finishJoin);
+  };
+
+  /** 载入跑完（或引擎本来就在）：把房主给的角色挂上去，开局。 */
+  const finishJoin = () => {
+    const pending = pendingJoinRef.current;
+    const engine = engineRef.current;
+    const session = netRef.current;
+    pendingJoinRef.current = null;
+    setNetJoining(false);
+
+    if (!pending || !engine || !session) {
+      // 载入途中房间没了（房主撤了 / 被拒）：别把人留在 100% 的载入页上，
+      // 退回面板 —— 那里已经有 error / left 之类的说法
+      setPhase('lobby');
+      return;
+    }
+
+    engine.setPlayerName(resolveName());
+    engine.attachNet(session, pending.id, pending.snap);
+    netLiveRef.current = true;
+    startMatch();
+  };
+
   /** 选阵营 → 发申请。`netJoining` 同时把两张卡片禁用，挡住连点（需求三.8）。 */
   const pickTeam = (team: Team) => {
     const session = netRef.current;
     if (!session || netJoining) return;
+    // 这一下是加房流程里**唯一还在手势窗口内**的点击（载入已经挪到回执之后），
+    // 音频上下文必须在这里建 —— 等引擎建好再 unlock 就不算用户手势了，
+    // Chrome 会把 ctx 停在 suspended，开局听不到枪声。
+    // `unlock` 幂等：引擎 `start()` 时再调一次只是 resume + 续排预热。
+    gameAudio.unlock();
     setNetJoining(true);
     session.requestJoin(team);
   };
@@ -543,17 +876,21 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     void Promise.resolve().then(() => {
       if (stored) setPlayerName(stored);
       if (!invited) return;
-      // 邀请链接：把面板打开、码填好，用户只差按一下「加入房间」
+      // 邀请链接：切到联机页签、把码填好，用户只差按一下「加入房间」
+      // （不自动开局：载入要建 WebGL、拉枪模，得留一次明确的点击）
       setNetCode(invited);
-      setNetScreen('menu');
+      setMode('net');
     });
   }, []);
 
-  // 面板一露头就连大厅。纯单机玩家永远不会进这张网 —— 不开面板就不建连
+  // 联机页签一露头就连大厅 + 点亮「搜索中」。
+  // 纯单机玩家永远不会进这张网 —— 没点过联机页签就不建连。
   useEffect(() => {
-    if (netScreen === null || lobbyRef.current) return;
+    if (phase !== 'mode' || mode !== 'net' || lobbyRef.current) return;
+    // 微任务里点灯：effect 体内同步 setState 会触发 `react-hooks/set-state-in-effect`
+    void Promise.resolve().then(() => startRoomScan(0));
     void ensureLobby();
-  }, [netScreen]);
+  }, [phase, mode, netRooms.length]);
 
   // 房主：人数一变就重报一次，否则列表里永远显示建房那一瞬间的「1 真人 9 人机」
   const netPeers = hud?.net?.peers ?? 0;
@@ -596,6 +933,49 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
   return (
     <div className="relative h-[100dvh] w-full touch-none overflow-hidden bg-[#080a0d] select-none">
       <canvas ref={canvasRef} className="absolute inset-0 block h-full w-full" style={canvasStyle} />
+
+      {/* 进游戏的第一道门（也是唯一的准备页）。z-30；载入页再高一档（z-40） */}
+      {phase === 'mode' ? (
+        <ShipModeSelect
+          locale={locale}
+          mode={mode}
+          onMode={setMode}
+          difficulty={rules.difficulty}
+          onDifficulty={(difficulty) => changeRules({ difficulty })}
+          teamSize={rules.teamSize}
+          onTeamSize={(teamSize) => changeRules({ teamSize })}
+          endMode={rules.endMode}
+          onEndMode={(endMode) => changeRules({ endMode })}
+          durationSec={rules.durationSec}
+          onDuration={(durationSec) => changeRules({ durationSec })}
+          killTarget={rules.killTarget}
+          onKillTarget={(killTarget) => changeRules({ killTarget })}
+          onEnter={() => enterMode('solo')}
+          name={playerName}
+          onName={changeName}
+          code={netCode}
+          onCode={setNetCode}
+          onCreate={() => enterMode('net', { kind: 'create' })}
+          onJoin={(code) => enterMode('net', { kind: 'join', code })}
+          rooms={netRooms}
+          scanning={netScanning}
+          onSettings={() => setSettingsOpen(true)}
+          backHref={backHref}
+        />
+      ) : null}
+
+      {/* 载入页 z-40：这一页在的时候，底下什么都不该被点到 */}
+      {phase === 'loading' ? (
+        <ShipLoading
+          locale={locale}
+          mode={mode}
+          pct={load.pct}
+          stage={load.stage}
+          detail={load.detail}
+          failed={loadFailed}
+          onBack={switchMode}
+        />
+      ) : null}
 
       {playing && hud ? (
         <>
@@ -646,7 +1026,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
       ) : null}
 
       {playing && scoreboardOpen && hud ? (
-        <ShipScoreboard hud={hud} locale={locale} killTarget={rules.killTarget} />
+        <ShipScoreboard hud={hud} locale={locale} killTarget={hud.killTarget} />
       ) : null}
 
       {playing && hud?.buyOpen ? (
@@ -658,17 +1038,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
         />
       ) : null}
 
-      {phase === 'ready' ? (
-        <ShipStartScreen
-          locale={locale}
-          difficulty={rules.difficulty}
-          onDifficulty={changeDifficulty}
-          onStart={startMatch}
-          onNet={openNetMenu}
-          onSettings={() => setSettingsOpen(true)}
-          backHref={backHref}
-        />
-      ) : null}
+      {/* 开始界面已经并进模式页：单人按「开始战斗」就是载入 + 开局，联机落点是房间面板 */}
 
       {/* 联机面板。z-20，和开始界面同层，但渲染在后面 —— 盖在它上面 */}
       {netScreen ? (
@@ -678,27 +1048,25 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
           error={netError}
           roster={netRoster}
           code={netCode}
-          name={playerName}
-          onName={changeName}
-          rooms={netRooms}
           joining={netJoining}
-          onCreate={createRoom}
-          onJoin={joinRoom}
+          cover={!controller}
           onPickTeam={pickTeam}
           onBack={leaveNet}
-          onCancel={cancelNet}
         />
       ) : null}
 
       {phase === 'menu' && !settingsOpen ? (
         <ShipGameMenu
           locale={locale}
+          // 联机局才有房间号；单人局 `hud.net` 是 null，菜单里那一行不画
+          net={hud?.net}
           onResume={resume}
           // 联机局不给「重新开始」：比分是全场共用的，单方面清掉就违反了
           // 「不因加入 / 退出而重置比分」（需求六.4）
           onRestart={netMode ? undefined : restart}
           onSettings={() => setSettingsOpen(true)}
-          onQuit={quitToStart}
+          // 「退出对局」回模式页（以前回的是开始界面，那张页已经并进模式页了）
+          onQuit={switchMode}
         />
       ) : null}
 
@@ -707,7 +1075,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
           result={result}
           locale={locale}
           onAgain={netMode ? undefined : restart}
-          onLeave={leaveToCatalog}
+          onLeave={leaveMatch}
           markBots={netMode}
         />
       ) : null}

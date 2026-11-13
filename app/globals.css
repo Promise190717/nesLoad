@@ -3293,3 +3293,14 @@ body {
   70% { opacity: 1; transform: scale(1); }
   100% { opacity: 0; transform: scale(1.04); }
 }
+
+/* ── H5 射击游戏：房间扫描条 ──────────────────────────────────────
+   一条橙金窄光从左侧扫到右侧，两端淡入淡出（避免出现「硬边矩形在移动」）。
+   配合旁边的呼吸圆点：圆点说明「还在跑」，扫描条说明「正在找的方向」。
+   时长由组件给。 */
+@keyframes ship-scan {
+  0% { transform: translateX(-100%); opacity: 0; }
+  14% { opacity: 1; }
+  86% { opacity: 1; }
+  100% { transform: translateX(340%); opacity: 0; }
+}

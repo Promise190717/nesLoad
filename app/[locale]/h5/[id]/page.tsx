@@ -8,8 +8,9 @@ import { readLocaleParam } from '@/lib/server/locale';
 /**
  * 单个 H5 游戏的**游玩页**。
  *
- * 整页只有一个客户端组件（`ShipGameShell`），服务端渲染出来的 HTML 里除了 metadata
- * 几乎没有内容 —— 因为这个游戏是纯 WebGL，跑起来之前没有可读的东西。
+ * 整页只有一个客户端组件（`ShipGameShell`）。它首屏渲染的是**模式选择**（单人 /
+ * 多人两张页签），那部分是真 HTML —— 也是这一页唯一对搜索 / 首屏有意义的内容。
+ * 后面的东西都要等用户选完模式、点下「继续」才开始加载（进度条在 `ShipLoading`），
  * 所以这一页：
  *
  *   · **按需 ISR**（和 `/play` 同一个理由）：HTML 对同一个 id + 语言逐字节相同，

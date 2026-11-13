@@ -26,9 +26,10 @@ import type { Actor, Team } from './types';
  *
  *   ① 布料整块高饱和阵营色（0 队蓝 / 1 队红棕），和写实军事地图的冷灰底
  *      拉开对比 —— 用户反馈过「轻微 lerp 看不出来」；
- *   ② 头顶一枚发光倒三角（Canvas 贴图，全场共享纹理）—— **只挂队友**。
- *      2026-11-12 用户要求去掉敌方头顶的箭头提示（等于给敌人开了透视），
- *      敌人只剩阵营色布料这一层信号。
+ *   ② **只有阵营色这一层信号，头顶不挂任何标记**。倒三角标记先是在 2026-11-12
+ *      因为「给敌人开透视」被限制到队友，2026-11-13 用户要求连蓝方一起去掉 ——
+ *      头顶飘一个 sprite 本身就出戏。删掉的是 `markerTextureFor` 那套 Canvas
+ *      纹理 + Sprite（曾经还带死亡熄灭和尸体淡出联动），别再按「队友才挂」加回来。
  *
  * ## 零静态资源
  *
@@ -37,7 +38,7 @@ import type { Actor, Team } from './types';
  * 缓存模板、逐视图 clone（淡出是材质级 opacity）。
  */
 
-/** 造型：真人还是人机。**由 `Actor.isHuman` 决定**。两者都是普通士兵外观 —— 用户否掉了「机器人」造型（金属头/天线/发光眼太机械感），人机只戴面罩，敌我识别交给阵营色 + 队友头顶标记。 */
+/** 造型：真人还是人机。**由 `Actor.isHuman` 决定**。两者都是普通士兵外观 —— 用户否掉了「机器人」造型（金属头/天线/发光眼太机械感），人机只戴面罩，敌我识别全靠阵营色布料。 */
 export type ActorKind = 'human' | 'bot';
 
 export interface ActorView {
@@ -143,64 +144,9 @@ const yawQuat = new THREE.Quaternion();
 const fallQuat = new THREE.Quaternion();
 const fallAxis = new THREE.Vector3();
 
-/* ============================================================
-   头顶阵营标记（Canvas 贴图按颜色缓存，纹理全场共享不 dispose）
-   ============================================================ */
-const markerTextureFor = (() => {
-  const cache = new Map<number, THREE.Texture>();
-  return (color: number): THREE.Texture => {
-    const cached = cache.get(color);
-    if (cached) return cached;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-    // 发光倒三角（▼）：阵营色填充 + 白描边，远看就是一个亮色点
-    const fill = `#${color.toString(16).padStart(6, '0')}`;
-    ctx.beginPath();
-    ctx.moveTo(22, 28);
-    ctx.lineTo(106, 28);
-    ctx.lineTo(64, 98);
-    ctx.closePath();
-    ctx.fillStyle = fill;
-    ctx.shadowColor = fill;
-    ctx.shadowBlur = 20;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.stroke();
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    cache.set(color, texture);
-    return texture;
-  };
-})();
-
-/** 标记色比布料更亮一档：0 队亮蓝。敌方（1 队）不挂标记 —— 头顶箭头等于
- *  透视挂，用户 2026-11-12 明确要求去掉；敌我识别靠阵营色布料兜底。 */
-const MARKER_COLOR = 0x3f8cff;
-
 export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'ak47'): ActorView {
   const materials = cloneMaterials(materialsFor(team, kind));
   const group = new THREE.Group();
-
-  // ---- 头顶队友标记（死亡时熄灭）。敌方不挂：头顶箭头等于透视挂 ----
-  const marker =
-    team === 0
-      ? new THREE.Sprite(
-          new THREE.SpriteMaterial({
-            map: markerTextureFor(MARKER_COLOR),
-            transparent: true,
-            opacity: 1,
-            depthWrite: false,
-          }),
-        )
-      : null;
-  if (marker) {
-    marker.scale.set(0.42, 0.42, 1);
-    marker.position.set(0, 2.14, 0);
-    group.add(marker);
-  }
 
   /* ============================================================
      士兵建模（正面 = -z。所有 y 都是「站立时离地高度」）
@@ -408,7 +354,6 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
     materials.skin.opacity = next;
     materials.gun.opacity = next;
     materials.trim.opacity = next;
-    if (marker) marker.material.opacity = next;
     group.visible = next > 0.02;
   };
 
@@ -468,7 +413,6 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
       impulseSet = false;
       fireTimer = 0;
       recoil = 0;
-      if (marker) marker.visible = true;
       applyOpacity(1);
       group.visible = true;
     }
@@ -520,8 +464,6 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon = 'a
         const mesh = child as THREE.Mesh;
         mesh.geometry?.dispose();
       });
-      // 标记材质是逐实例的，但 Canvas 纹理全场共享（缓存于模块级），不放
-      if (marker) marker.material.dispose();
       materials.cloth.dispose();
       materials.clothDark.dispose();
       materials.vest.dispose();

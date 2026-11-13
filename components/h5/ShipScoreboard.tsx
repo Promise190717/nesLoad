@@ -9,7 +9,7 @@ import { TEAM_COLOR } from './weapon-label';
  * 计分板（Tab 按住显示）。
  *
  * 两列并排 —— 这是 CS/CF 的固定布局，玩家不用学。**不做成可排序表格**：
- * 一场 10 人、最多几分钟，排序没有意义，而每一行都要按 `kills` 重排会让
+ * 一局最多 12 人、最多几分钟，排序没有意义，而每一行都要按 `kills` 重排会让
  * 玩家在「我刚打死一个」的瞬间失去自己的位置。
  */
 export default function ShipScoreboard({
@@ -39,8 +39,12 @@ export default function ShipScoreboard({
           <span className="text-[13px] font-bold tracking-[0.2em] text-[#f0a020] uppercase">
             {h5Text(locale, 'hud.scoreboard')}
           </span>
+          {/* 和 HUD 顶部同一套口径：按时长只显示剩余时间，按人头只显示目标人头。
+              两个一起摆出来的话，按人头的局里那串冻住的时间会被读成「还剩 10 分钟」 */}
           <span className="font-mono text-[12px] text-white/45">
-            {formatClock(hud.timeLeft)} · {h5Text(locale, 'hud.target', { count: killTarget })}
+            {hud.endMode === 'kills'
+              ? h5Text(locale, 'hud.target', { count: killTarget })
+              : formatClock(hud.timeLeft)}
           </span>
         </div>
 

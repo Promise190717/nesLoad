@@ -36,6 +36,14 @@ export type Team = 0 | 1;
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Quality = 'low' | 'mid' | 'high';
 
+/**
+ * 对局规模：**每队人数（含本机玩家）**。
+ *
+ * 值同时就是界面上的 `1v1 / 3v3 / 6v6` —— 不另做映射，协议里也只走这一个数。
+ */
+export const TEAM_SIZE_OPTIONS = [1, 3, 6] as const;
+export type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
+
 export type PrimaryId = 'ak47' | 'm4a1' | 'awm' | 'shotgun';
 export type WeaponId = PrimaryId | 'usp' | 'knife' | 'grenade';
 export type SlotId = 'primary' | 'secondary' | 'melee' | 'throwable';
@@ -102,7 +110,7 @@ export interface KillFeedback {
  *   dying     倒地动画（镜头从 1.6m 跌到贴地、roll 60°~90°）
  *   gaze      死亡凝视（贴地静止 + 去饱和 + 击杀信息卡）
  *   spectate  观战（镜头升起，切到击杀者第三人称）
- *   respawn   重生过渡（0.4s 把镜头拉回第一人称）
+ *   respawn   复活那一帧（**没有镜头过渡**：当帧硬切回第一人称，见 `death-cam.ts`）
  *
  * React 拿它决定去饱和强度、死亡 UI 出现的时机 —— 引擎不描述「长什么样」，
  * 只说「现在处于哪一段」。
@@ -128,11 +136,28 @@ export interface DeathInfo {
    对局参数
    ============================================================ */
 
+/**
+ * 结束方式：打满时长 / 先到人头目标。
+ *
+ * 🔴 **两者互斥，不是「或」**。上一版模式页把「对局时长」和「人头目标」两行同时
+ * 摆在屏幕上，玩家看到的是两条并行条件，自然会以为两个都要满足；引擎里也确实是
+ * `timeLeft <= 0 || score >= killTarget` 的先到先算 —— 于是「人头目标 60」还没打满，
+ * 5 分钟一到就结算了。现在只允许选一个，另一个数值行整行不渲染，引擎也只认一个。
+ */
+export type EndMode = 'time' | 'kills';
+
+/** 模式页「结束方式」那两档，顺序即界面顺序。 */
+export const END_MODE_OPTIONS = ['time', 'kills'] as const;
+
 export interface MatchRules {
-  /** 先到这个击杀数结束 */
+  /** 结束条件：时长到点 / 人头打满。决定下面两个数哪个生效 */
+  endMode: EndMode;
+  /** 先到这个击杀数结束（仅 `endMode === 'kills'` 时参与判定） */
   killTarget: number;
-  /** 或打满这么多秒 */
+  /** 或打满这么多秒（仅 `endMode === 'time'` 时参与判定） */
   durationSec: number;
+  /** 每队人数（含本机玩家）：1v1 / 3v3 / 6v6 */
+  teamSize: TeamSize;
   difficulty: Difficulty;
 }
 
@@ -146,10 +171,29 @@ export interface GameSettings {
 }
 
 export const DEFAULT_RULES: MatchRules = {
+  // 默认按时长：这是 CF 团队竞技的常规规则，也是「不选也能直接开打」的那一档
+  endMode: 'time',
   killTarget: 40,
   durationSec: 10 * 60,
+  // 默认 6v6：以前写死 5v5（10 人），6v6 是"满场"的那一档
+  teamSize: 6,
   difficulty: 'normal',
 };
+
+/**
+ * 模式页上可选的**对局时长**（秒）。
+ *
+ * 引擎原来写死 10 分钟，玩家没有「打一小局就走」的选项；这三个档位对应
+ * 「快打一局 / 标准 / 长局」，不再提供任意输入 —— 手输框在手机上是最难用的一种控件。
+ */
+export const DURATION_OPTIONS = [5 * 60, 10 * 60, 15 * 60] as const;
+
+/**
+ * 模式页上可选的**人头目标**。
+ *
+ * 满编 12 人时 40 头大约 10 分钟，20 头是「五分钟一局」，60 头是给只想打长局的。
+ */
+export const KILL_OPTIONS = [20, 40, 60] as const;
 
 export const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 1,
@@ -333,8 +377,19 @@ export interface HudSnapshot {
 
   scoreA: number;
   scoreB: number;
-  /** 剩余秒数 */
+  /** 剩余秒数。仅 `endMode === 'time'` 有意义（人头局里它冻在 `durationSec`） */
   timeLeft: number;
+  /** 本局已用秒数。仅 `endMode === 'kills'` 有意义（人头局顶部显示正计时） */
+  elapsed: number;
+  /** 结束方式。决定 HUD 顶部中央显示倒计时还是正计时 */
+  endMode: EndMode;
+  /**
+   * 这一局的目标人头。
+   *
+   * 放进快照而不是让 React 读自己的 `rules`：联机加入者的规则跟房主走（见
+   * `Snapshot.k`），计分板必须显示房主定的那个数，否则「显示 40、20 分就结束」。
+   */
+  killTarget: number;
 
   /** 换枪资格：存活 + 复活 ≤5s + 本次生命未耗弹（B 换枪可用） */
   canChangeLoadout: boolean;

@@ -117,6 +117,12 @@ export interface ViewModelParams {
   dying: number;
   /** 近战挥砍状态。非近战武器时传玩家身上那个恒零的常量就行 */
   melee: MeleePose;
+  /** 捏雷抬手进度 0..1（手里不是手雷时恒 0） */
+  grenadeCook: number;
+  /** 投掷动画进度 0..1。0 = 没在投掷 */
+  grenadeThrow: number;
+  /** 这次投掷是「快速扔雷」（G）—— 模型这一帧才出现，要补一段拔雷起手 */
+  grenadeThrowQuick: boolean;
 }
 
 /** 切枪的三个阶段。 */
@@ -178,6 +184,15 @@ export class ViewModelLayer {
   /* ---- 视角摇晃（平滑后的视角角速度，rad/s） ---- */
   private swayYaw = 0;
   private swayPitch = 0;
+
+  /**
+   * 平滑后的捏雷抬手量。
+   *
+   * 玩家松手那一帧 `grenadeCook` 直接从 1 跳回 0（`cooking` 被清掉），照原值
+   * 用会让手「啪」地掉回原位、紧接着又开始挥臂 —— 两次动作之间闪一帧。
+   * 所以这里自己 damp 一遍，抬手和收回都是渐变的。
+   */
+  private cookView = 0;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(VIEW_FOV, aspect, 0.01, 8);
@@ -421,6 +436,7 @@ export class ViewModelLayer {
 
     const pose = BASE_POSES[this.weapon ?? 'ak47'];
     const isKnife = this.weapon === 'knife';
+    const isGrenade = this.weapon === 'grenade';
 
     // 换弹动画：整把枪往下压再回位，用 sin 做「压下 → 抬起」
     const reloadArc = params.reloading ? Math.sin(Math.min(params.reloadProgress, 1) * Math.PI) : 0;
@@ -581,6 +597,80 @@ export class ViewModelLayer {
       targetRotY += o.ry;
       targetRotZ += o.rz;
     });
+
+    /* ---- 手雷：捏雷抬手 → 甩出 → 收手 ----
+     *
+     * 时间轴由 `player.ts` 的两条进度驱动（这里只认 0..1，不碰判定）：
+     * `grenadeCook` 是按住左键的前 0.22s（抬手凑近，之后保持），
+     * `grenadeThrow` 是松手之后 `GRENADE_THROW_TIME` 0.42s 的整段动作。
+     *
+     * 三段：「起手」→「蓄力后拉」→「甩出（往前下方砸出画外）」→「收手」。
+     * 快速扔雷（G）多一段起手：那个模型是这一帧才换出来的，如果不从下方
+     * 拔上来，手雷就是硬生生出现在画面中央。
+     *
+     * 🔴 snap：这段是精确编排的，走 damp 会被拖成慢动作（和切枪 / 转刀同理）。
+     * 所有偏移在进度到 1 时都被 `back` 系数抹回 0，不会和待机呼吸打架。 */
+    // 抬手量先过一遍平滑（松手那一帧源值是跳变的，见 `cookView`）
+    this.cookView = damp(this.cookView, clamp(params.grenadeCook, 0, 1), 22, dt);
+
+    if (isGrenade) {
+      const cook = this.cookView;
+      if (cook > 0) {
+        const c = easeOutCubic(cook);
+        targetX -= c * 0.05; // 往画面中线收
+        targetY += c * 0.08; // 抬到胸口以上
+        targetZ += c * 0.03; // 凑近镜头
+        targetRotX += c * 0.28; // 手腕后仰（雷体顶部朝镜头倒，看得见引信）
+        targetRotZ += c * 0.18;
+      }
+
+      const p = clamp(params.grenadeThrow, 0, 1);
+      if (p > 0 && p < 1) {
+        let gx = 0;
+        let gy = 0;
+        let gz = 0;
+        let grx = 0;
+        let grz = 0;
+
+        // ① 起手（只有快速扔雷）：从右下画外拔上来
+        if (params.grenadeThrowQuick) {
+          const e = 1 - easeOutCubic(clamp(p / 0.26, 0, 1));
+          gx += e * 0.2;
+          gy -= e * 0.45;
+          gz += e * 0.06;
+          grx += e * 0.7;
+          grz -= e * 0.6;
+        }
+
+        // ② 蓄力：抬手往后拉，0.36 最满；0.36~0.56 被甩出抵消回去
+        const wind =
+          p < 0.36 ? easeOutCubic(p / 0.36) : 1 - easeInCubic(clamp((p - 0.36) / 0.2, 0, 1));
+        gx -= wind * 0.1;
+        gy += wind * 0.12;
+        gz += wind * 0.06;
+        grx += wind * 0.5; // 顶部朝镜头倒 = 手举到肩后
+        grz += wind * 0.35;
+
+        // ③ 甩出：0.40 起加速往前下方砸，0.62 到最深 —— 那时已经出画
+        const flick = easeInCubic(clamp((p - 0.4) / 0.22, 0, 1));
+        gx += flick * 0.05;
+        gy -= flick * 0.55;
+        gz -= flick * 0.3;
+        grx -= flick * 1.45; // 手腕前甩：顶部翻向前方，跟着手一起沉出画面
+        grz -= flick * 0.5;
+
+        // ④ 收手：0.66 之后把上面所有偏移一起抹回 0（等于手抬回持雷位姿）
+        const back = p > 0.66 ? easeInOutCubic(clamp((p - 0.66) / 0.34, 0, 1)) : 0;
+        const k = 1 - back;
+
+        targetX += gx * k;
+        targetY += gy * k;
+        targetZ += gz * k;
+        targetRotX += grx * k;
+        targetRotZ += grz * k;
+        snap = true;
+      }
+    }
 
     /* ---- 切枪位移 / 旋转 ---- */
     const profile = this.profile;

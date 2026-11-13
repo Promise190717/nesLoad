@@ -55,12 +55,13 @@ const CL = 6.1;
 export const SPAWN_Z: readonly [number, number] = [-HALF_L + 3, HALF_L - 3];
 
 /**
- * 出生点横向分布。
+ * 出生点横向分布。**6 个**：一队最多 6 人（6v6），第 0 个永远留给本机玩家。
  *
- * 最外侧 ±9（不是 ±9.5）：外圈集装箱在 x = 10.4~13.0，重生还带 ±0.8 的
- * 随机偏移，±9.5 + 偏移会把人塞进箱子里。
+ * 最外侧 ±9（不是 ±9.5）：外圈集装箱在 x = 10.4~13.0，人机重生还带 ±0.8 的
+ * 随机偏移，±9.5 + 偏移会把人塞进箱子里。中间四个等距插值（3.6 米一个），
+ * 6 个并排也不会挤在一起。
  */
-const SPAWN_X = [-9, -4.5, 0, 4.5, 9] as const;
+const SPAWN_X = [-9, -5.4, -1.8, 1.8, 5.4, 9] as const;
 
 /** 站在出生点 ±这个距离内可以换枪。 */
 export const SPAWN_ZONE = 7;
@@ -100,7 +101,7 @@ export interface Level {
   /** 所有关卡几何的父节点。引擎只管 `root` 的可见性，不逐个碰子节点。 */
   root: THREE.Group;
   colliders: Collider[];
-  /** `[保卫者, 潜伏者]`，每个阵营 5 个点 */
+  /** `[保卫者, 潜伏者]`，每个阵营按 `SPAWN_X` 一行 6 个点 */
   spawns: [THREE.Vector3[], THREE.Vector3[]];
   nav: NavGrid;
   /** 低画质要关阴影，得能拿到它 */

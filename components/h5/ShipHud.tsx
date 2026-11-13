@@ -13,8 +13,8 @@ import { formatClock } from './ShipScoreboard';
  *
  * 布局照 CF 的常规摆位，**四角各管一件事**：
  *
- *   左上 / 右上  双方比分 + 目标人头
- *   正上        剩余时间
+ *   左上 / 右上  双方比分
+ *   正上        计时（按时长 = 倒计时 / 按人头 = 已用时）
  *   左下        生命 / 护甲
  *   右下        武器 / 弹药 / 手雷
  *
@@ -39,16 +39,19 @@ export default function ShipHud({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-[system-ui]">
-      {/* ── 顶部：比分 + 计时 ───────────────────────────────────── */}
+      {/* ── 顶部：比分 + 计时 ─────────────────────────────────────
+          中间那格显示什么**取决于结束方式**：按时长是倒计时，按人头是正计时。
+          人头局里把冻住的剩余时间画出来毫无意义（它永远停在设定的时长上），
+          玩家真正想知道的是「这局打了多久」 */}
       <div className="absolute inset-x-0 top-0 flex justify-center">
         <div className="flex items-stretch border-x border-b border-white/10 bg-black/45 backdrop-blur-[2px]">
           <ScoreCell label={teamLabel(locale, 0)} score={hud.scoreA} color={TEAM_COLOR[0]} />
           <div className="flex min-w-[86px] flex-col items-center justify-center border-x border-white/10 px-3 py-1">
             <span className="font-mono text-[16px] leading-none font-bold tabular-nums text-white">
-              {formatClock(hud.timeLeft)}
+              {formatClock(hud.endMode === 'kills' ? hud.elapsed : hud.timeLeft)}
             </span>
             <span className="mt-0.5 text-[9px] tracking-[0.18em] text-white/35 uppercase">
-              {h5Text(locale, 'hud.time')}
+              {h5Text(locale, hud.endMode === 'kills' ? 'hud.elapsed' : 'hud.time')}
             </span>
           </div>
           <ScoreCell label={teamLabel(locale, 1)} score={hud.scoreB} color={TEAM_COLOR[1]} align="right" />

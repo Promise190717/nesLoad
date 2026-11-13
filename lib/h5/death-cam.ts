@@ -21,7 +21,14 @@ import type { Actor, DeathPhase } from './types';
  *   1.15 ~ 2.10  凝视：贴地静止，只有极缓慢的呼吸漂移
  *   2.10 ~ 2.80  升起并切到击杀者第三人称（观战）
  *   3.50         底部倒计时条出现（UI 侧按 `respawnIn` 判）
- *   6.50         重生，之后 0.45s 把镜头拉回第一人称
+ *   6.50         重生，镜头**当帧直接**切回第一人称
+ *
+ * ## 重生为什么没有过渡（2026-11-13）
+ *
+ * 这里原来有一段 0.45s 的插值：镜头从观战位姿滑回第一人称。问题出在起点 ——
+ * 观战位在**击杀者身后**，插值途中画面会把交火区、敌人的位置和朝向一路拖过去，
+ * 等于每次复活白送半秒透视。用户原话「不然知道敌人位置在哪」，直接砍掉：
+ * `end()` 把相机交还引擎，下一帧就是新出生点的第一人称。
  *
  * ## 位姿怎么表示
  *
@@ -50,8 +57,6 @@ export const DEATH_TIMELINE = {
 
   /** 重生瞬间（= 死亡总时长） */
   respawnAt: 6.5,
-  /** 重生过渡：把镜头从观战位姿拉回第一人称 */
-  respawnBlend: 0.45,
 } as const;
 
 /** 倒地后眼睛离地多高。再低就会穿进甲板，再高就不像躺着。 */
@@ -92,24 +97,13 @@ function quatFromAngles(out: THREE.Quaternion, pitch: number, yaw: number, roll:
   out.setFromEuler(euler);
 }
 
-/** 第一人称相机本该在的位姿。重生过渡时拿它当插值终点。 */
-export interface AlivePose {
-  x: number;
-  y: number;
-  z: number;
-  yaw: number;
-  pitch: number;
-}
-
 /* ============================================================
    控制器
    ============================================================ */
 
 export class DeathCamera {
-  /** 相机这一帧要不要交给死亡相机。重生过渡结束前一直是 true。 */
+  /** 相机这一帧要不要交给死亡相机。`end()` / `reset()` 之后为 false。 */
   private active = false;
-  private respawning = false;
-  private blendRespawn = 0;
   private spectateReady = false;
 
   /** 死亡后累计的秒数 */
@@ -132,8 +126,6 @@ export class DeathCamera {
   private readonly lyingQuat = new THREE.Quaternion();
   private readonly spectatePos = new THREE.Vector3();
   private readonly spectateQuat = new THREE.Quaternion();
-  private readonly frozenPos = new THREE.Vector3();
-  private readonly frozenQuat = new THREE.Quaternion();
 
   /** 引擎每帧问它：现在是不是该由我接管相机。 */
   get busy(): boolean {
@@ -148,8 +140,6 @@ export class DeathCamera {
    */
   begin(pos: { x: number; y: number; z: number }, yaw: number, pitch: number, eyeY: number, killer: Actor | null): void {
     this.active = true;
-    this.respawning = false;
-    this.blendRespawn = 0;
     this.spectateReady = false;
     this.t = 0;
 
@@ -183,20 +173,20 @@ export class DeathCamera {
     this.yawDrift = rand(-0.35, 0.35);
   }
 
-  /** 重生：把当前镜头位姿冻住，接下来 `respawnBlend` 秒插值回第一人称。 */
-  startRespawn(camera: THREE.PerspectiveCamera): void {
-    if (!this.active) return;
-    this.frozenPos.copy(camera.position);
-    this.frozenQuat.copy(camera.quaternion);
-    this.respawning = true;
-    this.blendRespawn = 0;
+  /**
+   * 重生：**当帧交还相机**，不做任何过渡。
+   *
+   * 不做插值的原因是「过渡会漏位置」：起点是击杀者身后的观战位，途中会把
+   * 整个交火区拖进画面。所以这里只把 `active` 关掉，下一帧 `update()` 返回
+   * false，引擎直接按新出生点的第一人称写相机。
+   */
+  end(): void {
+    this.active = false;
   }
 
   /** 重开一局 / 退出对局时清干净。 */
   reset(): void {
     this.active = false;
-    this.respawning = false;
-    this.blendRespawn = 0;
     this.spectateReady = false;
     this.t = 0;
     this.killer = null;
@@ -205,27 +195,10 @@ export class DeathCamera {
   /**
    * 每帧调用。返回 `true` 表示这一帧相机已经由死亡相机写好，引擎不要覆盖。
    */
-  update(dt: number, camera: THREE.PerspectiveCamera, alive: AlivePose): boolean {
+  update(dt: number, camera: THREE.PerspectiveCamera): boolean {
     if (!this.active) return false;
 
     this.t += dt;
-
-    /* ---- 重生过渡：从冻住的观战位姿插值回第一人称 ---- */
-    if (this.respawning) {
-      this.blendRespawn = Math.min(1, this.blendRespawn + dt / DEATH_TIMELINE.respawnBlend);
-      const e = easeInOutCubic(this.blendRespawn);
-
-      camera.position.set(
-        lerp(this.frozenPos.x, alive.x, e),
-        lerp(this.frozenPos.y, alive.y, e),
-        lerp(this.frozenPos.z, alive.z, e),
-      );
-      quatFromAngles(desiredQuat, alive.pitch, alive.yaw, 0);
-      camera.quaternion.copy(this.frozenQuat).slerp(desiredQuat, e);
-
-      if (this.blendRespawn >= 1) this.active = false;
-      return true;
-    }
 
     // 观战目标每帧都要重算：击杀者在跑、在转身，甚至可能已经死了
     this.trackSpectate(dt);

@@ -9,7 +9,7 @@ import { DroppedWeapons } from './dropped';
 import { Effects } from './effects';
 import { InputController, type InputAction, type InputFrame } from './input';
 import { buildLevel, type Level } from './level';
-import { clamp, damp, pick, rand, randInt } from './math';
+import { clamp, damp, dirFromAngles, pick, rand, randInt } from './math';
 import type { Point3 } from './math';
 import {
   ACTOR_DEATHS,
@@ -31,7 +31,6 @@ import {
   ACTOR_Y,
   ACTOR_YAW,
   ACTOR_Z,
-  ACTOR_TOTAL,
   F_ALIVE,
   F_CROUCH,
   F_GROUND,
@@ -39,6 +38,10 @@ import {
   F_LOADOUT,
   F_RELOADING,
   F_SCOPED,
+  GRENADE_ID,
+  GRENADE_X,
+  GRENADE_Y,
+  GRENADE_Z,
   INPUT_HZ,
   IN_AIM,
   IN_AIM_PRESSED,
@@ -62,11 +65,13 @@ import {
   SNAPSHOT_HZ,
   SURFACE_WOOD,
   encodeActor,
+  encodeGrenade,
   indexToWeapon,
   num,
   str,
   weaponToIndex,
   type ActorWire,
+  type GrenadeWire,
   type InputWire,
   type NetEvent,
   type RosterWire,
@@ -75,7 +80,7 @@ import {
 } from './net/protocol';
 import { ReplicaActor } from './net/replica';
 import type { SessionRole, ShipNetSession } from './net/session';
-import { rayWorld, surfaceUnder } from './physics';
+import { rayWorld } from './physics';
 import { Player, SCOPED_FOV, type PlayerDeps } from './player';
 import type {
   Actor,
@@ -121,11 +126,6 @@ import { WEAPONS, weaponFeel } from './weapons';
 /* ============================================================
    常量
    ============================================================ */
-
-/** 队友（不含玩家）数量 */
-const TEAMMATE_COUNT = 4;
-/** 敌方数量 */
-const ENEMY_COUNT = 5;
 
 /** HUD 推送频率（秒） */
 const HUD_INTERVAL = 0.1;
@@ -194,6 +194,19 @@ const GRAVITY = 20;
  */
 const MAX_DT = 1 / 30;
 
+/**
+ * 房主在后台时「补帧」的触发门槛（毫秒）。见 `stepWhileHidden`。
+ *
+ * 背景：浏览器对**隐藏的标签页**会彻底停掉 rAF（窗口被别的窗口盖住时也可能
+ * 降到 1fps），而房主的整局权威模拟都挂在 rAF 上。房主一切走，加入者那边就
+ * 只剩「本地移动预测」还活着 —— 切枪、换弹、命中、比分全都要等房主落账，
+ * 表现就是「换了枪没反应、打中了不掉血」。
+ *
+ * 80ms ≈ 12fps：正常 60fps 下 rAF 间隔 16ms，这道门根本不会开；只有真的停了
+ * 才会被输入帧顶开。
+ */
+const HIDDEN_STEP_GAP_MS = 80;
+
 /** 瞬移自检：单帧位移超过「速度上限 × dt × 1.5」就报警。地址栏加 `?debug=1` 打开。 */
 const DEBUG_ENABLED =
   typeof window !== 'undefined' && /[?&]debug=1(?:&|$)/.test(window.location.search);
@@ -218,26 +231,56 @@ const MAX_NET_EVENTS = 96;
 const MAX_NET_IMPACTS = 24;
 
 /**
- * 加入者自己的位置外推提前量（秒）。
+ * 每帧最多给几个积压的副本建视图（见 `pendingReplicaViews`）。
  *
- * 快照里的位置是**半个快照间隔 + 一个来回之前**的：直接阻尼到它，自己走路
- * 永远拖着 150~250ms 的尾（「像在泥里」）。快照同时带了房主模拟出的速度 ——
- * 把阻尼目标沿速度往前推这段提前量，正好抵消管线延迟，残余滞后只剩阻尼
- * 本身的 ~40ms，手感接近本地模拟。停下来的时候速度位先归零，多出去的一小段
- * 由阻尼滑回来，肉眼无感。
+ * 中途加入时第一份快照一次带来 9 个陌生角色：一帧内全建出来的话，
+ * 几十个几何体分配 + 首次上屏的材质状态整备挤在同一帧，加入瞬间就是
+ * 一个几百毫秒的卡顿尖峰（连带输入上行断流，房主端 0.3s 就把人钉住）。
+ * 分帧建、先建离自己最近的 —— 80ms 内全部上屏，人眼几乎无感。
  */
-const SELF_POS_LEAD = 0.08;
+const NET_VIEW_BUDGET = 2;
+
+/**
+ * 加入者移动预测的对账参数（见 `mirrorSelf`）。
+ *
+ * 快照里的位置落后**半个管线**（上行 + 房主帧 + 快照回程 ≈ 40ms）：直接把本地
+ * 位置往它阻尼，等于把刚预测掉的延迟又加回来（旧方案 `SELF_POS_LEAD` +
+ * λ26 阻尼的残余 ≈ 100ms，就是「走路像在泥里」的根因）。现在改为**死区对账**：
+ *
+ *   SELF_DRIFT_DEAD   水平偏差小于它 → 完全信本地预测，一个字都不改
+ *   SELF_CORRECT_RATE 超出死区 → 按 4/s 的速率把偏差抹掉（0.25s 收敛，无瞬移感）
+ *   SELF_SNAP_DIST    超过它 → 房主权威，直接就位（复活 / 被外力挪 / 预测撞歪）
+ *   SELF_SNAP_Y       垂直版。跳跃起跳时间两端差一个管线，±0.3m 属正常
+ */
+const SELF_DRIFT_DEAD = 0.25;
+const SELF_CORRECT_RATE = 4;
+const SELF_SNAP_DIST = 1.5;
+const SELF_SNAP_Y = 0.6;
 
 /* ============================================================
    手雷投掷物
    ============================================================ */
 
 interface Grenade {
+  /** 房主分配的序号，快照的 `g` 行靠它标识「同一颗」（加入者侧认人用） */
+  id: number;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   fuse: number;
   owner: Actor;
   mesh: THREE.Mesh;
+}
+
+/**
+ * 加入者侧：对端手雷的**画面副本**。
+ *
+ * 只有位置和球 —— 没有速度、没有引信、不参与任何判定。它唯一的职责是让
+ * 「手雷在空中飞」这件事在加入者屏幕上真的看得见（以前只有落地那一声爆炸）。
+ */
+interface GrenadeView {
+  mesh: THREE.Mesh;
+  pos: THREE.Vector3;
+  target: THREE.Vector3;
 }
 
 /**
@@ -260,8 +303,12 @@ interface NetLink {
   walk: boolean;
   fire: boolean;
   aim: boolean;
-  /** 一次性动作（跳 / 换弹 / 切枪 / 扔雷），下一帧消费掉 */
-  readonly actions: Set<InputAction>;
+  /**
+   * 一次性动作（跳 / 换弹 / 切枪 / 扔雷），下一帧消费掉。
+   * 消费方式是**整体换出**（`updateRemotePlayers` 里换新 Set）而不是 clear：
+   * frame 要拿着这批动作走到 `handleActions`，同一个引用先清就全没了。
+   */
+  actions: Set<InputAction>;
   firePressed: boolean;
   aimPressed: boolean;
   /** 视角绝对角（加入者本地即时瞄准，房主照抄） */
@@ -284,7 +331,8 @@ function primaryOf(weapon: WeaponId): PrimaryId {
 export class ShipGame {
   private readonly canvas: HTMLCanvasElement;
   private readonly options: EngineOptions;
-  private readonly rules: MatchRules;
+  /** 对局规则。可在两次开局之间替换（`setRules`），所以不是 readonly */
+  private rules: MatchRules;
 
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -309,6 +357,16 @@ export class ShipGame {
   private readonly actors: Actor[] = [];
   private readonly botViews = new Map<Bot, ActorView>();
   private readonly grenades: Grenade[] = [];
+  /** 手雷序号发号器（房主）。只增不减，加入者靠它区分「同一颗」和「新一颗」 */
+  private grenadeSeq = 0;
+  /**
+   * 加入者：对端手雷的画面副本，key = 房主那边的序号。
+   *
+   * 加入者**不跑投掷物模拟**（谁扔的、飞到哪儿、炸到谁全在房主那边算），
+   * 所以这些球每帧只从快照的 `g` 行抄位置。没有这一层，加入者屏幕上扔雷
+   * 是「空中什么都没有，1.4 秒后地上凭空炸一下」。
+   */
+  private readonly grenadeViews = new Map<number, GrenadeView>();
 
   /* ---- 联机 ---- */
   /** 联机会话。`null` = 单人，走原来那条路径（一行都不变） */
@@ -322,6 +380,8 @@ export class ShipGame {
   private readonly replicas = new Map<string, ReplicaActor>();
   /** 加入者：id → 第三人称模型 */
   private readonly replicaViews = new Map<string, ActorView>();
+  /** 还没建视图的副本（分帧补建，见 `drainReplicaViews`） */
+  private readonly pendingReplicaViews = new Map<string, ReplicaActor>();
   private netInputTimer = 0;
   private netSnapshotTimer = 0;
   private netRosterTimer = 0;
@@ -331,6 +391,15 @@ export class ShipGame {
   private readonly netActions = new Set<InputAction>();
   private netFirePressed = false;
   private netAimPressed = false;
+  /**
+   * 加入者：本地开火反馈的节奏闸（秒）。
+   *
+   * 枪声/枪口焰/后坐本地即时演（`updateNetFireFeedback`），但连发的节奏
+   * 还是按武器表压着 —— 不然按住 AK 会在一帧里播 30 响。数值和房主
+   * `handleFire` 的 `fireCooldown` 同源（都来自 `spec.interval`），两端
+   * 节奏天然一致，不需要和回显对时。
+   */
+  private netFireFeelCd = 0;
   /** 房主：这一帧攒下、下次快照带出去的表现事件 */
   private netEvents: NetEvent[] = [];
   /** 本帧已经广播了几个弹着点（见 `MAX_NET_IMPACTS`） */
@@ -357,6 +426,8 @@ export class ShipGame {
   /* ---- 对局状态 ---- */
   private readonly score: [number, number] = [0, 0];
   private timeLeft: number;
+  /** 本局已用秒数。人头局（`endMode === 'kills'`）里 HUD 顶部显示它 */
+  private elapsed = 0;
   private running = false;
   /** 游戏菜单（Esc 放锁）开着。**不冻结游戏** —— 世界照常跑，只把本机玩家输入归零 */
   private menuOpen = false;
@@ -370,14 +441,6 @@ export class ShipGame {
 
   private readonly feed: FeedEntry[] = [];
   private feedCounter = 0;
-
-  /**
-   * 别人的脚步累计：角色 id → 上一帧位置 + 已走距离。
-   *
-   * 之前只有玩家自己有脚步声，人机和对端真人走路是哑的 —— 绕后摸到脸上
-   * 完全没有预警，「听声辨位」少了一半。见 `updateActorFootsteps`。
-   */
-  private readonly stepTracker = new Map<string, { x: number; y: number; z: number; dist: number }>();
 
   /* ---- 死亡体验相关 ---- */
   /** hit-stop 剩余时长（秒）。大于 0 时整局按 `hitStopScale` 慢放 */
@@ -420,6 +483,11 @@ export class ShipGame {
   /* ---- 帧 ---- */
   private rafId = 0;
   private lastTime = 0;
+  /**
+   * 当前是不是「rAF 已经停了、靠加入者的输入帧在补帧」（见 `stepWhileHidden`）。
+   * 一道门而已：真正跑起来（`render = true`）的那一帧会把它关掉。
+   */
+  private hiddenTicking = false;
   private hudTimer = 0;
   private frameCounter = 0;
   private fpsTimer = 0;
@@ -515,13 +583,18 @@ export class ShipGame {
     };
 
     /* ---------- 输入 ---------- */
-    this.input = new InputController(canvas, (locked) => {
+    this.input = new InputController(canvas, (locked, lostFocus) => {
       this.options.onLockChange(locked);
       // Esc 放锁 = 弹出菜单，但**不冻结游戏**：联机暂停会卡住对面（根本不该有），
       // 单机也统一取消 —— 世界照常跑，只有本机输入被归零。浏览器规范强制退出
-      // 锁定，拦不住，只能当成「开菜单」的信号。换枪菜单会主动放锁（要能用鼠标
-      // 点菜单），那种情况不算菜单。
-      if (!locked && this.running && !this.finished && !this.buyOpen) {
+      // 锁定，拦不住，只能当成「开菜单」的信号。
+      //
+      // 🔴 但「失焦被收回的锁」不算信号（`lostFocus`）：切标签页、点别的窗口都会
+      // 让浏览器顺手退出指针锁定，那不是玩家要开菜单。以前不看这个标志，切个 tab
+      // 回来菜单就开着。菜单的唯一入口就是玩家按 Esc。
+      //
+      // 换枪菜单会主动放锁（要能用鼠标点菜单），那种情况由 `buyOpen` 挡掉。
+      if (!locked && !lostFocus && this.running && !this.finished && !this.buyOpen) {
         this.menuOpen = true;
         this.options.onMenuChange(true);
       } else if (locked && this.menuOpen) {
@@ -537,6 +610,13 @@ export class ShipGame {
 
     // 先摆好相机画一帧：开始界面是浮在**真实场景**上的，不是一块黑底。
     // 这一步也让 WebGL 的 shader 在点击「开始」之前就编译完，避免开局卡半秒。
+    // 🔴 但 render() 只编译**当帧画到**的东西，覆盖不到藏在池子里还没上过屏的
+    // 特效材质（曳光/弹孔/枪口焰/爆炸/弹壳/粒子）。谁第一个撞上谁付编译账：
+    // 单人是开第一枪那一下，联机**加入者**是进场撞交火的那几帧——主线程一卡，
+    // WebAudio 就 underrun 出咔哒杂声。compile() 全量预编，构造期（还在载入
+    // 进度条里）一次性付清，两个场景都要。
+    this.renderer.compile(this.scene, this.camera);
+    this.renderer.compile(this.viewModel.scene, this.viewModel.camera);
     this.respawnPlayer();
     for (const bot of this.bots) this.respawnBot(bot);
     this.updateCamera(1 / 60);
@@ -550,10 +630,19 @@ export class ShipGame {
      初始化细节
      ============================================================ */
 
+  /**
+   * 按 `rules.teamSize` 铺满两队人机。
+   *
+   * `teamSize` 是**每队人数含本机玩家**，所以 team 0 少铺一个：出生线的第 0 个
+   * 位置永久留给玩家，人机从第 1 个位子开始排。team 1 没有本机玩家，6 个位子
+   * 全铺。出生位现在正好 6 个（`SPAWN_X`），6v6 也不会有人被挤到重复的格子上。
+   */
   private spawnBots(): void {
+    const size = this.rules.teamSize;
     for (const team of [0, 1] as Team[]) {
-      const count = team === 0 ? TEAMMATE_COUNT : ENEMY_COUNT;
-      for (let i = 0; i < count; i += 1) {
+      const reserved = team === 0 ? 1 : 0;
+      const spawns = this.level.spawns[team];
+      for (let i = 0; i < size - reserved; i += 1) {
         // 敌方火力更杂：有喷子，逼玩家换着打法；友方统一步枪。
         // **不给 Bot 配 AWM** —— 一枪一个的狙击枪放在 AI 手里，玩家只要露头就被
         // 隔着半个货场点掉，体验是「这局没法打」而不是「这局有难度」。
@@ -562,7 +651,7 @@ export class ShipGame {
             ? pick<WeaponId>(['ak47', 'm4a1', 'm4a1'])
             : pick<WeaponId>(['ak47', 'ak47', 'm4a1', 'shotgun']);
 
-        const spawn = this.level.spawns[team][(i + 1) % this.level.spawns[team].length]!.clone();
+        const spawn = spawns[(i + reserved) % spawns.length]!.clone();
         spawn.x += rand(-0.6, 0.6);
         this.addBot(team, spawn, weapon);
       }
@@ -640,10 +729,14 @@ export class ShipGame {
       this.score[0] = 0;
       this.score[1] = 0;
       this.timeLeft = this.rules.durationSec;
+      this.elapsed = 0;
     }
     this.finished = false;
     this.buyOpen = false;
     this.feed.length = 0;
+    // 上一局的投掷物不带进新一局：房主侧在飞的那几颗会「跨局爆炸」，
+    // 加入者侧的画面副本则没人再清理它
+    this.clearGrenades();
 
     // 上一局可能是在「观战」状态下被结束的，不清掉的话新一局开局镜头还躺在甲板上
     this.deathCam.reset();
@@ -692,11 +785,25 @@ export class ShipGame {
     this.menuOpen = false;
     this.finished = false;
     this.buyOpen = false;
+    // 场景要留着当背景：半空中悬着一颗冻住的手雷太出戏
+    this.clearGrenades();
     this.input.enabled = false;
     this.input.exitLock();
     cancelAnimationFrame(this.rafId);
     gameAudio.setVolume(0);
     this.deathCam.reset();
+  }
+
+  /**
+   * 预热音频（联机面板打开时调用，早于 `start()`）。
+   *
+   * `start()` 也会调 `unlock()`，但对**加入者**来说那一下正好是加入瞬间——
+   * AudioContext 创建 + 全部枪声/脚步的首烘焙会撞上快照回放，卡顿叠卡顿。
+   * 在选阵营界面那段空闲里提前建好 AudioContext、把烘焙排进后台宏任务，
+   * 加入时剩下的就只有快照回放本身。重复调用无副作用（`unlock` 幂等）。
+   */
+  prewarmAudio(): void {
+    gameAudio.unlock();
   }
 
   /**
@@ -761,122 +868,61 @@ export class ShipGame {
      ============================================================ */
 
   /**
-   * 玩家复活选点：从本方出生点里挑一个**掩体后方**的。
+   * 复活选点：**只在本方出生线**（= 己方最后面那 3 米横带）里挑，绝不跨到
+   * 中路或敌人家门口。真人和人机共用这一套（2026-11-13 用户：人机也得在自己家
+   * 复活，否则玩家会看到敌人从背后凭空冒出来）。
    *
-   * 「掩体后方」不是形容词，是真做了遮挡检测 —— 从每个存活敌人的眼睛向候选点
-   * 打射线，全被场景几何挡住的候选才算「看不见」。评分还叠加两项：
+   * 排点是**分层**的，不是简单加权：
+   *   ① 先比「被几个存活敌人看见」—— 从每个敌人眼睛向候选点胸口打射线，
+   *      全被场景几何挡住才算「看不见」；看见的人越少越安全，0 就是标准掩体后。
+   *   ② 看见人数相同，再比离最近敌人的距离（越远越好，30 米封顶）。
    *
-   *   + 离最近敌人越远越好（避开交火区）
-   *   - 任何一个敌人能直接看到就扣分（没有全遮掩体时退而求其次，挑暴露面最小的）
+   * 早期版本把遮挡和距离直接相加，会出现「掩体后但离敌人 3 米」输给「裸奔但
+   * 离敌人 25 米」的情况，复活瞬间就被远处狙击手点名；分层后只要存在全遮挡位
+   * 就一定选它，没有全遮挡位才退化成「暴露面最小的那个」。
    *
-   * 并列最优的候选里随机挑一个，避免每次复活都精确落在同一格。玩家**不再加
-   * ±0.8m 随机偏移**（那是 Bot 的做法）—— 偏移可能把人推进掩体模型里。
+   * 并列最优的候选里随机挑一个，避免每次复活都精确落在同一格。这里**不加**
+   * 随机偏移（Bot 在 `respawnBot` 里自己叠）—— 偏移可能把人推进掩体模型里。
+   *
+   * `self` 是「谁要复活」：真人是 `this.player`，Bot 传自己。只用来从敌人名单
+   * 里排除自己，默认值让玩家那条路径不用改。
    */
-  private pickPlayerSpawn(team: Team): THREE.Vector3 {
+  private pickHomeSpawn(team: Team, self: Actor | null = this.player): THREE.Vector3 {
     const candidates = this.level.spawns[team];
-    const enemies = this.actors.filter((a) => a !== this.player && a.alive && a.team !== team);
+    // 排除**自己**而不是固定排除玩家：Bot 复用时敌我判断不能漏掉玩家
+    const enemies = this.actors.filter((a) => a !== self && a.alive && a.team !== team);
 
-    let bestScore = -Infinity;
+    let bestSeen = Infinity;
+    let bestNear = -Infinity;
     let bestList: THREE.Vector3[] = [];
     for (const candidate of candidates) {
-      let score = 0;
+      let seen = 0;
       let nearest = Infinity;
       for (const enemy of enemies) {
         const dx = candidate.x - enemy.pos.x;
         const dz = candidate.z - enemy.pos.z;
         nearest = Math.min(nearest, Math.hypot(dx, dz));
-        // 敌人眼睛 → 候选点胸口；被挡 = +2（真掩体），暴露 = -1（掩护面越小越差）
-        score += this.lineBlocked(
+        // 敌人眼睛 → 候选点胸口；打穿了才算暴露
+        const blocked = this.lineBlocked(
           { x: enemy.pos.x, y: enemy.pos.y + 1.45, z: enemy.pos.z },
           { x: candidate.x, y: candidate.y + 0.9, z: candidate.z },
-        ) ? 2 : -1;
+        );
+        if (!blocked) seen += 1;
       }
-      // 避开交火区：离最近敌人至少给一点正分，30 米封顶
-      score += Math.min(nearest, 30) * 0.1;
-      if (score > bestScore + 0.5) {
-        bestScore = score;
+      // 无活敌（开局/清场）时全是 Infinity，退化为均匀随机
+      const near = nearest === Infinity ? 999 : nearest;
+      if (seen < bestSeen) {
+        bestSeen = seen;
+        bestNear = near;
         bestList = [candidate];
-      } else if (score > bestScore - 0.5) {
+      } else if (seen === bestSeen && near > bestNear + 0.5) {
+        bestNear = near;
+        bestList = [candidate];
+      } else if (seen === bestSeen && near > bestNear - 0.5) {
         bestList.push(candidate);
       }
     }
     return bestList[randInt(0, bestList.length - 1)] ?? candidates[0]!;
-  }
-
-  /** 全图可走格（复活候选）。nav 是关卡级常量，抽一次缓存就够。 */
-  private mapSpawnCells: { x: number; z: number }[] | null = null;
-
-  /**
-   * 全图选复活点：不再局限于双方出生线 —— 候选是 nav 里所有「走得到」的格子
-   * （泛洪过，集装箱死胡同进不来），评分口径和 `pickPlayerSpawn` 一致
-   * （掩体遮挡 + 离敌人距离），额外加一条硬淘汰：离任何存活敌人不足 8 米的
-   * 格子直接不评，杜绝「贴脸复活」。
-   *
-   * 全表约 600 格，逐格对每个敌人打射线太贵；随机抽 48 格评分足够随机，
-   * 一次复活的射线开销也压在几毫秒内。没有活敌（清场瞬间）时全格同分，
-   * 退化为均匀随机 —— 正是想要的行为。
-   */
-  private pickMapSpawn(team: Team): THREE.Vector3 {
-    if (!this.mapSpawnCells) {
-      const nav = this.level.nav;
-      const cells: { x: number; z: number }[] = [];
-      for (let i = 0; i < nav.walk.length; i += 1) {
-        if (nav.isWalkable(i)) cells.push(nav.center(i));
-      }
-      this.mapSpawnCells = cells;
-    }
-    const cells = this.mapSpawnCells;
-    const enemies = this.actors.filter((a) => a.alive && a.team !== team);
-
-    // 随机抽 48 格（不重复），先过「离敌人 ≥ 8 米」的硬淘汰
-    const candidates: { x: number; z: number }[] = [];
-    const picked = new Set<number>();
-    const samples = Math.min(48, cells.length);
-    for (let n = 0; n < samples * 4 && candidates.length < samples; n += 1) {
-      const index = Math.floor(Math.random() * cells.length);
-      if (picked.has(index)) continue;
-      picked.add(index);
-      const cell = cells[index]!;
-      let tooClose = false;
-      for (const enemy of enemies) {
-        if (Math.hypot(cell.x - enemy.pos.x, cell.z - enemy.pos.z) < 8) {
-          tooClose = true;
-          break;
-        }
-      }
-      if (!tooClose) candidates.push(cell);
-    }
-    if (candidates.length === 0) {
-      // 敌人把地图铺满了（几乎不可能）：退回出生线兜底
-      return this.pickPlayerSpawn(team);
-    }
-
-    let bestScore = -Infinity;
-    let bestList: { x: number; z: number }[] = [];
-    for (const candidate of candidates) {
-      let score = 0;
-      let nearest = Infinity;
-      for (const enemy of enemies) {
-        const dx = candidate.x - enemy.pos.x;
-        const dz = candidate.z - enemy.pos.z;
-        nearest = Math.min(nearest, Math.hypot(dx, dz));
-        score += this.lineBlocked(
-          { x: enemy.pos.x, y: enemy.pos.y + 1.45, z: enemy.pos.z },
-          { x: candidate.x, y: 0.9, z: candidate.z },
-        ) ? 2 : -1;
-      }
-      score += Math.min(nearest, 30) * 0.1;
-      if (score > bestScore + 0.5) {
-        bestScore = score;
-        bestList = [candidate];
-      } else if (score > bestScore - 0.5) {
-        bestList.push(candidate);
-      }
-    }
-    const pick = bestList[randInt(0, bestList.length - 1)];
-    if (!pick) return this.pickPlayerSpawn(team);
-    // nav 格子都是甲板层（block 阈值过滤过高/过低的障碍），地面就是 y=0
-    return new THREE.Vector3(pick.x, 0, pick.z);
   }
 
   /** 两点间视线是否被场景几何挡住。`from` 是眼睛高度，`to` 是胸口高度。 */
@@ -916,9 +962,16 @@ export class ShipGame {
     return Math.atan2(-(nearest.x - from.x), -(nearest.z - from.z));
   }
 
-  /** `useMapSpawn`：死亡复活 = 全图选点；开局 / 重开一局 = 回各自出生线。 */
-  private respawnPlayer(useMapSpawn = false): void {
-    const spawn = useMapSpawn ? this.pickMapSpawn(this.player.team) : this.pickPlayerSpawn(this.player.team);
+  /**
+   * 复活：死亡重生 / 开局 / 重开一局，**一律回己方出生线**。
+   *
+   * 曾经死亡复活走全图撒点（为了不让玩家从家跑到战场），但那样会出现「在敌方
+   * 半场、甚至敌人家门口复活」的情况，玩家刚站起来就被人从背后打死，规则上
+   * 说不通。全图选点整条链路已经删掉（2026-11-13），真人和人机统一走
+   * `pickHomeSpawn`。
+   */
+  private respawnPlayer(): void {
+    const spawn = this.pickHomeSpawn(this.player.team);
     this.player.respawn(spawn);
     this.player.yaw = this.spawnFacingYaw(this.player.team, spawn);
     this.player.pitch = 0;
@@ -927,17 +980,20 @@ export class ShipGame {
     this.viewModel.setWeapon(this.player.weapon);
   }
 
-  private respawnBot(bot: Bot, useMapSpawn = false): void {
-    if (useMapSpawn) {
-      // 全图复活不叠点也不加偏移：格心离障碍有 0.45m 余量，±0.8 的偏移反而
-      // 可能把 Bot 推进箱子里；重叠由分离力自己解开
-      bot.respawn(this.pickMapSpawn(bot.team), 3);
-      return;
-    }
-    const spawns = this.level.spawns[bot.team];
-    const spawn = spawns[randInt(0, spawns.length - 1)];
-    // 复活点带一点随机偏移，否则多个 Bot 会精确重叠在同一格上
-    bot.respawn(new THREE.Vector3(spawn.x + rand(-0.8, 0.8), spawn.y, spawn.z + rand(-0.8, 0.8)), 3);
+  /**
+   * 人机复活：**和真人走同一套出生线选点**（本方最后面 + 掩体遮挡）。
+   *
+   * 曾经人机走全图撒点，理由是「8 个 Bot 全从家跑，中场会长时间空掉」。但玩家
+   * 看到的是敌人在自己背后、甚至敌人家门口凭空冒出来 —— 规则上说不通，用户
+   * 2026-11-13 明确要求人机也回己方复活点。交火节奏不能靠复活点作弊解决，
+   * 该由 Bot 的寻路和推进速度负责。
+   *
+   * 选点后叠一点 ±0.5 的横移：出生线只有 6 个位，同分的几个 Bot 会精确重叠；
+   * 最外侧 ±9 的位子离集装箱（x ≥ 10.4）还有 1.4 米，0.5 推不进箱子里。
+   */
+  private respawnBot(bot: Bot): void {
+    const spawn = this.pickHomeSpawn(bot.team, bot);
+    bot.respawn(new THREE.Vector3(spawn.x + rand(-0.5, 0.5), spawn.y, spawn.z + rand(-0.5, 0.5)), 3);
   }
 
   /* ============================================================
@@ -1395,6 +1451,7 @@ export class ShipGame {
     mesh.castShadow = true;
 
     const grenade: Grenade = {
+      id: (this.grenadeSeq += 1),
       pos: new THREE.Vector3(origin.x + dirX * 0.5, origin.y + dirY * 0.5 - 0.05, origin.z + dirZ * 0.5),
       // 竖直方向额外加 2.6 m/s，让手雷有抛物线而不是直线飞出去
       vel: new THREE.Vector3(dirX * speed, dirY * speed + 2.6, dirZ * speed),
@@ -1477,6 +1534,83 @@ export class ShipGame {
     if (distance < 22) this.player.addShake((1 - distance / 22) * 0.9);
   }
 
+  /**
+   * 加入者：把快照里的手雷行铺成画面上的球。
+   *
+   * 只在**出现 / 消失**时建/删 mesh，位置交给 `updateGrenadeViews` 每帧去追 ——
+   * 快照 60Hz，逐帧都重建就没有平滑可言了。
+   *
+   * 消失即删：房主那边 `detonate` 之后这颗就不在 `grenades` 里了，而爆炸的
+   * 火球和音效由同一帧的 `boom` 事件补上，两者同帧落地，看不到「球凭空没了」。
+   */
+  private syncGrenadeViews(wires: readonly GrenadeWire[] | undefined): void {
+    const seen = new Set<number>();
+    if (wires) {
+      for (const wire of wires) {
+        const id = num(wire, GRENADE_ID, -1);
+        // 同 id 只认第一行：脏数据 / 重复行不该画出两颗
+        if (id < 0 || seen.has(id)) continue;
+        seen.add(id);
+        const x = num(wire, GRENADE_X, 0);
+        const y = num(wire, GRENADE_Y, 0);
+        const z = num(wire, GRENADE_Z, 0);
+
+        const existing = this.grenadeViews.get(id);
+        if (existing) {
+          existing.target.set(x, y, z);
+          continue;
+        }
+        const mesh = new THREE.Mesh(this.grenadeGeometry, this.grenadeMaterial);
+        mesh.castShadow = true;
+        mesh.position.set(x, y, z);
+        this.scene.add(mesh);
+        this.grenadeViews.set(id, {
+          mesh,
+          pos: new THREE.Vector3(x, y, z),
+          target: new THREE.Vector3(x, y, z),
+        });
+      }
+    }
+
+    for (const [id, view] of [...this.grenadeViews]) {
+      if (seen.has(id)) continue;
+      this.scene.remove(view.mesh);
+      this.grenadeViews.delete(id);
+    }
+  }
+
+  /**
+   * 加入者：手雷画面副本的逐帧跟随。
+   *
+   * 一帧的位移在 60Hz 快照下不到 30cm，`damp` 用 30（≈33ms 收敛到 63%）：
+   * 既吃掉网络抖动，又不至于让雷明显拖在真实位置后面。翻滚是纯装饰 ——
+   * 两端各转各的，不追求一致。
+   */
+  private updateGrenadeViews(dt: number): void {
+    for (const view of this.grenadeViews.values()) {
+      view.pos.x = damp(view.pos.x, view.target.x, 30, dt);
+      view.pos.y = damp(view.pos.y, view.target.y, 30, dt);
+      view.pos.z = damp(view.pos.z, view.target.z, 30, dt);
+      view.mesh.position.copy(view.pos);
+      view.mesh.rotation.x += dt * 6;
+      view.mesh.rotation.z += dt * 4;
+    }
+  }
+
+  /**
+   * 清掉所有手雷：房主那几颗**在飞的**（连同 mesh）、加入者那几颗画面副本。
+   *
+   * 开局、回模式页、退出联机、销毁引擎都要走这里 —— 不清的话上一局的雷会在
+   * 新一局里继续飞、继续炸（房主侧），或者作为一团永远停在空中的球留在背景里
+   * （加入者侧）。
+   */
+  private clearGrenades(): void {
+    for (const grenade of this.grenades) this.scene.remove(grenade.mesh);
+    this.grenades.length = 0;
+    for (const view of this.grenadeViews.values()) this.scene.remove(view.mesh);
+    this.grenadeViews.clear();
+  }
+
   /* ============================================================
      播报 / 计分
      ============================================================ */
@@ -1522,6 +1656,8 @@ export class ShipGame {
 
   private checkMatchEnd(): void {
     if (this.finished) return;
+    // 人头局才看比分。时长局里「打到 40 头」不结束 —— 那只是比分难看
+    if (this.rules.endMode !== 'kills') return;
     const reached = this.score[0] >= this.rules.killTarget || this.score[1] >= this.rules.killTarget;
     if (reached) this.finish();
   }
@@ -1562,7 +1698,7 @@ export class ShipGame {
    * 房主：世界**原样保留** —— 开局就是「房主 + 4 人机 vs 5 人机」这 10 个人，
    * 正好是需求要的初始阵容，一个人机都不用额外生成。
    *
-   * 加入者：把本地的 9 个人机全清掉（它们是假的，真正的角色从快照来），
+   * 加入者：把本地的人机全清掉（它们是假的，真正的角色从快照来），
    * 只留自己的 `player` 当相机载体。
    *
    * @param selfActorId 房主分配给自己那个角色的 id（加入者才有意义）
@@ -1601,7 +1737,13 @@ export class ShipGame {
     this.latestSnapshot = null;
     this.appliedSnapshotSeq = -1;
     this.netEvents = [];
-    if (wasGuest) this.restoreSinglePlayer();
+    this.netFireFeelCd = 0;
+    this.pendingReplicaViews.clear();
+    if (wasGuest) {
+      // 房主世界里的那几颗雷跟这张联机会话一起结束，别留在还原出来的单人局里
+      this.clearGrenades();
+      this.restoreSinglePlayer();
+    }
   }
 
   /** 改本机玩家的显示名（联机面板里改名之后立刻生效，不用重建引擎）。 */
@@ -1612,7 +1754,7 @@ export class ShipGame {
     if (this.netRole === 'host') this.broadcastRoster();
   }
 
-  /** 加入者退出联机后，把世界还原成「1 真人 + 9 人机」的单人局。 */
+  /** 加入者退出联机后，把世界还原成本地规则下的单人对局（人机数按 `teamSize`）。 */
   private restoreSinglePlayer(): void {
     for (const id of [...this.replicas.keys()]) this.removeReplica(id);
     this.actors.length = 0;
@@ -1628,15 +1770,16 @@ export class ShipGame {
   }
 
   /**
-   * 人数自检：场上**必须**恒为 10 个角色。
+   * 人数自检：场上角色数必须等于 `2 × rules.teamSize`。
    *
-   * 需求把「真人 + 人机 = 10」写成了硬约束（三.4 / 四.3 / 七.3）。这条断言不
-   * 改变任何行为，只在那条约束被破坏时立刻在控制台喊一声 —— 因为人数错了
-   * 在画面上不一定看得出来（多一个或少一个都是 10 个人里的一团影子）。
+   * 1v1 / 3v3 / 6v6 三档，人数不再是一个写死的 10。这条断言不改变任何行为，
+   * 只在那条约束被破坏时立刻在控制台喊一声 —— 人数错了在画面上不一定看得出来
+   * （多一个或少一个都是人堆里的一团影子）。
    */
   private assertRoster(tag: string): void {
-    if (this.actors.length === ACTOR_TOTAL) return;
-    console.warn(`[h5-net] 场上角色数 ${this.actors.length} ≠ ${ACTOR_TOTAL}（${tag}）`);
+    const expected = this.rules.teamSize * 2;
+    if (this.actors.length === expected) return;
+    console.warn(`[h5-net] 场上角色数 ${this.actors.length} ≠ ${expected}（${tag}）`);
   }
 
   /* ============================================================
@@ -1669,7 +1812,8 @@ export class ShipGame {
     }
 
     const id = `guest-${peerId.slice(0, 6)}`;
-    const spawn = this.pickPlayerSpawn(team);
+    // 新加入的真人还没进 `actors`，没有「自己」要排除
+    const spawn = this.pickHomeSpawn(team, null);
     const primary = primaryOf(bot.weapon);
 
     // ① 摘人机
@@ -1719,7 +1863,7 @@ export class ShipGame {
     });
     this.actors.push(player);
 
-    // ③ 快照要在替换**之后**生成：加入者拿到的第一帧就是 10 人现状（需求六.2）
+    // ③ 快照要在替换**之后**生成：加入者拿到的第一帧就是场上现状（需求六.2）
     session.admit(peerId, id, team, this.buildSnapshot());
     this.broadcastRoster();
     this.assertRoster('admit');
@@ -1779,6 +1923,10 @@ export class ShipGame {
     if (keys & IN_CYCLE_PREV) link.actions.add('cyclePrev');
     if (keys & IN_QUICK_SWITCH) link.actions.add('quickSwitch');
     if (keys & IN_QUICK_GRENADE) link.actions.add('quickGrenade');
+
+    // 🔴 房主切到后台时 rAF 会被浏览器停掉，但输入帧还在进来 —— 用它把世界推下去，
+    // 否则加入者的切枪 / 换弹 / 命中全都没有下家（见 `stepWhileHidden`）
+    this.stepWhileHidden();
   }
 
   /** 加入者换了主武器。资格由房主再判一次（UI 只是跟随显示）。 */
@@ -1801,6 +1949,11 @@ export class ShipGame {
     for (const link of this.links.values()) {
       // 输入断流：把移动轴和开火归零，但**不踢人** —— 人还站在那儿
       const stale = now - link.lastInputAt > INPUT_STALE * 1000;
+      // 把攒下的离散动作**整体换出来**给这一帧用，link 换个新 Set 继续攒。
+      // 🔴 之前是「同一个引用先 clear() 再 update()」—— jump / 换弹 / 切枪 /
+      // 扔雷走到 `handleActions` 手里永远是空集，加入者的跳跃就是这么没的
+      const actions = link.actions;
+      link.actions = new Set();
       const frame: InputFrame = {
         forward: stale ? 0 : link.forward,
         right: stale ? 0 : link.right,
@@ -1811,14 +1964,13 @@ export class ShipGame {
         aim: link.aim,
         aimPressed: stale ? false : link.aimPressed,
         scoreboard: false,
-        actions: link.actions,
+        actions,
         // 视角是绝对角，由下面两行直接写进 player，不需要增量
         lookYaw: 0,
         lookPitch: 0,
       };
       link.firePressed = false;
       link.aimPressed = false;
-      link.actions.clear();
 
       link.player.yaw = link.yaw;
       link.player.pitch = link.pitch;
@@ -1829,7 +1981,8 @@ export class ShipGame {
   }
 
   private respawnRemote(link: NetLink): void {
-    const spawn = this.pickMapSpawn(link.player.team);
+    // 和本地玩家同一条规则：回本方出生线，不跨半场
+    const spawn = this.pickHomeSpawn(link.player.team, link.player);
     link.player.respawn(spawn);
     link.player.yaw = this.spawnFacingYaw(link.player.team, spawn);
     link.player.pitch = 0;
@@ -1850,7 +2003,9 @@ export class ShipGame {
 
     this.netSnapshotTimer += dt;
     if (this.netSnapshotTimer >= 1 / SNAPSHOT_HZ) {
-      this.netSnapshotTimer = 0;
+      // -= 而不是 = 0：60Hz 下按 60fps 帧节拍量化，扣周期而不是清零，
+      // 快照间隔才不会随帧长抖动漂移
+      this.netSnapshotTimer -= 1 / SNAPSHOT_HZ;
       session.broadcastSnapshot(this.buildSnapshot());
       // 弹着点的配额按「一个快照窗口」算，不是按帧
       this.netImpacts = 0;
@@ -1858,7 +2013,7 @@ export class ShipGame {
 
     this.netRosterTimer += dt;
     if (this.netRosterTimer >= 1 / ROSTER_HZ) {
-      this.netRosterTimer = 0;
+      this.netRosterTimer -= 1 / ROSTER_HZ;
       this.broadcastRoster();
     }
 
@@ -1872,13 +2027,24 @@ export class ShipGame {
     const actors = this.actors.map((actor) =>
       encodeActor(actor, this.flagsFor(actor), this.magFor(actor), this.grenadesFor(actor)),
     );
+    const kills = this.rules.endMode === 'kills';
     const snapshot: Snapshot = {
       v: NET_VERSION,
       q: (this.netSeq += 1),
-      t: Math.max(0, this.timeLeft),
+      // 人头局里 `t` 换语义：发**已用时**（正计时）。剩余时间在那种局里没有意义，
+      // 而加入者的 HUD 顶部要显示的正是用时，不这么发就得再开一个字段
+      t: kills ? Math.max(0, this.elapsed) : Math.max(0, this.timeLeft),
+      // 目标人头随帧下发：加入者的结算判定和计分板都按房主这份走
+      k: this.rules.killTarget,
+      m: kills ? 1 : 0,
       s: [this.score[0], this.score[1]],
       a: actors,
     };
+    // 在飞的手雷：加入者只拿它画球（伤害和爆炸都是房主算完的）。没人扔就
+    // 不带这个字段 —— 平时大部分帧是空的，别为它付字节
+    if (this.grenades.length > 0) {
+      snapshot.g = this.grenades.map((grenade) => encodeGrenade(grenade.id, grenade.pos));
+    }
     if (this.netEvents.length > 0) {
       snapshot.e = this.netEvents;
       this.netEvents = [];
@@ -1959,7 +2125,7 @@ export class ShipGame {
      ============================================================ */
 
   private enterGuestMode(): void {
-    // 本地这 9 个人机是假的：真正场上有谁、在哪儿，全听房主的
+    // 本地这批人机是假的：真正场上有谁、在哪儿，全听房主的（席位多少也可能不同）
     for (const bot of [...this.bots]) this.removeBot(bot);
     this.actors.length = 0;
     this.actors.push(this.player);
@@ -1971,13 +2137,14 @@ export class ShipGame {
   /**
    * 加入者的主循环。
    *
-   * 和房主那条最大的区别：**没有本地结算**。位置、血量、比分、死亡全部来自
-   * 快照；本地只做三件事 —— 转视角（必须即时，否则瞄准像在水里）、把输入发上去、
-   * 把快照画出来。
+   * 和房主那条最大的区别：**没有本地结算**。血量、比分、死亡全部来自快照。
+   * 但「感觉」层面的两样东西必须本地零延迟，否则整局像泡在水里：
    *
-   * 代价说清楚：走路的位移要等一个来回（局域网里 RTT + 50ms 快照间隔 ≈ 60ms），
-   * 所以起步会比单人稍微「软」一点。换来的好处是「所有人看到的场面完全一致」——
-   * 这正是验收里反复强调的那几条（人数、替换、比分不重置）。
+   *   · 移动 —— 本地跑同一条移动物理（`updateNetMovement`），快照只用来对账
+   *   · 开火表现 —— 枪声 / 枪口焰 / 后坐 / 曳光按下就播（`updateNetFireFeedback`）
+   *
+   * 事实（命中谁、掉多少血、比分）依旧等房主的快照回执 —— 那部分几十毫秒
+   * 的延迟是权威模型的固有代价，局域网里换来的「所有人看到的场面一致」值这个价。
    */
   private updateGuest(dt: number): void {
     const frame = this.input.flush();
@@ -1987,12 +2154,12 @@ export class ShipGame {
       this.options.onScoreboard?.(frame.scoreboard);
     }
 
-    // 快照先吃：它可能刚告诉我们「你死了」，那这一帧就不该再转视角
+    // 快照先吃：它可能刚告诉我们「你死了」，那这一帧就不该再动
     const snapshot = this.latestSnapshot;
     if (snapshot) {
       this.latestSnapshot = null;
-      // 带上真实帧步长：mirrorSelf 的阻尼按它算，固定 1/60 在低帧率下会
-      // 让「自己」比「别人」更快地飘向目标位
+      // 带上真实帧步长：对账的纠偏按它算，固定 1/60 在低帧率下会
+      // 让偏差抹得太快、看起来像瞬移
       this.applySnapshot(snapshot, dt);
     }
 
@@ -2013,22 +2180,40 @@ export class ShipGame {
       this.lookDelta.pitch = 0;
     }
 
+    // 移动预测：本地先跑（冻结期轴归零，和上行口径一致 —— 不然房主那边人已
+    // 站定、这边还在滑）。对账在 `mirrorSelf`，走的是死区策略不是阻尼追快照。
+    if (this.player.alive) {
+      const moveFrame = frozen ? { ...frame, forward: 0, right: 0 } : frame;
+      if (!frozen && moveFrame.actions.has('jump')) this.player.predictJump();
+      this.player.updateNetMovement(dt, moveFrame, this.playerDeps);
+    }
+
+    // 开火表现本地预测（枪声 / 枪口焰 / 后坐 / 曳光 / 破空声）
+    this.updateNetFireFeedback(dt, frame, frozen);
+
     this.player.advanceVisual(dt);
 
-    // 上行：一次性动作攒起来，到点一次性发（30Hz）
+    // 上行：一次性动作攒起来，到点一次性发（60Hz）。
+    // 开火 / 开镜的**边沿**不等节拍：那是玩家手感的临界事件，多等 8~16ms
+    // 都能察觉 —— 按下的这一帧立刻把攒的上行冲出去
     for (const action of frame.actions) this.netActions.add(action);
     if (frame.firePressed) this.netFirePressed = true;
     if (frame.aimPressed) this.netAimPressed = true;
+    if (frame.firePressed || frame.aimPressed) {
+      this.netInputTimer = Math.max(this.netInputTimer, 1 / INPUT_HZ);
+    }
     this.netInputTimer += dt;
     if (this.netInputTimer >= 1 / INPUT_HZ) {
-      this.netInputTimer = 0;
+      // -= 而不是 = 0：扣掉一个周期而不是清零，帧长抖动时上行节奏不漂移
+      this.netInputTimer -= 1 / INPUT_HZ;
       // 冻结期间上行移动归零：不然加入者点着菜单，房主那边他还在满场跑
       this.sendInputNow(frozen ? { ...frame, forward: 0, right: 0, fire: false } : frame);
     }
 
     for (const replica of this.replicas.values()) replica.step(dt);
-    // 副本（含自己 —— 加入者没有本地移动模拟，自己的脚步也在这里补）的脚步
-    this.updateActorFootsteps();
+    // 积压视图补建（每帧最多 NET_VIEW_BUDGET 个）—— 必须在下面的 sync 循环前，
+    // 新建的当帧就跟着转
+    this.drainReplicaViews();
     for (const [id, view] of this.replicaViews) {
       const replica = this.replicas.get(id);
       if (!replica) continue;
@@ -2043,6 +2228,8 @@ export class ShipGame {
     }
 
     this.updateDropped(dt);
+    // 对端手雷的画面副本（房主那几颗在 `update` 里由 `updateGrenades` 推进）
+    this.updateGrenadeViews(dt);
     this.effects.update(dt);
     this.updateCamera(dt);
     this.updateViewModel(dt);
@@ -2088,6 +2275,85 @@ export class ShipGame {
     });
   }
 
+  /**
+   * 加入者：开火表现的**本地预测**。
+   *
+   * 以前自己的枪声 / 枪口焰 / 后坐要等房主的 `shot` 回显事件 —— 那是完整的
+   * 上行 + 房主模拟 + 快照回程（30Hz 时代 ≈ 100ms+），「按下到枪响」的延迟
+   * 全在这。现在本地按武器节奏直接演，回显那边（`replayShot` 的自己分支）
+   * 相应关掉，不会双响。
+   *
+   * 预测错了也只是一次「空枪响」（比如本地以为弹匣有货、房主刚好扣完）：
+   * 弹匣数 60Hz 从快照镜像过来，错窗口只有十几毫秒，下一次就同步了。
+   * 命中确认（hit 标记 / 血雾）**不**预测 —— 那是事实，必须等房主。
+   */
+  private updateNetFireFeedback(dt: number, frame: InputFrame, frozen: boolean): void {
+    this.netFireFeelCd -= dt;
+    if (frozen || !this.player.alive) return;
+
+    const weapon = this.player.weapon;
+    const spec = WEAPONS[weapon];
+    // 手雷另有一条本地表现路（`playThrowView` 补演投掷），这里不掺和
+    if (spec.kind === 'throwable') return;
+
+    if (spec.kind === 'melee') {
+      // 近战：轻击 = firePressed，重击 = 按住右键时的 aimPressed（和房主
+      // `handleMelee` 同一套判定）。本地只补一声破空 —— 刀本来就没有枪口焰，
+      // 挥砍的第一人称动画仍由房主回显驱动不了，维持现状
+      const heavy = frame.aim;
+      const wants = frame.firePressed || (heavy && frame.aimPressed);
+      if (!wants || this.netFireFeelCd > 0) return;
+      this.netFireFeelCd = heavy ? (spec.heavyInterval ?? 1) : spec.interval;
+      gameAudio.knife(heavy);
+      return;
+    }
+
+    const wantsFire = spec.auto ? frame.fire : frame.firePressed;
+    if (!wantsFire || this.netFireFeelCd > 0) return;
+    // 空仓 / 换弹就不演了：演了就是凭空一声枪响，还和房主的自动装填对不上
+    if (this.player.reloading || this.player.currentAmmo.mag <= 0) return;
+
+    this.netFireFeelCd = spec.interval;
+    this.playLocalShotFeedback(weapon);
+  }
+
+  /** 自己这一枪的本地表现。几何与单人 `handleFire` 的第一人称分支同源。 */
+  private playLocalShotFeedback(weapon: WeaponId): void {
+    const spec = WEAPONS[weapon];
+    const feel = weaponFeel(weapon);
+    const origin = this.player.eyePos;
+    // 方向用本地视角（房主收到的就是这份绝对角，误差只有上行延迟那一小截；
+    // 散布房主自己加，本地曳光沿视线画即可 —— 命中端的血雾/弹孔才是事实）
+    const dir = dirFromAngles(this.player.aimYaw, this.player.aimPitch);
+    const muzzle =
+      this.muzzleWorldPoint(0.6) ?? {
+        x: origin.x + dir.x * 0.6 + Math.cos(this.player.yaw) * 0.16,
+        y: origin.y + dir.y * 0.6 - 0.12,
+        z: origin.z + dir.z * 0.6 - Math.sin(this.player.yaw) * 0.16,
+      };
+
+    this.effects.spawnMuzzleFlash(muzzle, dir, { scale: feel.flashScale, life: feel.flashLife });
+    this.effects.spawnTracer(muzzle, {
+      x: muzzle.x + dir.x * 60,
+      y: muzzle.y + dir.y * 60,
+      z: muzzle.z + dir.z * 60,
+    });
+    // 抛壳口：枪身右侧、比枪口近一点（单人同款）
+    this.effects.ejectShells(
+      {
+        x: origin.x + Math.cos(this.player.yaw) * 0.24 + dir.x * 0.3,
+        y: origin.y - 0.12,
+        z: origin.z - Math.sin(this.player.yaw) * 0.24 + dir.z * 0.3,
+      },
+      this.player.yaw,
+    );
+    if (spec.sound) gameAudio.shot(spec.sound, { own: true });
+    const punchScale = this.player.crouching ? 0.85 : 1;
+    this.player.addPunch(feel.punchPitch * punchScale, feel.punchRoll * punchScale);
+    if (feel.shake > 0) this.player.addShake(feel.shake);
+    this.viewModel.triggerKick(feel.kick);
+  }
+
   /** 加入者：把一帧快照铺到场上。 */
   private applySnapshot(snapshot: Snapshot, dt = 1 / 60): void {
     if (snapshot.q <= this.appliedSnapshotSeq) return;
@@ -2095,7 +2361,23 @@ export class ShipGame {
 
     this.score[0] = snapshot.s[0];
     this.score[1] = snapshot.s[1];
-    this.timeLeft = snapshot.t;
+    // 结束方式先落地：它决定 `snapshot.t` 是「剩余」还是「已用」，下面两个字段
+    // 各写各的。缺省（老帧没有 `m`）按按时长处理
+    const hostKills = snapshot.m === 1;
+    if (hostKills !== (this.rules.endMode === 'kills')) {
+      this.rules = { ...this.rules, endMode: hostKills ? 'kills' : 'time' };
+    }
+    if (hostKills) {
+      this.elapsed = snapshot.t;
+    } else {
+      this.timeLeft = snapshot.t;
+    }
+    // 房主定的目标人头。缺省（老帧）时保留本地值。
+    // 换副本而不是原地改：`this.rules` 可能就是 React state 那个对象，
+    // 悄悄改它的字段不会触发渲染，模式页的选项会停在旧值
+    if (typeof snapshot.k === 'number' && snapshot.k > 0 && snapshot.k !== this.rules.killTarget) {
+      this.rules = { ...this.rules, killTarget: snapshot.k };
+    }
 
     const seen = new Set<string>();
     for (const wire of snapshot.a) {
@@ -2111,7 +2393,9 @@ export class ShipGame {
       } else {
         const replica = new ReplicaActor(wire);
         this.replicas.set(id, replica);
-        this.createReplicaView(replica);
+        // 视图不在这里建：中途加入一次涌入 9 个，全建就是一帧大尖峰。
+        // 排进队列，`drainReplicaViews` 每帧补几个
+        this.pendingReplicaViews.set(id, replica);
         this.actors.push(replica);
       }
     }
@@ -2120,6 +2404,10 @@ export class ShipGame {
     for (const id of [...this.replicas.keys()]) {
       if (!seen.has(id)) this.removeReplica(id);
     }
+
+    // 在飞的手雷：加入者没有投掷物模拟，全靠这一行把球摆到房主算出来的位置上。
+    // 放在事件之前：这一帧刚好爆炸的那颗先撤球，再演火球，不会出现「球穿着火球」
+    this.syncGrenadeViews(snapshot.g);
 
     if (snapshot.e) {
       for (const event of snapshot.e) this.applyNetEvent(event);
@@ -2134,7 +2422,28 @@ export class ShipGame {
     this.replicaViews.set(replica.id, view);
   }
 
+  /**
+   * 把积压的副本视图分帧建出来。
+   *
+   * 顺序是**离本机最近的先建**：中途加入的第一眼看到的是眼前的人，远处那几个
+   * 晚 80ms 出现根本注意不到。副本本身照常吃快照、照常推进 —— 只是「画」
+   * 这一步晚几帧，命中/脚步/HUD 都不受影响（副本没视图就不上屏而已）。
+   */
+  private drainReplicaViews(): void {
+    if (this.pendingReplicaViews.size === 0) return;
+    const pending = [...this.pendingReplicaViews.entries()];
+    pending.sort(
+      (a, b) => a[1].pos.distanceToSquared(this.player.pos) - b[1].pos.distanceToSquared(this.player.pos),
+    );
+    for (const [id, replica] of pending.slice(0, NET_VIEW_BUDGET)) {
+      this.pendingReplicaViews.delete(id);
+      this.createReplicaView(replica);
+    }
+  }
+
   private removeReplica(id: string): void {
+    // 可能还没排到建视图就消失了（房主补人机）：队列里也得摘掉，否则留着引用
+    this.pendingReplicaViews.delete(id);
     const view = this.replicaViews.get(id);
     if (view) {
       this.scene.remove(view.group);
@@ -2154,6 +2463,11 @@ export class ShipGame {
    *
    * ⚠️ 视角（`yaw` / `pitch`）**不从快照读** —— 那是本机即时操作的，房主只是
    * 抄一份去算弹道。读回来会让鼠标每 50ms 被拽一下。
+   *
+   * 位置同理走了本地预测：这里只做**对账**（死区 + 分级纠偏，见下面那段），
+   * 不再把本地位置往快照位置上拖。`onGround` 也不从快照读 —— 它比位置还
+   * 滞后一个管线，照抄会让刚起跳的人被「还在地上」的旧值骗出二段跳
+   * （`predictJump` 就是这么误触发的）。
    */
   private mirrorSelf(wire: ActorWire, dt: number): void {
     const player = this.player;
@@ -2171,11 +2485,14 @@ export class ShipGame {
     player.height = clamp(num(wire, ACTOR_HEIGHT, 1.8), 0.9, 2);
     player.scoped = (flags & F_SCOPED) !== 0;
     player.reloading = (flags & F_RELOADING) !== 0;
+    // 蹲的姿态位照抄无害：本帧随后的 `applyCrouch` 按本地输入重新判定，永远赢
     player.crouching = (flags & F_CROUCH) !== 0;
-    player.onGround = (flags & F_GROUND) !== 0;
     player.netCanLoadout = (flags & F_LOADOUT) !== 0;
-    player.grenades = num(wire, ACTOR_GRENADES, player.grenades);
-    player.vel.set(num(wire, ACTOR_VX, 0), 0, num(wire, ACTOR_VZ, 0));
+    const wireGrenades = num(wire, ACTOR_GRENADES, player.grenades);
+    // 加入者不跑本地玩法：快照里雷少了一颗 = 房主刚把他手里那颗扔出去了。
+    // 在这里补演一次投掷动作，否则加入者扔雷时手里什么都不动（纯画面，不改弹数）
+    if (player.weapon === 'grenade' && wireGrenades < player.grenades) player.playThrowView();
+    player.grenades = wireGrenades;
 
     // 武器是**换着来的**（买枪 / 数字键 / 刀 / 雷），不是每帧同值：
     // 加入者不跑 `Player.update`，`onWeaponChange` 钩子永远不会走，
@@ -2192,14 +2509,29 @@ export class ShipGame {
     const y = num(wire, ACTOR_Y, player.pos.y);
     const z = num(wire, ACTOR_Z, player.pos.z);
     if (alive) {
-      // 平滑 + 速度外推：阻尼目标沿房主模拟出的速度往前推 `SELF_POS_LEAD`
-      // 秒，抵消「上行 → 房主模拟 → 快照回来」整条管线延迟。直接阻尼到原始
-      // 位置的话，自己走路永远拖着 150ms+ 的尾巴 —— 「巨卡」的主要来源。
-      // 房主输入断流时速度位会归零，外推自动收敛回来，不需要额外处理。
-      const lead = SELF_POS_LEAD;
-      player.pos.x = damp(player.pos.x, x + player.vel.x * lead, 26, dt);
-      player.pos.y = damp(player.pos.y, y, 26, dt);
-      player.pos.z = damp(player.pos.z, z + player.vel.z * lead, 26, dt);
+      /*
+       * 预测对账（死区策略，常量见文件头 `SELF_*`）。
+       *
+       * 本地预测（`updateNetMovement`）和房主跑同一段移动物理，正常偏差厘米级
+       * —— 死区内**一个字都不改**：快照位置落后半个管线（≈40ms），往它阻尼
+       * 等于把刚预测掉的延迟加回来，这正是旧版「走路像在泥里」的根因。
+       *
+       * 超出死区才纠：小偏按 `SELF_CORRECT_RATE` 抹平（顺滑），大偏（复活 /
+       * 被爆炸推开 / 预测撞歪）直接就位 —— 位置和速度都换成房主的，从那一帧
+       * 起两端重新同源。速度只在就位时抄房主的：平时本地模拟的更「新」。
+       */
+      const dx = x - player.pos.x;
+      const dy = y - player.pos.y;
+      const dz = z - player.pos.z;
+      const drift = Math.hypot(dx, dz);
+      if (Math.abs(dy) > SELF_SNAP_Y || drift > SELF_SNAP_DIST) {
+        player.pos.set(x, y, z);
+        player.vel.set(num(wire, ACTOR_VX, 0), 0, num(wire, ACTOR_VZ, 0));
+      } else if (drift > SELF_DRIFT_DEAD) {
+        const k = Math.min(1, dt * SELF_CORRECT_RATE);
+        player.pos.x += dx * k;
+        player.pos.z += dz * k;
+      }
     } else {
       player.pos.set(x, y, z);
     }
@@ -2209,11 +2541,13 @@ export class ShipGame {
 
     if (alive && !wasAlive) {
       // 房主已经让我复活了：位置**直接就位**（和副本那条 `apply(snap)` 同理，
-      // 否则镜头会先从死亡点往复活点滑 100ms），镜头再用 0.45 秒从观战位
-      // 拉回第一人称（和单人一致）
+      // 否则镜头会先从死亡点往复活点滑 100ms），镜头也当帧交还 —— **不做过渡**。
+      // 速度清零：死亡瞬间的旧动量不该带进新生命
       player.deathTime = 0;
       player.pos.set(x, y, z);
-      this.deathCam.startRespawn(this.camera);
+      player.vel.set(0, 0, 0);
+      player.onGround = true;
+      this.deathCam.end();
     } else if (!alive && wasAlive) {
       this.beginGuestDeath();
     }
@@ -2369,19 +2703,10 @@ export class ShipGame {
     };
 
     if (event.id === this.selfActorId) {
-      // 自己这一枪：枪口用**枪模 muzzle 反投影**，和单人模式完全一致
-      const point = this.muzzleWorldPoint(0.6) ?? muzzle;
-      this.effects.spawnMuzzleFlash(point, dir, { scale: feel.flashScale, life: feel.flashLife });
-      const endT = event.t > 0 ? Math.min(event.t, 90) : 60;
-      this.effects.spawnTracer(point, {
-        x: origin.x + dir.x * endT,
-        y: origin.y + dir.y * endT,
-        z: origin.z + dir.z * endT,
-      });
-      if (spec.sound) gameAudio.shot(spec.sound, { own: true });
-      this.player.addPunch(feel.punchPitch, feel.punchRoll);
-      if (feel.shake > 0) this.player.addShake(feel.shake);
-      this.viewModel.triggerKick(feel.kick);
+      // 自己这一枪**不再回放**：按下那一刻本地已经按武器节奏即时演过了
+      // （`updateNetFireFeedback`）。这里再播一遍就是一声双响 + 一发双曳光，
+      // 还比本地那版多等整整一条回路。房主这帧的真正价值在 `hit` / `imp`
+      // 事件里 —— 命中确认和弹着点照样走权威回执。
       return;
     }
 
@@ -2465,12 +2790,35 @@ export class ShipGame {
     if (this.disposed) return;
 
     this.rafId = requestAnimationFrame(this.loop);
+    this.step(now, true);
+  };
+
+  /**
+   * 推进一帧。
+   *
+   * `render = false` 是**后台补帧**（见 `stepWhileHidden`）：只算不画，HUD 也不
+   * 往 React 推 —— 标签页都看不见，没必要按 60Hz 重渲染。物理、开火、计分、
+   * 出网（快照 / 名单）这些「别人看得见的状态」一律照跑。
+   */
+  private step(now: number, render: boolean): void {
+    // 真正跑起来的一帧就是「rAF 活着」的证明：把补帧状态关掉，不然前台会
+    // 出现 rAF 和输入帧各推一帧的双算
+    if (render) this.hiddenTicking = false;
 
     // dt 上限见 MAX_DT：切标签页回来时 `now - lastTime` 可能是好几秒，
     // 不夹住的话玩家会在一帧里穿过三堵墙
     const rawDt = (now - this.lastTime) / 1000;
     let dt = Math.min(rawDt, MAX_DT);
     this.lastTime = now;
+
+    // 循环停过整整一秒以上（房主在后台、又没有输入帧来顶）—— 那段时间里
+    // `publishNet` 的掉线判定根本没跑，对端也没机会证明自己还活着。把每个人的
+    // 计时基准整体往后推同样长，等于「掉线只按循环真的在跑的时间算」；不补这一下，
+    // 房主切回来第一帧就会把一屋子人全判成掉线、再一个个补成人机。
+    if (rawDt > 1 && this.links.size > 0) {
+      const stalledMs = rawDt * 1000;
+      for (const link of this.links.values()) link.lastInputAt += stalledMs;
+    }
 
     // hit-stop：致命一击之后整局慢放 80ms。
     // 不做成「暂停循环」是因为这一瞬间画面还得继续演（震动、血雾、镜头开始下沉），
@@ -2481,7 +2829,7 @@ export class ShipGame {
     }
 
     if (this.finished) {
-      this.renderFrame();
+      if (render) this.renderFrame();
       return;
     }
 
@@ -2489,9 +2837,37 @@ export class ShipGame {
     if (this.netRole === 'guest') this.updateGuest(dt);
     else this.update(dt, rawDt);
 
+    if (!render) return;
     this.renderFrame();
     this.pushHud(dt);
-  };
+  }
+
+  /**
+   * 房主在后台时的补帧。
+   *
+   * 场景就是最平常的一个动作：房主双击了另一个标签页，或者把浏览器切到后台，
+   * 加入者那边还在打。浏览器对隐藏页面会**完全停掉 rAF**，房主的权威模拟随之
+   * 冻住 —— 加入者本机能跑（移动走了本地预测），但切枪 / 换弹 / 开火命中全都要
+   * 房主落账再回快照，于是全部失灵（这是「换枪没反应、打不死人」的根因）。
+   *
+   * 这里把**加入者的输入帧**当成心跳：DataChannel 的消息不受标签页计时器节流
+   * 影响，只要对面还在动，房主就还在算。入场券是 `HIDDEN_STEP_GAP_MS` ——
+   * rAF 没停时 `lastTime` 一直是新的，这道门不会开；一旦真停了就每来一帧输入
+   * 补一帧模拟，且 `dt` 用的是真实间隔，补出来的时长和现实时间是对齐的。
+   *
+   * 顺带把 `PEER_TIMEOUT_MS` 的掉线判定也保住了：那个判定跑在这里面，房主回来
+   * 时不会因为「几十秒没跑循环」把一屋子人全判掉、再补成人机。
+   */
+  private stepWhileHidden(): void {
+    if (this.disposed || !this.running || this.finished) return;
+    if (this.netRole !== 'host') return;
+    const now = performance.now();
+    // rAF 还活着就把这一帧让给它：两条路都推进 `lastTime` 的话，同一段时间会被
+    // 切成两半算 —— 总时长虽然对得上，但白烧一倍 CPU
+    if (!this.hiddenTicking && now - this.lastTime < HIDDEN_STEP_GAP_MS) return;
+    this.hiddenTicking = true;
+    this.step(now, false);
+  }
 
   private update(dt: number, rawDt = dt): void {
     const frame = this.input.flush();
@@ -2538,10 +2914,6 @@ export class ShipGame {
 
     for (const bot of this.bots) bot.update(dt, this.botWorld);
 
-    // 所有非本地角色（人机 + 对端真人）的脚步。放在位移都算完之后，
-    // 这一帧走出来的路才算得准
-    this.updateActorFootsteps();
-
     this.updateGrenades(dt);
     this.updateRespawns();
     this.updateBotViews(dt);
@@ -2555,10 +2927,17 @@ export class ShipGame {
     // 早一步算就会用上一帧的视角，快速甩枪时标记会偏
     this.flushFeedback();
 
-    this.timeLeft -= dt;
-    if (this.timeLeft <= 0) {
-      this.timeLeft = 0;
-      this.finish();
+    // 结束条件**只有一个**（模式页单选）：按时长就只走时钟，按人头就只累计用时。
+    // 以前这里是「时间到点就 finish」的硬编码 —— 配上可选人头目标之后，
+    // 「选 60 头、但 5 分钟先到」会提前结算，玩家的感受是「我还没打满就结束了」
+    if (this.rules.endMode === 'time') {
+      this.timeLeft -= dt;
+      if (this.timeLeft <= 0) {
+        this.timeLeft = 0;
+        this.finish();
+      }
+    } else {
+      this.elapsed += dt;
     }
 
     // 播报过期
@@ -2630,75 +3009,18 @@ export class ShipGame {
   private updateRespawns(): void {
     const player = this.player;
     if (!player.alive && player.deathTime >= DEATH_TIMELINE.respawnAt) {
-      this.respawnPlayer(true);
-      // 重生**不黑屏**：镜头从观战位姿用 0.45 秒插值回第一人称，
-      // 中间没有任何一帧是纯色块
-      this.deathCam.startRespawn(this.camera);
+      this.respawnPlayer();
+      // 复活**当帧直接切**第一人称，不做镜头过渡。过渡的起点是击杀者身后的观战位，
+      // 那 0.45 秒里画面会把交火区和敌人的位置一路拖过来 —— 每次复活白送一次透视
+      this.deathCam.end();
     }
     for (const bot of this.bots) {
-      if (!bot.alive && bot.deathTime >= BOT_CORPSE_LIFE) this.respawnBot(bot, true);
+      if (!bot.alive && bot.deathTime >= BOT_CORPSE_LIFE) this.respawnBot(bot);
     }
     // 网络对端：房主替他们重生，用的是和玩家完全一样的时间轴
     for (const link of this.links.values()) {
       if (!link.player.alive && link.player.deathTime >= DEATH_TIMELINE.respawnAt) {
         this.respawnRemote(link);
-      }
-    }
-  }
-
-  /**
-   * 别人的脚步声 —— 「听声辨位」的另一半。
-   *
-   * 按**逐帧位移**给每个角色累计步距（和 player.ts 自己那条同一套口径），
-   * 走够一步就在他的位置空间化地响一声。规则：
-   *
-   *   - 单人/房主模式下本机玩家跳过（player.ts 已经播了，再播就是一步两响）；
-   *     加入者反过来 —— 他没有本地移动模拟，自己的脚步只能在这里补，
-   *     走 `own: true` 不过节流、不空间化。
-   *   - 死亡清掉累计（尸体不走路，复活后从落点重新起算）。
-   *   - 竖直速度大 = 跳在半空，不计步距（空中没有落点）；一帧上下超过
-   *     0.25m 同理（上台阶的插值帧不当作「落地一步」）。
-   *   - 材质按脚下碰撞盒判：木箱上是空腔声，甲板上是钢板声。
-   *
-   * 多人齐步的并发靠 `gameAudio.step` 里那道 45ms 闸 —— 同帧几个人落步时
-   * 吞掉几声，听起来更像「一群人」而不是节拍器。
-   */
-  private updateActorFootsteps(): void {
-    for (const actor of this.actors) {
-      const isSelf = actor === this.player;
-      const selfGuest = isSelf && this.netRole === 'guest';
-      // 单人 / 房主：自己的脚步归 player.ts，这里不碰
-      if (isSelf && !selfGuest) continue;
-
-      const state = this.stepTracker.get(actor.id);
-      if (!actor.alive) {
-        if (state) this.stepTracker.delete(actor.id);
-        continue;
-      }
-      if (!state) {
-        this.stepTracker.set(actor.id, { x: actor.pos.x, y: actor.pos.y, z: actor.pos.z, dist: 0 });
-        continue;
-      }
-
-      const airborne = Math.abs(actor.vel.y) > 0.8 || Math.abs(actor.pos.y - state.y) > 0.25;
-      if (!airborne) state.dist += Math.hypot(actor.pos.x - state.x, actor.pos.z - state.z);
-      state.x = actor.pos.x;
-      state.y = actor.pos.y;
-      state.z = actor.pos.z;
-
-      if (state.dist > 2.1) {
-        state.dist = 0;
-        const surface = surfaceUnder(actor.pos.x, actor.pos.y, actor.pos.z, this.level.colliders);
-        if (selfGuest) {
-          gameAudio.step(surface, { own: true, gain: this.player.crouching ? 0.45 : 1 });
-        } else {
-          gameAudio.step(surface, {
-            x: actor.pos.x,
-            y: actor.pos.y + 0.1,
-            z: actor.pos.z,
-            gain: 0.9,
-          });
-        }
       }
     }
   }
@@ -2751,9 +3073,9 @@ export class ShipGame {
       pitch: player.viewPitch,
     };
 
-    // 死亡 / 观战 / 重生过渡全部由 `DeathCamera` 接管。
+    // 死亡 / 观战由 `DeathCamera` 接管（复活是硬切，不经过它）。
     // 它返回 false 才走第一人称这条路径 —— 只有一个地方写相机，不会打架
-    if (!this.deathCam.update(dt, this.camera, alive)) {
+    if (!this.deathCam.update(dt, this.camera)) {
       this.camera.position.set(alive.x, alive.y, alive.z);
       // roll = 开火冲击的侧倾（`player.viewRoll`）。Euler 'XYZ' 下 z 旋转是绕
       // **视线轴**的，前向量只由 yaw / pitch 决定 —— 所以这一下歪画面不会歪弹道，
@@ -2798,6 +3120,10 @@ export class ShipGame {
       bolt: player.boltView,
       dying,
       melee: player.meleeView,
+      // 手雷的三条进度：捏雷抬手 / 投掷整段 / 这次投掷是不是 G 快速扔
+      grenadeCook: player.grenadeCook,
+      grenadeThrow: player.grenadeThrow,
+      grenadeThrowQuick: player.grenadeThrowQuick,
     });
   }
 
@@ -2851,6 +3177,9 @@ export class ShipGame {
       scoreA: this.score[0],
       scoreB: this.score[1],
       timeLeft: Math.max(0, Math.round(this.timeLeft)),
+      elapsed: Math.max(0, Math.round(this.elapsed)),
+      endMode: this.rules.endMode,
+      killTarget: this.rules.killTarget,
       canChangeLoadout: this.player.canChangeLoadout,
       buyOpen: this.buyOpen,
       primary: player.primary,
@@ -2940,6 +3269,33 @@ export class ShipGame {
     for (const bot of this.bots) bot.setDifficulty(difficulty);
   }
 
+  /**
+   * 换对局规则（结束方式 / 规模 / 目标人头 / 时长）。
+   *
+   * 模式页选完点开局时调用。局中不生效：`killTarget` 若在局中被改小，下一次
+   * 击杀就会突然判负结束；两个时钟也只在没开局时跟着换。引擎不重建 ——
+   * 这几处（`start` 重置时钟、`checkMatchEnd` 判分、HUD 显示目标）都是即时取值。
+   *
+   * 唯一需要动世界的是 `teamSize`：1v1 / 3v3 / 6v6 换档必须重铺人机（见
+   * `rebuildTeams`）。联机中不碰 —— 房主的世界由房主自己维护。
+   */
+  setRules(rules: MatchRules): void {
+    const sizeChanged = rules.teamSize !== this.rules.teamSize;
+    this.rules = { ...rules };
+    if (!this.running) {
+      this.timeLeft = rules.durationSec;
+      this.elapsed = 0;
+    }
+    if (sizeChanged && !this.running && !this.netRole) this.rebuildTeams();
+  }
+
+  /** 按当前 `rules.teamSize` 重铺人机阵容（只应在非对局、非联机时调用）。 */
+  private rebuildTeams(): void {
+    for (const bot of [...this.bots]) this.removeBot(bot);
+    this.spawnBots();
+    for (const bot of this.bots) this.respawnBot(bot);
+  }
+
   /* ============================================================
      清理
      ============================================================ */
@@ -2966,11 +3322,11 @@ export class ShipGame {
     }
     this.replicaViews.clear();
     this.replicas.clear();
+    this.pendingReplicaViews.clear();
     this.links.clear();
-    this.stepTracker.clear();
 
-    for (const grenade of this.grenades) this.scene.remove(grenade.mesh);
-    this.grenades.length = 0;
+    // 房主的投掷物和加入者的画面副本在这里一起收掉，之后才能释放共享的几何体
+    this.clearGrenades();
     this.grenadeGeometry.dispose();
     this.grenadeMaterial.dispose();
 

@@ -986,8 +986,17 @@ async function loadGlbWeapon(id: WeaponId, config: GlbGunConfig): Promise<boolea
   }
 }
 
-/** 预载全部 GLB 枪模（幂等：并发调用共享同一个任务）。在 viewmodel 层开局时调用。 */
-export function preloadWeaponGlbs(): Promise<boolean[]> {
+/**
+ * 预载全部 GLB 枪模（幂等：并发调用共享同一个任务）。在 viewmodel 层开局时调用。
+ *
+ * `onProgress` 是给**载入页的进度条**用的：五把枪各自 50~130KB，逐个回一个
+ * `(已完成, 总数)`。计数器是**每次调用独立**的 —— 任务本身被 `glbJobs` 共享，
+ * 但「等的人」可能不止一个（引擎构造时先起一次，载入页紧接着再等一次），
+ * 共用同一个计数器会出现「第二次调用一上来就 5/5」。
+ */
+export function preloadWeaponGlbs(
+  onProgress?: (done: number, total: number) => void,
+): Promise<boolean[]> {
   const jobs: Promise<boolean>[] = [];
   for (const [id, config] of Object.entries(GLB_GUNS) as [WeaponId, GlbGunConfig][]) {
     let job = glbJobs.get(id);
@@ -997,7 +1006,20 @@ export function preloadWeaponGlbs(): Promise<boolean[]> {
     }
     jobs.push(job);
   }
-  return Promise.all(jobs);
+
+  if (!onProgress) return Promise.all(jobs);
+
+  let done = 0;
+  onProgress(0, jobs.length);
+  return Promise.all(
+    jobs.map((job) =>
+      job.then((ok) => {
+        done += 1;
+        onProgress(done, jobs.length);
+        return ok;
+      }),
+    ),
+  );
 }
 
 /** 这把枪的 GLB 模板是否已就绪（供 viewmodel 层决定要不要热替换） */

@@ -37,7 +37,7 @@ import {
  *
  * ## 拓扑
  *
- * Trystero 的房间里**所有 peer 互相直连**（它没有星形拓扑），所以 10 人房间是
+ * Trystero 的房间里**所有 peer 互相直连**（它没有星形拓扑），所以 12 人房间是
  * 45 条 DataChannel。这里不打算绕开它（那要自己写信令），而是靠「只让房主发状态」
  * 把流量压到「房主 → 每人一条快照流」：加入者之间互发的只有开局前的一条 `hello`。
  *
@@ -552,6 +552,17 @@ export class ShipLobby {
 
   entries(): LobbyEntry[] {
     return [...this.byPeer.values()].sort((a, b) => b.at - a.at);
+  }
+
+  /**
+   * 大厅真的连上了吗。
+   *
+   * `open()` 故意不抛错（没有列表还有房间码和邀请链接两条路，联机不该被它拖死），
+   * 所以调用方拿不到「成没成功」这个信号 —— 而没有它，UI 就只能一直假装在搜。
+   * 注意：room 非空只代表 joinRoom 没抛错，不等于 MQTT 已握手完成。
+   */
+  get live(): boolean {
+    return this.room !== null;
   }
 
   async close(): Promise<void> {
