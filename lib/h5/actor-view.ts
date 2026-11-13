@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TEAM_CLOTH, surfaceMaps } from './surface-textures';
 import type { Actor, Team, WeaponId } from './types';
 
 /**
@@ -64,6 +65,13 @@ export interface ActorView {
   setOpacity(value: number): void;
   /** 远端这一枪响了 —— 触发一次开火后座动画。 */
   playFire(): void;
+  /**
+   * 这个角色被子弹打中了 —— 触发一次受击顿挫（身体后仰 + 头部前点）。
+   *
+   * `head` 只影响动作幅度（爆头更大）。**不改位置/朝向**：那一份永远属于
+   * 权威端，模型自己歪一下不会让人觉得「打中了却打偏」。
+   */
+  playHit(head: boolean): void;
   /** 只释放几何体。材质是每个视图自己克隆的一份，也要在这里释放。 */
   dispose(): void;
 }
@@ -94,18 +102,40 @@ function materialsFor(team: Team, kind: ActorKind): TeamMaterials {
   const cached = teamMaterials.get(key);
   if (cached) return cached;
 
-  // 🔴 敌我识别第一眼信息：0 队钢蓝、1 队锈红。色相按 CF 军服做旧感压了
-  // 饱和度（写实地图上不刺眼），但色差仍然拉开 —— 别改回同色系。
-  const cloth = team === 0 ? 0x35597e : 0x9c4530;
-  const clothDark = team === 0 ? 0x27425e : 0x74321f;
+  // 🔴 敌我识别第一眼信息：0 队 CF 潜伏者土黄（匪）、1 队 CF 保卫者蓝灰（警）。
+  // 色相按 CF 军服做旧感压了饱和度（写实地图上不刺眼），但色差仍然拉开 —— 别改回同色系。
+  // ⚠️ 数值 = 原色 × 1.18：cloth 迷彩贴图的平均亮度从 0.965 掉到 ~0.8
+  //（见 surface-textures.ts paintCloth），不补偿的话队服整体暗一档。
+  const [cloth, clothDark] = TEAM_CLOTH[team];
+
+  // 布料 / 背心 / 装具 / 皮肤各有一张**灰度**的贴图（见 surface-textures.ts）：
+  // 迷彩、织带、颗粒全是灰阶图案，阵营色仍然由 `color` 染 —— 一张图两队共用，
+  // 敌我识别还是只靠色相。人物贴图不做 UV 铺米：胶囊/球体本身只有 0..1 的 UV，
+  // 一个部件一张图，图案按部件大小自然缩放，近看刚好是 3~10 厘米的迷彩色块
+  const clothMaps = surfaceMaps('cloth');
+  const vestMaps = surfaceMaps('vest');
+  const gearMaps = surfaceMaps('gear');
+  const skinMaps = surfaceMaps('skin');
+
+  const fabric = (maps: ReturnType<typeof surfaceMaps>, color: number): THREE.MeshStandardMaterial =>
+    new THREE.MeshStandardMaterial({
+      color,
+      map: maps.map,
+      normalMap: maps.normalMap,
+      roughnessMap: maps.roughnessMap,
+      // 和关卡同一条规矩：带 roughnessMap 时标量必须是 1（它是乘数）
+      roughness: 1,
+      metalness: 0,
+      normalScale: new THREE.Vector2(0.7, 0.7),
+    });
 
   const materials: TeamMaterials = {
-    cloth: new THREE.MeshStandardMaterial({ color: cloth, roughness: 0.92, metalness: 0 }),
-    clothDark: new THREE.MeshStandardMaterial({ color: clothDark, roughness: 0.94, metalness: 0 }),
+    cloth: fabric(clothMaps, cloth),
+    clothDark: fabric(clothMaps, clothDark),
     // 背心 = CF 风深橄榄，装备近黑灰；金属度全部压到 0（机械感被否过）
-    vest: new THREE.MeshStandardMaterial({ color: 0x3a4034, roughness: 0.88, metalness: 0 }),
-    gear: new THREE.MeshStandardMaterial({ color: 0x23272b, roughness: 0.85, metalness: 0 }),
-    skin: new THREE.MeshStandardMaterial({ color: 0xb08a66, roughness: 0.9, metalness: 0 }),
+    vest: fabric(vestMaps, 0x3a4034),
+    gear: fabric(gearMaps, 0x23272b),
+    skin: fabric(skinMaps, 0xb08a66),
     gun: new THREE.MeshStandardMaterial({ color: 0x1c1f23, roughness: 0.6, metalness: 0.45 }),
     trim: new THREE.MeshStandardMaterial({ color: 0x14181c, roughness: 0.35, metalness: 0.1 }),
   };
@@ -144,6 +174,14 @@ const FALL_BOUNCE = 0.14;
 
 /** 开火后座动画在最后一枪之后继续保持的秒数（连发期间每枪刷新）。 */
 const FIRE_HOLD = 0.35;
+
+/**
+ * 受击顿挫的时长（秒）。
+ *
+ * 0.17 秒 ≈ 10 帧：短到能跟上 600 RPM 的连发（每 0.1 秒一发，动作会被下一发
+ * 接着推），又长到「一眼看见」。再长会变成抽搐，再短就等于没有。
+ */
+const HIT_HOLD = 0.17;
 
 const UP = new THREE.Vector3(0, 1, 0);
 const yawQuat = new THREE.Quaternion();
@@ -422,6 +460,18 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: Wea
   let opacity = 1;
   let fireTimer = 0;
   let recoil = 0;
+  /**
+   * 受击反应的剩余时长（秒）与「这一下是不是爆头」。
+   *
+   * 为什么必须有：血雾会飘走、hitmarker 会消失，但敌人的模型会明确告诉你
+   * 「这一发进去了」。CS 里被打中的人会有一个短促的顿挫 —— 没有它，连续
+   * 命中会让人怀疑子弹是不是穿过去了。
+   *
+   * 和 `fireTimer` 分开：开火是射手自己的动作，受击是被打的那一方，两者
+   * 可以同时发生（对枪互换），用一个计时器会互相清掉。
+   */
+  let hitTimer = 0;
+  let hitHead = false;
 
   /* ---- 倒地方向：世界坐标下的弹道方向，`impulseSet` 为假时退回「往前扑」 ---- */
   let impulseX = 0;
@@ -460,6 +510,17 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: Wea
   const playFire = (): void => {
     fireTimer = FIRE_HOLD;
     recoil = 1;
+  };
+
+  /**
+   * 被打中时的顿挫。`head` = 爆头，动作更大。
+   *
+   * 只驱动第三人称模型（姿态），不改位置、不改朝向 —— 位置永远由权威端决定，
+   * 模型自己歪一下不会造成「打中了却打偏」的错觉。
+   */
+  const playHit = (head: boolean): void => {
+    hitTimer = HIT_HOLD;
+    if (head) hitHead = true;
   };
 
   const sync = (actor: Actor, dt: number): void => {
@@ -501,6 +562,8 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: Wea
       impulseSet = false;
       fireTimer = 0;
       recoil = 0;
+      hitTimer = 0;
+      hitHead = false;
       applyOpacity(1);
       group.visible = true;
     }
@@ -524,7 +587,15 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: Wea
     const breath = (1 - speedFactor) * Math.sin(animPhase * 1.6) * 0.008;
 
     body.position.y = bob + breath;
-    body.rotation.x = 0.07 * speedFactor;
+    // ---- 受击顿挫 ----
+    // 身体被打得往后一顿（正的 x 旋转是前倾，所以受击要往下减），
+    // 头再往前点一下 —— 「头被子弹带得往前一甩」是最容易被认出来的受击信号。
+    // 曲线用平方：命中那一帧直接到位、尾段快速收回，不会拖成慢动作
+    if (hitTimer > 0) hitTimer -= dt;
+    if (hitTimer <= 0) hitHead = false;
+    const flinch = hitTimer > 0 ? (hitTimer / HIT_HOLD) ** 2 : 0;
+    body.rotation.x = 0.07 * speedFactor - flinch * (hitHead ? 0.3 : 0.16);
+    head.rotation.x = -flinch * (hitHead ? 0.55 : 0.2);
 
     // ---- 腿：摆腿 + 屈膝（摆到前面的那条腿膝盖弯） ----
     legL.hip.rotation.x = swing;
@@ -535,7 +606,7 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: Wea
     // ---- 手臂：持枪姿势上叠一点随步伐的摆动，像端着枪在走 ----
     // 基础角和上面 `armX.shoulder.rotation.set()` 保持一致；z（内收）不动
     armL.shoulder.rotation.x = 0.9 + swing * 0.08;
-    armR.shoulder.rotation.x = 0.3 - swing * 0.08;
+    armR.shoulder.rotation.x = 0.3 - swing * 0.08 - flinch * 0.22;
   };
 
   return {
@@ -544,6 +615,7 @@ export function createActorView(team: Team, kind: ActorKind = 'bot', weapon: Wea
     setDeathImpulse,
     setOpacity,
     playFire,
+    playHit,
     dispose(): void {
       group.traverse((child) => {
         const mesh = child as THREE.Mesh;

@@ -8,10 +8,12 @@ import {
   type SwitchFlourish,
   type SwitchProfile,
   type ViewModel,
+  buildFirstPersonArms,
   buildWeaponModel,
   disposeWeaponModel,
   hasGlbTemplate,
   preloadWeaponGlbs,
+  setFirstPersonSleeveTeam,
 } from './weapons';
 
 /**
@@ -31,8 +33,10 @@ import {
  *
  * ## 动作表（改手感看这里）
  *
- *   开火  → 向后 5.5cm + 抬头 8°  （`kick` / `kickRotation`，幅度与回位速度按武器
- *            `WeaponSpec.feel.kick` 缩放：AWM 2.0 最重、USP 0.6 最轻）
+ *   开火  → 向后 5.5cm + 上翘 1.7cm + 微抬头 2°  （`kick` / `kickRotation`，幅度与回位
+ *            速度按武器 `WeaponSpec.feel.kick` 缩放：AWM 2.0 最重、USP 0.6 最轻）
+ *            🔴 抬头**必须很小**：视角后坐已经由 `Player.recoilPitch` 负责了，枪模再抬
+ *            一大截就是「枪口朝上」，2026-11-13 用户明确否掉过（0.14 → 0.03）
  *   换弹  → 下沉 14cm + 前倾 49°  （`reloadArc`）
  *   走路  → 12mm 横摆 + 10mm 上下（`bobAmount`）
  *   开镜  → 退到画面正下方并隐藏
@@ -70,14 +74,18 @@ interface BasePose {
  * 幅度都压在 5° 以内，不会让枪口火光偏离准星太远（火光位置投影的是真实
  * muzzle 节点，跟着姿态走，弹道仍由主相机决定，互不影响）。
  *
+ * 2026-11-13 y 普遍抬高（步枪 −0.16 → −0.105）：装上第一人称手臂后按用户给的
+ * CS:GO 参考图，右手扣握把的手背要露出画面下沿 —— 原高度整只手都在画外。
+ * 只动 y/x 平移不影响准星对齐（火光投影真实 muzzle 节点，弹道仍由主相机决定）。
+ *
  * **军刀是唯一的例外** —— 刺击握法（见 `weapons.ts` 的 `knife` 分支）。
  */
-const RIFLE_POSE: BasePose = { x: 0.16, y: -0.16, z: -0.55, rotX: -0.012, rotY: 0.055, rotZ: 0.06 };
+const RIFLE_POSE: BasePose = { x: 0.15, y: -0.105, z: -0.55, rotX: -0.012, rotY: 0.055, rotZ: 0.06 };
 /** AWM 更沉：端得更低、侧倾略大，和它「重」的开火手感对齐 */
-const SNIPER_POSE: BasePose = { x: 0.17, y: -0.175, z: -0.56, rotX: -0.02, rotY: 0.05, rotZ: 0.075 };
+const SNIPER_POSE: BasePose = { x: 0.16, y: -0.12, z: -0.56, rotX: -0.02, rotY: 0.05, rotZ: 0.075 };
 /** 手枪单手持：更靠近视线中线，姿态比步枪收敛 */
-const PISTOL_POSE: BasePose = { x: 0.13, y: -0.145, z: -0.5, rotX: -0.008, rotY: 0.045, rotZ: 0.04 };
-const GRENADE_POSE: BasePose = { x: 0.18, y: -0.17, z: -0.5, rotX: 0, rotY: 0.05, rotZ: 0 };
+const PISTOL_POSE: BasePose = { x: 0.12, y: -0.115, z: -0.5, rotX: -0.008, rotY: 0.045, rotZ: 0.04 };
+const GRENADE_POSE: BasePose = { x: 0.17, y: -0.15, z: -0.5, rotX: 0, rotY: 0.05, rotZ: 0 };
 
 const BASE_POSES: Record<WeaponId, BasePose> = {
   ak47: RIFLE_POSE,
@@ -163,6 +171,17 @@ export class ViewModelLayer {
    */
   private kickDamping = 15;
   private kickRotDamping = 12;
+  /** 弹簧回位的速度状态（`advanceKick` 积分用）。单位：倍率/秒 */
+  private kickVel = 0;
+  private kickRotVel = 0;
+  /**
+   * 连发力度（0..1，由 `triggerKick` 的第二个参数写入）。
+   *
+   * 它做两件事：把后坐幅度按「这一梭子打到第几发」放大（最多 +45%），
+   * 以及在枪身上叠一层左右抽动 —— 真实的自动武器连发时枪不是「一直往后退」，
+   * 是被枪机往复推得在手里乱跳。这两个量都只影响第一人称模型。
+   */
+  private burstHeat = 0;
 
   /* ---- 切枪状态机 ---- */
   private phase: SwitchPhase = 'ready';
@@ -194,6 +213,21 @@ export class ViewModelLayer {
    */
   private cookView = 0;
 
+  /** 袖子当前染的队色（-1 = 还没染过）；没换队就不写材质 */
+  private sleeveTeam = -1;
+
+  /**
+   * 第一人称袖子跟随本机玩家的阵营（和第三人称队服同一个来源色）。
+   *
+   * 引擎每帧从 `updateViewModel` 调 —— 联机选阵营、重开一局、回单人，任何改队
+   * 路径都会自然走到这里，不用挨个挂钩子。真正写材质只在队伍变化的那一帧。
+   */
+  setTeam(team: 0 | 1): void {
+    if (team === this.sleeveTeam) return;
+    this.sleeveTeam = team;
+    setFirstPersonSleeveTeam(team);
+  }
+
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(VIEW_FOV, aspect, 0.01, 8);
 
@@ -209,6 +243,11 @@ export class ViewModelLayer {
     const warm = new THREE.DirectionalLight(0xffd9a0, 0.4);
     warm.position.set(0.4, -0.6, 0.3);
     this.scene.add(warm);
+
+    // 🔴 不给枪模场景加枪口点光（用户 2026-11-13 明确要求：开枪时枪身不要有
+    // 反光效果）。曾经有一盏跟随 kick 的 PointLight 专门在开火瞬间照亮枪身，
+    // 橙光打在金属件上就是一片高光 —— 已整盏删除。主场景的枪口光照不到这里
+    // （独立 scene / 独立相机），所以开火时第一人称枪身保持常亮不变。
 
     // GLB 枪模后台预载（CC0 外部模型，见 weapons.ts 的 GLB 一节）。
     // 就绪前 buildWeaponModel 走程序化兜底，全部就绪后如果手里还是程序化模型
@@ -273,6 +312,9 @@ export class ViewModelLayer {
 
     const pose = BASE_POSES[weapon];
     const model = buildWeaponModel(weapon);
+    // 第一人称手臂（手套 + 小臂）：挂成 group 的子节点，枪的一切动画自动带动。
+    // 掉在地上的枪（dropped.ts）不走这里，所以地上的枪没有手
+    buildFirstPersonArms(weapon, model);
     model.group.position.set(pose.x, pose.y, pose.z);
     model.group.rotation.set(pose.rotX, pose.rotY, pose.rotZ);
     this.scene.add(model.group);
@@ -281,6 +323,8 @@ export class ViewModelLayer {
     this.weapon = weapon;
     this.kick = 0;
     this.kickRotation = 0;
+    this.kickVel = 0;
+    this.kickRotVel = 0;
   }
 
   /**
@@ -385,13 +429,50 @@ export class ViewModelLayer {
    * `strength` 来自武器表 `WeaponSpec.feel.kick`（AWM 2.0 / AK 1.2 / M4 0.85 /
    * USP 0.6）。**位移和回位速度都跟着它走** —— 只改幅度的话，重枪只是「抖得
    * 更远」，回位还是那么快，看起来像在震而不是在后坐。
+   *
+   * `burst` 是玩家那一侧算出来的连发力度（0..1，见 `Player.recoilBurst`）。
+   * 连发时幅度最多再加 45%、回位更慢一点点 —— 第 1 发和「一梭子打到一半」
+   * 在画面上必须有明显区别，否则自动武器和半自动看起来一模一样。
+   *
+   * 🔴 上限 2.6 是安全值，不是审美值：`kick` 直接乘 0.055 米的后退量，
+   * 再大枪托会穿过近平面（0.01），一发子弹就能让枪消失一帧。
    */
-  triggerKick(strength = 1): void {
+  triggerKick(strength = 1, burst = 0): void {
     const s = Math.max(0.4, strength);
-    this.kick = Math.max(this.kick, s);
-    this.kickRotation = Math.max(this.kickRotation, s);
-    this.kickDamping = 15 / s;
-    this.kickRotDamping = 12 / s;
+    const heat = Math.min(1, Math.max(0, burst));
+    const next = Math.min(2.6, s * (1 + heat * 0.45));
+    this.kick = Math.max(this.kick, next);
+    this.kickRotation = Math.max(this.kickRotation, next);
+    this.kickDamping = 15 / next;
+    this.kickRotDamping = 12 / next;
+    // 每发都是新的冲击：速度归零，从峰值开始回落。不清的话连发会把速度
+    // 一直加上去，枪会在手里越甩越远（而且幅度不受武器表控制）
+    this.kickVel = 0;
+    this.kickRotVel = 0;
+    this.burstHeat = Math.max(this.burstHeat, heat);
+  }
+
+  /**
+   * 后坐的回位：欠阻尼弹簧，不是指数衰减。
+   *
+   * 一阶 `damp` 永远从正面逼近 0 —— 看起来像枪被一只手按回去。真实的枪托
+   * 顶在肩窝上，回位会**过冲一点点**再落定（肩窝和枪身的弹性）。ζ = 0.86
+   * 只过一次冲，幅度约峰值的 4%，肉眼刚好是「弹了一下」。
+   *
+   * 半隐式欧拉 + 步长夹在 1/30 秒：卡顿时 `dt` 可能到 0.05，
+   * 不夹的话 `ω²·dt` 会让弹簧发散（枪抖成噪点）。
+   */
+  private advanceKick(dt: number): void {
+    const step = Math.min(dt, 1 / 30);
+    const zeta = 0.86;
+    const stiffness = this.kickDamping * this.kickDamping;
+    this.kickVel += (-stiffness * this.kick - 2 * zeta * this.kickDamping * this.kickVel) * step;
+    this.kick = clamp(this.kick + this.kickVel * step, -0.06, 2.6);
+
+    const rotStiffness = this.kickRotDamping * this.kickRotDamping;
+    this.kickRotVel +=
+      (-rotStiffness * this.kickRotation - 2 * zeta * this.kickRotDamping * this.kickRotVel) * step;
+    this.kickRotation = clamp(this.kickRotation + this.kickRotVel * step, -0.06, 2.6);
   }
 
   setAspect(aspect: number): void {
@@ -427,11 +508,14 @@ export class ViewModelLayer {
   update(dt: number, params: ViewModelParams): void {
     // 先推进切枪 —— 它可能在这一帧把模型换掉，所以下面要重新取 `this.model`
     const switching = this.advanceSwitch(dt);
+    // 后坐弹簧在 model 判空之前推进：切枪/载入的空档里积压的速度也要落地，
+    // 否则换出枪的那一帧枪会带着上一把的余速「嗖」地弹一下
+    this.advanceKick(dt);
     const model = this.model;
     if (!model) return;
-
-    this.kick = damp(this.kick, 0, this.kickDamping, dt);
-    this.kickRotation = damp(this.kickRotation, 0, this.kickRotDamping, dt);
+    // 连发热度：上升由 `triggerKick` 当场写入（不等平滑），这里只负责退火。
+    // 5 的系数约 0.2 秒松掉 —— 松手后枪还在余震里，是「刚打完一梭子」的重量
+    this.burstHeat = damp(this.burstHeat, 0, 5, dt);
     this.idleTime += dt;
 
     const pose = BASE_POSES[this.weapon ?? 'ak47'];
@@ -503,7 +587,7 @@ export class ViewModelLayer {
     let targetX = pose.x + bobX;
     let targetY = pose.y + bobY - reloadArc * 0.14;
     let targetZ = pose.z + this.kick * 0.055;
-    let targetRotX = pose.rotX + this.kickRotation * 0.14 - reloadArc * 0.85;
+    let targetRotX = pose.rotX + this.kickRotation * 0.03 - reloadArc * 0.85;
     let targetRotY = pose.rotY;
     let targetRotZ = pose.rotZ - reloadArc * 0.35 + Math.sin(params.bobPhase) * 0.01 * bobAmount;
 
@@ -512,6 +596,19 @@ export class ViewModelLayer {
     // 才是「一发打在肩窝里」。幅度都很小（1~2cm / 1° 级），不会挡准星
     targetY += this.kick * 0.014;
     targetRotZ -= this.kickRotation * 0.022;
+
+    // 连发时枪在手里「跳」：两个错开的低频横摆，幅度跟热度走。
+    // 只有后退 + 抬头的话，一梭子看起来是「枪被一只看不见的手匀速拖走」；
+    // 真实的连发是机匣在往复、整把枪在手里左右抽。0.028 rad ≈ 1.6°（满热度）
+    if (this.burstHeat > 0.01) {
+      const burstSway = this.burstHeat * Math.max(0, this.kick) * 0.028;
+      targetRotZ += Math.sin(this.idleTime * 27) * burstSway;
+      targetX += Math.sin(this.idleTime * 19 + 1.1) * burstSway * 0.45;
+      // 枪机往复：前后方向的高频小振（40 rad/s ≈ 6.4Hz，接近 400 RPM 的机械节奏）。
+      // 只有 4 毫米，但它让「枪在连续工作」这件事有体积感 —— 少了这一层，
+      // 连发看起来是枪整体在平移
+      targetZ += Math.sin(this.idleTime * 40) * this.burstHeat * 0.004;
+    }
 
     // 拉栓带动的枪身动作（幅度都很小 —— 是「手在忙」，不是「枪在甩」）
     targetRotZ -= boltRoll;
@@ -743,6 +840,8 @@ export class ViewModelLayer {
 
     // 掉到画面外之后就彻底不画了：留着只会浪费一次 draw call
     group.visible = !params.scoped && params.dying < 0.95;
+    // 死亡 = 武器脱手：枪滑出画面的同时手臂留在画外，不能跟着枪一起飞
+    if (model.arms) model.arms.visible = params.dying <= 0;
   }
 
   dispose(): void {

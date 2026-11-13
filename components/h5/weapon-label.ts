@@ -16,10 +16,10 @@ export function weaponLabel(locale: Locale, id: WeaponId): string {
 }
 
 /**
- * 阵营配色。保卫者冷蓝、潜伏者红棕 —— 和场上模型衣服同色，
+ * 阵营配色。潜伏者土黄（匪）、保卫者冷蓝（警）—— 和场上模型衣服同色，
  * 这样「谁打死了谁」不用读字也能一眼看出来。
  */
 export const TEAM_COLOR: Record<0 | 1, string> = {
-  0: '#5c9fd6',
-  1: '#d97b52',
+  0: '#c9a85c',
+  1: '#5c9fd6',
 };

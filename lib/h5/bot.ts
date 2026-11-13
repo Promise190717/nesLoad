@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { type CombatHooks, currentSpread, fireWeapon, nowSeconds } from './combat';
+import { type CombatHooks, SPREAD_RECOVER_TIME, currentSpread, fireWeapon, nowSeconds } from './combat';
 import { type NavGrid, nearestWalkablePoint } from './level';
 import { clamp, damp, normalizeAngle, rand, randInt } from './math';
 import {
@@ -11,7 +11,7 @@ import {
   resetMotionState,
 } from './physics';
 import type { Actor, Difficulty, Team, WeaponId } from './types';
-import { WEAPONS } from './weapons';
+import { WEAPONS, weaponMobility } from './weapons';
 
 /**
  * Bot —— 状态机 + A* 寻路 + 弹药管理。
@@ -156,10 +156,12 @@ export class Bot implements Actor {
   private burstPause = 0;
   /**
    * 连发累积散布（弧度）。和玩家 `Player.spreadAccum` 同一条规则：
-   * 每次成功击发 +`perShot`、每帧按 4.5 指数衰减 —— Bot 打长点射也会越打越散，
-   * 不再是「每一发都从零散布起步的激光枪」。
+   * 每次成功击发 +`perShot`，**点射期间不恢复**，`spreadHold` 走完才线性归零。
+   * 于是 Bot 打长点射也会越打越散，不再是「每一发都从零散布起步的激光枪」。
    */
   private spreadAccum = 0;
+  /** 不解散窗口（秒），和玩家同名同义。见 `Player.spreadHold` */
+  private spreadHold = 0;
 
   /* 感知 */
   state: BotState = 'patrol';
@@ -198,7 +200,7 @@ export class Bot implements Actor {
     this.name = name;
     this.skill = SKILL[difficulty];
     this.weapon = weapon;
-    // 面向敌方半场：保卫者（z 负）朝 +z 看，潜伏者朝 -z 看
+    // 面向敌方半场：潜伏者（z 负）朝 +z 看，保卫者朝 -z 看
     this.yaw = team === 0 ? Math.PI : 0;
 
     const spec = WEAPONS[weapon];
@@ -218,6 +220,7 @@ export class Bot implements Actor {
     this.fireCooldown = 0;
     this.burstLeft = 0;
     this.spreadAccum = 0;
+    this.spreadHold = 0;
   }
 
   respawn(position: Vector3, protectSeconds: number): void {
@@ -257,6 +260,7 @@ export class Bot implements Actor {
     this.fireCooldown = 0;
     this.burstLeft = 0;
     this.spreadAccum = 0;
+    this.spreadHold = 0;
   }
 
   /* ------------------------------------------------------------
@@ -293,9 +297,14 @@ export class Bot implements Actor {
     this.pickTarget(dt, world);
     this.steer(dt, world);
     this.physics(dt, world.colliders, world.nav);
-    // 连发散布的衰减放在 update 而不是 tryFire：tryFire 在换弹 / 没目标 /
-    // 点射间歇时会提前 return，那些时段也必须照常恢复（衰减速率与玩家一致）
-    this.spreadAccum = damp(this.spreadAccum, 0, 4.5, dt);
+    // 连发散布的恢复放在 update 而不是 tryFire：tryFire 在换弹 / 没目标 /
+    // 点射间歇时会提前 return，那些时段也必须照常恢复。规则与玩家一致 ——
+    // 点射期间不恢复，停火后线性归零
+    this.spreadHold = Math.max(0, this.spreadHold - dt);
+    if (this.spreadHold <= 0 && this.spreadAccum > 0) {
+      const spreadMax = WEAPONS[this.weapon].spread.max;
+      this.spreadAccum = Math.max(0, this.spreadAccum - (spreadMax / SPREAD_RECOVER_TIME) * dt);
+    }
     this.tryFire(dt, world);
   }
 
@@ -515,8 +524,11 @@ export class Bot implements Actor {
       }
     }
 
-    this.vel.x = damp(this.vel.x, moveX * speed, 9.1, dt);
-    this.vel.z = damp(this.vel.z, moveZ * speed, 9.1, dt);
+    // 武器机动性也作用于人机：拿 AWM 的人机不该跑得和拿刀一样快，
+    // 否则单人模式里「武器影响移动速度」这条规则只约束玩家就是单向惩罚
+    const mobility = weaponMobility(this.weapon).speed;
+    this.vel.x = damp(this.vel.x, moveX * speed * mobility, 9.1, dt);
+    this.vel.z = damp(this.vel.z, moveZ * speed * mobility, 9.1, dt);
   }
 
   private physics(dt: number, colliders: readonly Collider[], nav: NavGrid): void {
@@ -588,7 +600,7 @@ export class Bot implements Actor {
       }
     }
 
-    // 偏向敌方半场：保卫者想去 +z，潜伏者想去 -z
+    // 偏向敌方半场：潜伏者想去 +z，保卫者想去 -z
     const preferZ = this.team === 0 ? 1 : -1;
     const cellCount = nav.nx * nav.nz;
 
@@ -631,6 +643,8 @@ export class Bot implements Actor {
     if (this.seenFor < this.skill.react) return;
 
     if (this.mag <= 0) {
+      // 人机换弹**刻意不出声**（用户要求）：人机开枪声已经够吵，换弹也响的话
+      // 单人模式里满图都是机械咔嗒
       if (this.reserve > 0) this.reloadTimer = spec.reload;
       // Bot 不做弹药经济：备弹打空就直接补满，免得它拿着空枪站着不动
       else this.reserve = spec.reserve;
@@ -698,10 +712,10 @@ export class Bot implements Actor {
 
     this.mag -= 1;
     // 连发扩散以「实际成功击发」为累计依据 —— 走到这里说明弹匣扣减了，
-    // 换弹 / 冷却 / 无弹药的中途 return 都到不了这一行。上限与玩家同款
-    // （0.85 × max，给 base + move 的叠加留出到 max 的余量，最终仍被
-    // `currentSpread` 夹在 `spread.max`）
-    this.spreadAccum = Math.min(this.spreadAccum + spec.spread.perShot, spec.spread.max * 0.85);
+    // 换弹 / 冷却 / 无弹药的中途 return 都到不了这一行。上限和玩家一致（`max`，
+    // 移动惩罚在这之上另外加），`spreadHold` 续命让点射期间不恢复
+    this.spreadAccum = Math.min(this.spreadAccum + spec.spread.perShot, spec.spread.max);
+    this.spreadHold = Math.max(0.12, spec.interval * 1.5);
     this.burstLeft -= 1;
     if (this.burstLeft <= 0) this.burstPause = rand(this.skill.pause[0], this.skill.pause[1]);
   }

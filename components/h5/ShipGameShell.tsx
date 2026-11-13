@@ -32,7 +32,7 @@ import { ShipLobby, ShipNetSession, type LobbyEntry, type SessionStatus } from '
 import { preloadWeaponGlbs } from '@/lib/h5/weapons';
 import { h5Text, type H5TextKey } from '@/lib/h5/ui-text';
 import ShipBuyMenu from './ShipBuyMenu';
-import { ShipCrosshair, ShipDamageArc, ShipDamageVignette, ShipHitMarker, ShipLowHpPulse } from './ShipCrosshair';
+import { ShipCrosshair, ShipDamageArc, ShipDamageVignette, ShipExplosionFlash, ShipHitMarker, ShipLowHpPulse } from './ShipCrosshair';
 import ShipDeathOverlay from './ShipDeathOverlay';
 import ShipHud from './ShipHud';
 import ShipKillIcon, { ShipKillPulse } from './ShipKillIcon';
@@ -209,6 +209,8 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
   /** 击杀时准星「放大回弹」的时间戳。`strong` = 爆头击杀；`at` 为 0 = 不播 */
   const [crosshairPulse, setCrosshairPulse] = useState({ at: 0, strong: false });
   const [damage, setDamage] = useState(0);
+  /** 爆炸白闪。引擎只在离爆心 16m 内推一次，240ms 淡出后清 state */
+  const [flash, setFlash] = useState({ at: 0, strength: 0 });
   /** 最近一次死亡的击杀信息卡。只在 `deathPhase !== 'alive'` 时显示 */
   const [deathInfo, setDeathInfo] = useState<DeathInfo | null>(null);
   /** 连杀播报。`count < 2` 时不显示 */
@@ -233,6 +235,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
   const engineRef = useRef<ShipGame | null>(null);
   const settingsRef = useRef<GameSettings>(DEFAULT_SETTINGS);
   const damageTimer = useRef<number | null>(null);
+  const flashTimer = useRef<number | null>(null);
   const netRef = useRef<ShipNetSession | null>(null);
   const lobbyRef = useRef<ShipLobby | null>(null);
   /** 「正在搜索房间」的超时闸（见 `ROOM_SCAN_MS`） */
@@ -300,6 +303,11 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
         setDamage(strength);
         if (damageTimer.current !== null) window.clearTimeout(damageTimer.current);
         damageTimer.current = window.setTimeout(() => setDamage(0), DAMAGE_FLASH_MS);
+      },
+      onFlash: (strength) => {
+        setFlash({ at: Date.now(), strength });
+        if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(() => setFlash({ at: 0, strength: 0 }), 300);
       },
       onDeath: (info) => {
         setDeathInfo(info);
@@ -505,6 +513,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     setKillFx({ at: 0, head: false, streak: 0 });
     setCrosshairPulse({ at: 0, strong: false });
     setDamage(0);
+    setFlash({ at: 0, strength: 0 });
   };
 
   const startMatch = () => {
@@ -607,6 +616,19 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
     // 连不上（没有 crypto.subtle / joinRoom 抛错）就别装着还在扫，直接给「没发现」
     if (!lobby.live) stopRoomScan();
     return lobby;
+  };
+
+  /**
+   * 手动刷新附近的房间列表。
+   *
+   * 大厅没有「查询」这个动作 —— 列表是房主每 2 秒的 beacon 广播喂出来的，
+   * 所以刷新 = 清掉当前列表重新点亮「搜索中」，等下一轮公告把活着的房间
+   * 重新填回来（最多 2 秒）。清列表是刻意的：过期房间下一轮本来就会消失，
+   * 先清掉能让「刷新」有看得见的反馈，而不是点了没反应。
+   */
+  const refreshRooms = () => {
+    setNetRooms([]);
+    startRoomScan(0);
   };
 
   /** 玩家名：空串用默认名。引擎和线上协议都按 16 字截断，这里统一。 */
@@ -959,6 +981,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
           onJoin={(code) => enterMode('net', { kind: 'join', code })}
           rooms={netRooms}
           scanning={netScanning}
+          onRefreshRooms={refreshRooms}
           onSettings={() => setSettingsOpen(true)}
           backHref={backHref}
         />
@@ -982,6 +1005,7 @@ export default function ShipGameShell({ locale, backHref }: { locale: Locale; ba
           <ShipCrosshair scoped={hud.scoped} weapon={hud.weapon} dead={hud.dead} pulse={crosshairPulse} />
           <ShipDamageArc angle={hud.damageFrom} />
           <ShipDamageVignette strength={damage} />
+          <ShipExplosionFlash at={flash.at} strength={flash.strength} />
           <ShipLowHpPulse hp={hud.hp} />
           {/* 连杀时**不弹边缘脉冲**：那一下已经有「双杀/三杀」大字和 ×N 角标了，
               再加一层全屏脉冲就是三个东西同时抢注意力（需求：不要堆叠过多） */}

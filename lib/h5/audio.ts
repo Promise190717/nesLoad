@@ -317,6 +317,7 @@ class GameAudio {
   private lastOwnShotAt = 0;
   private lastImpactAt = 0;
   private lastRicochetAt = 0;
+  private lastWhizAt = 0;
   private lastHitMarkAt = 0;
   private ambience: { gain: GainNode } | null = null;
   /** 还「在响」的枪声，`at + life` 过了就自动出列（并发上限用，见 `MAX_GUN_VOICES`） */
@@ -963,21 +964,43 @@ class GameAudio {
      机械 / 移动
      ============================================================ */
 
-  reload(stage: 'out' | 'in' | 'bolt'): void {
+  /**
+   * 换弹机械音。`options` 传坐标 = 别人（远端玩家）的换弹，走距离衰减、声像和
+   * 空气低通；不传 = 自己的。人机换弹刻意不出声（见 `bot.ts`），别加回来。
+   */
+  reload(stage: 'out' | 'in' | 'bolt', options: SpatialOptions = {}): void {
     if (!this.ctx) return;
     const t = this.now;
-    const out = this.output({ gain: 0.5 });
+    // 自己的换弹走 gun 总线 + 足量音量：之前 0.5 挂在 world 总线上，一交火就被
+    // 命中/击杀的 duck 压掉一半，玩家「根本听不见换弹声」。机械咔嗒的能量天然
+    // 比枪声小一截，gain 推到 2.6 才压得住枪声的响度；gunBus 限幅器兜着不破音。
+    // 别人的保持中等，靠距离衰减自然变小
+    const out =
+      options.x === undefined
+        ? this.output({ bus: 'gun', gain: 2.6 })
+        : this.output({ gain: 0.5, ...options });
     if (!out) return;
     if (stage === 'out') {
-      this.burst(t, 0.05, out, 'bandpass', 1800, 900, 0.3, 1.4);
-      this.tone(t + 0.04, 'square', 220, 140, 0.05, 0.05, out);
+      // 拔弹匣：厚度（中频「哐」）+ 金属质感 + 一点低频垫底，三层各占一角。
+      // 低通尾端不再压到 500Hz —— 那版太闷；抬到 900Hz 收，亮度靠带通和高频
+      this.burst(t, 0.11, out, 'lowpass', 2600, 900, 0.8, 0.7);
+      this.burst(t, 0.05, out, 'bandpass', 2800, 1400, 0.7, 1.6);
+      this.burst(t + 0.02, 0.03, out, 'highpass', 4200, 4200, 0.4, 1.0);
+      this.tone(t, 'sine', 150, 70, 0.08, 0.35, out);
+      this.tone(t + 0.05, 'square', 220, 140, 0.05, 0.18, out);
     } else if (stage === 'in') {
-      this.burst(t, 0.04, out, 'bandpass', 2400, 1200, 0.35, 1.6);
-      this.burst(t + 0.09, 0.05, out, 'bandpass', 1400, 700, 0.28, 1.2);
-      this.tone(t + 0.09, 'square', 300, 160, 0.05, 0.06, out);
+      // 弹匣入位：先一记压入（中频闷响），隔 70ms 一记锁卡榫（亮咔 + 高频火花）
+      this.burst(t, 0.09, out, 'lowpass', 2000, 800, 0.7, 0.7);
+      this.burst(t + 0.07, 0.11, out, 'bandpass', 2600, 1200, 0.85, 1.2);
+      this.burst(t + 0.07, 0.03, out, 'highpass', 4600, 4600, 0.45, 1.0);
+      this.tone(t + 0.07, 'sine', 130, 60, 0.09, 0.4, out);
+      this.tone(t + 0.07, 'square', 300, 160, 0.05, 0.22, out);
     } else {
-      this.burst(t, 0.06, out, 'bandpass', 3000, 1400, 0.3, 2);
-      this.burst(t + 0.1, 0.05, out, 'bandpass', 2000, 1000, 0.26, 1.6);
+      // bolt：拉枪栓——前段高频摩擦拉长，到位一记中频重响（不再压到 500Hz）
+      this.burst(t, 0.09, out, 'bandpass', 2800, 1300, 0.7, 1.6);
+      this.burst(t + 0.09, 0.1, out, 'lowpass', 2400, 900, 0.8, 0.8);
+      this.burst(t + 0.09, 0.03, out, 'highpass', 4400, 4400, 0.4, 1.0);
+      this.tone(t + 0.09, 'sine', 140, 65, 0.08, 0.3, out);
     }
   }
 
@@ -993,16 +1016,23 @@ class GameAudio {
   boltAction(stage: 'open' | 'close'): void {
     if (!this.ctx) return;
     const t = this.now;
-    const out = this.output({ gain: 0.55 });
+    // 和 `reload` 同一条规矩：自己的机械声走 gun 总线（不被 duck 压掉），
+    // 音量给足 —— 拉栓是 AWM 每一发之后的主角动作，听不见等于白做
+    const out = this.output({ bus: 'gun', gain: 2.0 });
     if (!out) return;
     if (stage === 'open') {
-      this.burst(t, 0.09, out, 'bandpass', 2600, 1100, 0.3, 2.2);
-      this.tone(t + 0.02, 'square', 420, 240, 0.05, 0.07, out);
-      this.burst(t + 0.09, 0.06, out, 'bandpass', 1800, 800, 0.26, 1.6);
+      // 提栓 + 后拉：金属摩擦往上滑一截（拉长才有「行程」感），收尾中频到位 + 高频亮一下
+      this.burst(t, 0.11, out, 'bandpass', 2800, 1200, 0.8, 1.4);
+      this.tone(t + 0.02, 'square', 420, 240, 0.05, 0.25, out);
+      this.burst(t + 0.1, 0.09, out, 'lowpass', 2600, 1000, 0.75, 0.8);
+      this.burst(t + 0.1, 0.03, out, 'highpass', 4400, 4400, 0.4, 1.0);
+      this.tone(t + 0.1, 'sine', 140, 65, 0.07, 0.3, out);
     } else {
-      this.burst(t, 0.05, out, 'bandpass', 2200, 1000, 0.28, 1.8);
-      this.burst(t + 0.08, 0.04, out, 'highpass', 3400, 3400, 0.3, 1.4);
-      this.tone(t + 0.08, 'square', 360, 200, 0.04, 0.08, out);
+      // 推回 + 压倒拉机柄：短促推入，再补一记更高的「咔」+ 高频火花
+      this.burst(t, 0.07, out, 'bandpass', 2600, 1100, 0.75, 1.4);
+      this.burst(t + 0.07, 0.08, out, 'highpass', 3200, 3200, 0.65, 1.2);
+      this.tone(t + 0.07, 'sine', 150, 70, 0.07, 0.3, out);
+      this.tone(t + 0.07, 'square', 360, 200, 0.04, 0.25, out);
     }
   }
 
@@ -1034,11 +1064,30 @@ class GameAudio {
     // 10Hz 的颤音（听起来像压缩器在抽气）。命中靠的是「高频短音 + 反馈总线」
     // 本身穿出来，压低留给击杀那一下（低频、稀有、值得让开）
     if (head) {
-      this.tone(t, 'sine', 2100, 1500, 0.05, 0.22, out);
-      this.tone(t + 0.02, 'sine', 2900, 2400, 0.06, 0.16, out);
+      // 爆头「叮」：基频抬高 + 两个泛音叠出金属质感 —— 一耳朵就和普通命中
+      // 分开（COD 爆头那个亮闪闪的 ding）。普通命中还是单音短促的「嗒」
+      this.tone(t, 'sine', 2600, 2100, 0.05, 0.24, out);
+      this.tone(t + 0.012, 'sine', 3400, 2900, 0.065, 0.17, out);
+      this.tone(t + 0.028, 'sine', 4500, 4100, 0.045, 0.09, out);
     } else {
       this.tone(t, 'sine', 1250, 900, 0.045, 0.16, out);
     }
+  }
+
+  /**
+   * 爆炸耳鸣。近处手雷炸开后的高频「吱——」，耳蜗过载的体感音。
+   *
+   * 刻意**不做空间化**：它长在耳朵里、不在世界里，加声像反而会让人以为
+   * 「声音从那个方向来」。走反馈总线、全向输出，主频 3.1k 缓慢下溜 1.3s，
+   * 叠一个 4.7k 的弱泛音做出「针尖」的质感。
+   */
+  tinnitus(intensity: number): void {
+    if (!this.ctx || intensity <= 0.02) return;
+    const t = this.now;
+    const out = this.output({ bus: 'feedback', gain: 0.3 * intensity });
+    if (!out) return;
+    this.tone(t, 'sine', 3150, 2900, 1.3, 0.5, out);
+    this.tone(t, 'sine', 4700, 4500, 0.8, 0.18, out);
   }
 
   /**
@@ -1127,6 +1176,32 @@ class GameAudio {
     const out = this.output({ x, y, z, gain: 0.2 });
     if (!out) return;
     this.tone(t, 'sine', 3400, 900, 0.16, 0.1, out);
+  }
+
+  /**
+   * 子弹擦身而过（whiz）。
+   *
+   * CS 里最容易被记住的「我在被打」信号：超音速弹头经过耳边时先是一声
+   * 「啪」的激波，枪声要晚半拍才到。这里只做前半段 —— 一段 2.8k → 620Hz
+   * 的快扫带通噪声，0.13 秒内收干净。
+   *
+   * `intensity` 是 0..1（离弹道多近），调用方按「到弹道的最近距离」算好，
+   * 音频层不做距离判定 —— 那里才知道弹道的两个端点。
+   *
+   * 节流 0.05s：霰弹一枪 8 颗弹丸会同时擦过去，不节流就是一坨白噪。
+   */
+  whiz(x: number, y: number, z: number, intensity: number): void {
+    if (!this.ctx) return;
+    if (intensity <= 0.02) return;
+    const t = this.now;
+    if (t - this.lastWhizAt < 0.05) return;
+    this.lastWhizAt = t;
+
+    const out = this.output({ x, y, z, gain: 0.5 * Math.min(1, intensity) });
+    if (!out) return;
+    this.burst(t, 0.13, out, 'bandpass', 2800, 620, 0.55, 2.2);
+    // 一点点低频：只有激波没有「身体感觉到的那一下」会像蚊子
+    this.tone(t, 'sine', 420, 180, 0.06, 0.05, out);
   }
 
   /**

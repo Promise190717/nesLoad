@@ -402,6 +402,26 @@
 - ⚠️ 指针锁定：`InputController.onPointerDown` **只认 `event.target instanceof HTMLCanvasElement`**，否则点菜单按钮会被抢走指针。全站唯一 `Esc` 语义不变（这里开游戏菜单）。🔴 H5 **没有暂停状态**（2026-11-12 用户定案：联机不能暂停、单机也取消）：Esc 放锁只弹菜单（ShipGameMenu），世界照常跑，只有本机输入走 `frozen` 归零；引擎里是 `menuOpen` + `onMenuChange`，别把冻结世界的 pause() 加回来。
 - 🔴 **加入者不跑 `Player.update` ⇒ `onWeaponChange` 钩子不走**（2026-11-12 晚修）：`mirrorSelf()` 必须检测武器变化并 `viewModel.setWeapon()`、主武器写回 `player.primary`（守卫 `isPrimaryId()` 在 types.ts），否则买枪/切刀/切雷后第一人称还是旧枪模型。加入者侧尸体淡出同理要自己在 `updateGuest` 补（时间轴同房主 `updateBotViews` 的 BOT_CORPSE_LIFE/CORPSE_FADE）。已知残留：加入者自己的 AWM 拉栓/近战挥刀动画、第三者打肉声不同步（协议无此事件，刻意不动）。
 - 🔴 **加入者「巨卡」根因 = 自己的移动零预测**（2026-11-12 深夜修）：输入上行→房主模拟→快照回来→阻尼，端到端 150~250ms。修复三件套：`SNAPSHOT_HZ` 20→30（protocol.ts，约 0.7Mbps）；`mirrorSelf` 阻尼目标沿快照速度外推 `SELF_POS_LEAD=0.08s`（抵消管线延迟，残余 ~25ms；输入断流时速度位归零自动收敛）；复活帧位置直接就位。`updateGuest` 给 `applySnapshot` 传真实 dt（原固定 1/60）。**电流声没有代码级声源**：audio.ts 全部节流（枪 30ms / 脚步 45ms / 弹着 30ms）且枪声预烘焙，单声源不可能连成蜂鸣；复现时先查环境（蓝牙耳机、机器负载、quality 档位），别往合成器里找。
+- 🔴 **加入者「连续一卡一卡」根因 = 死区对账骑边界**（2026-11-13 两轮修，演进史全文在 engine.ts 文件头 `SELF_*` 注释）：初版死区 0.25 与「跑速×管线 ≈0.28m」同量级 + 只在快照帧拽 → 60Hz 锯齿直上相机；第二版改「快照沿速度外推 + 差分估 vy」结果在台阶上**自激**（跨级快照 y 瞬跳 0.3m → 假 vy 18m/s 夹 ±7 → 外推目标抬高 0.6m 踩破就位阈值 → 上下瞬移循环，且就位挪基准让差分反号 —— 用户实测上楼梯狂抖、靠船体停稳即恢复）。🔴 **教训：快照 y 差分 vy 对离散跳变不可信，绝不进外推/就位判定。** 现行版：无外推，目标 = 裸快照位置；死区 = 0.15 + 0.08×快照速度（盖管线漂移）；垂直只有硬就位（裸 y 差 1.6m）无轻拉；estVy 超 12 估 0 不夹幅；就位不挪基准；`applySnapshot`/`mirrorSelf` 无 dt 参数。复活时基准复位（死亡期差分野 vy）。
+
+### 打击感 / 真实感（2026-11-13，参考 CSGO）
+
+用户：「增加真实感和打击感（增加感官刺激），比如连发开枪抖动，等等，参考 CSGO」。**这一批全部在表现层**，`aimYaw/aimPitch`（后坐、散布、伤害）一个数没动 —— 改的全是「看起来/听起来有多狠」。
+
+- **连发累积 `Player.recoilBurst`**（0..1，`BURST_WINDOW 0.34s` 窗口、`BURST_PEAK 7` 发封顶）。唯一写入口 `registerBurstShot()`：单人/房主走 `handleFire`，**加入者不跑 handleFire**（`playLocalShotFeedback` 里直接调同一个方法）—— 两条路必须是同一份曲线，否则联机时自己和队友看到的抖动量不一致。
+  `viewmodel.triggerKick(kick, burst)`：幅度 ×(1+0.45·burst)，**硬顶 2.6**（kick 直接乘 0.055m 后退量，再大枪托穿近平面）；连发再叠 27/19 rad/s 双频横摆 + 40 rad/s 前后 4mm 的枪机往复。
+- **枪模回位改欠阻尼弹簧**（`advanceKick`，ζ=0.86，积分步长夹 1/30s）：一阶 `damp` 永远从正面逼近 0，像枪被一只手按回去；弹簧会过冲 ~4% 再落定。`triggerKick` 每次把 `kickVel` 归零，否则连发会把速度累加成越甩越远。
+- **震屏从白噪声改成阻尼振荡**（`Player.shakeWave` = `sin(ωt+φ)·e^(-9t)`）：旧版每帧 `Math.random()`，帧率高时抖成噪点、帧率低时抖成抽帧。新波形帧率无关、有方向、可叠。
+  `addShake` 只有在**新幅度 ≥ 当前**时才重置 `shakeTime` 与相位；更弱只取 max（否则连发每发重开，波形卡在第一个四分之一周期）。
+  三个通道：yaw/pitch（0.03 rad）、`bobOffset` 位置（12/8mm）、roll（0.02）；频率 52/37/29/41/31 全错开。寿命 `SHAKE_LIFE 1.1s`（衰减在波函数里，不再 damp 套 damp）。
+- **命中反馈**：命中别人 `addShake(爆头 0.2 / 普通 0.11)`，**60ms 限流**（`lastHitShakeAt`）；加入者侧 `hit` 事件同规则。`flushFeedback` 击杀再补 `KILL_CONFIRM_SHAKE 0.12`（这个常量以前定义了没用）。
+- **敌人受击顿挫 `ActorView.playHit(head)`**：0.17s、平方曲线，身体后仰 + 头前点 + 持枪臂下沉，爆头幅度约 2 倍。本地 `onActorHit`、远端 `hit` 事件都接线。**只动姿态，不动位置/朝向**。
+- **受击方向进镜头 `applyHitDirection`**：弹道在玩家右向量上的投影 → `addPunch(0, -side×1.2°)`。roll 不改变前向量，零瞄准代价。
+- **弹头擦身声 `gameAudio.whiz`**：把玩家眼睛投影到弹道线段，最近点距离 <2.6m（`WHIZ_RADIUS`）才播，越近越响。房主在 `onShot`、加入者在 `replayShot`，两端同一套。合成 = 2.8k→620Hz 带通扫频 + 420→180Hz 低频，节流 50ms。
+- **落地沉坠 `landDip`**：落速 >6m/s 起算，1.8cm→5cm 封顶，damp 9 回位，和 `stepLift` 一起进 `bobOffset`。原来只有 `addShake(0.14)`，只有「晃」没有「坠」。
+- **横向移动侧倾 `strafeRoll`**：右向量点乘速度 ×0.014 rad（0.8°），只进 `viewRoll`。
+- **枪模枪口补光**：`ViewModelLayer` 自己 scene 里一盏常驻 `PointLight(0xffb066, 0, 2.4, 2)`，强度 = `max(0,kick)×0.9`。主场景那盏 `muzzleLight` 照不到独立 scene；系数按主场景标定，再高枪身过曝。
+- ⚠️ 既有遗留：`engine.ts` 的 `randInt` / `ACTOR_PITCH` / `ACTOR_YAW` 是未使用导入（3 条 lint warning），与本次无关。
 
 ### 改动入口
 
@@ -577,4 +597,25 @@ sun.shadow.camera.updateProjectionMatrix();
 - **已知妥协（用户知情）**：GLB 整块网格无独立弹匣/枪栓节点 → `magazine`/`bolt` 恒 null，换弹拔匣、AWM 拉栓零件动画退化为整体动作；USP 消音器由程序化 `attachSuppressor` 附加件补上（两条路共用）。
 - **加载流**：`viewmodel.ts` 构造时 `preloadWeaponGlbs()`（幂等共享任务）→ 就绪前 `buildWeaponModel` 走程序化兜底 → 就绪后若手里还是程序化模型则 `swapModel` 热替换一次（phase==='ready' 才换）。加载失败**永久**回退程序化，不重试。
 - 临时探针（GLB 解析/朝向分析）已删；`.tmp-glb/` 不存在了。
+
+## 真实度轮：贴图 PBR 化（2026-11-13 晚 —— 现行版，以代码为准）
+
+> 用户「h5游戏优化 增加游戏模型的真实度 现在的贴图看起来太假了」。根因不是面数、
+> 也不是配色，是**整张图只有颜色**：板缝、波纹、木纹全是画在底色里的假阴影，光
+> 的入射方向被烘死，跑动 / 抬头时表面毫无反应 —— 那就是「贴纸」的定义。
+
+- **新文件 `lib/h5/surface-textures.ts`**：`Painter`（三并行数组：底色 / 高度 / 粗糙度，逐像素对齐）+ `TileNoise`（可平铺 fbm）+ 10 种表面。每种表面出三张图：`map` / `normalMap`（高度场中心差分）/ `roughnessMap`（灰度，three 取 G 通道）。
+- 🔴 **不做 aoMap、不做 metalnessMap**：前者要 uv1（几何只有 uv0），后者 B 通道恒 1 只会把金属度顶满。做旧靠「颜色压暗 + 粗糙度拉高 + 高度压下去」三件一起改，这也正是旧版只画 canvas 做不到的。
+- 🔴 **带 `roughnessMap` 的材质 `roughness` 必须给 1**：它是乘数，给 0.8 会把整张图的层次压平。
+- 🔴 **UV 按真实米数铺**（这轮最大的结构性修复）：`level.ts` `fitBoxUv(geometry, w, h, d, tile)` 把每个盒子每面的 UV 乘成「面宽 / tile」，`tile` 来自材质 `userData.tileM`（surface-textures 的 `tileMeters`）。BoxGeometry 面序固定 `[+x,-x,+y,-y,+z,-z]`、每面 4 顶点。旧版所有盒子吃 0..1，同一张 128px 金属图既铺 1.1 米木箱又铺 10 米台面，纹素密度差十倍。
+- 🔴 **端门三张贴图必须一起设 `repeat`**：几何 UV 按 2 米铺（2.6/2 = 1.3 个 tile），要用 `repeat = 2/2.6 = 0.769` 压回一面。three 每张贴图有独立 uvTransform，只压 `map` ⇒ 法线/粗糙度错开半根锁杆（这个坑已经踩过一次）。
+- **集装箱六面材质数组**：`[side, side, roof, side, door, door]`（±x 是 6.1 米长边、±z 是 2.6 米端门）。端门是单独画的一整面：门框、中缝、四根锁杆 + 凸轮把手、三组铰链、四角角件、底部积灰。侧板是一个 tile 7 道波纹（间距 0.286 米），斜坡做窄（真实波深 36mm / 水平过渡 40mm），斜坡画宽只有二十几度、像瓦楞纸。
+- **甲板**：2×2 米钢板错缝（左半列缝在 y=0/s，右半列错 1 米）+ 菱形防滑凸起（82mm 一颗、相邻排反向 45°）+ 焊缝 + 缝边长锈 + 油污（低粗糙）+ 掉漆。🔴 **旧的棋盘格已删**：`(x/64+y/64)%2` 那种 0.5 米明暗方格子是第一眼「假」的来源之一。
+- **人物**：cloth 走**灰度四阶迷彩**（232/244/251/255）+ 织纹；vest 走 18 道 MOLLE 织带（每道 39mm）+ 压线；gear 走橡胶颗粒；skin 走极轻色斑 + 毛孔。色相仍由阵营色 `color` 染（一张图两队共用，敌我识别还是只靠色相）。🔴 迷彩平均亮度锚在 246，掉到 224 时阵营色会跟着暗一档。
+- **天空**：512² 渐变 + 47 团云（两层：灰底 + 亮面，左右各画一份绕球面的副本）。🔴 **五个色标一个都没动** —— 天空球是 `MeshBasicMaterial`，它的亮度就是画面亮度上限，动它等于重调全局曝光。
+- **亮度补偿**：钢系材质（hull/rail/steel/dark/crane/metal）的 `color` 各 +5~9%，因为贴图均值约 0.92 sRGB 会乘掉一档；集装箱五色 +4%（贴图底 246 而不是 255）。甲板 / 木板 / 钢板的颜色仍由贴图自己承担（`color: 0xffffff`）。
+- **各向异性 8**（`finishTexture`）：甲板/船壳大量掠射角，旧值 4 在远处糊成一片灰。three 会按硬件上限 clamp。
+- 🔴 **贴图是模块级缓存，永远不 dispose**（同 `weapon-textures.ts`）：材质每次 `buildLevel` 都重建，清了再进游戏一片黑。`Level.dispose()` 只 dispose 材质 + 天空图（天空是这份 level 自己生成的）。
+- **去铁锈轮（2026-11-13 下午）**：用户圈了「墙上带铁锈的贴片、好几个颜色」。根因是同一份锈斑/锈水痕被染色多份（steel 染六色、集装箱染五色），墙上一看就是好几块颜色不一样的锈。🔴 **整图去铁锈，别再加回橙色锈**：steel 删锈斑 + 螺栓锈水，补漆面晒褪（大软斑）/ 漆面剥露裸钢 / 淡灰水痕；集装箱与端门的锈水痕全换中性灰污水痕（不带色相）。**甲板的缝边锈保留**（地板，用户点名好评）。
+- 未做（讲给用户听过）：几何倒角 / 更多甲板杂物 / 海面波纹（舷墙挡住根本看不见，纯浪费）。
 

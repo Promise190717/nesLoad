@@ -21,7 +21,7 @@ import type { Team } from './types';
 const ZH = {
   /* 通用 */
   title: '运输船枪战',
-  tagline: '第一人称射击 · AK-47 / M4A1 / AWM · 1v1 / 3v3 / 6v6 人机对抗',
+  tagline: '第一人称射击 · AK-47 / M4A1 / AWM · 1v1 ~ 6v6 人机对抗',
   'unit.minute': '分钟',
   'unit.second': '秒',
 
@@ -43,7 +43,7 @@ const ZH = {
   'mode.eyebrow': 'H5 战场',
   'mode.title': '选择模式',
   'mode.solo': '单人作战',
-  'mode.soloTag': '1v1 · 3v3 · 6v6',
+  'mode.soloTag': '1v1 ~ 6v6',
   'mode.soloDesc': '你带着队友对上人机，在运输船货场打一局。人头打满或时间耗尽结束，阵亡后自动重生。',
   'mode.net': '局域网联机',
   'mode.netTag': '最多 12 人',
@@ -60,9 +60,9 @@ const ZH = {
   'load.stage.done': '准备完毕',
   'load.failed': '加载失败：这台设备可能不支持 WebGL',
 
-  /* 阵营 */
-  'team.a': '保卫者',
-  'team.b': '潜伏者',
+  /* 阵营（0 = 潜伏者/匪/土黄/AK，1 = 保卫者/警/蓝灰/M4） */
+  'team.a': '潜伏者',
+  'team.b': '保卫者',
 
   /* 武器（枪名不翻，只有这两个有实义） */
   'weapon.knife': '尼泊尔军刀',
@@ -170,6 +170,9 @@ const ZH = {
   'net.rooms': '附近的房间',
   'net.roomsEmpty': '还没发现房间。可以让房主把邀请链接发给你，或者直接输房间码。',
   'net.roomsScan': '正在搜索局域网房间…',
+  'net.createHint': '上面的规模、时长、人头就是这间房的房规。点「创建房间」立刻开局，别人随时可以中途加入。',
+  'net.joinHint': '输房间码，或从下面的列表里直接点一间加入。',
+  'net.refresh': '刷新房间列表',
   'net.name': '你的名字',
   'net.namePlaceholder': '留空用默认名',
   'net.teamTitle': '选择阵营',
@@ -212,7 +215,7 @@ export type H5TextKey = keyof typeof ZH;
 
 const ZH_TW: Record<H5TextKey, string> = {
   title: '運輸船槍戰',
-  tagline: '第一人稱射擊 · AK-47 / M4A1 / AWM · 1v1 / 3v3 / 6v6 人機對抗',
+  tagline: '第一人稱射擊 · AK-47 / M4A1 / AWM · 1v1 ~ 6v6 人機對抗',
   'unit.minute': '分鐘',
   'unit.second': '秒',
 
@@ -232,7 +235,7 @@ const ZH_TW: Record<H5TextKey, string> = {
   'mode.eyebrow': 'H5 戰場',
   'mode.title': '選擇模式',
   'mode.solo': '單人作戰',
-  'mode.soloTag': '1v1 · 3v3 · 6v6',
+  'mode.soloTag': '1v1 ~ 6v6',
   'mode.soloDesc': '你帶著隊友對上人機，在運輸船貨場打一局。人頭打滿或時間耗盡結束，陣亡後自動重生。',
   'mode.net': '區域網聯機',
   'mode.netTag': '最多 12 人',
@@ -248,8 +251,8 @@ const ZH_TW: Record<H5TextKey, string> = {
   'load.stage.done': '準備完畢',
   'load.failed': '載入失敗：這台裝置可能不支援 WebGL',
 
-  'team.a': '保衛者',
-  'team.b': '潛伏者',
+  'team.a': '潛伏者',
+  'team.b': '保衛者',
 
   'weapon.knife': '尼泊爾軍刀',
   'weapon.grenade': '高爆手榴彈',
@@ -345,6 +348,9 @@ const ZH_TW: Record<H5TextKey, string> = {
   'net.rooms': '附近的房間',
   'net.roomsEmpty': '還沒發現房間。可以讓房主把邀請連結發給你，或直接輸入房間碼。',
   'net.roomsScan': '正在搜尋區域網路房間…',
+  'net.createHint': '上面的規模、時長、人頭就是這間房的房規。點「建立房間」立刻開局，別人隨時可以中途加入。',
+  'net.joinHint': '輸入房間碼，或從下面的列表直接點一間加入。',
+  'net.refresh': '重新整理房間列表',
   'net.name': '你的名字',
   'net.namePlaceholder': '留空用預設名',
   'net.teamTitle': '選擇陣營',
@@ -385,7 +391,7 @@ const ZH_TW: Record<H5TextKey, string> = {
 
 const EN: Record<H5TextKey, string> = {
   title: 'Transport Ship',
-  tagline: 'First-person shooter · AK-47 / M4A1 / AWM · 1v1 / 3v3 / 6v6 bot matches',
+  tagline: 'First-person shooter · AK-47 / M4A1 / AWM · 1v1 – 6v6 bot matches',
   'unit.minute': 'min',
   'unit.second': 's',
 
@@ -405,7 +411,7 @@ const EN: Record<H5TextKey, string> = {
   'mode.eyebrow': 'H5 ARENA',
   'mode.title': 'Select mode',
   'mode.solo': 'Solo vs bots',
-  'mode.soloTag': '1v1 · 3v3 · 6v6',
+  'mode.soloTag': '1v1 ~ 6v6',
   'mode.soloDesc': 'You and your squad against bots on the cargo deck. Ends on the kill cap or the clock; you respawn automatically.',
   'mode.net': 'LAN multiplayer',
   'mode.netTag': 'Up to 12 players',
@@ -421,8 +427,8 @@ const EN: Record<H5TextKey, string> = {
   'load.stage.done': 'Ready',
   'load.failed': 'Load failed — this device may not support WebGL',
 
-  'team.a': 'Vanguard',
-  'team.b': 'Insurgent',
+  'team.a': 'Insurgent',
+  'team.b': 'Vanguard',
 
   'weapon.knife': 'Kukri',
   'weapon.grenade': 'HE grenade',
@@ -518,6 +524,9 @@ const EN: Record<H5TextKey, string> = {
   'net.rooms': 'Rooms nearby',
   'net.roomsEmpty': 'No rooms found yet. Ask the host for an invite link, or type the room code.',
   'net.roomsScan': 'Scanning for LAN rooms…',
+  'net.createHint': "The size, clock and kill cap above become this room's rules. Creating starts the match at once — others can join mid-game.",
+  'net.joinHint': 'Type a room code, or pick a room from the list below.',
+  'net.refresh': 'Refresh room list',
   'net.name': 'Your name',
   'net.namePlaceholder': 'Leave blank for the default',
   'net.teamTitle': 'Pick a side',

@@ -227,6 +227,27 @@ export function ShipDamageVignette({ strength }: { strength: number }) {
 }
 
 /**
+ * 爆炸白闪 —— 手雷近炸时全屏「糊白」一瞬再淡出。
+ *
+ * 峰值浓度由 `strength` 定（贴脸全白、远处泛白），淡出交给 CSS 动画
+ * `ship-explosion-flash`（240ms ease-out，见 `globals.css`）。用 `at` 做 key：
+ * 连续两颗雷是两次独立的闪，key 换了动画才会重播。
+ */
+export function ShipExplosionFlash({ at, strength }: { at: number; strength: number }) {
+  if (!at || strength <= 0.01) return null;
+  return (
+    <div
+      key={at}
+      className="pointer-events-none absolute inset-0 z-20"
+      style={{
+        background: `radial-gradient(circle at center, rgba(255,250,235,${(strength * 0.92).toFixed(3)}) 0%, rgba(255,242,214,${(strength * 0.72).toFixed(3)}) 100%)`,
+        animation: 'ship-explosion-flash 240ms ease-out forwards',
+      }}
+    />
+  );
+}
+
+/**
  * 受击方向弧形指示器 —— 主流 FPS 的标配：挨打时屏幕边缘会亮起一段弧，
  * 指向子弹来的方向。
  *

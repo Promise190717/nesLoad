@@ -350,46 +350,55 @@ export interface AimState {
 const RUN_SPEED = 5.4;
 
 /**
+ * 停火后「连发惩罚」从满值线性归零所需的时间（秒）。
+ *
+ * CSGO 里对应 `recovery_time_stand`：开火期间只累加、**停火后才开始恢复**，
+ * 压枪流和点射流的分界线就靠这个值撑着。玩家 / Bot 共用（见 `Player.applyRecoil`）。
+ */
+export const SPREAD_RECOVER_TIME = 0.55;
+
+/**
  * 当前这一枪的实际散布（弧度）。**这是散布的唯一算法**，玩家和 Bot 都走它。
+ *
+ * 结构照 CSGO 的 `GetInaccuracy()`：**连发 / 移动 / 姿态是三个独立分量相加**，
+ * 各自有自己的上限，不是一个总上限把所有东西夹死。CSGO 里 AK 站立
+ * `inaccuracy_stand` 约 0.006 rad、满速移动 `inaccuracy_move` 约 0.14 rad
+ * （二十多倍），所以「跑打必空、站定才准」；我们按同样的比例关系配数值。
  *
  * 五项按固定顺序叠加，顺序本身就是需求里的手感：
  *
  *   ① 基准 + 连发累积 —— 第一发最准，按住不放越打越散（`accum` 由击发方累加、
- *      停火后自己衰减回 0）。累积**单独**夹在 0.85×max，给下面几项留出叠加空间；
- *   ② 移动 —— 按速度占奔跑速度的比例线性叠加。**是加法**，所以「移动连发」一定
- *      比「静止连发」更散，不会被连发累积先顶到上限而看不出区别；
+ *      按住期间不恢复，松手后线性归零）。`max` **只夹这一项**；
+ *   ② 移动 —— 按速度占奔跑速度的比例线性叠加，是加法；
  *   ③ 姿态 —— 空中更散（×>1），乘法叠加在①+②之上。这一项原来还管「蹲下更准」，
  *      蹲下功能整体移除后只剩空中；
  *   ④ 开镜 —— ×0.05 只压「站桩」那部分散布；移动惩罚在开镜之后**再加一次全额**
- *      （2026-11-12 用户要求「开镜移动时子弹落点不要很准」）。之前移动惩罚先加、
- *      再被 ×0.05 一起压掉，开镜滑步等于指哪打哪；现在开镜急走约 +0.027 rad
- *      （scoped 减速到 0.45 倍速 → 比例 0.45 × move），远距离明显打偏。
- *      不开镜的路径与旧版逐字节一致。
- *   ⑤ 上限 —— 最后统一夹到 `spread.max`，任何组合都不会失控。
+ *      （2026-11-12 用户要求「开镜移动时子弹落点不要很准」）。
+ *   ⑤ 兜底 —— `max + move × air`，只是防数值失控的安全网，正常射击到不了。
  *
- * ⚠️ 累积的 0.85×max 夹取**必须发生在②之前**：这样 `base + accum` 永远自己顶不到
- * `max`，移动 / 姿态才有可叠加的空间。上一版把 `accum` 加在最后、和 base+move 一起
- * 被 max 夹死，于是连发打满之后「移动更散」这一条就再也看不出来了（两种状态都是
- * 同一个 max 值）。
+ * ⚠️ 2026-11-13 之前这里是「全部相加后统一夹 `max`」。后果是移动连发在第 2~3 发
+ * 就撞顶，站桩和跑动收敛到同一个数 —— 玩家两次反馈「移动还是太准」就是这个原因。
+ * 现在 `max` 只表示「连发随机锥的上限」，移动惩罚在它之外叠加，**永远不会被吃掉**。
  */
 export function currentSpread(spec: WeaponSpec, state: AimState): number {
   const s = spec.spread;
+  const moveRatio = state.speed > 0.4 ? Math.min(1, state.speed / RUN_SPEED) : 0;
 
-  // ① 基准 + 连发累积
-  let spread = s.base + Math.min(state.accum, s.max * 0.85);
+  // ① 基准 + 连发累积（上限只夹这一项）
+  let spread = s.base + Math.min(state.accum, s.max);
 
   // ② 移动（加法，跑满 = +move）
-  if (state.speed > 0.4) spread += s.move * Math.min(1, state.speed / RUN_SPEED);
+  spread += s.move * moveRatio;
 
-  // ③ 姿态（乘法）
+  // ③ 姿态（乘法，会把移动项一起放大）
   if (!state.onGround) spread *= s.air;
 
-  // ④ 开镜：×0.05 之后把移动惩罚全额补回（站桩开镜依然是激光，移动开镜不准）
+  // ④ 开镜：×0.05 只压站桩部分，移动惩罚全额补回（开镜滑步照样打不准）
   if (state.scoped) {
     spread *= 0.05;
-    if (state.speed > 0.4) spread += s.move * Math.min(1, state.speed / RUN_SPEED);
+    spread += s.move * moveRatio;
   }
 
-  // ⑤ 上限
-  return Math.min(spread, s.max);
+  // ⑤ 兜底
+  return Math.min(spread, s.max + s.move * s.air);
 }

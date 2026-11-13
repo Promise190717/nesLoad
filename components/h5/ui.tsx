@@ -80,6 +80,11 @@ export function GameButton({
 export interface SegmentedOption<T extends string | number> {
   value: T;
   label: string;
+  /**
+   * 角标数字（如「加入房间」页签上的房间数）。0 / 省略都不画 ——
+   * 角标只在该「有东西可看」时出现，恒 0 的角标是噪声。
+   */
+  badge?: number;
 }
 
 /** 分段选择器：方格按钮，选中项橙金实底。 */
@@ -107,7 +112,20 @@ export function Segmented<T extends string | number>({
               active ? 'bg-[#f0a020] text-[#1a1206]' : 'text-white/55 hover:bg-white/6 hover:text-white/85'
             }`}
           >
-            {option.label}
+            <span className="flex items-center gap-1.5">
+              {option.label}
+              {/* 角标：选中态底已经是橙金，角标翻成暗底亮字；未选中态反过来。
+                  两态都必须能读出来，不能只靠颜色 */}
+              {option.badge ? (
+                <span
+                  className={`min-w-[16px] px-1 text-center font-mono text-[10px] leading-[16px] tabular-nums ${
+                    active ? 'bg-black/30 text-white' : 'bg-[#f0a020] text-[#1a1206]'
+                  }`}
+                >
+                  {option.badge}
+                </span>
+              ) : null}
+            </span>
           </button>
         );
       })}

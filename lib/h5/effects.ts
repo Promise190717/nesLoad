@@ -62,6 +62,11 @@ const TRACER_LIMIT = 20;
 /** 曳光存活时长（秒）。 */
 const TRACER_LIFE = 0.055;
 
+/** 人机曳光色（暖金）——枪手里只有人机用这个色，联机真人全走紫色 */
+export const TRACER_COLOR_BOT = 0xffd79a;
+/** 人类玩家曳光色（亮紫罗兰）：本机自己 + 联机对端共用，加色混合下在深色掩体和蓝灰甲板上都醒目 */
+export const TRACER_COLOR_HUMAN = 0xb26bff;
+
 /** 曳光朝向计算用的临时向量（模块级复用，避免每发子弹都新建 Vector3）。 */
 const TRACER_UP = new THREE.Vector3(0, 1, 0);
 const TRACER_DIR = new THREE.Vector3();
@@ -242,7 +247,7 @@ export class Effects {
     // 再 dispose 会在连发时制造 GC 抖动（材质要逐实例控制 opacity，不能共享）
     for (let i = 0; i < TRACER_LIMIT; i += 1) {
       const material = new THREE.MeshBasicMaterial({
-        color: 0xffd79a,
+        color: TRACER_COLOR_BOT,
         transparent: true,
         opacity: 0.85,
         blending: THREE.AdditiveBlending,
@@ -332,7 +337,7 @@ export class Effects {
     this.alphas[index] = 1;
   }
 
-  /** 血雾。`dir` 是子弹方向，喷溅跟着弹道走。 */
+  /** 血雾。`dir` 是子弹方向，喷溅跟着弹道走。爆头再混一撮硬碎片。 */
   bloodBurst(point: Point3, dir: Point3, head: boolean): void {
     const count = head ? 10 : 6;
     for (let i = 0; i < count; i += 1) {
@@ -347,6 +352,24 @@ export class Effects {
         rand(0.06, 0.13),
         rand(0.25, 0.5),
       );
+    }
+    if (head) {
+      // 爆头碎屑：血雾里混几粒骨头色 / 头盔色的硬碎片，更快、更小、喷得更远 ——
+      // 「打穿了」和「打中了」在余光里一眼可辨（COD 爆头的碎屑感）
+      for (let i = 0; i < 6; i += 1) {
+        const bone = i % 2 === 0;
+        this.emit(
+          point.x,
+          point.y,
+          point.z,
+          dir.x * rand(2.5, 6) + rand(-2.4, 2.4),
+          rand(1.2, 4),
+          dir.z * rand(2.5, 6) + rand(-2.4, 2.4),
+          bone ? [0.92, 0.88, 0.76] : [0.32, 0.3, 0.28],
+          rand(0.03, 0.06),
+          rand(0.3, 0.55),
+        );
+      }
     }
   }
 
@@ -465,7 +488,7 @@ export class Effects {
    * `dir` 必须用**这一发真实打出去的方向**（含散布），否则所有曳光都会收束到
    * 准星中心线上，看起来像「子弹全打在一个点」。
    */
-  spawnTracer(from: Point3, to: Point3): void {
+  spawnTracer(from: Point3, to: Point3, color: number = TRACER_COLOR_BOT): void {
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const dz = to.z - from.z;
@@ -477,6 +500,9 @@ export class Effects {
     this.tracerCursor = (this.tracerCursor + 1) % this.tracers.length;
 
     const mesh = entry.mesh;
+    // 颜色逐实例设：池里的材质本来就不共享（opacity 要逐实例控制），
+    // 每发 setHex 只是一个赋值，不会比原来多出分配
+    entry.material.color.setHex(color);
     mesh.position.set((from.x + to.x) / 2, (from.y + to.y) / 2, (from.z + to.z) / 2);
     mesh.scale.set(1, length, 1);
     // 复用两个临时向量：这里是每发子弹都走的路径，`new Vector3()` 两次

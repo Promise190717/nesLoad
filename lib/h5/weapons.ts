@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { TEAM_CLOTH, surfaceMaps } from './surface-textures';
 import type { PrimaryId, SlotId, WeaponId } from './types';
 import { type PbrTextureSet, type WeaponTextureLibrary, weaponTextures } from './weapon-textures';
 
@@ -22,6 +23,12 @@ import { type PbrTextureSet, type WeaponTextureLibrary, weaponTextures } from '.
  *               敌人走进来也砍得到（见 `combat.ts` 的 `meleeSwing`）。
  *   高爆手雷 —— 3 秒引信、8 米半径、中心 98 衰减到 20，可捏雷。
  *
+ * ## 落点 = 视角后坐（可压）+ 随机锥（不可压）
+ *
+ * 和 CSGO 同构：`recoil.up` 每发把**视角**顶上去，玩家必须反向拖鼠标压枪；
+ * `spread` 只是在被顶歪的视线之上再撒一层随机。想让一把枪「连发更难」先调
+ * `recoil.up` / `recover`，只堆 `spread` 会变成打不中也没法练的玄学。
+ *
  * `spread` 是**弧度**的圆锥半角。命中判定用「射一条带随机扰动的射线」，
  * 于是散布在画面上表现为「有时候打空」，和真枪一样，不需要额外的随机数表。
  *
@@ -42,6 +49,7 @@ export interface SpreadSpec {
   base: number;
   /** 每开一枪额外增加的散布 */
   perShot: number;
+  /** 连发随机锥的上限。移动惩罚在这个上限**之外**叠加，见 `currentSpread()` */
   max: number;
   /** 满速移动时额外增加的散布 */
   move: number;
@@ -50,11 +58,11 @@ export interface SpreadSpec {
 }
 
 export interface RecoilSpec {
-  /** 每发抬起的角度（度） */
+  /** 每发抬起的角度（度）—— 直接加到 `aimPitch` 上，玩家必须反向压枪 */
   up: number;
   /** 每发横向抖动的最大角度（度） */
   side: number;
-  /** 回正速度（指数逼近系数） */
+  /** 回正速度（指数逼近系数，越小回得越慢）。`Player.applyRecoil` 读它 */
   recover: number;
 }
 
@@ -135,6 +143,34 @@ export interface FalloffSpec {
   curve?: FalloffCurve;
 }
 
+/**
+ * 武器的**机动性**规格 —— 拿着它时移动多快、跳多高。
+ *
+ * 沿用 CS 的手感分层：越重的武器越拖腿。倍率乘在基础速度（跑 / 走）和起跳
+ * 速度上 —— 起跳速度同时决定跳高与跳远，所以「跳跃距离」不用单独一个字段。
+ *
+ *   刀       —— 空手跑刀最快，是换武器跑图的收益
+ *   手枪     —— 单手轻携，略快
+ *   步枪     —— 基准（1.0）
+ *   霰弹     —— 泵动长枪，略沉
+ *   AWM      —— 全表最重：拿着它就别指望当突击手用
+ *   手雷     —— 捏着雷和拿刀差不多轻（快扔的战术价值就靠这点机动性）
+ */
+export interface MobilitySpec {
+  /** 移动速度倍率。乘在 `SPEED_RUN` / `SPEED_WALK` 上（开镜 / 换弹惩罚另行叠加） */
+  speed: number;
+  /** 起跳速度倍率。乘在 `JUMP_SPEED` 上 */
+  jump: number;
+}
+
+/** 没配 `mobility` 的武器走这一份 —— 步枪就是基准，行为与以前完全一致 */
+export const DEFAULT_MOBILITY: MobilitySpec = { speed: 1, jump: 1 };
+
+/** 取一把武器的机动性。集中取值，调用方不用处理 `undefined`（与 `weaponFeel` 同构） */
+export function weaponMobility(id: WeaponId): MobilitySpec {
+  return WEAPONS[id].mobility ?? DEFAULT_MOBILITY;
+}
+
 export interface WeaponSpec {
   id: WeaponId;
   /** 分派用：枪走弹道，刀走扇形，手雷走投掷物 */
@@ -165,6 +201,11 @@ export interface WeaponSpec {
   recoil: RecoilSpec;
   /** 开枪的**表现**参数（枪模后坐 / 镜头冲击 / 枪口焰）。不参与任何结算 */
   feel?: FeelSpec;
+  /**
+   * 机动性（移动速度 / 起跳速度倍率）。不填 = 步枪基准 `{1, 1}`。
+   * 玩家的 `applyMovement`、跳跃和加入者的本地预跳都读它 —— 三条路同一张表。
+   */
+  mobility?: MobilitySpec;
   /** 距离衰减；null = 不衰减 */
   falloff: FalloffSpec | null;
   /** 可穿透的木箱层数 */
@@ -206,6 +247,14 @@ export interface WeaponSpec {
   throwSpeed?: number;
 }
 
+/**
+ * 步枪 / 手枪的散布配置。参数顺序：基准、每发累积、上限、满速移动惩罚。
+ *
+ * 🔴 `max` 只管**连发随机锥**：`currentSpread()` 里移动惩罚是在它之外加法叠加的，
+ * 不会被连发上限吃掉。所以这三个数可以各自独立调 —— 想让跑打更废只动 move。
+ * 反过来说，如果你把 move 调到比 max 还大也不要紧，那是 CSGO 的常态（移动散布
+ * 本来就该远大于连发散布）。
+ */
 const RIFLE_SPREAD = (base: number, perShot: number, max: number, move: number): SpreadSpec => ({
   base,
   perShot,
@@ -220,7 +269,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     kind: 'gun',
     slot: 'primary',
     name: 'AK-47',
-    damage: 33,
+    damage: 28,
     headMul: 4,
     interval: 0.1,
     magazine: 30,
@@ -229,14 +278,27 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 2.5,
     perShell: false,
     pellets: 1,
-    // 2026-11-12 第十二轮第三次调：用户两次反馈「还是太准」。基准散布也抬了，
-    // 静止点射不再指哪打哪；连发累积加大让扫射快速进入「泼水」状态
-    spread: RIFLE_SPREAD(0.005, 0.007, 0.075, 0.032),
-    recoil: { up: 1.05, side: 0.42, recover: 7 },
+    // 2026-11-13 第五次调（用户：「参考 CSGO 的落点算法，还是太准」「连发时视角要动、
+    // 要靠鼠标压枪」）。上一版把随机锥抬到 0.13 是错的方向 —— CSGO 扫射的随机锥其实
+    // 很小（散布大头是**视角被顶上去**，可压），抬随机锥只会变成玄学。
+    // 现在分工：随机锥 0.055（3.1°，泼水时也确实打不满）+ 后坐 up 2.7。
+    // 2026-11-13 第六次调：用户「抬升幅度太小、压枪太容易」。up 2.0 → 2.7，
+    // 同时 `RECOIL_HOLD_SCALE` 0.33 → 0.24 —— **必须两个一起改**，只抬 up 会被
+    // 衰减免掉一半（稳态 = up / (1 − e^(−recover·scale·interval))）。
+    // 现在扫射 10 发视角抬约 12°（20m 上偏 4m+），按住到稳态约 17.5°，
+    // 全程得把鼠标往下拖；松手按 recover 7 回位，约 0.4 秒重新变准。
+    // 2026-11-13 第七次调（用户仍嫌压枪容易）：up 2.7 → 3.4，配合
+    // `RECOIL_HOLD_SCALE` 0.19 —— 稳态约 27°，过头了（「太快也太高」）。
+    // 第八次调收到 up 3.0 + HOLD_SCALE 0.22：扫射 10 发约 16.5°、稳态约 21°。
+    // move 0.105 = 满速 6°，跑打必空 —— CSGO 里 AK 的移动散布是站立的二十多倍。
+    spread: RIFLE_SPREAD(0.005, 0.0065, 0.055, 0.105),
+    recoil: { up: 3.0, side: 0.6, recover: 7 },
     // 7.62 大口径：枪模后退最狠、枪口焰最大最久。镜头只给一点侧倾，
     // 不给随机震屏 —— 600 RPM 下随机抖动会连成一片，20 秒就晕
     feel: { kick: 1.2, punchPitch: 0.16, punchRoll: 0.4, shake: 0, flashScale: 1.05, flashLife: 0.055 },
-    // 射程：30m 内满伤害（33），85m 掉到 55%（18.2）。85 > 全图最长视线
+    // 2026-11-13 伤害整体下调（用户「降低枪支伤害」）：33 → 28。爆头仍一枪
+    // （28 × 4 = 112），身体 4 发死（84 / 112），续航对枪更久
+    // 射程：30m 内满伤害（28），85m 掉到 55%（15.4）。85 > 全图最长视线
     // （船长 52m、对角约 58m），所以「打满整张图也不会掉到底」—— 步枪的中距离
     // 稳定性就是靠这个余量 + 'hold' 曲线的前段压平撑起来的
     falloff: { start: 30, end: 85, min: 0.55, curve: 'hold' },
@@ -249,7 +311,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     kind: 'gun',
     slot: 'primary',
     name: 'M4A1',
-    damage: 30,
+    damage: 26,
     headMul: 4,
     interval: 60 / 685,
     magazine: 30,
@@ -258,11 +320,18 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 2.5,
     perShell: false,
     pellets: 1,
-    spread: RIFLE_SPREAD(0.004, 0.0055, 0.065, 0.026),
-    recoil: { up: 0.82, side: 0.28, recover: 8.5 },
+    // 2026-11-13 第五次调：和 AK 同一轮改成「小随机锥 + 大上飘」的 CSGO 结构。
+    // 第六次调跟着 AK 一起抬（up 1.35 → 1.8），保持「5.56 比 7.62 稳一档」。
+    // 第七次 2.3 过头，第八次收到 2.05（配 HOLD_SCALE 0.22）：
+    // 连射 10 发约 11.5°、按住稳态约 14.5°，仍和 AK 差 6° 左右，
+    // 甩枪和点射的回位（recover 8）也明显更跟手。
+    spread: RIFLE_SPREAD(0.004, 0.0052, 0.048, 0.092),
+    recoil: { up: 2.05, side: 0.4, recover: 8 },
     // 5.56 小口径 + 685 RPM：**最干脆的一把** —— 枪模位移小、回位快，
     // 枪口焰小而短。连发时看起来是「哒哒哒」的节奏而不是「砰砰砰」的糊
     feel: { kick: 0.85, punchPitch: 0.12, punchRoll: 0.3, shake: 0, flashScale: 0.85, flashLife: 0.042 },
+    // 2026-11-13 伤害整体下调：30 → 26。仍 4 发死（26 × 4 = 104），
+    // 爆头仍一枪（104），和 AK 一起变「更依赖命中数」
     // 比 AK 略晚起衰（32m）、底更低（58%），但用 'smooth' 曲线 —— 出射程那段几乎
     // 不掉、到 85m 才缓缓落底。5.56 的定位就是「远一点也还能打」
     falloff: { start: 32, end: 85, min: 0.58, curve: 'smooth' },
@@ -284,8 +353,11 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 3.5,
     perShell: false,
     pellets: 1,
+    // 2026-11-13 那轮「移动 / 连发加大」刻意跳过 AWM：move 0.06 已是全表最大档，
+    // 开镜移动又会全额吃这份惩罚（50m 上偏约 3m），再抬就和「停下来、开镜、开一枪」
+    // 的定位冲突了
     spread: { base: 0.012, perShot: 0.02, max: 0.06, move: 0.06, air: 3 },
-    recoil: { up: 3.4, side: 0.7, recover: 4.5 },
+    recoil: { up: 3.4, side: 0.7, recover: 6 },
     // 全表最重的一档：枪模往后砸、枪口焰大且挂得久（0.09s 能看见「喷出来」而不是
     // 一闪）。侧倾 1.05° 是「一枪把人掀一下」的来源，衰减 60ms，不影响瞄准；
     // 随机震屏只给 0.08 —— 有它才像后坐，再多就晕
@@ -298,6 +370,9 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     // 本图最长视线约 58m，所以实际衰减只有 50~58m 那一段、幅度 <1%，玩家感知不到 ——
     // 这正是「有效射程长」应有的表现，不是没生效。
     falloff: { start: 50, end: 130, min: 0.92, curve: 'hold' },
+    // 全表最重的一把：移动 -12%、起跳 -10%。狙击的定位就是「停下来开枪」，
+    // 机动性再高这个定位就名存实亡 —— 这是手感差异里最能被身体感知到的一档
+    mobility: { speed: 0.88, jump: 0.9 },
     pen: 2,
     scoped: true,
     // 拉栓周期 = 射击间隔（42 RPM）：每一发之间演一整套拉栓，拉完才能打下一发
@@ -309,7 +384,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     kind: 'gun',
     slot: 'primary',
     name: 'M870',
-    damage: 9,
+    damage: 8,
     headMul: 1.6,
     interval: 60 / 72,
     magazine: 7,
@@ -318,14 +393,19 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 0.55,
     perShell: true,
     pellets: 8,
-    spread: { base: 0.055, perShot: 0.006, max: 0.075, move: 0.012, air: 1.6 },
-    recoil: { up: 2.6, side: 0.9, recover: 4 },
+    // 弹丸锥靠 base 0.055 就已经很散；这一轮（2026-11-13 第五次）把移动惩罚再抬到
+    // 0.048 —— 边走边喷应该明显漏人。泵动 0.83s 一发，连发累积不是主项
+    spread: { base: 0.055, perShot: 0.006, max: 0.085, move: 0.048, air: 1.6 },
+    recoil: { up: 2.6, side: 0.9, recover: 5 },
     // 12 号霰弹：枪模砸得比 AK 重、枪口焰最宽（8 颗弹丸一起出膛，火光本来就大）。
     // 泵动间隔 0.83s，所以侧倾可以给到 0.85° 而不至于连成抖动
     feel: { kick: 1.7, punchPitch: 0.3, punchRoll: 0.85, shake: 0.06, flashScale: 1.5, flashLife: 0.075 },
-    // 射程最短、掉得最狠：15m 内 8 颗弹丸满伤害，34m 就只剩 12%（每颗 1.08）。
+    // 2026-11-13 伤害整体下调：9 → 8（贴脸 8 颗 64，原 72）
+    // 射程最短、掉得最狠：15m 内 8 颗弹丸满伤害，34m 就只剩 12%（每颗 0.96）。
     // 用 'linear' —— 霰弹要的就是「出了射程立刻没戏」，曲线压平反而违背直觉
     falloff: { start: 15, end: 34, min: 0.12, curve: 'linear' },
+    // 长管泵动枪，比步枪沉一点但不至于拖沓
+    mobility: { speed: 0.95, jump: 0.95 },
     pen: 0,
     scoped: false,
     sound: 'shotgun',
@@ -335,7 +415,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     kind: 'gun',
     slot: 'secondary',
     name: 'USP',
-    damage: 25,
+    damage: 21,
     headMul: 3.2,
     interval: 60 / 400,
     magazine: 12,
@@ -344,14 +424,23 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     reload: 1.9,
     perShell: false,
     pellets: 1,
-    spread: RIFLE_SPREAD(0.007, 0.009, 0.072, 0.028),
-    recoil: { up: 1.5, side: 0.5, recover: 9 },
+    // 手枪半自动，「连发」实际是快速连点：perShot 0.008 让连点也散。
+    // 移动惩罚 0.085 比步枪略低 —— 但手枪单手更晃，跑起来照样打不准
+    // （2026-11-13 第五次调，与步枪同一条 CSGO 结构）
+    // 第六次调：连点抬升 1.8 → 2.2。第七次 2.6 过头，第八次收到 2.4
+    // （配 HOLD_SCALE 0.22）：12 发连点到空约 11°，跟步枪一起变难压
+    spread: RIFLE_SPREAD(0.007, 0.008, 0.062, 0.085),
+    recoil: { up: 2.4, side: 0.55, recover: 7.5 },
     // .45 手枪：全表最轻。枪模几乎只抖一下、枪口焰最小，和步枪的「砸」拉开距离
     feel: { kick: 0.6, punchPitch: 0.1, punchRoll: 0.25, shake: 0, flashScale: 0.7, flashLife: 0.038 },
-    // 手枪：22m 内满伤害（25），55m 掉到 50%（12.5）。'linear' + 全表第二早的
+    // 2026-11-13 伤害整体下调：25 → 21。原来 4 发正好 100，现在要 5 发
+    //（21 × 5 = 105）—— 手枪从「补枪」进一步退到「应急」
+    // 手枪：22m 内满伤害（21），55m 掉到 50%（10.5）。'linear' + 全表第二早的
     // 起衰点 —— 「短射程武器远距离衰减更明显」这条由它和霰弹承担
     // （表里没有冲锋枪；将来加 SMG 就照这一档填：start 18~22 / min 0.4~0.5）
     falloff: { start: 22, end: 55, min: 0.5, curve: 'linear' },
+    // 单手轻携：比步枪快一档 —— 手枪对枪打不赢，就用这点速度换位
+    mobility: { speed: 1.05, jump: 1.02 },
     pen: 0,
     scoped: false,
     sound: 'usp',
@@ -387,6 +476,8 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     // 轻击横扫，扇形宽；重击是斜劈，扇形窄但更远（+0.3m 见 `HEAVY_REACH_BONUS`）
     meleeArc: 70,
     heavyArc: 46,
+    // 空手跑刀是全表最快的机动性 —— 换武器跑图的收益，CF/CS 都有这条
+    mobility: { speed: 1.12, jump: 1.05 },
   },
   grenade: {
     id: 'grenade',
@@ -412,6 +503,8 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     radius: 8,
     minDamage: 20,
     throwSpeed: 17,
+    // 捏着雷和拿刀差不多轻：快扔雷的战术价值就靠这点机动性兜着
+    mobility: { speed: 1.06, jump: 1 },
   },
 };
 
@@ -647,7 +740,24 @@ function materials() {
     brass: pbr(0xc39a45, 0.6, 0.9, tex.metal, 0.6),
     // 镜片：低粗糙 + 环境反射出高光，metalness 留一半压住底色，别成一面镜子
     glass: pbr(0x2f4c5c, 0.1, 0.5, null),
-    hand: pbr(0x9c7a5e, 0.9, 0, null),
+    // 手套：哑光深灰织物（战术手套不反光），纹理沿用聚合物噪声
+    glove: pbr(0x2f343c, 0.96, 0.02, tex.polymer, 0.55),
+    // 袖子：和人物模型的作训服同一张 cloth 迷彩（灰度图案、按本机队伍染色 ——
+    // 第一人称袖子就是第三人称那套衣服的袖子，不用两张图）。surface-textures
+    // 的 cloth 图是「一个部件一张 0..1 UV」的用法，正好匹配袖子的圆柱 UV。
+    // color 默认 0 队（玩家单人默认阵营），开局后由 setFirstPersonSleeveTeam 同步
+    sleeve: (() => {
+      const cloth = surfaceMaps('cloth');
+      return new THREE.MeshStandardMaterial({
+        color: TEAM_CLOTH[0][0],
+        map: cloth.map,
+        normalMap: cloth.normalMap,
+        roughnessMap: cloth.roughnessMap,
+        roughness: 1, // 带 roughnessMap 时标量必须是 1（乘数）
+        metalness: 0,
+        normalScale: new THREE.Vector2(0.7, 0.7),
+      });
+    })(),
     // 刀身比枪身亮一档、更光；开刃的反光交给下面的 `edge`
     blade: pbr(0xb8c0c8, 0.5, 0.92, tex.metal, 0.6),
     // 开刃斜面（ExtrudeGeometry 的侧壁材质）：最亮最光的一道，刀刃的高光线
@@ -656,6 +766,17 @@ function materials() {
     woodDark: pbr(0x4a2f1c, 0.95, 0, tex.wood),
   };
   return mats;
+}
+
+/**
+ * 第一人称袖子按本机玩家的阵营染色（第三人称队服在 actor-view，同一个来源）。
+ *
+ * 袖子材质是 `materials()` 的共享实例，改 color 全部袖子一起变 —— 第一人称
+ * 同一时刻只有一个玩家在看，正好就是想要的行为。每帧调用是安全的（引擎在
+ * updateViewModel 里同步），但 viewmodel 那层有缓存挡着，真写材质只在换队时发生。
+ */
+export function setFirstPersonSleeveTeam(team: 0 | 1): void {
+  materials().sleeve.color.setHex(TEAM_CLOTH[team][0]);
 }
 
 function box(
@@ -714,6 +835,12 @@ export interface ViewModel {
    * GLB 路径同样恒为 null。
    */
   bolt: THREE.Group | null;
+  /**
+   * 第一人称手臂（手 + 小臂，`buildFirstPersonArms` 装上，挂成 group 的子节点，
+   * 枪的一切动画自动带动它）。**掉在地上的枪没有手臂**（恒 null）——
+   * `dropped.ts` 走同一个构建函数但不调它，地上的枪不能长手。
+   */
+  arms: THREE.Group | null;
 }
 
 /**
@@ -1034,7 +1161,7 @@ function cloneGlbViewModel(id: WeaponId, template: THREE.Group, m: Record<string
   // AWM：模板里预切好的拉机柄动画组（loadGlbWeapon 内 splitBoltHandle 产物）；
   // 切分失败 / 结构不符时为 undefined → 退回整体动作的兜底分支
   const bolt = id === 'awm' ? (group.getObjectByName(AWM_BOLT_NAME) as THREE.Group | undefined) : undefined;
-  return { group, muzzle, magazine: null, bolt: bolt ?? null };
+  return { group, muzzle, magazine: null, bolt: bolt ?? null, arms: null };
 }
 
 /* ---------- 尼泊尔军刀（kukri）---------- */
@@ -1321,7 +1448,8 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     // 刀尖现在指向 -z，位置是 arm 姿态变换后刀尖的落点
     muzzle.position.set(...MUZZLE_POS[id]);
   } else {
-    // 手雷：一颗弹体 + 保险片 + 保险环 + 一只握着它的手
+    // 手雷：一颗弹体 + 保险片 + 保险环 + 保险销。握着它的手由
+    // `buildFirstPersonArms` 装（第一人称才有，掉在地上的雷没有手）
     const body = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), m.olive);
     body.position.set(0, 0, -0.02);
     body.scale.set(1, 1.15, 1);
@@ -1339,16 +1467,23 @@ export function buildWeaponModel(id: WeaponId): ViewModel {
     const ring = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.0022, 6, 18), m.steelLite);
     ring.position.set(0.024, 0.104, -0.02);
     group.add(ring);
-    box(group, 0.055, 0.075, 0.055, 0.01, -0.05, 0.03, m.hand);
     muzzle.position.set(...MUZZLE_POS[id]);
   }
 
   group.add(muzzle);
-  return { group, muzzle, magazine, bolt };
+  return { group, muzzle, magazine, bolt, arms: null };
 }
 
 /** 释放一把枪模的几何体（材质是共享的，不能 dispose）。 */
 export function disposeWeaponModel(model: ViewModel): void {
+  // 手臂几何是每次现建的（不像 GLB 枪体与模板共享），无条件释放。
+  // 程序化枪的手臂在 group 里，下面的 traverse 会再扫一遍 —— dispose 两次无害
+  if (model.arms) {
+    model.arms.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+    });
+  }
   // GLB 模板克隆（userData.shared）：几何体与材质和模块级模板共享，
   // dispose 会把模板打穿 —— 下次切枪拿到已释放几何体，枪变全黑。
   // 与 materials() 缓存「不能清」是同一条铁律。
@@ -1357,4 +1492,152 @@ export function disposeWeaponModel(model: ViewModel): void {
     const mesh = child as THREE.Mesh;
     if (mesh.geometry) mesh.geometry.dispose();
   });
+}
+
+/* ============================================================
+   第一人称手臂（2026-11-13，用户给了 CS:GO 的持枪参考图拍板）
+   ============================================================ */
+
+/**
+ * 第一人称的手 + 小臂。之前一直没做（备注：「程序化手容易丑，等用户定」），
+ * 现按参考图定式：**步枪双手**（右手扣握把、左手掌心朝上托护木）、
+ * **手枪单手**、**军刀单手** —— 全部低模几何拼装，与枪模同一套材质库。
+ *
+ * ## 挂载与生命周期
+ *
+ * 手臂是 `model.group` 的**子节点** —— 后坐、换弹下沉、切枪、走路摇晃全都
+ * 作用在 group 上，手臂自动跟随，一行同步代码都不用写。代价是军刀的转刀
+ * 花式会让手跟着滚一圈 —— 正好读作「手腕翻了个面」，可接受。
+ *
+ * 为什么不直接在 `buildWeaponModel` 里挂：**掉在地上的枪**（`dropped.ts`）
+ * 走同一个构建函数，地上的枪不能长手 —— 所以拆成独立函数，只有
+ * `viewmodel.ts` 的 `swapModel` 调用。
+ *
+ * ## 几何
+ *
+ * 一只手 = 掌（盒）+ 四指（横穿握把前方的细圆柱，读作合抱）+ 拇指（斜管）
+ * + 腕球；前臂 = 一根从腕伸到画外的锥形圆柱（袖子）。手指和雷体/护木**故意
+ * 轻微穿插** —— 低模下「嵌进去一点」比「悬空一毫米」更像真的握住。
+ * 袖子比腕球大一圈，自然形成「袖口盖住手套」的层次。
+ *
+ * 坐标全是枪模局部坐标（原点在握把上方机匣尾部，−z 朝枪口）。GLB 与程序化
+ * 两条路的包络已归一到同一组坐标（见 GLB 一节），摆位两条路通用。
+ */
+
+/** 一只「右手握竖直握把」的手：握持轴 = 本地 Y，手背朝 +z/+x，拇指在 −x 侧。 */
+function buildGripHand(m: Record<string, THREE.MeshStandardMaterial>): THREE.Group {
+  const g = new THREE.Group();
+  box(g, 0.038, 0.08, 0.06, 0.005, 0, 0.016, m.glove); // 掌（兜住握把后侧）
+  box(g, 0.03, 0.055, 0.014, 0.01, 0.004, 0.05, m.glove); // 手背指节垫
+  // 四指：横穿握把前方的圆管，从上往下排，逐根微拧出「合抱」的错落。
+  // z −0.028 让指管骑在握把前缘上：一半埋进握把（接缝藏在枪体里），一半露出
+  for (let i = 0; i < 4; i += 1) {
+    const f = cyl(g, 0.0088, 0.064, 0, 0.026 - i * 0.017, -0.028, m.glove, 8);
+    f.rotation.set(0, -0.05 + i * 0.03, Math.PI / 2);
+  }
+  // 拇指：从虎口斜向前的短管（右手 → 在 −x 侧扣向握把前方）
+  const thumb = new THREE.Mesh(new THREE.CylinderGeometry(0.0095, 0.011, 0.052, 8), m.glove);
+  thumb.position.set(-0.02, 0.02, -0.018);
+  thumb.rotation.set(1.25, 0, 0.5);
+  g.add(thumb);
+  // 腕球：掌底过渡，被袖口盖住一半
+  const wrist = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), m.glove);
+  wrist.position.set(0.006, -0.055, 0.02);
+  g.add(wrist);
+  return g;
+}
+
+/** 两点之间的一根锥形管（前臂/袖子）。`rA` 是腕端半径、`rB` 是肘端半径。 */
+function limb(
+  parent: THREE.Object3D,
+  a: [number, number, number],
+  b: [number, number, number],
+  rA: number,
+  rB: number,
+  mat: THREE.Material,
+): THREE.Mesh {
+  const va = new THREE.Vector3(...a);
+  const vb = new THREE.Vector3(...b);
+  const dir = vb.clone().sub(va);
+  const len = dir.length();
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rB, rA, len, 10), mat);
+  mesh.position.copy(va).add(vb).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  parent.add(mesh);
+  return mesh;
+}
+
+/** 一只手 + 一段前臂。左手 = 右手模板先绕 y 翻半圈，外层 wrapper 再摆姿态。 */
+function addArm(
+  arms: THREE.Object3D,
+  m: Record<string, THREE.MeshStandardMaterial>,
+  side: 'left' | 'right',
+  handPos: [number, number, number],
+  handRot: [number, number, number],
+  wristFrom: [number, number, number],
+  elbowTo: [number, number, number],
+): void {
+  const hand = buildGripHand(m);
+  if (side === 'left') {
+    // 翻转（chirality）必须先于姿态：wrapper 在外层、hand.rotation.y = π 在内层
+    const wrap = new THREE.Group();
+    wrap.position.set(...handPos);
+    wrap.rotation.set(...handRot);
+    hand.rotation.y = Math.PI;
+    wrap.add(hand);
+    arms.add(wrap);
+  } else {
+    hand.position.set(...handPos);
+    hand.rotation.set(...handRot);
+    arms.add(hand);
+  }
+  limb(arms, wristFrom, elbowTo, 0.032, 0.044, m.sleeve);
+}
+
+/**
+ * 给一把**第一人称**枪模装手。`dropped.ts` 不调用 —— 地上的枪是空的。
+ *
+ * 摆位口算过一遍相机投影（FOV 50 + BASE_POSES 的持枪位）：手腕两端都落在
+ * 画面外/下沿，只露手背和护木上的托手，和参考图一致。
+ */
+export function buildFirstPersonArms(id: WeaponId, model: ViewModel): void {
+  if (model.arms) return;
+  const m = materials();
+  const arms = new THREE.Group();
+  arms.name = 'fp_arms';
+
+  switch (id) {
+    case 'ak47':
+    case 'm4a1':
+      // 步枪：右手扣握把，左手掌心朝上托住下护木（参考图 1 的持枪式）
+      addArm(arms, m, 'right', [0.002, -0.085, 0.105], [0.12, 0, 0], [0.01, -0.142, 0.118], [0.27, -0.6, 0.72]);
+      addArm(arms, m, 'left', [-0.004, -0.062, -0.32], [-0.85, 0, 0.12], [0, -0.115, -0.29], [-0.36, -0.62, 0.45]);
+      break;
+    case 'awm':
+      // 端得更开：左手托在前护托下，肘位比步枪更靠外，撑出「重」的架型
+      addArm(arms, m, 'right', [0.002, -0.08, 0.105], [0.12, 0, 0], [0.01, -0.137, 0.118], [0.28, -0.62, 0.7]);
+      addArm(arms, m, 'left', [-0.004, -0.062, -0.26], [-0.8, 0, 0.12], [0, -0.135, -0.23], [-0.38, -0.64, 0.45]);
+      break;
+    case 'shotgun':
+      // 泵动：左手直接握在护木上（护木就是往复件，参考 CS 的 M870 持枪）
+      addArm(arms, m, 'right', [0.002, -0.07, 0.115], [0.12, 0, 0], [0.01, -0.127, 0.128], [0.27, -0.6, 0.72]);
+      addArm(arms, m, 'left', [-0.004, -0.07, -0.34], [-0.85, 0, 0], [0, -0.143, -0.31], [-0.36, -0.62, 0.45]);
+      break;
+    case 'usp':
+      // 手枪单手（参考图 2），手的倾角和握把的 −0.18 对齐
+      addArm(arms, m, 'right', [0.002, -0.068, 0.062], [-0.18, 0, 0], [0.01, -0.12, 0.09], [0.25, -0.6, 0.6]);
+      break;
+    case 'knife':
+      // 刺击握法：手背朝上扣住刀柄，握持轴从竖直转到沿刀柄方向（参考图 3）。
+      // (−1.47, 0, 0.16) 是把模板的 Y 握持轴对到刀柄轴向 (−0.158, 0.099, −0.982)
+      addArm(arms, m, 'right', [0.013, -0.002, 0.09], [-1.47, 0, 0.16], [0.028, 0.012, 0.145], [0.3, -0.5, 0.68]);
+      break;
+    default:
+      // 手雷：整只手兜住雷体下半（旧的一块方「手」已删）
+      addArm(arms, m, 'right', [0.008, -0.06, 0.008], [0.45, 0, 0.1], [0.02, -0.117, 0.003], [0.26, -0.6, 0.55]);
+      break;
+  }
+
+  model.group.add(arms);
+  model.arms = arms;
 }

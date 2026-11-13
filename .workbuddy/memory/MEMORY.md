@@ -31,20 +31,22 @@
 
 ## H5 专栏（FPS `transport-ship`）
 
-- `/h5` + `/h5/transport-ship`：写实军事风 FPS（CF 视觉：直角 + 橙金 `#f0a020` + 近黑 `#0f1318`），联机 + 人机。**与模拟器完全隔离**（不碰 Supabase / R2 / `emulator.ts` / `netplay.ts`），独立 `appId: 'nesload-fps'`。代码以 `lib/h5/engine.ts` 为中枢；`level.ts` 地图、`weapons.ts` 数值+枪模、`viewmodel.ts` 第一人称层、`player.ts`/`bot.ts`/`combat.ts` 玩法、`effects.ts`、`actor-view.ts`、`dropped.ts`。**旧文件名 render3d/world/game/map/character/net.ts 已失效**。
+- `/h5` + `/h5/transport-ship`：写实军事风 FPS（CF 视觉：直角 + 橙金 `#f0a020` + 近黑 `#0f1318`），联机 + 人机。**与模拟器完全隔离**（不碰 Supabase / R2 / `emulator.ts` / `netplay.ts`），独立 `appId: 'nesload-fps'`。代码以 `lib/h5/engine.ts` 为中枢；`level.ts` 地图、`surface-textures.ts` 关卡+人物 PBR 贴图、`weapons.ts` 数值+枪模、`viewmodel.ts` 第一人称层、`player.ts`/`bot.ts`/`combat.ts` 玩法、`effects.ts`、`actor-view.ts`、`dropped.ts`。**旧文件名 render3d/world/game/map/character/net.ts 已失效**。
 - 🔴 入口 = 模式页，也是唯一准备页 `ShipModeSelect`：单人卡（人机强度）/ 联机卡（名字 / 房间码 / 附近房间 + `ship-scan`）。点「开始战斗 / 创建房间 / 加入房间」即意图 `enterMode(mode, NetIntent)`；单人/建房 → `ShipLoading` → 开局；**加房不载入**（先连会话选阵营 → 房主回执 → `acceptJoin()` → `runLoad` → `finishJoin()`）。**没有第二道选择页**（`ShipStartScreen` 已删）。phase = `mode|loading|lobby|playing|menu|result`。`leaveNet()`/Esc 都回模式页。载入取消靠 `loadSeq` 批次号。加房那一下必须 `gameAudio.unlock()`。
 - 对局规则唯一入口是模式页四行 `Segmented` → `engine.setRules`；`teamSize` 决定席位数（2×teamSize），**换档必须在非对局非联机时 `rebuildTeams()`**；`SPAWN_X` 6 位、第 0 位留给本机玩家。🔴 `endMode` 互斥单选：`kills` 只判人头、`time` 只递减 `timeLeft`；联机由房主定（`Snapshot.m` 0 时长 / 1 人头，`NET_VERSION=2`，`Snapshot.k` 目标，`Snapshot.t` 语义随 `m` 变）。计分板读 `hud.killTarget`/`hud.endMode`。结算「返回」= 回模式页。
 - 🔴 出生/复活唯一出口 `pickHomeSpawn(team, self)`（玩家 / 联机对端 / 人机共用，只在 `level.spawns[team]` 6 格里挑）：**带权随机**，权重 `1/(1+0.5×被看见人数)`，**刚站过那格 ×0.3**（软惩罚，不是硬排除）。`SPAWN_X = ±7.6 / ±5.2 / ±1.8`（2026-11-13 从 ±9 收窄，用户「不要总在复活点的角落」）；**x=0 与 ±4.2 必须空着**（出生区掩体在正前方）。玩家叠 ±0.8、人机叠 ±0.5 横向偏移。`pickMapSpawn` 全图撒点已整条删除。朝向 `spawnFacingYaw` 固定朝敌方出生线中点。🔴 **复活没有镜头过渡**（别加回插值，会白送透视）。
 - 枪模 = three 几何体拼装 + 共享材质；**独立 scene + FOV 50**，主场景画完 `clearDepth()`；`rotation.y` 恒 0（别给 yaw 修）。只有 AWM 能开镜。`disposeWeaponModel` 只释放几何体。
 - 🔴 远端/人机武器跟 `actor.weapon` 自动换（`ActorView.sync` 每帧比对，变了 dispose + `buildGun`）；**AK 与 M4 必须两套几何**，共用一个 `else` = 换枪在别人眼里没换。加入者看房主换枪走快照 `ACTOR_WEAPON` → `ReplicaActor.apply`，和房主看加入者是两条路。
-- 🔴 枪口火光：`depthTest` 默认 true（会被掩体挡），只有本机传 false；`light` 只给本机。整池共用 `depthTest=false` = 隔箱看火光找人。
+- 🔴 枪口火光：`depthTest` 默认 true（会被掩体挡），只有本机传 false；`light` 只给本机。🔴 **枪模场景没有任何枪口点光**（用户要求开枪时枪身无反光，`viewmodel.ts` 的 muzzleLight 已删，别加回）。整池共用 `depthTest=false` = 隔箱看火光找人。
 - 🔴 联机输入纪律：远端动作 Set 是**换出**（`link.actions = new Set()`）不是 clear。音频 `unlock()` 挂 `schedulePrewarm`（逐宏任务烘枪声）；构造期 `renderer.compile` 两个 scene 全量预编 shader。
 - 🔴 房主权威模拟不能只挂 rAF：`engine.step(now, render)` 是唯一帧入口，`stepWhileHidden()` 用加入者输入帧当心跳补帧（`HIDDEN_STEP_GAP_MS=80`），`rawDt>1` 的停顿要补进 `link.lastInputAt`。
 - 🔴 加入者没有投掷物模拟：只从 `Snapshot.g`（`GrenadeWire=[id,x,y,z]`）拿位置 damp 跟随，别加本地弹道。加入者近战是纯画面（`playMeleeView` + `meleeVisual` 跳过 `meleeStrike`），切枪闸吞掉的单击用 `pendingMelee` 补。
 - 🔴 已删功能（用户明确要求，别再恢复）：**脚步声**（audio 的 step/bakeStep/STEP_*）、**蹲下**（Ctrl 蹲 + W = Ctrl+W 关标签页；`InputFrame` 无 crouch，身高恒 1.8）；网络位图 `F_*` 的 `1<<4`、`IN_*` 的 `1<<0` 是空位不许复用。
 - 渲染 `NeutralToneMapping` + exposure 1.15（不是 ACES）；高金属度必须有环境贴图。音效全 WebAudio 合成、无音频文件；枪声 = 预烘焙 `AudioBuffer`（`GUN_RECIPE` 六层 + tanh + 归一化），调听感只动 `GUN_RECIPE`，别再换采样 / 加回实时 biquad。
-- 🔴 地图 22 × 44（`HALF_W=11`/`HALF_L=22`），改图只动 `level.ts` 写死坐标、**别引入缩放系数**。结构：两座狙击台（`cx=±8.7`、楼梯 `±10.05`）＋中路散货（中央横箱、攀爬链 1.0→1.9→2.6、moss/slate/sand 三对）＋船头吊臂（底座 (-9.7,-20.9)）。配色五色冷调（bone/olive/moss/slate/sand），甲板蓝灰 `#7f8d98`，**锈橙已删**。改完核：① 六个出生位不被压 ② `z=0` 只有 x=±6 一格能过 ③ 中段散货外沿 ≤5.3 ④ 攀爬链三件面贴面（4.15/3.05）⑤ `textureDeck` repeat 11×22、阴影相机 ±30。
+- 🔴 **贴图 = 三件套（map + normalMap + roughnessMap）**，全部在 `surface-textures.ts` 运行时画，模块级缓存**永不 dispose**（清了重进游戏一片黑）。带 `roughnessMap` 的材质 `roughness` 必须给 1（乘数）。UV **按米铺**：`level.ts` `fitBoxUv()` 读材质 `userData.tileM`；`block()` 与 `containerGeometry` 都过它，别再吃 0..1。端门三张贴图要一起设 repeat（0.769），只压 map 会错位。集装箱六面 = `[side,side,roof,side,door,door]`。
+- 🔴 地图 22 × 44（`HALF_W=11`/`HALF_L=22`），改图只动 `level.ts` 写死坐标、**别引入缩放系数**。结构：两座狙击台（`cx=±8.7`，**旧楼梯与台面围挡已删、换短边端面内嵌斜坡**——2026-11-13 用户两轮要求：坡在 z=±5 端**靠内侧半幅**（x∈[7,8.7] 宽 1.7）沿 z 爬台，视觉=楔形真斜面（`rampGeometry` 折叠 BoxGeometry），碰撞=32 级 0.1m 隐形台阶，零外伸；`rampEnd = side` 点对称，stairX 锚点公式已废）＋中路散货（中央横箱、攀爬链 1.0→1.9→2.6、moss/slate/sand 三对）＋船头吊臂（底座 (-9.7,-20.9)）。🔴 导航是平面 2D、坡/台阶格子对 Bot 仍是阻挡，Bot 不走坡（旧楼梯亦然）。配色五色冷调（bone/olive/moss/slate/sand），甲板蓝灰 `#7f8d98`，**锈橙已删**。改完核：① 六个出生位不被压 ② `z=0` 只有 x=±6 一格能过 ③ 中段散货外沿 ≤5.3 ④ 攀爬链三件面贴面（4.15/3.05）⑤ 阴影相机 ±30、甲板贴图 tile 4 米（UV 由 `fitBoxUv` 算，不再手填 repeat）。
 - 换枪资格唯一出口 `player.canChangeLoadout`（存活 + 复活 ≤5s + 本次生命未耗弹）；HUD 字段是 `canChangeLoadout`。
+- 打击感分层：**玩法后坐 `recoilPitch/Yaw` 进 `aimYaw`；抖屏 / 沉坠 / 侧倾 / 命中冲击只进 `viewYaw/viewPitch/viewRoll/bobOffset`**。连发力度唯一来源 `player.recoilBurst`（`registerBurstShot()` 写入，加入者也要调），别在别处另算一套。
 
 ## 主题 / 首屏
 

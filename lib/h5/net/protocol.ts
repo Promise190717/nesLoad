@@ -67,7 +67,7 @@ export const ROOM_QUERY_PARAM = 'shiproom';
 export const NET_STORAGE_KEY = 'nesload:h5-ship:net:v1';
 
 /**
- * 场上角色数**不是常量**：由房规的 `teamSize`（1v1 / 3v3 / 6v6）决定，
+ * 场上角色数**不是常量**：由房规的 `teamSize`（1v1 ~ 6v6）决定，
  * 实际人数 = `2 × teamSize`，最多 12 个。这里不再导出 `ACTOR_TOTAL` ——
  * 以前写死 10，加 6v6 之后任何「硬编码 10」的地方都会算错席位。
  */
@@ -420,7 +420,7 @@ export type Snapshot = {
    * 它会在自己那台机器上先结算一次 —— 结算页一弹，后面房主的帧就没人看了。
    */
   m?: number;
-  /** [保卫者, 潜伏者] */
+  /** [潜伏者, 保卫者] */
   s: [number, number];
   a: ActorWire[];
   /**
@@ -452,7 +452,7 @@ export type RosterWire = {
   v: number;
   /** 对局还开着（没结束） */
   o: boolean;
-  /** 两个阵营：[保卫者, 潜伏者] */
+  /** 两个阵营：[潜伏者, 保卫者] */
   t: [TeamSlot, TeamSlot];
   /** 房主名字，加入前显示「正在加入 XXX 的房间」 */
   n: string;

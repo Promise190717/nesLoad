@@ -6,7 +6,7 @@ import { Bot, BOT_NAMES, type BotWorld } from './bot';
 import { type CombatHooks, grenadeBlast } from './combat';
 import { DEATH_TIMELINE, DeathCamera, deathPhaseAt } from './death-cam';
 import { DroppedWeapons } from './dropped';
-import { Effects } from './effects';
+import { Effects, TRACER_COLOR_BOT, TRACER_COLOR_HUMAN } from './effects';
 import { InputController, type InputAction, type InputFrame } from './input';
 import { buildLevel, type Level } from './level';
 import { clamp, damp, dirFromAngles, pick, rand, randInt } from './math';
@@ -172,6 +172,14 @@ const MELEE_HITSTOP = 0.07;
 const KILL_CONFIRM_SHAKE = 0.12;
 
 /**
+ * 弹头擦身声的作用半径（米）。
+ *
+ * 2.6 米：甲板宽度 22 米，这个半径只覆盖「正打我这一侧」的弹道，
+ * 隔着两个集装箱的乱射不该在耳边「啪啪」响。距离近到 0.3 米时满音量。
+ */
+const WHIZ_RADIUS = 2.6;
+
+/**
  * 命中标记相对屏幕中心的最大偏移（NDC，1 = 半个屏幕）。
  *
  * 命中点几乎总在准星附近（子弹就是从准星打出去的），偶尔会偏出去 —— 霰弹的
@@ -239,21 +247,38 @@ const MAX_NET_IMPACTS = 24;
 const NET_VIEW_BUDGET = 2;
 
 /**
- * 加入者移动预测的对账参数（见 `mirrorSelf`）。
+ * 加入者移动预测的对账参数（见 `reconcileSelf`）。
  *
- * 快照里的位置落后**半个管线**（上行 + 房主帧 + 快照回程 ≈ 40ms）：直接把本地
- * 位置往它阻尼，等于把刚预测掉的延迟又加回来（旧方案 `SELF_POS_LEAD` +
- * λ26 阻尼的残余 ≈ 100ms，就是「走路像在泥里」的根因）。现在改为**死区对账**：
+ * 演进史（都别走回头路）：
+ * ① 最初版固定死区 0.25 + 只在快照帧拽 —— 0.25 和「跑速×管线延迟」同量级，
+ *    跑起来漂移骑在死区边界反复触发，60Hz 锯齿直上相机 =「连续一卡一卡」。
+ * ② 外推版（快照位置沿速度前推 + 差分估 vy）—— 台阶是**离散跳变**：房主跨
+ *    一级台阶那帧快照 y 瞬间 +0.3m，差分把 0.3/0.016 ≈ 18m/s 的「假 vy」夹成
+ *    ±7，外推目标凭空抬高 0.6m 踩破硬就位阈值 → 每跨一级上下瞬移一轮，且
+ *    就位分支挪基准会让下一帧差分反号，**自激成持续狂抖**（用户实测：上楼梯
+ *    狂抖、靠住船体停稳就恢复）。差分估 vy 对一切 y 离散（台阶、攀爬箱）都
+ *    不可信 —— **别再把差分 vy 用进外推或就位判定**。
+ * ③ 现行版：不做外推，死区随快照速度放宽（盖过「管线×速度」的固有漂移），
+ *    目标永远 = 裸快照位置（绝不会指进墙里/台阶里），垂直只有硬就位一条路。
  *
- *   SELF_DRIFT_DEAD   水平偏差小于它 → 完全信本地预测，一个字都不改
- *   SELF_CORRECT_RATE 超出死区 → 按 4/s 的速率把偏差抹掉（0.25s 收敛，无瞬移感）
- *   SELF_SNAP_DIST    超过它 → 房主权威，直接就位（复活 / 被外力挪 / 预测撞歪）
- *   SELF_SNAP_Y       垂直版。跳跃起跳时间两端差一个管线，±0.3m 属正常
+ *   SELF_DRIFT_DEAD        基础死区（静止时）；漂移小于它完全信本地预测
+ *   SELF_DEADZONE_PER_SPEED 死区随快照速度的增长系数：0.08 × 5.5 ≈ 0.44，
+ *                          加基础项共 ~0.6m，盖住正常管线漂移（0.05~0.15s × 跑速）
+ *   SELF_CORRECT_RATE      超出死区 → 逐帧指数纠偏（4/s 收敛，无锯齿无瞬移）
+ *   SELF_SNAP_DIST         水平硬就位阈值。要盖过「急转向时漂移瞬时摆到
+ *                          2×管线×跑速 ≈ 1.7m」，2.0 只兜真瞬移
+ *   SELF_SNAP_Y            垂直硬就位阈值（裸快照 y vs 本地 y）。要盖过「合法
+ *                          跳跃/坠落 × 管线」：6.6m/s 起跳 × 0.15s ≈ 1.0，取 1.6
+ *   SELF_VY_EST_MAX        房主不发 vy，快照 y 差分估的 vy 超过它视为离散
+ *                          （台阶瞬跳 / 就位污染），估 0 不估值 —— 只给硬就位
+ *                          时的 vel.y 用，不参与任何外推
  */
-const SELF_DRIFT_DEAD = 0.25;
+const SELF_DRIFT_DEAD = 0.15;
+const SELF_DEADZONE_PER_SPEED = 0.08;
 const SELF_CORRECT_RATE = 4;
-const SELF_SNAP_DIST = 1.5;
-const SELF_SNAP_Y = 0.6;
+const SELF_SNAP_DIST = 2.0;
+const SELF_SNAP_Y = 1.6;
+const SELF_VY_EST_MAX = 12;
 
 /* ============================================================
    手雷投掷物
@@ -384,6 +409,12 @@ export class ShipGame {
   private netRosterTimer = 0;
   private netSeq = 0;
   private netInputSeq = 0;
+  /* ---- 加入者对账基准（见 `reconcileSelf`） ---- */
+  /** 最近一次快照里「我自己」的原始位置 / 速度 / 到达时刻 */
+  private selfMirrorBase = new THREE.Vector3();
+  private selfMirrorVel = new THREE.Vector3();
+  private selfMirrorAt = 0;
+  private hasSelfMirror = false;
   /** 加入者：攒到下一次上行的一次性动作（30Hz 之间按下的键不能丢） */
   private readonly netActions = new Set<InputAction>();
   private netFirePressed = false;
@@ -450,6 +481,14 @@ export class ShipGame {
   private damageFromUntil = 0;
   /** 最近一次挨打的实际伤害。死亡信息卡要显示它 */
   private lastPlayerDamage = 0;
+  /**
+   * 上一次「命中别人」的镜头冲击时间（`performance.now()`）。
+   *
+   * 用来限流：连发命中时每发都给 `addShake` 会把波形一直重置在峰值，
+   * 观感从「一下一下」变成「持续抖」。60ms ≈ 16 次/秒，比任何枪的射速都密，
+   * 实际效果是「打中第一发有一下，之后的连发粘成一片低频震动」。
+   */
+  private lastHitShakeAt = 0;
   private heartbeatTimer = 0;
 
   /**
@@ -468,6 +507,9 @@ export class ShipGame {
    * hit），连杀数照常累加，图标显示 ×3 而不是闪三次。这也是验收里
    * 「不出现未击杀却弹击杀提示」最直接的保证 —— 反馈只由真实结算结果产生。
    */
+  /** 击杀瞬间 FOV 微弹的剩余量（度）。`updateCamera` 里按帧指数衰减。 */
+  private fovPop = 0;
+
   private readonly feedback: {
     tier: HitTier | null;
     point: Point3 | null;
@@ -640,13 +682,14 @@ export class ShipGame {
       const reserved = team === 0 ? 1 : 0;
       const spawns = this.level.spawns[team];
       for (let i = 0; i < size - reserved; i += 1) {
-        // 敌方火力更杂：有喷子，逼玩家换着打法；友方统一步枪。
+        // 阵营默认枪：匪（team 0，土黄）默认 AK，警（team 1，蓝）默认 M4。
+        // 敌方（警）火力更杂：有喷子，逼玩家换着打法；友方统一 AK。
         // **不给 Bot 配 AWM** —— 一枪一个的狙击枪放在 AI 手里，玩家只要露头就被
         // 隔着半个货场点掉，体验是「这局没法打」而不是「这局有难度」。
         const weapon: WeaponId =
           team === 0
-            ? pick<WeaponId>(['ak47', 'm4a1', 'm4a1'])
-            : pick<WeaponId>(['ak47', 'ak47', 'm4a1', 'shotgun']);
+            ? pick<WeaponId>(['ak47', 'ak47', 'ak47', 'm4a1'])
+            : pick<WeaponId>(['m4a1', 'm4a1', 'm4a1', 'shotgun']);
 
         const spawn = spawns[(i + reserved) % spawns.length]!.clone();
         spawn.x += rand(-0.6, 0.6);
@@ -664,7 +707,7 @@ export class ShipGame {
   private addBot(team: Team, spawn: THREE.Vector3, weapon?: WeaponId): Bot {
     const name = this.freeBotName();
     const gun: WeaponId =
-      weapon ?? (team === 0 ? pick<WeaponId>(['ak47', 'm4a1', 'm4a1']) : pick<WeaponId>(['ak47', 'ak47', 'm4a1', 'shotgun']));
+      weapon ?? (team === 0 ? pick<WeaponId>(['ak47', 'ak47', 'ak47', 'm4a1']) : pick<WeaponId>(['m4a1', 'm4a1', 'm4a1', 'shotgun']));
 
     const bot = new Bot(`bot-${team}-${this.botSerial}`, team, name, this.rules.difficulty, gun);
     this.botSerial += 1;
@@ -742,6 +785,7 @@ export class ShipGame {
     this.hitStop = 0;
     this.killStreak = 0;
     this.lastPlayerDamage = 0;
+    this.lastHitShakeAt = 0;
     this.damageFromUntil = 0;
     this.heartbeatTimer = 0;
     // 上一局最后一帧攒下的反馈（比如刚好在结算那一帧打死人）不能漏到新一局
@@ -1031,6 +1075,10 @@ export class ShipGame {
       this.effects.bloodBurst(point, dir, head);
       this.lastDamage.set(target.id, damage);
 
+      // 第二层：被打中的**模型本身**要顿一下。血雾会飘走、hitmarker 会消失，
+      // 只有身体的动作能证明这一发真的进去了（自己挨打走下面的 `hurt` 分支）
+      if (target !== this.player) this.actorViewOf(target.id)?.playHit(head);
+
       // 联机：命中事实要发给所有人（血雾 + 命中标记 + 受击方向全靠它）。
       // 一条子弹一颗弹丸一条，霰弹贴脸会一次来 8 条 —— 队列有上限，见 `pushEvent`
       this.pushEvent({
@@ -1063,11 +1111,24 @@ export class ShipGame {
         }
         // ⚠️ 命中标记和「叮」都**不在这里推**，见 `feedback` 的注释
         this.recordHit(head, point);
+
+        // 命中那一刻手上「顶」一下：爆头比普通命中重近一倍。
+        // 60ms 内只触发一次 —— AK 是 100ms 一发，如果每发都重置波形，
+        // 连发命中会变成持续抖动（晕），而不是一下一下的触感
+        const now = performance.now();
+        if (now - this.lastHitShakeAt > 60) {
+          this.lastHitShakeAt = now;
+          this.player.addShake(head ? 0.2 : 0.11);
+          // 命中顿感：镜头向下轻沉一下（COD 的 hit punch）。走 punch 通道，
+          // 不碰 `aimPitch` —— 弹道零影响，衰减自动回弹；爆头沉得更狠
+          this.player.addPunch(head ? -0.45 : -0.28, 0);
+        }
       }
       if (target === this.player) {
         gameAudio.impact(point.x, point.y, point.z, 'flesh', { own: true });
         // 挨打要抖一下：这是玩家唯一「不看血条也知道自己中枪了」的反馈
         this.player.addShake(Math.min(0.5, damage / 90));
+        this.applyHitDirection(dir);
         this.options.onDamage?.(Math.min(1, damage / 45));
 
         // 记下伤害来源，HUD 那个弧形指示器要靠它。没有凶手（爆炸 / 摔落）
@@ -1201,6 +1262,8 @@ export class ShipGame {
 
       // 自己的枪在 handleFire 里已经响过、画过曳光了，这里只处理别人
       if (shooter === this.player) return;
+      // 弹头擦身声：别人的枪才有意义（自己的枪不可能擦过自己）
+      this.playWhiz(origin, dir, endT > 0 ? endT : 60);
       // 射手的第三人称模型播开火动画（Fire 剪辑；找不到视图/无动画就静默跳过）
       this.actorViewOf(shooter.id)?.playFire();
       const spec = WEAPONS[weapon];
@@ -1241,11 +1304,17 @@ export class ShipGame {
       // t 传进来），没打中任何东西就画到默认射程 —— 与玩家自己那条曳光同款
       // 的 60 / 90 规则，观察者看到的弹道和射手实际打出去的一致
       const shotEnd = endT > 0 ? Math.min(endT, 90) : 60;
-      this.effects.spawnTracer(muzzle, {
-        x: origin.x + dir.x * shotEnd,
-        y: origin.y + dir.y * shotEnd,
-        z: origin.z + dir.z * shotEnd,
-      });
+      // 曳光分色：人机暖金、联机真人紫色（人机 id 固定 `bot-` 前缀，
+      // 房主侧 Bot 对象全在 `this.bots` 里，用前缀判和加入者侧同一套规则）
+      this.effects.spawnTracer(
+        muzzle,
+        {
+          x: origin.x + dir.x * shotEnd,
+          y: origin.y + dir.y * shotEnd,
+          z: origin.z + dir.z * shotEnd,
+        },
+        shooter.id.startsWith('bot-') ? TRACER_COLOR_BOT : TRACER_COLOR_HUMAN,
+      );
     },
   };
 
@@ -1311,6 +1380,12 @@ export class ShipGame {
       // 玩家这一帧也死了（对枪互换）就只留播报和死亡卡，不再弹勋章 ——
       // 勋章正好压在死亡信息卡上，而且此时 `killStreak` 已经被清零了
       gameAudio.killConfirm(fb.head, this.killStreak);
+      // 击杀的「手上一沉」：比命中重一档。取 max 语义（`addShake` 内部），
+      // 所以这一发如果是爆头命中（0.2），不会被这条 0.12 顶掉
+      this.player.addShake(KILL_CONFIRM_SHAKE);
+      // 击杀 FOV pop：视野瞬间「睁大」再弹回来 —— COD 那种「确实收割了一个人」
+      // 的确认感。只动主相机 FOV，不碰弹道；爆头走大档
+      this.fovPop = fb.head ? 1.6 : 1.1;
       this.options.onKillFeedback?.({ head: fb.head, streak: this.killStreak, weapon: fb.weapon });
       // 双杀以上才播报：单杀已经有击杀音 + 勋章了，再弹一行字是噪音
       if (this.killStreak >= 2) this.options.onStreak?.(this.killStreak);
@@ -1564,6 +1639,12 @@ export class ShipGame {
 
     const distance = this.player.pos.distanceTo(pos);
     if (distance < 22) this.player.addShake((1 - distance / 22) * 0.9);
+    // 离爆心 16m 内才有「被炸懵」：高频耳鸣 + 全屏白闪（震屏上面那条管）。
+    // 14m 内拉满 —— COD 手雷近炸那种「耳朵里只剩一根针在响」
+    if (distance < 16) {
+      gameAudio.tinnitus(1 - distance / 16);
+      this.options.onFlash?.(Math.min(1, (1 - distance / 14) * 1.15));
+    }
   }
 
   /**
@@ -1804,7 +1885,7 @@ export class ShipGame {
   /**
    * 人数自检：场上角色数必须等于 `2 × rules.teamSize`。
    *
-   * 1v1 / 3v3 / 6v6 三档，人数不再是一个写死的 10。这条断言不改变任何行为，
+   * 人数不再是一个写死的 10，档位全按 `teamSize` 走（1v1 ~ 6v6）。这条断言不改变任何行为，
    * 只在那条约束被破坏时立刻在控制台喊一声 —— 人数错了在画面上不一定看得出来
    * （多一个或少一个都是人堆里的一团影子）。
    */
@@ -2182,13 +2263,12 @@ export class ShipGame {
       this.options.onScoreboard?.(frame.scoreboard);
     }
 
-    // 快照先吃：它可能刚告诉我们「你死了」，那这一帧就不该再动
+    // 快照先吃：它可能刚告诉我们「你死了」，那这一帧就不该再动。
+    // 对账本身在下面的 `reconcileSelf`，按真实时钟算，不依赖帧步长
     const snapshot = this.latestSnapshot;
     if (snapshot) {
       this.latestSnapshot = null;
-      // 带上真实帧步长：对账的纠偏按它算，固定 1/60 在低帧率下会
-      // 让偏差抹得太快、看起来像瞬移
-      this.applySnapshot(snapshot, dt);
+      this.applySnapshot(snapshot);
     }
 
     if (frame.actions.has('buy')) {
@@ -2209,12 +2289,14 @@ export class ShipGame {
     }
 
     // 移动预测：本地先跑（冻结期轴归零，和上行口径一致 —— 不然房主那边人已
-    // 站定、这边还在滑）。对账在 `mirrorSelf`，走的是死区策略不是阻尼追快照。
+    // 站定、这边还在滑）。对账在 `reconcileSelf`：速度放宽死区 + 裸快照目标，
+    // 不是阻尼追快照。
     if (this.player.alive) {
       const moveFrame = frozen ? { ...frame, forward: 0, right: 0 } : frame;
       if (!frozen && moveFrame.actions.has('jump')) this.player.predictJump();
       this.player.updateNetMovement(dt, moveFrame, this.playerDeps);
     }
+    this.reconcileSelf(dt);
 
     // 开火表现本地预测（枪声 / 枪口焰 / 后坐 / 曳光 / 破空声 / 挥砍动作）
     this.updateNetFireFeedback(dt, frame, frozen);
@@ -2369,11 +2451,16 @@ export class ShipGame {
       depthTest: false,
       light: true,
     });
-    this.effects.spawnTracer(muzzle, {
-      x: muzzle.x + dir.x * 60,
-      y: muzzle.y + dir.y * 60,
-      z: muzzle.z + dir.z * 60,
-    });
+    // 本机玩家的曳光是紫色（人机保持暖金），单人同款
+    this.effects.spawnTracer(
+      muzzle,
+      {
+        x: muzzle.x + dir.x * 60,
+        y: muzzle.y + dir.y * 60,
+        z: muzzle.z + dir.z * 60,
+      },
+      TRACER_COLOR_HUMAN,
+    );
     // 抛壳口：枪身右侧、比枪口近一点（单人同款）
     this.effects.ejectShells(
       {
@@ -2384,13 +2471,19 @@ export class ShipGame {
       this.player.yaw,
     );
     if (spec.sound) gameAudio.shot(spec.sound, { own: true });
+    // 加入者不跑 `Player.handleFire`：连发计数、**视角后坐、连发累积散布**都要在这里补。
+    // 后坐是「按下就顶上去」的那部分，必须本地预测 —— 等房主回执再顶，压枪会晚半拍；
+    // 房主那边替这个玩家跑的 `Player` 也走同一条 `applyShotRecoil`，两边数值同源。
+    this.player.registerBurstShot();
+    this.player.applyShotRecoil();
     this.player.addPunch(feel.punchPitch, feel.punchRoll);
-    if (feel.shake > 0) this.player.addShake(feel.shake);
-    this.viewModel.triggerKick(feel.kick);
+    const burstShake = this.player.recoilBurst * 0.055;
+    if (feel.shake > 0 || burstShake > 0) this.player.addShake(Math.max(feel.shake, burstShake));
+    this.viewModel.triggerKick(feel.kick, this.player.recoilBurst);
   }
 
   /** 加入者：把一帧快照铺到场上。 */
-  private applySnapshot(snapshot: Snapshot, dt = 1 / 60): void {
+  private applySnapshot(snapshot: Snapshot): void {
     if (snapshot.q <= this.appliedSnapshotSeq) return;
     this.appliedSnapshotSeq = snapshot.q;
 
@@ -2419,12 +2512,26 @@ export class ShipGame {
       const id = str(wire, ACTOR_ID);
       seen.add(id);
       if (id === this.selfActorId) {
-        this.mirrorSelf(wire, dt);
+        this.mirrorSelf(wire);
         continue;
       }
       const existing = this.replicas.get(id);
       if (existing) {
+        // 副本「换弹」位的边沿是别人换弹的唯一信号（布尔位，没有进度）：翻真
+        // 补开头一声、翻假（装完）补收尾一声，都按他的最新坐标空间化。
+        // 只放真人的：人机换弹不出声（用户要求，同 Bot 侧）。死亡角色会原样
+        // 带着换弹位到重生，用「前后都活着」兜掉尸体上的误报
+        const wasReloading = existing.reloading;
+        const wasAlive = existing.alive;
         existing.apply(wire);
+        if (existing.alive && wasAlive && existing.isHuman) {
+          const at = { x: existing.pos.x, y: existing.pos.y + 1.4, z: existing.pos.z };
+          if (existing.reloading && !wasReloading) {
+            gameAudio.reload('out', at);
+          } else if (wasReloading && !existing.reloading) {
+            gameAudio.reload('in', at);
+          }
+        }
       } else {
         const replica = new ReplicaActor(wire);
         this.replicas.set(id, replica);
@@ -2499,12 +2606,13 @@ export class ShipGame {
    * ⚠️ 视角（`yaw` / `pitch`）**不从快照读** —— 那是本机即时操作的，房主只是
    * 抄一份去算弹道。读回来会让鼠标每 50ms 被拽一下。
    *
-   * 位置同理走了本地预测：这里只做**对账**（死区 + 分级纠偏，见下面那段），
-   * 不再把本地位置往快照位置上拖。`onGround` 也不从快照读 —— 它比位置还
+   * 位置同理走了本地预测：这里只做**落账**（把快照位置/速度存进基准，
+   * 供 `reconcileSelf` 每帧对账），不再把本地位置往快照位置上拖。
+   * `onGround` 也不从快照读 —— 它比位置还
    * 滞后一个管线，照抄会让刚起跳的人被「还在地上」的旧值骗出二段跳
    * （`predictJump` 就是这么误触发的）。
    */
-  private mirrorSelf(wire: ActorWire, dt: number): void {
+  private mirrorSelf(wire: ActorWire): void {
     const player = this.player;
     const flags = num(wire, ACTOR_FLAGS, 0);
     const alive = (flags & F_ALIVE) !== 0;
@@ -2519,7 +2627,12 @@ export class ShipGame {
     player.deaths = num(wire, ACTOR_DEATHS, player.deaths);
     player.height = clamp(num(wire, ACTOR_HEIGHT, 1.8), 0.9, 2);
     player.scoped = (flags & F_SCOPED) !== 0;
+    const wasReloading = player.reloading;
     player.reloading = (flags & F_RELOADING) !== 0;
+    // 加入者自己的换弹开头音：本地不跑 `startReload`（玩法在房主那边），快照里
+    // 「换弹」位刚翻真时没人放那声「拔弹匣」，在这里补。死亡角色会原样带着
+    // 换弹位，`alive` 兜一道
+    if (player.reloading && !wasReloading && alive) gameAudio.reload('out');
     player.netCanLoadout = (flags & F_LOADOUT) !== 0;
     const wireGrenades = num(wire, ACTOR_GRENADES, player.grenades);
     // 加入者不跑本地玩法：快照里雷少了一颗 = 房主刚把他手里那颗扔出去了。
@@ -2544,31 +2657,29 @@ export class ShipGame {
     const x = num(wire, ACTOR_X, player.pos.x);
     const y = num(wire, ACTOR_Y, player.pos.y);
     const z = num(wire, ACTOR_Z, player.pos.z);
-    if (alive) {
-      /*
-       * 预测对账（死区策略，常量见文件头 `SELF_*`）。
-       *
-       * 本地预测（`updateNetMovement`）和房主跑同一段移动物理，正常偏差厘米级
-       * —— 死区内**一个字都不改**：快照位置落后半个管线（≈40ms），往它阻尼
-       * 等于把刚预测掉的延迟加回来，这正是旧版「走路像在泥里」的根因。
-       *
-       * 超出死区才纠：小偏按 `SELF_CORRECT_RATE` 抹平（顺滑），大偏（复活 /
-       * 被爆炸推开 / 预测撞歪）直接就位 —— 位置和速度都换成房主的，从那一帧
-       * 起两端重新同源。速度只在就位时抄房主的：平时本地模拟的更「新」。
-       */
-      const dx = x - player.pos.x;
-      const dy = y - player.pos.y;
-      const dz = z - player.pos.z;
-      const drift = Math.hypot(dx, dz);
-      if (Math.abs(dy) > SELF_SNAP_Y || drift > SELF_SNAP_DIST) {
-        player.pos.set(x, y, z);
-        player.vel.set(num(wire, ACTOR_VX, 0), 0, num(wire, ACTOR_VZ, 0));
-      } else if (drift > SELF_DRIFT_DEAD) {
-        const k = Math.min(1, dt * SELF_CORRECT_RATE);
-        player.pos.x += dx * k;
-        player.pos.z += dz * k;
-      }
-    } else {
+
+    /*
+     * 快照落账：位置和速度存进基准，真正的对账在 `reconcileSelf` 里
+     * **每帧连续**做（这里只记事实、不动位置 —— 在快照帧拽位置会和每帧的
+     * 本地预测叠成 60Hz 锯齿）。
+     *
+     * 房主不发 vy：用相邻两帧快照的 y 差分估一个，**只**给硬就位时的 vel.y 用。
+     * 差分对 y 离散完全不可信 —— 房主跨一级台阶那帧 y 瞬跳 0.3m，按 16ms 一算
+     * 就是 18m/s 的假 vy（外推版就是被它送进自激振荡的），所以超过
+     * `SELF_VY_EST_MAX` 一律估 0，不做夹幅：夹幅会把假值留着继续害人。
+     */
+    const now = performance.now();
+    const snapDt = this.hasSelfMirror
+      ? clamp((now - this.selfMirrorAt) / 1000, 1 / 120, 0.2)
+      : 0;
+    const rawVy = snapDt > 0 ? (y - this.selfMirrorBase.y) / snapDt : 0;
+    const estVy = Math.abs(rawVy) <= SELF_VY_EST_MAX ? rawVy : 0;
+    this.selfMirrorBase.set(x, y, z);
+    this.selfMirrorVel.set(num(wire, ACTOR_VX, 0), estVy, num(wire, ACTOR_VZ, 0));
+    this.selfMirrorAt = now;
+    this.hasSelfMirror = true;
+
+    if (!alive) {
       player.pos.set(x, y, z);
     }
 
@@ -2587,9 +2698,58 @@ export class ShipGame {
       // （面朝敌方复活点）自己纠一次，否则会保留死亡瞬间的朝向
       player.yaw = this.spawnFacingYaw(player.team, player.pos);
       player.pitch = 0;
+      // 基准跟着复位：上面落账那步拿死亡期的旧 y 差分估出了一个野 vy，
+      // 不清掉的话 reconcileSelf 头几帧会按它把人从复活点拽走
+      this.selfMirrorBase.set(x, y, z);
+      this.selfMirrorVel.set(0, 0, 0);
+      this.selfMirrorAt = performance.now();
       this.deathCam.end();
     } else if (!alive && wasAlive) {
       this.beginGuestDeath();
+    }
+  }
+
+  /**
+   * 加入者的移动对账：**每帧连续纠偏**，目标 = 裸快照位置，死区随速度放宽。
+   *
+   * 设计要点（两代旧方案的教训都写死了，别改回去）：
+   * · 纠偏必须逐帧做 —— 只在快照帧拽会和每帧推进的预测叠成 60Hz 锯齿，相机
+   *   直接吃 `player.pos`，锯齿一比一上屏就是「一卡一卡」。
+   * · 目标**不做速度外推** —— 外推目标会越过房主的真实位置冲进墙/台阶里；
+   *   更致命的是垂直外推叠加「台阶差分假 vy」会自激振荡（见文件头演进史②）。
+   *   外推缺的那段管线漂移改由**死区随速度放宽**来盖：死区 = 基础项 +
+   *   0.08 × 快照速度，正常跑动（漂移 ≈ 管线 × 跑速 ≤ 0.8m）永远在死区内，
+   *   纠偏只在真发散时才醒。
+   * · 垂直**只有硬就位一条路**，没有轻拉：站地/楼梯本地地面物理就是事实，
+   *   轻拉只会被差分噪声和台阶跳变拽出毛刺；就位阈值 1.6m 盖过「合法跳跃/
+   *   坠落 × 管线」的最大瞬时差，不会误伤。
+   */
+  private reconcileSelf(dt: number): void {
+    if (!this.hasSelfMirror || !this.player.alive) return;
+    const p = this.player;
+
+    const dx = this.selfMirrorBase.x - p.pos.x;
+    const dyRaw = this.selfMirrorBase.y - p.pos.y;
+    const dz = this.selfMirrorBase.z - p.pos.z;
+    const drift = Math.hypot(dx, dz);
+
+    // 硬错位（掉出世界被捞回 / 被外力挪 / 长时间断流）：房主权威直接就位。
+    // 不挪 selfMirrorBase/At —— 基准永远来自相邻两帧**真实**快照，就位污染
+    // 基准会让下一帧差分估出反号假 vy，正是上一版自激振荡的燃料
+    if (Math.abs(dyRaw) > SELF_SNAP_Y || drift > SELF_SNAP_DIST) {
+      p.pos.copy(this.selfMirrorBase);
+      p.vel.copy(this.selfMirrorVel);
+      return;
+    }
+
+    // 死区随快照速度放宽：跑得越快，「快照天然落后管线」造成的漂移越大
+    const speed = Math.hypot(this.selfMirrorVel.x, this.selfMirrorVel.z);
+    const dead = SELF_DRIFT_DEAD + speed * SELF_DEADZONE_PER_SPEED;
+    if (drift > dead) {
+      // 指数逼近（1 - e^(-k·dt)），和 math.damp 同一套，帧率无关
+      const k = 1 - Math.exp(-SELF_CORRECT_RATE * dt);
+      p.pos.x += dx * k;
+      p.pos.z += dz * k;
     }
   }
 
@@ -2644,10 +2804,13 @@ export class ShipGame {
         const dir = { x: event.dx, y: event.dy, z: event.dz };
         this.effects.bloodBurst(point, dir, event.head);
         this.lastDamage.set(event.v, event.dmg);
+        // 加入者看到别人被打也要有受击动作（自己那一份走下面的 hurt 分支）
+        if (event.v !== this.selfActorId) this.actorViewOf(event.v)?.playHit(event.head);
 
         if (event.v === this.selfActorId) {
           gameAudio.impact(point.x, point.y, point.z, 'flesh', { own: true });
           this.player.addShake(Math.min(0.5, event.dmg / 90));
+          this.applyHitDirection(dir);
           this.options.onDamage?.(Math.min(1, event.dmg / 45));
           const attacker = event.a ? this.replicas.get(event.a) : null;
           if (attacker) {
@@ -2662,6 +2825,12 @@ export class ShipGame {
         } else if (event.a === this.selfActorId) {
           gameAudio.impact(point.x, point.y, point.z, 'flesh', { own: true });
           this.recordHit(event.head, point);
+          // 和房主侧同一条限流规则（60ms），否则连发命中的震动会粘成一片
+          const now = performance.now();
+          if (now - this.lastHitShakeAt > 60) {
+            this.lastHitShakeAt = now;
+            this.player.addShake(event.head ? 0.2 : 0.11);
+          }
         }
         break;
       }
@@ -2714,6 +2883,11 @@ export class ShipGame {
           new THREE.Vector3(event.x, event.y, event.z),
         );
         if (distance < 22) this.player.addShake((1 - distance / 22) * 0.9);
+        // 和房主 `detonate` 同一套「被炸懵」反馈 —— 加入者不能少一半
+        if (distance < 16) {
+          gameAudio.tinnitus(1 - distance / 16);
+          this.options.onFlash?.(Math.min(1, (1 - distance / 14) * 1.15));
+        }
         break;
       }
 
@@ -2761,11 +2935,19 @@ export class ShipGame {
       light: false,
     });
     const endT = event.t > 0 ? Math.min(event.t, 90) : 60;
-    this.effects.spawnTracer(muzzle, {
-      x: origin.x + dir.x * endT,
-      y: origin.y + dir.y * endT,
-      z: origin.z + dir.z * endT,
-    });
+    // 曳光分色和房主 `onShot` 同一条规则：人机暖金、真人紫色（人机 id 固定
+    // `bot-` 前缀，跨端确定，不依赖本机是否已建出副本）
+    this.effects.spawnTracer(
+      muzzle,
+      {
+        x: origin.x + dir.x * endT,
+        y: origin.y + dir.y * endT,
+        z: origin.z + dir.z * endT,
+      },
+      event.id.startsWith('bot-') ? TRACER_COLOR_BOT : TRACER_COLOR_HUMAN,
+    );
+    // 加入者侧的弹头擦身声（房主侧在 `onShot` 钩子里，两端听感要一致）
+    this.playWhiz(origin, dir, endT);
   }
 
   /** 按角色 id 找它的第三人称视图（挂 Fire 动画用；找不到就静默跳过）。 */
@@ -2779,6 +2961,50 @@ export class ShipGame {
     return this.replicaViews.get(id) ?? null;
   }
 
+  /**
+   * 被打中的**方向**也进镜头：子弹从左前方来，画面就往右倒一下。
+   *
+   * 用 `punchRoll`（绕视线滚转）而不是转 yaw —— 它不改变前向量，所以
+   * 「被谁打」这件事有身体感，但准星和弹道的关系一点没变。
+   * 幅度 1.2° 封顶，和受击震屏是两个通道（一个晃、一个倒）。
+   */
+  private applyHitDirection(dir: Point3): void {
+    // 玩家右向量 = (cos yaw, 0, -sin yaw)；弹道在这个轴上的投影就是「从哪边来」
+    const side = dir.x * Math.cos(this.player.yaw) - dir.z * Math.sin(this.player.yaw);
+    this.player.addPunch(0, -side * 1.2);
+  }
+
+  /**
+   * 弹头擦身而过的一声「啪」。
+   *
+   * 判定在**世界坐标**里做：把玩家的眼睛投影到弹道线段上，最近距离在
+   * `WHIZ_RADIUS` 以内才播。这是玩家判断「刚才那枪是打我」的最本能信号 ——
+   * 比屏幕上的红弧更早，也不需要抬头看。
+   *
+   * 只对「别人的枪」调用：自己开的枪不可能擦过自己。
+   * `length` 是最远命中距离（打偏时调用方换成 60 米）。
+   */
+  private playWhiz(origin: Point3, dir: Point3, length: number): void {
+    if (!this.player.alive) return;
+    const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+    const ux = dir.x / len;
+    const uy = dir.y / len;
+    const uz = dir.z / len;
+
+    const eye = this.player.eyePos;
+    const dx = eye.x - origin.x;
+    const dy = eye.y - origin.y;
+    const dz = eye.z - origin.z;
+    // 最近点在弹道上的参数（dir 已归一化）
+    const t = dx * ux + dy * uy + dz * uz;
+    // t < 0.6：枪口就贴着我，这一下该走受击/枪声，不是擦身
+    if (t <= 0.6 || t > length) return;
+
+    const dist = Math.hypot(dx - ux * t, dy - uy * t, dz - uz * t);
+    if (dist > WHIZ_RADIUS) return;
+
+    gameAudio.whiz(origin.x + ux * t, origin.y + uy * t, origin.z + uz * t, 1 - dist / WHIZ_RADIUS);
+  }
   private actorIdentity(id: string): { name: string; team: Team } {
     if (id === this.selfActorId) return { name: this.player.name, team: this.player.team };
     const replica = this.replicas.get(id);
@@ -2950,7 +3176,7 @@ export class ShipGame {
     const shotsBefore = this.player.shotsFired;
     this.player.update(dt, playerFrame, this.playerDeps);
     if (this.player.shotsFired > shotsBefore) {
-      this.viewModel.triggerKick(weaponFeel(this.player.weapon).kick);
+      this.viewModel.triggerKick(weaponFeel(this.player.weapon).kick, this.player.recoilBurst);
     }
 
     // 网络对端：房主替他们跑同一套 `Player.update`（位置、开火、换弹、扔雷）
@@ -3130,8 +3356,10 @@ export class ShipGame {
     }
 
     // 开镜时 FOV 收到 `SCOPED_FOV`：这是「狙击枪」这个武器定位的全部视觉表达。
-    // 死亡时必须收回 —— 否则开着镜被打死，整段观战视角都是 22°
-    const targetFov = player.alive && player.scoped ? SCOPED_FOV : this.settings.fov;
+    // 死亡时必须收回 —— 否则开着镜被打死，整段观战视角都是 22°。
+    // 击杀 FOV pop 叠在目标值上（开镜击杀也弹），约 0.2s 衰减归零
+    this.fovPop = damp(this.fovPop, 0, 12, dt);
+    const targetFov = (player.alive && player.scoped ? SCOPED_FOV : this.settings.fov) + this.fovPop;
     if (Math.abs(this.camera.fov - targetFov) > 0.4) {
       const next = this.camera.fov + (targetFov - this.camera.fov) * Math.min(1, dt * 14);
       this.camera.fov = next;
@@ -3145,6 +3373,8 @@ export class ShipGame {
 
   private updateViewModel(dt: number): void {
     const player = this.player;
+    // 袖子跟队色（带缓存，换队才写材质）：联机选阵营 / 重开 / 回单人统一走这里
+    this.viewModel.setTeam(player.team);
     // 死亡进度直接复用倒地时间轴：镜头往下掉的同时枪也在往下掉，两者是一件事
     const dying = player.alive
       ? 0
@@ -3321,7 +3551,7 @@ export class ShipGame {
    * 击杀就会突然判负结束；两个时钟也只在没开局时跟着换。引擎不重建 ——
    * 这几处（`start` 重置时钟、`checkMatchEnd` 判分、HUD 显示目标）都是即时取值。
    *
-   * 唯一需要动世界的是 `teamSize`：1v1 / 3v3 / 6v6 换档必须重铺人机（见
+   * 唯一需要动世界的是 `teamSize`：1v1 ~ 6v6 换档必须重铺人机（见
    * `rebuildTeams`）。联机中不碰 —— 房主的世界由房主自己维护。
    */
   setRules(rules: MatchRules): void {

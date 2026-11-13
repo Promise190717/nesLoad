@@ -2,13 +2,14 @@ import { Vector3 } from 'three';
 import { gameAudio } from './audio';
 import {
   type CombatHooks,
+  SPREAD_RECOVER_TIME,
   currentSpread,
   fireWeapon,
   grenadeBlast,
   meleeSwing,
   nowSeconds,
 } from './combat';
-import type { Effects } from './effects';
+import { type Effects, TRACER_COLOR_HUMAN } from './effects';
 import type { InputFrame } from './input';
 import type { NavGrid } from './level';
 import { nearestWalkablePoint } from './level';
@@ -23,7 +24,7 @@ import {
   resetMotionState,
 } from './physics';
 import type { Actor, PrimaryId, Team, WeaponId } from './types';
-import { HEAVY_REACH_BONUS, SWITCH_PROFILES, WEAPONS, weaponFeel } from './weapons';
+import { HEAVY_REACH_BONUS, SWITCH_PROFILES, WEAPONS, weaponFeel, weaponMobility } from './weapons';
 
 /**
  * 玩家 —— 移动、视角、武器状态机、开火。
@@ -49,6 +50,66 @@ const JUMP_SPEED = 6.6;
 const SPEED_RUN = 5.5;
 const SPEED_WALK = 2.8;
 const STEP_UP = 0.45;
+
+/**
+ * 连射期间的**后坐回正折扣**（乘在 `recoil.recover` 上）。
+ *
+ * CSGO 的 view punch 在开火期间几乎不回正、停火后整段快速归零。只用一个固定
+ * 衰减速率做不到这件事：想「连射能累积到要压枪」就得把速率调慢，可那样单发
+ * 点射也会越点越高。所以要按「是否还在开火」分两档。
+ *
+ * 🔴 这个数直接决定**按住时能顶到多高**：
+ *
+ *   稳态后坐 = up / (1 − e^(−recover × scale × interval))
+ *
+ * 只抬 `weapons.ts` 里的 `up`、不动这里，衰减会吃掉一半增量 —— 上一版
+ * （0.33 → 0.24，用户反馈「抬升幅度太小、压枪太容易」）就是被这条吃掉的。
+ * 2026-11-13 第七次调 0.19 + up 3.4 过头了（用户「太快也太高」），第八次收到
+ * 0.22 —— AK 按住到稳态约 21°、10 发约 16.5°，必须往下拖鼠标但不至于扫天；
+ * 松手后按表里的 `recover` 回位，0.3~0.5 秒重新变准。
+ */
+const RECOIL_HOLD_SCALE = 0.22;
+
+/**
+ * 视角追上「后坐目标值」的速度（指数逼近系数）。
+ *
+ * 击发时只把目标值加一截，实际视角用它平滑追过去 —— 0.105 ≈ 95ms 追上，仍比
+ * 射击间隔（100ms）略快，所以连发看起来是**连续的向上推**，不是每发一次台阶。
+ * 第七次后坐调用户嫌「顶得太快」，从 12 收到这里；再小（<10）就追不上、手感发飘。
+ */
+const RECOIL_PUSH_FOLLOW = 10.5;
+
+/**
+ * 连发判定窗口（秒）：两发间隔超过它就算「重新起手」，连发力度归零。
+ *
+ * 取值必须**大于**最慢自动武器的射击间隔（AK 600 RPM = 0.10s、M4 685 RPM =
+ * 0.088s），又要小于「点射两下」的手速间隔（约 0.25s）。0.34 让「一梭子」
+ * 和「快速点两下」能被分开 —— 后者不该越打越晃。
+ */
+const BURST_WINDOW = 0.34;
+
+/**
+ * 连发力度的饱和点（发）。打到这么多发就到顶，再打不会更狠。
+ *
+ * AK 600 RPM 下约 0.6 秒 —— 刚好是一梭子里「手感已经压不住」的那一段。
+ * 定得太高，长按会一路加码到不可控（那是玩法改动）；7 发封顶只是让
+ * 「第一发」和「一梭子」看起来明显不是同一件事。
+ */
+const BURST_PEAK = 7;
+
+/**
+ * 震屏的最长寿命（秒）。超过它归零，避免极小的余波永远清不掉。
+ * 视觉上真正的衰减在 `shakeWave` 的指数项里（~0.11s 掉到 1/e）。
+ */
+const SHAKE_LIFE = 1.1;
+
+/** 落地沉坠的下限 / 上限（米）。负值 = 画面往下沉 */
+const LAND_DIP_MIN = 0.018;
+/**
+ * 上限 5cm ≈ 1.7°（眼高 1.7m 时）。再深就不是「坠了一下」而是「跪下了」——
+ * 从二楼跳下来的最大落速已经在 14m/s 以上，不封顶会沉到 10cm。
+ */
+const LAND_DIP_MAX = 0.05;
 
 /**
  * 身高。**恒定** —— 蹲下功能已整体移除（2026-11-13 用户要求，起因为 Ctrl+W 关标签页，
@@ -180,7 +241,7 @@ interface Ammo {
 }
 
 /**
- * 构造参数。默认值 = 单机模式下的那个玩家（`id = 'player'`、保卫者、本机）。
+ * 构造参数。默认值 = 单机模式下的那个玩家（`id = 'player'`、潜伏者、本机）。
  *
  * 联机时这个类被复用成**三个角色**：
  *   ① 房主自己的玩家（`local = true`，默认）；
@@ -332,10 +393,40 @@ export class Player implements Actor {
   private pendingMelee: boolean | null = null;
 
   /* ---- 后坐与散布 ---- */
+  /** 实际叠加到 `aimPitch/aimYaw` 上的后坐偏移（相机和弹道都吃它） */
   private recoilPitch = 0;
   private recoilYaw = 0;
+  /**
+   * 后坐的**目标值**。击发时只给目标加一截，实际视角每帧用 `RECOIL_PUSH_FOLLOW`
+   * 追它 —— 于是连发是「有人缓缓把准星往上推」，不是每发一帧硬跳。
+   *
+   * 为什么要拆成两个值：单帧瞬跳在 60fps 下看得很清楚（画面突然糊一下），
+   * 而 CSGO 的连发上抬是连续的。目标值负责「这一梭子顶到多高」，实际值负责「怎么上去」。
+   */
+  private recoilPitchTarget = 0;
+  private recoilYawTarget = 0;
   private spreadAccum = 0;
+  /**
+   * 连发累积的「不恢复窗口」（秒）。每次击发重置成 `max(0.12, interval × 1.5)`。
+   *
+   * 这是 CSGO `accuracy penalty` 的关键结构：**按住扳机期间散布只累加、不恢复**，
+   * 松手之后才开始线性归零。以前这里没有这个窗口、每帧按 4.5 指数衰减，
+   * 100ms 的射击间隔里就衰减掉三成，稳态只有 1.7 发 `perShot` 的量 ——
+   * 连发累积永远到不了 `max`，扫射和点射一样准（用户两次反馈「太准」的根因）。
+   */
+  private spreadHold = 0;
   private fireCooldown = 0;
+  /**
+   * 连发累积（0..1）。**纯表现**，一个字节都不进弹道。
+   *
+   * 真实的自动武器连发时，枪会越打越晃：第一发是「一顶」，后面几发是「被按着
+   * 不放的东西在跳」。`recoilPitch/Yaw` 表达的是「准星被推上去」（玩法），
+   * 这个值表达的是「枪身和画面有多失控」（表现），两者分开调互不牵连。
+   */
+  private burstCount = 0;
+  /** 距离上一发的间隔。> 0 表示还在同一梭子里 */
+  private burstTimer = 0;
+  private burstEnergy = 0;
   /**
    * 开火预输入剩余时长（秒）。见 `FIRE_BUFFER`。
    *
@@ -392,7 +483,35 @@ export class Player implements Actor {
 
   /* ---- 相机 ---- */
   private bobPhase = 0;
+  /**
+   * 震屏的**幅度**（0..1 量级）。真正的位移由 `shakeWave` 按时间算出来。
+   *
+   * 上一版是每帧 `Math.random()` 直接乘幅度：帧率越高抖得越碎，而且相邻两帧
+   * 毫无关联 —— 看起来像画面在「噪」，不像被什么东西撞了一下。现在是一个
+   * 有频率、有相位、随时间指数衰减的振荡，帧率无关，也更像物理冲击。
+   */
   private shake = 0;
+  /** 当前这次冲击已经过去多久（秒）。`addShake` 时会重置 */
+  private shakeTime = 0;
+  /** 三个轴的相位，每次触发随机 —— 每一下的晃动方向都不一样，不会变成机械循环 */
+  private shakeSeedX = rand(0, Math.PI * 2);
+  private shakeSeedY = rand(0, Math.PI * 2);
+  private shakeSeedZ = rand(0, Math.PI * 2);
+  /**
+   * 落地沉坠（米，负值 = 画面下沉）。
+   *
+   * 落地只给震屏是不够的：震屏是「晃」，沉坠是「整个人往下坠了一下」。
+   * 只进相机（`bobOffset`），物理位置不动。
+   */
+  private landDip = 0;
+  /**
+   * 横向移动的相机侧倾（弧度）。
+   *
+   * 往右平移时画面极轻微地往左倒一点，模拟人侧身移动时头部的平衡。CS 没有
+   * 这个（它的画面是硬的），但这一层是「真实感」而不是「竞技公平性」——
+   * 幅度压在 0.8° 以内，只在 `viewRoll` 上，不影响前向量。
+   */
+  private strafeRoll = 0;
   /**
    * 上台阶的**视觉补偿**。
    *
@@ -420,7 +539,7 @@ export class Player implements Actor {
     this.isPlayer = options.local ?? true;
     this.primary = options.primary ?? 'ak47';
     this.weapon = this.primary;
-    // 面向敌方半场：保卫者（出生在 z 负）朝 +z 看，潜伏者朝 -z 看。
+    // 面向敌方半场：潜伏者（出生在 z 负）朝 +z 看，保卫者朝 -z 看。
     // 和 `Bot` 的初值同一条规则，引擎重生时还会按敌方复活点再纠一次
     this.yaw = this.team === 0 ? Math.PI : 0;
     this.ammo[this.primary].mag = WEAPONS[this.primary].magazine;
@@ -458,28 +577,55 @@ export class Player implements Actor {
     return clamp(this.pitch + this.recoilPitch, -PITCH_LIMIT, PITCH_LIMIT);
   }
 
+  /**
+   * 连发力度 0..1（第一发约 0.14，第 7 发封顶）。
+   *
+   * 给枪模和相机用：`viewmodel.ts` 拿它放大后坐幅度、加横向摆动，引擎拿它
+   * 叠加震屏。**弹道不读它** —— `aimYaw/aimPitch` 里没有这个值。
+   */
+  get recoilBurst(): number {
+    return this.burstEnergy;
+  }
+
   /** 相机用的角度（再叠屏幕震动） */
   get viewYaw(): number {
-    const jitter = this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.045 : 0;
-    return this.yaw + this.recoilYaw + jitter;
+    // 0.03 rad ≈ 1.7°（shake=1 时）。上一版是 ±0.0225 rad 的白噪声，
+    // 峰值差不多，但那是一帧一个随机数，看起来是「噪」不是「撞」
+    return this.yaw + this.recoilYaw + this.shakeWave(52, this.shakeSeedX) * this.shake * 0.03;
   }
 
   get viewPitch(): number {
-    const jitter = this.shake > 0.001 ? (Math.random() - 0.5) * this.shake * 0.045 : 0;
     // 刺击不改镜头俯仰 —— 攻击是刀的动作，不是相机的（需求：不许用转相机来
-    // 表现攻击）。命中/弹刀的顿挫走 `addShake`
+    // 表现攻击）。命中/弹刀的顿挫走 `addShake`。
+    // 两个轴的频率刻意错开（52 / 37）：同步会变成一条 45° 的直线来回甩
+    const jitter = this.shakeWave(37, this.shakeSeedY) * this.shake * 0.03;
     return clamp(this.pitch + this.recoilPitch + this.punchPitch + jitter, -PITCH_LIMIT, PITCH_LIMIT);
   }
 
   /**
    * 相机侧倾（弧度）。
    *
-   * 只有**开火冲击**会写它：绕视线滚转**不改变前向量**，所以它是最便宜、
-   * 也是唯一「零瞄准代价」的力度表达 —— 大狙开一枪画面被掀一下，但准星
-   * 和弹道的关系一点没变。
+   * 三个来源，全是「零瞄准代价」：绕视线滚转**不改变前向量**。
+   *   `punchRoll`  开火冲击（大狙开一枪画面被掀一下）
+   *   `strafeRoll` 横向移动（往右平移时画面极轻微地倒一点）
+   *   `shake`      冲击的滚转分量（第三频率，避免和俯仰同步）
    */
   get viewRoll(): number {
-    return this.punchRoll;
+    return this.punchRoll + this.strafeRoll + this.shakeWave(29, this.shakeSeedZ) * this.shake * 0.02;
+  }
+
+  /**
+   * 阻尼振荡：`sin(ωt + φ) × e^(-λt)`。
+   *
+   * 为什么要换成这个而不是每帧 `Math.random()`：
+   *   ① 帧率无关 —— 144Hz 和 60Hz 抖出来的幅度与节奏一样；
+   *   ② 有方向感 —— 一次冲击是「甩出去、弹回来、收住」，不是原地噪点；
+   *   ③ 能叠 —— 连发时每发重置 `shakeTime`，波形从峰值重新开始，听起来/看起来
+   *      就是连续撞击，而不是一堆不相关的噪声相加。
+   */
+  private shakeWave(freq: number, phase: number): number {
+    if (this.shake <= 0.001) return 0;
+    return Math.sin(this.shakeTime * freq + phase) * Math.exp(-this.shakeTime * 9);
   }
 
   /** 走路带来的相机上下浮动。只影响画面，不影响弹道。 */
@@ -487,11 +633,17 @@ export class Player implements Actor {
     const speed = Math.hypot(this.vel.x, this.vel.z);
     // 台阶补偿和走路浮动是两个来源，但都只改画面，合在一个返回值里
     let x = 0;
-    let y = this.stepLift;
+    let y = this.stepLift + this.landDip;
     if (this.onGround && speed > 0.5) {
       const amplitude = Math.min(speed / SPEED_RUN, 1) * 0.018;
       x = Math.sin(this.bobPhase) * amplitude;
       y += Math.abs(Math.cos(this.bobPhase)) * amplitude * 0.8;
+    }
+    // 冲击的位置分量：低频、毫米级。角度抖动负责「画面在晃」，位移负责
+    // 「脚下在震」—— 只有角度时，远处的物体几乎不动，缺一点体重
+    if (this.shake > 0.001) {
+      x += this.shakeWave(41, this.shakeSeedZ) * this.shake * 0.012;
+      y += this.shakeWave(31, this.shakeSeedX) * this.shake * 0.008;
     }
     return { x, y };
   }
@@ -547,9 +699,39 @@ export class Player implements Actor {
     this.ammo[weapon].mag = Math.max(0, Math.round(mag));
   }
 
-  /** 屏幕震动（爆炸、被打） */
+  /**
+   * 记一发「开火」，推进连发力度。
+   *
+   * 单人和房主走 `handleFire`；**加入者不跑 `handleFire`**（他不结算自己，
+   * 只补表现），所以 `engine.playLocalShotFeedback` 也会直接调这个方法 ——
+   * 两边的连发曲线必须是同一份，否则联机时「我这边越打越晃、队友看我没变」。
+   */
+  registerBurstShot(): void {
+    this.burstCount = this.burstTimer > 0 ? this.burstCount + 1 : 0;
+    this.burstTimer = BURST_WINDOW;
+    this.burstEnergy = Math.max(this.burstEnergy, Math.min(1, this.burstCount / BURST_PEAK));
+  }
+
+  /**
+   * 屏幕震动（爆炸、被打、开枪、命中）。
+   *
+   * 触发规则刻意是「更强才重置波形」：
+   *   - 新冲击 ≥ 当前剩余幅度 → 从峰值重开（`shakeTime = 0`），玩家感到「又挨了一下」；
+   *   - 更弱 → 只按最大值留存，不重置相位。否则连发时每发都重开，波形永远
+   *     停在第一个四分之一周期，看起来是「抽帧」而不是「连续震动」。
+   */
   addShake(amount: number): void {
-    this.shake = Math.max(this.shake, amount);
+    if (amount <= 0) return;
+    if (amount >= this.shake) {
+      this.shake = amount;
+      this.shakeTime = 0;
+      // 每次触发换一组相位：每一下的方向都不同，不会变成可预测的机械循环
+      this.shakeSeedX = rand(0, Math.PI * 2);
+      this.shakeSeedY = rand(0, Math.PI * 2);
+      this.shakeSeedZ = rand(0, Math.PI * 2);
+    } else {
+      this.shake = Math.max(this.shake, amount);
+    }
   }
 
   /**
@@ -597,7 +779,16 @@ export class Player implements Actor {
     this.throwReturn = null;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
+    this.recoilPitchTarget = 0;
+    this.recoilYawTarget = 0;
+    // 连发 / 沉坠 / 侧倾全部归零：重生是硬切，残留的半截波形会带进新一条命
+    this.burstCount = 0;
+    this.burstTimer = 0;
+    this.burstEnergy = 0;
+    this.landDip = 0;
+    this.strafeRoll = 0;
     this.spreadAccum = 0;
+    this.spreadHold = 0;
     this.fireCooldown = 0;
     this.fireBuffer = 0;
     this.punchPitch = 0;
@@ -606,6 +797,7 @@ export class Player implements Actor {
     this.boltTotal = 0;
     this.boltSoundStage = 0;
     this.shake = 0;
+    this.shakeTime = 0;
     this.height = STAND_HEIGHT;
 
     // 重生是「重新拿枪」：切枪锁定和挥砍动作一起清掉，
@@ -659,6 +851,7 @@ export class Player implements Actor {
     this.cooking = false;
     this.scoped = false;
     this.spreadAccum = 0;
+    this.spreadHold = 0;
     this.fireCooldown = 0;
     // 预输入跟着作废：换枪之后那一枪不该再补出来（否则会「切完枪自己响一发」）
     this.fireBuffer = 0;
@@ -728,7 +921,12 @@ export class Player implements Actor {
     this.reloadTimer = 0;
     this.reloadDuration = spec.reload;
     this.reloadSoundPlayed = false;
-    if (!this.remote) gameAudio.reload('out');
+    // 自己的全音量；别人（房主权威模拟里的远端玩家）按胸口高度空间化
+    if (this.remote) {
+      gameAudio.reload('out', { x: this.pos.x, y: this.pos.y + 1.4, z: this.pos.z });
+    } else {
+      gameAudio.reload('out');
+    }
   }
 
   /* ============================================================
@@ -753,11 +951,16 @@ export class Player implements Actor {
     if (this.onGround && speed > 0.6) this.bobPhase += dt * speed * 1.35;
     else this.bobPhase += dt * 0.6;
     this.stepLift = damp(this.stepLift, 0, 22, dt);
-    this.shake = damp(this.shake, 0, 7, dt);
+    this.advanceCameraLean(dt);
+    this.advanceShake(dt);
+    this.advanceBurst(dt);
     this.punchPitch = damp(this.punchPitch, 0, 26, dt);
     this.punchRoll = damp(this.punchRoll, 0, 16, dt);
-    this.recoilPitch = damp(this.recoilPitch, 0, 7.5, dt);
-    this.recoilYaw = damp(this.recoilYaw, 0, 7.5, dt);
+    // 加入者不跑 `update()`（也就没有 `applyRecoil`），后坐推进和 `spreadHold`
+    // 的倒计时都要在这里补一份 —— 和房主同一条 `advanceRecoilAim`，否则联机两边
+    // 「连发时视角跑多快」不一样。
+    this.advanceRecoilAim(dt);
+    this.spreadHold = Math.max(0, this.spreadHold - dt);
 
     // 挥砍的时间轴也要在这里推进：加入者不跑 `update()`，不推的话刀永远不动
     // （判定被 `meleeVisual` 关掉，`deps` 只是签名要，不会真的扫人）
@@ -767,9 +970,17 @@ export class Player implements Actor {
       const spec = WEAPONS[this.weapon];
       if (this.reloadDuration <= 0) this.reloadDuration = spec.reload;
       this.reloadTimer = Math.min(this.reloadDuration, this.reloadTimer + dt);
+      // 加入者也补中段那声「弹匣入位」：进度是本地近似推的（见上），音效跟着
+      // 本地时间轴走 —— 差几十毫秒听不出来，但完全没有就是「哑巴换弹」
+      if (!this.reloadSoundPlayed && this.reloadTimer > this.reloadDuration * 0.55) {
+        this.reloadSoundPlayed = true;
+        gameAudio.reload('in');
+      }
     } else {
       this.reloadTimer = 0;
       this.reloadDuration = 0;
+      // 复位中段音标记：下一次快照把「换弹」位翻真时才能再响一声
+      this.reloadSoundPlayed = false;
     }
 
     // 投掷动画也只推进计时器：`advanceThrow` 会发起切枪，加入者不该自己换枪
@@ -808,7 +1019,9 @@ export class Player implements Actor {
    */
   predictJump(): void {
     if (!this.onGround) return;
-    this.vel.y = JUMP_SPEED;
+    // 必须和房主 `handleActions` 里那条跳是同一个式子（含武器机动性倍率），
+    // 否则加入者预跳和房主对账会差出一截
+    this.vel.y = JUMP_SPEED * weaponMobility(this.weapon).jump;
     this.onGround = false;
   }
 
@@ -853,7 +1066,7 @@ export class Player implements Actor {
       // 全部由 `death-cam.ts` 接管，否则「人躺下了但视角还站着」这种矛盾
       // 会同时存在于两个文件里，改哪边都不对。
       this.deathTime += dt;
-      this.shake = damp(this.shake, 0, 7, dt);
+      this.advanceShake(dt);
       return;
     }
 
@@ -862,6 +1075,8 @@ export class Player implements Actor {
     this.aliveTime += dt;
     this.applyMovement(dt, frame, deps);
     this.applyRecoil(dt);
+    this.advanceBurst(dt);
+    this.advanceCameraLean(dt);
     this.advanceSwitch(dt);
     this.handleReload(dt);
     this.handleActions(frame, deps);
@@ -913,8 +1128,8 @@ export class Player implements Actor {
       wishZ /= wishLength;
     }
 
-    let speed = SPEED_RUN;
-    if (frame.walk) speed = SPEED_WALK;
+    let speed = SPEED_RUN * weaponMobility(this.weapon).speed;
+    if (frame.walk) speed = SPEED_WALK * weaponMobility(this.weapon).speed;
     if (this.scoped) speed *= 0.45;
     if (this.reloading) speed *= 0.92;
 
@@ -954,6 +1169,9 @@ export class Player implements Actor {
     if (!wasGrounded && this.onGround && fallSpeed < -6) {
       if (!this.remote) gameAudio.land();
       this.addShake(0.14);
+      // 落得越重沉得越深。只给相机 —— 下落速度超过 6m/s 才起算，
+      // 普通走楼梯不会触发（台阶是 `stepLift` 的另一条线）
+      this.landDip = -clamp((Math.abs(fallSpeed) - 6) * 0.012 + LAND_DIP_MIN, LAND_DIP_MIN, LAND_DIP_MAX);
     }
 
     // 相机浮动（脚步声已移除 —— 2026-11-13 用户要求整体去掉脚步功能）
@@ -987,16 +1205,110 @@ export class Player implements Actor {
   }
 
   private applyRecoil(dt: number): void {
-    this.recoilPitch = damp(this.recoilPitch, 0, 7.5, dt);
-    this.recoilYaw = damp(this.recoilYaw, 0, 7.5, dt);
-    // 连发累积散布的回退速度：4.5 意味着连发可以一直保持惩罚，
-    // 停火约 0.5 秒才散掉一半 —— 点射流和压制流的分界线就靠这个数撑着
-    this.spreadAccum = damp(this.spreadAccum, 0, 4.5, dt);
-    this.shake = damp(this.shake, 0, 7, dt);
-    // 镜头冲击比后坐衰减快得多（16 / 26 vs 7.5）：后坐是「持续顶」，
+    const spec = WEAPONS[this.weapon];
+    this.advanceRecoilAim(dt);
+
+    // 连发散布：按住不放时**完全不恢复**；松手 `spreadHold` 秒后按
+    // 「满值 / SPREAD_RECOVER_TIME」线性归零。用线性而不是指数，是照 CSGO 的
+    // `recovery_time` 做的 —— 玩家能估出「停火半秒重新变准」，指数在末尾拖长尾。
+    this.spreadHold = Math.max(0, this.spreadHold - dt);
+    if (this.spreadHold <= 0 && this.spreadAccum > 0) {
+      this.spreadAccum = Math.max(0, this.spreadAccum - (spec.spread.max / SPREAD_RECOVER_TIME) * dt);
+    }
+
+    // 镜头冲击比后坐衰减快得多（16 / 26 vs recover 5~8）：后坐是「持续顶」，
     // 冲击是「一下」。两者混在一起的话，连发会变成画面一直被推着走
     this.punchPitch = damp(this.punchPitch, 0, 26, dt);
     this.punchRoll = damp(this.punchRoll, 0, 16, dt);
+    this.advanceShake(dt);
+  }
+
+  /**
+   * 后坐的「目标值 → 实际视角」推进。玩家（`applyRecoil`）和加入者
+   * （`advanceVisual`）共用同一条曲线，否则联机两边视角跑得不一样。
+   *
+   * 两个速率叠在一起就是用户要的手感：
+   *   · **目标值**按 `recover × RECOIL_HOLD_SCALE` 慢回零（按住时）—— 决定这一梭子
+   *     最终把准星顶到多高；
+   *   · **实际视角**用 `RECOIL_PUSH_FOLLOW` 平滑追目标 —— 决定「怎么上去」。
+   * 击发只加目标，所以连发是一条连续的斜线，而不是每发一次瞬跳。
+   */
+  private advanceRecoilAim(dt: number): void {
+    const recover = WEAPONS[this.weapon].recoil.recover * (this.spreadHold > 0 ? RECOIL_HOLD_SCALE : 1);
+    this.recoilPitchTarget = damp(this.recoilPitchTarget, 0, recover, dt);
+    this.recoilYawTarget = damp(this.recoilYawTarget, 0, recover, dt);
+    this.recoilPitch = damp(this.recoilPitch, this.recoilPitchTarget, RECOIL_PUSH_FOLLOW, dt);
+    this.recoilYaw = damp(this.recoilYaw, this.recoilYawTarget, RECOIL_PUSH_FOLLOW, dt);
+  }
+
+  /**
+   * 一次击发的后坐 + 连发累积。**玩家和加入者共用同一条实现**。
+   *
+   * 房主（含单机）由 `handleFire` 调；加入者不跑 `handleFire`（弹道由房主结算），
+   * 但视角必须一样被顶上去 —— 否则联机时加入者完全不用压枪，和房主是两套手感。
+   *
+   * 🔴 这里只加**目标值**，不改实际视角：`advanceRecoilAim` 会用
+   * `RECOIL_PUSH_FOLLOW` 平滑追过去。直接改 `recoilPitch` 的话每一发都是一次
+   * 单帧瞬跳，看起来是「画面被撞了一下」，不是用户要的「鼠标被缓缓往上推」。
+   *
+   * `spreadHold` 在击发时续命，这就是「按住不放散布不恢复」的全部实现：
+   * 自动武器每 `interval` 击发一次，`interval × 1.5` 的窗口永远盖得住下一发。
+   */
+  applyShotRecoil(): void {
+    const spec = WEAPONS[this.weapon];
+    const kick = spec.recoil.up * (this.scoped ? 0.55 : 1);
+    this.recoilPitchTarget += kick * (Math.PI / 180);
+    // 水平只给「小幅度跳动」：单发最多 side 度，累积稳态约 1°（AK）。方向随机
+    // 是有意的 —— CSGO 的固定左右 pattern 需要玩家背表，我们没打算让人练压枪表
+    this.recoilYawTarget += rand(-1, 1) * spec.recoil.side * (Math.PI / 180);
+    this.spreadHold = Math.max(0.12, spec.interval * 1.5);
+    this.spreadAccum = Math.min(this.spreadAccum + spec.spread.perShot, spec.spread.max);
+  }
+
+  /**
+   * 冲击波形的生命周期。
+   *
+   * 衰减本身在 `shakeWave` 的 `e^(-9t)` 里，这里只负责「过了寿命就清零」。
+   * 上一版这里是 `damp(shake, 0, 7, dt)`：指数衰减套指数衰减，实际寿命
+   * 只有 0.2 秒左右，重手感的冲击（应该拖到 0.3~0.4 秒）全被压扁了。
+   */
+  private advanceShake(dt: number): void {
+    if (this.shake <= 0.001) {
+      this.shake = 0;
+      return;
+    }
+    this.shakeTime += dt;
+    if (this.shakeTime > SHAKE_LIFE) {
+      this.shake = 0;
+      this.shakeTime = 0;
+    }
+  }
+
+  /**
+   * 连发力度的推进（玩法侧只写 `burstCount/Timer`，这里只做平滑回零）。
+   *
+   * 上升用 30 的系数（几乎瞬时到位）、下降用 5（约 0.2 秒松掉）：
+   * 松手后枪不该「啪」地停止晃动，那半秒的余震正是「刚打完一梭子」的重量。
+   */
+  private advanceBurst(dt: number): void {
+    if (this.burstTimer > 0) this.burstTimer = Math.max(0, this.burstTimer - dt);
+    const inBurst = this.burstTimer > 0;
+    const target = inBurst ? Math.min(1, this.burstCount / BURST_PEAK) : 0;
+    this.burstEnergy = damp(this.burstEnergy, target, inBurst ? 30 : 5, dt);
+  }
+
+  /**
+   * 落地沉坠 + 横向侧倾的推进。
+   *
+   * 两者都只进 `bobOffset / viewRoll`（相机），物理位置和弹道都不动。
+   * 加入者也走这条 —— 他的 `vel` 是从快照推算出来的，侧倾一样能对上。
+   */
+  private advanceCameraLean(dt: number): void {
+    this.landDip = damp(this.landDip, 0, 9, dt);
+    // 右向量 = (cos yaw, 0, -sin yaw)，点乘速度就是「往右挪多快」
+    const rightSpeed = this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw);
+    const lean = this.onGround ? clamp(rightSpeed / SPEED_RUN, -1, 1) * 0.014 : 0;
+    this.strafeRoll = damp(this.strafeRoll, lean, 7, dt);
   }
 
   private handleReload(dt: number): void {
@@ -1005,10 +1317,15 @@ export class Player implements Actor {
     const spec = WEAPONS[this.weapon];
     this.reloadTimer += dt;
 
-    // 中段（拉枪栓那一下）再响一声，比整段只有开头响一次更像换弹
+    // 中段（拉枪栓那一下）再响一声，比整段只有开头响一次更像换弹。
+    // 远端玩家按位置空间化 —— 别人装完弹的「咔嗒」也是位置情报
     if (!this.reloadSoundPlayed && this.reloadTimer > this.reloadDuration * 0.55) {
       this.reloadSoundPlayed = true;
-      if (!this.remote) gameAudio.reload('in');
+      if (this.remote) {
+        gameAudio.reload('in', { x: this.pos.x, y: this.pos.y + 1.4, z: this.pos.z });
+      } else {
+        gameAudio.reload('in');
+      }
     }
 
     if (this.reloadTimer < this.reloadDuration) return;
@@ -1021,7 +1338,11 @@ export class Player implements Actor {
       if (ammo.mag < spec.magazine) {
         this.reloadTimer = 0;
         this.reloadSoundPlayed = false;
-        if (!this.remote) gameAudio.reload('in');
+        if (this.remote) {
+          gameAudio.reload('in', { x: this.pos.x, y: this.pos.y + 1.4, z: this.pos.z });
+        } else {
+          gameAudio.reload('in');
+        }
       } else {
         this.reloading = false;
       }
@@ -1035,7 +1356,8 @@ export class Player implements Actor {
     const actions = frame.actions;
 
     if (actions.has('jump') && this.onGround) {
-      this.vel.y = JUMP_SPEED;
+      // 起跳速度乘武器机动性 —— 跳高和跳远一起变（武器表 `MobilitySpec.jump`）
+      this.vel.y = JUMP_SPEED * weaponMobility(this.weapon).jump;
       this.onGround = false;
     }
     if (actions.has('reload')) this.startReload();
@@ -1247,11 +1569,13 @@ export class Player implements Actor {
     // 「子弹全打在一个点」，而弹孔其实是散的（这条坑踩过）。
     const shotDir = results[0]?.dir ?? aim;
 
-    // 后坐
-    const kick = spec.recoil.up * (this.scoped ? 0.55 : 1);
-    this.recoilPitch += kick * (Math.PI / 180);
-    this.recoilYaw += rand(-1, 1) * spec.recoil.side * (Math.PI / 180);
-    this.spreadAccum = Math.min(this.spreadAccum + spec.spread.perShot, spec.spread.max * 0.85);
+    // 后坐 + 连发累积（加入者走 `applyShotRecoil` 的同一条实现）
+    this.applyShotRecoil();
+
+    // 连发计数：窗口内接着打就 +1，断火就重新从第 0 发算。
+    // `burstEnergy` 当场就抬到位（不靠 `advanceBurst` 的平滑），否则「越打越晃」
+    // 会慢半拍 —— 第一发和第二发看起来一样，玩家的感觉就断了
+    this.registerBurstShot();
 
     /* ---- 表现层：镜头冲击 + 枪口焰尺寸 + 枪声，全部在**这一帧同一处**触发 ----
      * 上面是「玩法」后坐（会顶准星、会影响下一发），这里只加「看起来有多狠」。
@@ -1259,8 +1583,12 @@ export class Player implements Actor {
      * 调手感时不会互相牵连。 */
     const feel = weaponFeel(this.weapon);
     this.addPunch(feel.punchPitch, feel.punchRoll);
-    // 随机震屏只给最重的两把、而且很小（0.06~0.08）—— 这是「有后坐」而不是「镜头在抖」
-    if (feel.shake > 0) this.addShake(feel.shake);
+    // 枪械自身的震屏（表里只有最重的两把配了值）+ 连发累积的**枪机震动**。
+    // 后半段是这次新加的：单发时几乎为零，连发到第 5~7 发会明显起来 ——
+    // 「越打越晃」里必须有画面这一份，否则只有枪模在动、镜头是死的。
+    // 0.055 的幅度大约 0.1°，比落地（0.14）轻一档，不会晕
+    const burstShake = this.burstEnergy * 0.055;
+    if (feel.shake > 0 || burstShake > 0) this.addShake(Math.max(feel.shake, burstShake));
 
     // 枪口位置：引擎把枪模 muzzle 节点的屏幕位置反投影回主相机（0.6 米处），
     // 保证火光 / 曳光起点贴在画面里枪口喷出的地方。几何近似只是引擎没注入时的兜底
@@ -1315,7 +1643,9 @@ export class Player implements Actor {
         z: origin.z + shotDir.z * endT,
       };
     }
-    deps.effects.spawnTracer(muzzle, tracerEnd);
+    // 人类玩家的曳光是紫色（人机保持暖金）：本机自己、以及房主替联机真人
+    // 跑的这条 `handleFire`（`remote === true`）都算玩家，一律紫
+    deps.effects.spawnTracer(muzzle, tracerEnd, TRACER_COLOR_HUMAN);
 
     deps.hooks.onShot?.(this, this.weapon, origin, shotDir, endT);
 

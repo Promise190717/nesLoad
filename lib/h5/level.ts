@@ -1,13 +1,23 @@
 import * as THREE from 'three';
 import type { Collider } from './physics';
+import { surfaceMaps, type SurfaceMaps } from './surface-textures';
 import type { Surface } from './types';
 
 /**
  * 程序化关卡「运输船」—— 船体、集装箱阵列、狙击台、掩体、环境光。
  *
  * **没有任何外部资源**：几何体全是 Box / Cylinder / Sphere 拼的，贴图全部由
- * Canvas 2D 现画（甲板防滑纹、集装箱波纹、木纹、拉丝金属、天空渐变）。
- * 这不是「省事」，是硬要求 —— 商用贴图要么有版权风险，要么得打几百 KB 的包。
+ * Canvas 2D 现画（见 `surface-textures.ts`：每种表面一张底色 + 一张法线 +
+ * 一张粗糙度）。这不是「省事」，是硬要求 —— 商用贴图要么有版权风险，要么
+ * 得打几百 KB 的包。
+ *
+ * ## 贴图为什么按「米」铺（2026-11-13 真实度轮）
+ *
+ * 旧版所有盒子的 UV 都是 0..1，一张 128px 的金属图同时铺在 1.1 米的铁箱和
+ * 10 米长的台面上 —— 纹素密度差十倍，近看是一团糊、远看是一片噪点，而且
+ * **只有底色没有法线**，凹凸全画在颜色里，光怎么打都不变。现在每个盒子按
+ * `fitBoxUv()` 把 UV 乘成「面宽 / 贴图覆盖米数」，纹素密度全场一致；三种贴图
+ * 各管一件事（颜色 / 凹凸 / 反光），跑动时表面才有反应。
  *
  * ## 几何即碰撞
  *
@@ -19,7 +29,7 @@ import type { Surface } from './types';
  * ## 坐标系
  *
  * three 原生系：x 右、y 上、z 朝屏幕外。甲板顶面 `y = 0`。
- * 保卫者出生在 `z = SPAWN_Z[0]`（船头方向），潜伏者在 `SPAWN_Z[1]`。
+ * 潜伏者出生在 `z = SPAWN_Z[0]`（船头方向），保卫者在 `SPAWN_Z[1]`。
  *
  * ## 尺寸沿革：80 → 52 → 42 → 50 → **44 × 22**
  *
@@ -31,8 +41,8 @@ import type { Surface } from './types';
  * 收紧一档，但不至于像 42 米那版一样贴脸。
  *
  * 宽度是跟着**狙击台**走的：台体 3.4 宽、外沿要嵌进舷板 0.3 米，所以
- * `HALF_W` 每减 1 米，台心就跟着内移 1 米（见第 3 节）。缩宽度不是简单
- * 改一个常量，台子和楼梯的 x 必须同时挪，否则会穿出舷墙。
+ * `HALF_W` 每减 1 米，台心就跟着内移 1 米（见第 2 节）。缩宽度不是简单
+ * 改一个常量，台子的 x 必须同时挪，否则会穿出舷墙。
  *
  * ⚠️ 缩放只动**地图，不动箱子**。第一轮的教训是拿 `Z_SCALE = 52/80` 把
  * 集装箱一起缩到 3.97 米 —— 箱子缩了、人没缩，2.6×4.0 的箱子配 1.8 米的人，
@@ -160,7 +170,7 @@ export interface Level {
   /** 所有关卡几何的父节点。引擎只管 `root` 的可见性，不逐个碰子节点。 */
   root: THREE.Group;
   colliders: Collider[];
-  /** `[保卫者, 潜伏者]`，每个阵营按 `SPAWN_X` 一行 6 个点 */
+  /** `[潜伏者, 保卫者]`，每个阵营按 `SPAWN_X` 一行 6 个点 */
   spawns: [THREE.Vector3[], THREE.Vector3[]];
   nav: NavGrid;
   /** 低画质要关阴影，得能拿到它 */
@@ -169,175 +179,62 @@ export interface Level {
 }
 
 /* ============================================================
-   贴图（Canvas 程序化生成）
+   贴图铺法（贴图本身在 surface-textures.ts）
    ============================================================ */
 
-function canvasTexture(
-  size: number,
-  draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
-  repeatX = 1,
-  repeatY = 1,
-): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('无法获取 2D 上下文，贴图生成失败');
-  draw(ctx, size, size);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  // r152 起 `encoding` 换成 `colorSpace`；写 `SRGBColorSpace` 才不会整体发灰
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  texture.repeat.set(repeatX, repeatY);
-  return texture;
+/**
+ * 把 BoxGeometry 的 UV 按**真实尺寸**铺开。
+ *
+ * 这是这一轮「贴图太假」的头号病根：旧版所有盒子 UV 都是 0..1，同一张金属图
+ * 既铺在 1.1 米的铁箱上、也铺在 10 米长的台面上 —— 纹素密度差十倍，木箱上的
+ * 拉丝比台面上的粗一个数量级，眼睛立刻能看出「这不是一块真的金属」。
+ *
+ * 做法：`u *= 面宽 / tile`、`v *= 面高 / tile`，贴图 `repeat` 保持 1、
+ * wrap 是 Repeat，于是每个面都按米铺、跨面一致。副作用是好的：小于 tile 的
+ * 盒子，板缝正好落在棱边上，看起来像箱体的边框焊缝。
+ *
+ * BoxGeometry 的顶点顺序固定为 +x / -x / +y / -y / +z / -z，每面 4 个顶点、
+ * 且每个面的 UV 都是 0..1，所以这里可以直接按下标算。
+ */
+function fitBoxUv(geometry: THREE.BufferGeometry, w: number, h: number, d: number, tile: number): void {
+  const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+  const faceScale: [number, number][] = [
+    [d / tile, h / tile], // +x
+    [d / tile, h / tile], // -x
+    [w / tile, d / tile], // +y
+    [w / tile, d / tile], // -y
+    [w / tile, h / tile], // +z
+    [w / tile, h / tile], // -z
+  ];
+  for (let face = 0; face < 6; face += 1) {
+    const [su, sv] = faceScale[face]!;
+    for (let i = 0; i < 4; i += 1) {
+      const index = face * 4 + i;
+      uv.setXY(index, uv.getX(index) * su, uv.getY(index) * sv);
+    }
+  }
+  uv.needsUpdate = true;
 }
 
-/** 甲板：防滑钢板，64px 一块，带锈斑。整块甲板铺 11×22 次（一块 2×2 米）。 */
-function textureDeck(): THREE.CanvasTexture {
-  return canvasTexture(
-    256,
-    (g, w, h) => {
-      // 贴图本身要偏亮：材质的 color 会**乘**在这上面，两张中灰相乘就是黑
-      //
-      // 基色是**蓝灰**，不是水泥灰 —— 实景俯视图里那块甲板明显偏冷（钢板刷的
-      // 防锈漆带蓝），上一版的 #9aa2a9 中性灰俯视读起来像停车场
-      g.fillStyle = '#7f8d98';
-      g.fillRect(0, 0, w, h);
-      for (let y = 0; y < h; y += 64) {
-        for (let x = 0; x < w; x += 64) {
-          g.fillStyle = (x / 64 + y / 64) % 2 ? '#8896a1' : '#76828d';
-          g.fillRect(x + 1, y + 1, 62, 62);
-        }
-      }
-      g.strokeStyle = 'rgba(0,0,0,0.42)';
-      g.lineWidth = 2;
-      for (let y = 0; y <= h; y += 64) {
-        g.beginPath();
-        g.moveTo(0, y);
-        g.lineTo(w, y);
-        g.stroke();
-      }
-      for (let x = 0; x <= w; x += 64) {
-        g.beginPath();
-        g.moveTo(x, 0);
-        g.lineTo(x, h);
-        g.stroke();
-      }
-      // 防滑凸点
-      g.fillStyle = 'rgba(0,0,0,0.3)';
-      for (let y = 9; y < h; y += 64) {
-        for (let x = 9; x < w; x += 16) g.fillRect(x, y, 2, 2);
-      }
-      // 锈
-      for (let i = 0; i < 70; i += 1) {
-        g.fillStyle = `rgba(122,74,44,${(Math.random() * 0.15).toFixed(3)})`;
-        g.beginPath();
-        g.arc(Math.random() * w, Math.random() * h, Math.random() * 11 + 2, 0, 7);
-        g.fill();
-      }
-    },
-    // 重复次数 = 尺寸 / 2 米：x 方向 22 米铺 11 次，z 方向 44 米铺 22 次，
-    // 一块钢板永远是 2×2 米。船长改了这里必须同步，否则砖块会被拉长
-    11,
-    22,
-  );
-}
-
-/** 集装箱：竖向波纹 + 上下边框。底色靠材质 `color` 染，所以这里画成白色。 */
-function textureContainer(): THREE.CanvasTexture {
-  return canvasTexture(256, (g, w, h) => {
-    g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, w, h);
-    for (let x = 0; x < w; x += 12) {
-      g.fillStyle = 'rgba(0,0,0,0.17)';
-      g.fillRect(x, 0, 4, h);
-      g.fillStyle = 'rgba(255,255,255,0.12)';
-      g.fillRect(x + 6, 0, 2, h);
-    }
-    g.fillStyle = 'rgba(0,0,0,0.30)';
-    g.fillRect(0, 0, w, 15);
-    g.fillRect(0, h - 15, w, 15);
-    g.fillRect(0, 0, 8, h);
-    g.fillRect(w - 8, 0, 8, h);
-    for (let i = 0; i < 30; i += 1) {
-      const rx = Math.random() * w;
-      const ry = Math.random() * h;
-      const rr = Math.random() * 15 + 3;
-      const grad = g.createRadialGradient(rx, ry, 0, rx, ry, rr);
-      grad.addColorStop(0, 'rgba(74,42,20,0.34)');
-      grad.addColorStop(1, 'rgba(74,42,20,0)');
-      g.fillStyle = grad;
-      g.beginPath();
-      g.arc(rx, ry, rr, 0, 7);
-      g.fill();
-    }
-  });
-}
-
-/** 木板：横向板缝 + 随机木纹曲线。 */
-function textureWood(): THREE.CanvasTexture {
-  return canvasTexture(128, (g, w, h) => {
-    g.fillStyle = '#c08f5c';
-    g.fillRect(0, 0, w, h);
-    for (let y = 0; y < h; y += 32) {
-      g.fillStyle = 'rgba(0,0,0,0.10)';
-      g.fillRect(0, y, w, 2);
-      g.fillStyle = 'rgba(255,255,255,0.06)';
-      g.fillRect(0, y + 2, w, 1);
-    }
-    for (let i = 0; i < 90; i += 1) {
-      g.strokeStyle = `rgba(90,58,30,${(Math.random() * 0.16).toFixed(3)})`;
-      g.lineWidth = Math.random() * 1.6 + 0.4;
-      const y0 = Math.random() * h;
-      g.beginPath();
-      g.moveTo(0, y0);
-      g.bezierCurveTo(w * 0.3, y0 + Math.random() * 4 - 2, w * 0.6, y0 + Math.random() * 4 - 2, w, y0);
-      g.stroke();
-    }
-    g.fillStyle = 'rgba(0,0,0,0.16)';
-    g.fillRect(0, 0, w, 3);
-    g.fillRect(0, h - 3, w, 3);
-  });
-}
-
-/** 拉丝金属：随机短划线 + 锈点 + 内描边。 */
-function textureMetal(): THREE.CanvasTexture {
-  return canvasTexture(128, (g, w, h) => {
-    g.fillStyle = '#b0b8bf';
-    g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 120; i += 1) {
-      g.strokeStyle = `rgba(255,255,255,${(Math.random() * 0.1).toFixed(3)})`;
-      g.lineWidth = Math.random() * 1.4;
-      const x = Math.random() * w;
-      const y = Math.random() * h;
-      g.beginPath();
-      g.moveTo(x, y);
-      g.lineTo(x + Math.random() * 18 - 9, y + Math.random() * 18 - 9);
-      g.stroke();
-    }
-    for (let i = 0; i < 24; i += 1) {
-      g.fillStyle = `rgba(110,70,40,${(Math.random() * 0.18).toFixed(3)})`;
-      g.beginPath();
-      g.arc(Math.random() * w, Math.random() * h, Math.random() * 8 + 1, 0, 7);
-      g.fill();
-    }
-    g.strokeStyle = 'rgba(0,0,0,0.30)';
-    g.lineWidth = 3;
-    g.strokeRect(1.5, 1.5, w - 3, h - 3);
-  });
-}
-
-/** 天空：竖直渐变，贴在反面球上。 */
+/**
+ * 天空：竖直渐变 + 一层低对比度的云带，贴在反面球上。
+ *
+ * 只加云、**不改渐变的那五个色标** —— 天空球是 `MeshBasicMaterial`（不吃光），
+ * 它的亮度就是整个画面的上限，之前为了「场景太暗」把这组值调亮过一档，
+ * 动它等于重调全局曝光。
+ *
+ * 云只画在 0.28~0.66 这一段（canvas 的 y=0 是头顶，越大越靠近地平线）：
+ * 地平线附近本来就有暖色霾，云压到那儿反而脏。
+ */
 function textureSky(): THREE.CanvasTexture {
+  const W = 512;
+  const H = 512;
   const canvas = document.createElement('canvas');
-  canvas.width = 8;
-  canvas.height = 256;
+  canvas.width = W;
+  canvas.height = H;
   const g = canvas.getContext('2d');
   if (!g) throw new Error('无法获取 2D 上下文，天空生成失败');
-  const grad = g.createLinearGradient(0, 0, 0, 256);
+  const grad = g.createLinearGradient(0, 0, 0, H);
   // 整体比「真实阴天」亮一档：天空球是 MeshBasicMaterial（不吃光），
   // 它的亮度就是画面的上限 —— 天空压暗的话整个场景都跟着发灰
   grad.addColorStop(0.0, '#2c5c88');
@@ -346,7 +243,40 @@ function textureSky(): THREE.CanvasTexture {
   grad.addColorStop(0.74, '#f0e2c8');
   grad.addColorStop(1.0, '#a3b6c2');
   g.fillStyle = grad;
-  g.fillRect(0, 0, 8, 256);
+  g.fillRect(0, 0, W, H);
+
+  // 云：一团一团叠出来的软边，不是云图。每团先垫一层偏灰的底（云的暗面在
+  // 下方），再叠一层亮面 —— 单层径向渐变看起来像烟雾，不像云
+  let seed = 0x5eed;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  for (let i = 0; i < 46; i += 1) {
+    const cy = H * (0.28 + rand() * 0.34);
+    const cx = rand() * W;
+    const rx = 26 + rand() * 90;
+    const ry = rx * (0.22 + rand() * 0.22);
+    // 云在球面 u 方向要接得上：左右各画一份绕过去的副本
+    for (const dx of [-W, 0, W]) {
+      for (const [tone, alpha, dy] of [
+        ['190,198,208', 0.10, ry * 0.35],
+        ['255,255,255', 0.13, 0],
+      ] as const) {
+        g.save();
+        g.translate(cx + dx, cy + dy);
+        g.scale(1, ry / rx);
+        const blob = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+        blob.addColorStop(0, `rgba(${tone},${alpha})`);
+        blob.addColorStop(1, `rgba(${tone},0)`);
+        g.fillStyle = blob;
+        g.beginPath();
+        g.arc(0, 0, rx, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+    }
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -385,18 +315,22 @@ export function buildLevel(scene: THREE.Scene): Level {
 
   /* ---------- 贴图与材质 ---------- */
 
-  const texDeck = textureDeck();
-  const texContainer = textureContainer();
-  const texWood = textureWood();
-  const texMetal = textureMetal();
+  // 贴图来自 `surface-textures` 的模块级缓存：**只取不建**。也不要在这里
+  // dispose（见本文件末尾的 dispose）—— 贴图活得比这一份 level 长
+  const deckTex = surfaceMaps('deck');
+  const containerTex = surfaceMaps('container');
+  const doorTex = surfaceMaps('containerDoor');
+  const roofTex = surfaceMaps('containerRoof');
+  const steelTex = surfaceMaps('steel');
+  const woodTex = surfaceMaps('wood');
   const texSky = textureSky();
 
   /**
    * `metalness` 全部压在 0.3 以下。
    *
-   * 场景里**没有环境贴图**，而 three 的金属材质靠 `envMap` 反射环境 —— 没有它，
-   * 高 metalness 的表面会渲染成死黑（只能反射到黑色）。0.2~0.3 之间还能靠
-   * 直接光照出一点金属感，再高就开始发暗。
+   * 主场景确实有 PMREM 环境图（`engine.ts`，`environmentIntensity 0.3`），但那个
+   * 强度只够给金属补一层反射，不够把纯金属照亮 —— 给到「真金属」的 0.8~0.9，
+   * 背光面会直接掉进暗部。0.2~0.3 是这套灯下能出金属感又不变黑的上限。
    */
   /**
    * 集装箱配色 —— **照三张实景角度图取的冷调工业漆**。
@@ -407,8 +341,8 @@ export function buildLevel(scene: THREE.Scene): Level {
    * （上一版的锈橙整条删了：「锈」在俯视图里是暖橙色，而这张图的箱体没有
    * 一只是那么暖的，留着反而把整片甲板往暖调拖。）
    *
-   * ⚠️ 这里给的是**材质色**，显示出来会乘上 `texContainer` 的亮度（约 0.85，
-   * 波纹的暗部），所以每个值都比目标颜色亮一档。直接填截图里的 hex 会暗半级。
+   * ⚠️ 贴图底色是接近白的 246（波纹本身靠法线出明暗，不再靠画阴影），
+   * 所以这里的值比上一版（纯白底）亮约 4%。改贴图底色必须回来看一眼这里。
    */
   const PAINT = {
     bone: 0,
@@ -418,34 +352,79 @@ export function buildLevel(scene: THREE.Scene): Level {
     sand: 4,
   } as const;
 
+  /**
+   * 建一个带 PBR 三件套的材质。
+   *
+   * `roughness` 固定 1 是刻意的：它是**乘在 roughnessMap 上的系数**，贴图里
+   * 已经把「漆面 0.72 / 裸钢 0.34 / 晒褪 0.8」写死了，这里再乘一个 0.8 只会
+   * 把整张图的层次压平。
+   */
+  function pbr(maps: SurfaceMaps, color: number, metalness: number, normalScale = 1): THREE.MeshStandardMaterial {
+    const material = new THREE.MeshStandardMaterial({
+      map: maps.map,
+      normalMap: maps.normalMap,
+      roughnessMap: maps.roughnessMap,
+      color,
+      roughness: 1,
+      metalness,
+      normalScale: new THREE.Vector2(normalScale, normalScale),
+    });
+    // `block()` 靠它把 UV 乘成「面宽 / 米数」，见 `fitBoxUv`
+    material.userData.tileM = maps.tileMeters;
+    return material;
+  }
+
+  /**
+   * 一只集装箱 = 6 个面槽位，顺序是 BoxGeometry 的 `[+x, -x, +y, -y, +z, -z]`。
+   *
+   * 箱体 2.6 宽 × 2.6 高 × 6.1 长，所以 **±x 才是长边、±z 是端门**。旧版六面
+   * 共用一张竖波纹，端头也是一片波纹 —— 凑近看没有门缝、没有锁杆、没有角件，
+   * 这是「像贴纸」最主要的来源之一。
+   */
+  function containerMaterials(tint: number): THREE.MeshStandardMaterial[] {
+    const side = pbr(containerTex, tint, 0.16, 1.15);
+    const roof = pbr(roofTex, tint, 0.16, 1);
+    const door = pbr(doorTex, tint, 0.16, 1);
+    // 端门是「一整面一张图」：几何 UV 按 2 米铺出来是 1.3 个 tile，用贴图
+    // 自身的 repeat 压回 1（2/2.6 = 0.769），门框和锁杆才刚好占满一面。
+    // 🔴 **三张贴图必须一起压**：three 的每张图有独立的 uvTransform，只压 map
+    // 的话法线/粗糙度还是 1.3 个 tile —— 锁杆的凹凸会和底色错开半根
+    // 同时把 tileM 改回 2：这个材质的 UV 基准是几何那边的 2 米，不是图自己的 2.6
+    door.userData.tileM = containerTex.tileMeters;
+    return [side, side, roof, side, door, door];
+  }
+
+  const doorRepeat = containerTex.tileMeters / CW;
+  for (const texture of [doorTex.map, doorTex.normalMap, doorTex.roughnessMap]) {
+    texture.repeat.set(doorRepeat, containerTex.tileMeters / CH);
+  }
+
   const materials = {
-    // ⚠️ 带贴图的材质一律 `color: 0xffffff`。
-    //
-    // `MeshStandardMaterial.color` 是**乘在贴图上的**：贴图 #6d737a × 颜色 #b6bbc1
-    // 的乘积只有 0.07 的反照率，比水泥还黑 —— 这正是早期版本「整体发暗」的主因。
-    // 让贴图自己承担颜色，材质色只用来调明暗（无贴图的那些才给具体颜色）。
-    deck: new THREE.MeshStandardMaterial({ map: texDeck, color: 0xffffff, roughness: 0.8, metalness: 0.22 }),
-    hull: new THREE.MeshStandardMaterial({ color: 0x64707a, roughness: 0.82, metalness: 0.18 }),
-    rail: new THREE.MeshStandardMaterial({ color: 0x505a64, roughness: 0.7, metalness: 0.3 }),
-    wood: new THREE.MeshStandardMaterial({ map: texWood, color: 0xffffff, roughness: 0.9, metalness: 0.02 }),
-    metal: new THREE.MeshStandardMaterial({ map: texMetal, color: 0xffffff, roughness: 0.55, metalness: 0.3 }),
-    steel: new THREE.MeshStandardMaterial({ color: 0x8d959d, roughness: 0.58, metalness: 0.3 }),
-    dark: new THREE.MeshStandardMaterial({ color: 0x3b434a, roughness: 0.9, metalness: 0.15 }),
+    // ⚠️ 带贴图的材质，`color` 是**乘在贴图上的**：贴图 #6d737a × 颜色 #b6bbc1
+    // 的乘积只有 0.07 的反照率，比水泥还黑。甲板 / 木板 / 钢板的底色由贴图
+    // 自己承担（所以给白），只有「一张灰度图染五种箱色」这种才需要染。
+    deck: pbr(deckTex, 0xffffff, 0.22, 1),
+    hull: pbr(steelTex, 0x6d7a85, 0.26, 0.9),
+    rail: pbr(steelTex, 0x58636e, 0.3, 0.9),
+    wood: pbr(woodTex, 0xffffff, 0.02, 1),
+    metal: pbr(steelTex, 0xbfc7ce, 0.3, 1),
+    steel: pbr(steelTex, 0x99a2aa, 0.3, 1),
+    dark: pbr(steelTex, 0x40474f, 0.16, 0.9),
     /** 甲板中线：CF 运输船甲板正中那条浅色通道带，俯视最直接的识别物 */
     marking: new THREE.MeshStandardMaterial({ color: 0xc0bda9, roughness: 0.85, metalness: 0.1 }),
     /** 吊机桁架：实景里那只吊是**黄色**的，是全图唯一的高饱和色，当路标用 */
-    crane: new THREE.MeshStandardMaterial({ color: 0xd8a521, roughness: 0.62, metalness: 0.22 }),
+    crane: pbr(steelTex, 0xe8b325, 0.24, 0.9),
     containers: [
       // bone：米白，实景里占一半以上
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0xe2dccb, roughness: 0.78, metalness: 0.18 }),
+      containerMaterials(0xe6dfce),
       // olive：军绿
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x76805c, roughness: 0.78, metalness: 0.18 }),
+      containerMaterials(0x7a8460),
       // moss：深绿，实景里那几只压在阴影里的箱子
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x50604a, roughness: 0.78, metalness: 0.18 }),
+      containerMaterials(0x54644e),
       // slate：蓝灰，实景里少数几只
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0x5c6874, roughness: 0.7, metalness: 0.26 }),
+      containerMaterials(0x606c78),
       // sand：卡其，实景里那只偏黄的旧柜
-      new THREE.MeshStandardMaterial({ map: texContainer, color: 0xc0b195, roughness: 0.78, metalness: 0.18 }),
+      containerMaterials(0xc4b599),
     ],
   };
 
@@ -464,7 +443,12 @@ export function buildLevel(scene: THREE.Scene): Level {
     let mesh: THREE.Mesh | null = null;
 
     if (options.visible !== false) {
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+      const geometry = new THREE.BoxGeometry(w, h, d);
+      // 带贴图的材质自己带 `tileM`（surface-textures 那边定的米数），
+      // 没有的就是纯色材质（甲板中线、天空之类），不用铺 UV
+      const tile = material.userData.tileM as number | undefined;
+      if (tile) fitBoxUv(geometry, w, h, d, tile);
+      mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(x, y0 + h / 2, z);
       mesh.castShadow = options.cast !== false;
       mesh.receiveShadow = options.receive !== false;
@@ -485,8 +469,10 @@ export function buildLevel(scene: THREE.Scene): Level {
     return mesh;
   }
 
-  // 集装箱共用几何体：同尺寸的箱子有十几只，各建一份是纯浪费显存
+  // 集装箱共用几何体：同尺寸的箱子有十几只，各建一份是纯浪费显存。
+  // UV 按 2 米铺（和侧板贴图的 tileMeters 一致），端门靠贴图 repeat 再压回 1 面
   const containerGeometry = new THREE.BoxGeometry(CW, CH, CL);
+  fitBoxUv(containerGeometry, CW, CH, CL, containerTex.tileMeters);
 
   /**
    * 放一只集装箱。
@@ -555,43 +541,74 @@ export function buildLevel(scene: THREE.Scene): Level {
   /* ============================================================
      2. 两侧狙击台（对称）
 
-     缩宽度的**唯一锚点**：台体 3.4 宽、楼梯 1.7 宽，两者的相对位置是定死的
-     （楼梯贴台体外侧、外沿比台面多出 0.5 米）。舷板内壁在 `HALF_W - 0.4`，
-     楼梯外沿要嵌进去 0.3 米，于是
+     台体 3.4 宽，台心 `cx = HALF_W - 2.3`（宽度 26 → 22 时从 ±10.7 挪到
+     ±8.7）。只改 `HALF_W` 不改这里，台子会整块穿出船外。
 
-         stairX + 0.85 = HALF_W - 0.4 + 0.3  ⇒  stairX = HALF_W - 0.95
-         cx = stairX - 1.35                  ⇒  cx     = HALF_W - 2.3
-
-     宽度 26 → 22 之后 `cx` 必须从 ±10.7 挪到 ±8.7、楼梯从 ±12.05 挪到
-     ±10.05。只改 `HALF_W` 不改这里，台子会整块穿出船外。
+     🔴 登台斜坡：开在**短边端面**（z = ±5 端、旧楼梯的位置）靠台体**内侧**
+     的那半幅（宽 1.7，x 靠中路），整个掏在台体原轮廓之内、零外伸 —— 旧
+     楼梯「外沿嵌进舷板 0.3 米」的 stairX 锚点推导已废。视觉是一整块楔形
+     真斜面（用户 2026-11-13：「加一个斜坡（不要楼梯）」），碰撞是看不见
+     的细台阶（物理层是纯 AABB，见文件头铁律）。两座台**点对称**：+x 台坡
+     在 z=+5 端、-x 台坡在 z=-5 端，两队各有一座近家的坡。这一轮的前一版
+     曾把坡开在内侧面正中间、八级大台阶，被用户否掉（「不是中间加楼梯」）。
 
      （原来这一节前面还有一段「舷侧 40 尺货排」—— 每舷两只长箱贴舷墙。
      用户 2026-11-13 明确要求去掉那四只箱子，整段连同 `CL40` / `long`
      选项一起删了。现在两条长边是空甲板，掩体全靠中路散货和两座台。）
      ============================================================ */
 
+  // 楔形斜面（两座台共用一份几何体）：拿盒子把**远端上沿**两根顶点压到
+  // 地面 —— 顶面变斜面、远端面退化成零面积（画不出来），侧脸变三角。
+  // UV 必须在折叠**前**按 fitBoxUv 铺好：斜面继承原顶面的米数 UV，纹素
+  // 密度和台体一致；折叠后再算一次顶点法线，斜面才真正受光。
+  const rampGeometry = (() => {
+    const geometry = new THREE.BoxGeometry(1.7, 3.2, 4.6);
+    const tile = materials.steel.userData.tileM as number;
+    fitBoxUv(geometry, 1.7, 3.2, 4.6, tile);
+    geometry.translate(0, 1.6, 0);
+    const pos = geometry.attributes.position;
+    for (let i = 0; i < pos.count; i += 1) {
+      if (pos.getY(i) > 0 && pos.getZ(i) > 0) pos.setY(i, 0);
+    }
+    geometry.computeVertexNormals();
+    return geometry;
+  })();
+
   function sniperDeck(side: number): void {
     const cx = side * 8.7;
-    // 台体：3.4 宽 × 3.2 高 × 10 长（尺寸不跟地图缩，和人物比例对齐）
-    block(cx, 0, 3.4, 3.2, 10.0, materials.steel, { y0: 0, surf: 'metal' });
+    // 坡端：+x 台开在 z=+5 端、-x 台开在 z=-5 端（点对称，与散货摆法一致）
+    const rampEnd = side;
+    // 台体主体：z 向让出坡端的外 4.6 米，其余实心（z ∈ [-5, 0.4]）
+    block(cx, -rampEnd * 2.3, 3.4, 3.2, 5.4, materials.steel, { y0: 0, surf: 'metal' });
+    // 坡端的外半幅（x 贴舷侧）仍是实心台体，坡只占内半幅
+    block(cx + side * 0.85, rampEnd * 2.7, 1.7, 3.2, 4.6, materials.steel, { y0: 0, surf: 'metal' });
 
-    // 台面护栏：只挡视觉，可以越过开枪 —— 否则台子上的人完全没法还手
-    block(cx, -5.05, 3.4, 0.9, 0.12, materials.rail, { y0: 3.2, collide: false });
-    block(cx, 5.05, 3.4, 0.9, 0.12, materials.rail, { y0: 3.2, collide: false });
-    block(cx - side * 1.7, 0, 0.12, 0.9, 10.0, materials.rail, { y0: 3.2, collide: false });
+    // 楔形：本地坐标系里高端在 -z（贴台体）、低端在 +z（贴甲板），低端
+    // 正好落在甲板上；-x 台绕 y 转 180°（棱柱左右对称，转完严丝合缝）
+    const ramp = new THREE.Mesh(rampGeometry, materials.steel);
+    ramp.position.set(cx - side * 0.85, 0, rampEnd * 2.7);
+    ramp.rotation.y = rampEnd === 1 ? 0 : Math.PI;
+    ramp.castShadow = true;
+    ramp.receiveShadow = true;
+    root.add(ramp);
 
-    // 楼梯：10 级，靠台面那级最高 —— `rise * (steps - s)` 让台阶从远到近逐级升高，
-    // 于是每一级都是一个「实心柱」而不是悬空板，自动上台阶逻辑直接能爬。
-    // 台面**两端各一段**：旧版只有 +z 端有梯子，两座台都只能从潜伏者半场登，
-    // 保卫者想上自己的台得绕过整座 10 米台体 —— 隐性的半场优势。
-    const steps = 10;
-    const rise = 3.2 / steps;
-    const run = 4.6 / steps;
-    for (const zSign of [1, -1] as const) {
-      for (let s = 0; s < steps; s += 1) {
-        const z0 = zSign * (5 + s * run + run / 2);
-        block(side * 10.05, z0, 1.7, rise * (steps - s), run, materials.steel, { y0: 0 });
-      }
+    // 碰撞：物理层没有斜面（文件头铁律），用一排**看不见的细台阶**垫在
+    // 楔形下面 —— 0.1 米一级，顶面取楔形斜面在每级跨度的**中点高度**
+    //（偏差 ≤ 5 厘米，走路的手感顿挫由 player.ts 的 stepLift 抹平）
+    const STEPS = 32;
+    const rise = 3.2 / STEPS;
+    const run = 4.6 / STEPS;
+    for (let s = 0; s < STEPS; s += 1) {
+      const h = rise * (STEPS - s - 0.5);
+      block(
+        cx - side * 0.85,
+        rampEnd * (0.4 + s * run + run / 2),
+        1.7,
+        h,
+        run,
+        materials.steel,
+        { visible: false, surf: 'metal' },
+      );
     }
   }
   sniperDeck(1);
@@ -628,8 +645,10 @@ export function buildLevel(scene: THREE.Scene): Level {
   root.add(boom);
 
   const BOOM_LEN = 18;
-  // 四根主弦杆
+  // 四根主弦杆。UV 必须按真实长度铺：18 米的杆子上，2 米的板缝要重复 9 次，
+  // 吃 0..1 的话整根杆只有一块板、一颗螺栓，远看是一根纯黄的方条
   const chordGeometry = new THREE.BoxGeometry(BOOM_LEN, 0.13, 0.13);
+  fitBoxUv(chordGeometry, BOOM_LEN, 0.13, 0.13, steelTex.tileMeters);
   for (const dy of [-0.55, 0.55]) {
     for (const dz of [-0.55, 0.55]) {
       const chord = new THREE.Mesh(chordGeometry, materials.crane);
@@ -641,6 +660,7 @@ export function buildLevel(scene: THREE.Scene): Level {
   // 横撑：每 2.2 米一道，只做左右两侧的立杆。四面全做是三十多个 draw call，
   // 而俯视/第一人称都看不出差别
   const braceGeometry = new THREE.BoxGeometry(0.1, 1.1, 0.1);
+  fitBoxUv(braceGeometry, 0.1, 1.1, 0.1, steelTex.tileMeters);
   for (let i = 0; i < 8; i += 1) {
     for (const dz of [-0.55, 0.55]) {
       const brace = new THREE.Mesh(braceGeometry, materials.crane);
@@ -731,8 +751,8 @@ export function buildLevel(scene: THREE.Scene): Level {
   crate(9.9, 12.4, 1.2, 0.95);
   crate(-9.9, -12.4, 1.2, 0.95);
 
-  // 楼梯口：接在台阶末端（台阶铺到 z = 9.6），挡楼梯下来的人正面视线。
-  // 刻意错开台阶本身，不占 z ∈ [5, 9.6] 的下台落脚区
+  // 台端铁箱（旧「楼梯口」掩体）：楼梯 2026-11-13 删掉后仍在，位置本来
+  // 就在台体两端外沿，留作端巷拐角的正面掩体 —— 别顺着旧注释去找台阶了
   metalBox(8.4, 10.2, 1.2, 1.6);
   metalBox(-8.4, -10.2, 1.2, 1.6);
 
@@ -837,8 +857,10 @@ export function buildLevel(scene: THREE.Scene): Level {
       const collectMaterial = (material: THREE.Material) => {
         if (seenMaterials.has(material)) return;
         seenMaterials.add(material);
-        const textured = material as THREE.MeshStandardMaterial;
-        textured.map?.dispose();
+        // 🔴 贴图来自 `surface-textures` 的模块级缓存，**绝对不能在这里 dispose**：
+        // 材质每次 buildLevel 都会重建、贴图不重建，清了重进游戏就是一片黑
+        // （和 `weapon-textures.ts` 同一条铁律）。天空图是这一份 level 自己生成的，
+        // 所以下面单独释放
         material.dispose();
       };
 
@@ -851,7 +873,9 @@ export function buildLevel(scene: THREE.Scene): Level {
       });
 
       sky.geometry.dispose();
-      collectMaterial(sky.material as THREE.Material);
+      const skyMaterial = sky.material as THREE.MeshBasicMaterial;
+      skyMaterial.map?.dispose();
+      collectMaterial(skyMaterial);
       sea.geometry.dispose();
       collectMaterial(sea.material as THREE.Material);
       farMaterial.dispose();

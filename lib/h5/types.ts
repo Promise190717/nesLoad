@@ -39,9 +39,10 @@ export type Quality = 'low' | 'mid' | 'high';
 /**
  * 对局规模：**每队人数（含本机玩家）**。
  *
- * 值同时就是界面上的 `1v1 / 3v3 / 6v6` —— 不另做映射，协议里也只走这一个数。
+ * 值同时就是界面上的 `1v1 ~ 6v6` —— 不另做映射，协议里也只走这一个数。
+ * 上限 6 是出生位决定的：`SPAWN_X` 每队正好 6 格，再往上就得先加出生点。
  */
-export const TEAM_SIZE_OPTIONS = [1, 3, 6] as const;
+export const TEAM_SIZE_OPTIONS = [1, 2, 3, 4, 5, 6] as const;
 export type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
 
 export type PrimaryId = 'ak47' | 'm4a1' | 'awm' | 'shotgun';
@@ -156,7 +157,7 @@ export interface MatchRules {
   killTarget: number;
   /** 或打满这么多秒（仅 `endMode === 'time'` 时参与判定） */
   durationSec: number;
-  /** 每队人数（含本机玩家）：1v1 / 3v3 / 6v6 */
+  /** 每队人数（含本机玩家）：1v1 ~ 6v6 */
   teamSize: TeamSize;
   difficulty: Difficulty;
 }
@@ -334,9 +335,9 @@ export interface NetHud {
   role: 'host' | 'guest';
   /** 房间码。房主和加入者都能看到，方便念给别人 */
   code: string;
-  /** [保卫者, 潜伏者] 的真人数量 */
+  /** [潜伏者, 保卫者] 的真人数量 */
   humans: [number, number];
-  /** [保卫者, 潜伏者] 的人机数量 */
+  /** [潜伏者, 保卫者] 的人机数量 */
   bots: [number, number];
   /** 场上真人总数（含自己） */
   peers: number;
@@ -448,6 +449,11 @@ export interface EngineOptions {
   onKillFeedback?: (info: KillFeedback) => void;
   /** 自己被打。`strength` 0..1，React 用它控制红色暗角的浓度。 */
   onDamage?: (strength: number) => void;
+  /**
+   * 爆炸白闪。`strength` 0..1，离爆心越近越亮（14m 内拉满）。
+   * 不走 `onHud`：白闪只活 200ms 左右，10Hz 快照表达不了「刚刚那一下」。
+   */
+  onFlash?: (strength: number) => void;
   /**
    * 玩家被打死。**一次性**，带着击杀信息卡要显示的全部内容。
    *

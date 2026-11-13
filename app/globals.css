@@ -3304,3 +3304,14 @@ body {
   86% { opacity: 1; }
   100% { transform: translateX(340%); opacity: 0; }
 }
+
+/* H5 爆炸白闪：峰值浓度由内联 background 定，这里只管淡出。
+   forwards 停在 opacity 0，等 React 300ms 后卸下节点。 */
+@keyframes ship-explosion-flash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

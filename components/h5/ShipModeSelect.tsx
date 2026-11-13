@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { Locale } from '@/lib/i18n';
 import {
   DURATION_OPTIONS,
@@ -29,8 +29,11 @@ import { GameButton, Segmented, Tabs } from './ui';
  * 2026-11-13 的两次收口，目标都是**去掉「点完还有一页要选」**：
  *
  *   · 人机强度长进单人卡 —— 「开始战斗」按下去就是枪响；
- *   · 建房 / 加房整块搬进联机卡（名字、房间码、附近房间）—— 建房直接开局，
- *     加房直接进阵营选择。房间面板只剩「连接中 / 选阵营 / 出错 / 房主走了」。
+ *   · 建房 / 加房整块搬进联机卡，再拆成两个子页签，页签放**最上方**（比房规和
+ *     名字都靠前）：「创建房间」页 = 房规四行 + 一句说明，点页脚主按钮直接开局；
+ *     「加入房间」页 = 名字 + 附近的房间（房间码输入框撤了，链接带来的码走横幅），
+ *     页签上带房间数角标，列表头上有手动刷新。
+ *     建房直接开局，加房直接进阵营选择。房间面板只剩「连接中 / 选阵营 / 出错 / 房主走了」。
  *
  * 设置挂在页面右上角，跟模式选择平级 —— 它是整页的入口，不属于任何模式。
  *
@@ -45,6 +48,9 @@ import { GameButton, Segmented, Tabs } from './ui';
  */
 
 export type GameMode = 'solo' | 'net';
+
+/** 联机卡内的子页签：建房 / 加房各占一页，附近的房间只住在「加入房间」里。 */
+type NetTab = 'create' | 'join';
 
 /**
  * 两个模式各自的文案键。写成映射而不是拼字符串：`h5Text` 的 key 是字面量联合。
@@ -87,6 +93,7 @@ export default function ShipModeSelect({
   onJoin,
   rooms,
   scanning,
+  onRefreshRooms,
   onSettings,
   backHref,
 }: {
@@ -96,7 +103,7 @@ export default function ShipModeSelect({
   /** 人机强度（只对单人局有意义，跟 `rules` 同一份状态） */
   difficulty: Difficulty;
   onDifficulty: (value: Difficulty) => void;
-  /** 对局规模：每队人数（含自己）。1v1 / 3v3 / 6v6 */
+  /** 对局规模：每队人数（含自己）。1v1 ~ 6v6 */
   teamSize: TeamSize;
   onTeamSize: (value: TeamSize) => void;
   /** 结束方式：时长到点 / 人头打满。**二选一**，另一个数值行不渲染 */
@@ -113,7 +120,7 @@ export default function ShipModeSelect({
   /** 本机玩家名（受控；空串用默认名） */
   name: string;
   onName: (next: string) => void;
-  /** 房间码输入（受控，宿主持有 —— 邀请链接会直接把它填好） */
+  /** 邀请链接带来的房间码（受控，宿主持有；加房页的输入框也走它） */
   code: string;
   onCode: (next: string) => void;
   /** 建房：载入 → 立刻开局（房主不等别人） */
@@ -124,12 +131,19 @@ export default function ShipModeSelect({
   rooms: readonly LobbyEntry[];
   /** 正在等房间列表（大厅刚连上 / 刚切到联机页签） */
   scanning: boolean;
+  /** 手动刷新附近的房间（清掉当前列表重新等下一轮公告） */
+  onRefreshRooms: () => void;
   onSettings: () => void;
   backHref: string;
 }) {
   const text = (key: H5TextKey) => h5Text(locale, key);
   const copy = COPY[mode];
   const solo = mode === 'solo';
+
+  // 子页签是本组件的本地状态：模式页每次回到 phase='mode' 都重挂载，
+  // 但「点过哪一页」这种 UI 偏好不值得抬进宿主。唯一例外是邀请链接 ——
+  // 带着房间码进来的人九成是要加房，初值直接落「加入房间」
+  const [netTab, setNetTab] = useState<NetTab>(() => (normalizeRoomCode(code) !== null ? 'join' : 'create'));
 
   // 房间码由宿主持有：邀请链接（`?shiproom=`）到达时会直接把它填好，
   // 放在这里当本地草稿的话挂载之后就到不了了
@@ -224,12 +238,42 @@ export default function ShipModeSelect({
 
             <p className="mt-3.5 text-[12px] leading-6 text-white/50">{text(copy.desc)}</p>
 
-            {/* 对局参数放在两张卡共用区：单人直接生效，联机建房决定房规。
+            {/* 子页签放最上方：建房 / 加房是这页的第一个选择，比房规和名字都靠前。
+                「加入房间」上的角标是附近房间数，有房才画 */}
+            {solo ? null : (
+              <Segmented<NetTab>
+                className="mt-4"
+                value={netTab}
+                onChange={setNetTab}
+                options={[
+                  { value: 'create', label: text('net.create') },
+                  { value: 'join', label: text('net.join'), badge: rooms.length },
+                ]}
+              />
+            )}
+
+            {/* 名字两个子页都要（建房要报名，加房也要），紧跟页签 */}
+            {solo ? null : (
+              <label className="mt-3 block">
+                <span className="mb-1 block text-[11px] tracking-wide text-white/45">{text('net.name')}</span>
+                <input
+                  value={name}
+                  onChange={(event) => onName(event.target.value.slice(0, 16))}
+                  placeholder={text('net.namePlaceholder')}
+                  maxLength={16}
+                  className="w-full border border-[#343a42] bg-black/45 px-3 py-2 text-[13px] text-white outline-none focus:border-[#f0a020]/70"
+                />
+              </label>
+            )}
+
+            {/* 对局参数：单人直接生效；联机只在「创建房间」页出现 —— 加房页听房主的，
+                把这四行画出来只会让人以为是自己选的规模和人头。
                 以前这些是写死的（5v5 / 10 分钟 / 40 头），想打一小局的人只能中途退出。
 
                 🔴 「结束方式」两档互斥：按时长 / 按人头。**只渲染选中的那一个数值行** ——
                 两行同时出现时玩家会读到「5 分钟内打满 40 头才结束」，而引擎其实是
                 先到先算；选「按人头」却因为时间先到被结算，看着就像 bug */}
+            {solo || netTab === 'create' ? (
             <div className="mt-4 space-y-2.5 border-t border-white/8 pt-4">
               <RuleRow label={text('start.mode')}>
                 <Segmented<TeamSize>
@@ -275,56 +319,60 @@ export default function ShipModeSelect({
                   options={DIFFICULTIES.map((item) => ({ value: item.value, label: text(item.label) }))}
                 />
               </RuleRow>
-              {/* 加入别人的房间时这几行不生效：席位、时长、人头都听房主的。
-                  不写这一句的话，加房的人会以为是自己选的规模和人头 */}
-              {solo ? null : (
-                <p className="text-[10px] leading-4 text-white/28">{text('mode.netRulesHint')}</p>
-              )}
             </div>
+            ) : null}
 
-            {/* 联机的三件事全在这张卡里：名字、房间码、附近房间。
-                以前它们是「点继续之后」另一个面板，现在没有那一步了 */}
-            {solo ? null : (
+            {/* 子页签内容：建房页只补一句房规说明；加房页 = 房间码 + 附近的房间。
+                名字在上面两页共用，这里不再重复 */}
+            {solo ? null : netTab === 'create' ? (
+              <p className="mt-3 border border-dashed border-white/12 px-3 py-3 text-[11px] leading-5 text-white/40">
+                {text('net.createHint')}
+              </p>
+            ) : (
               <>
-                <div className="mt-4 border-t border-white/8 pt-4">
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] tracking-wide text-white/45">{text('net.name')}</span>
-                    <input
-                      value={name}
-                      onChange={(event) => onName(event.target.value.slice(0, 16))}
-                      placeholder={text('net.namePlaceholder')}
-                      maxLength={16}
-                      className="w-full border border-[#343a42] bg-black/45 px-3 py-2 text-[13px] text-white outline-none focus:border-[#f0a020]/70"
-                    />
-                  </label>
-                </div>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[11px] tracking-wide text-white/45">{text('net.code')}</span>
+                  <input
+                    value={code}
+                    onChange={(event) => onCode(event.target.value.toUpperCase())}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && normalized) onJoin(normalized);
+                    }}
+                    placeholder={text('net.codePlaceholder')}
+                    maxLength={CODE_LENGTH + 2}
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="w-full border border-[#343a42] bg-black/45 px-3 py-2 font-mono text-[15px] tracking-[0.3em] text-white uppercase outline-none focus:border-[#f0a020]/70"
+                  />
+                </label>
 
-                <div className="mt-3 flex items-end gap-2">
-                  <label className="flex-1">
-                    <span className="mb-1 block text-[11px] tracking-wide text-white/45">{text('net.code')}</span>
-                    <input
-                      value={code}
-                      onChange={(event) => onCode(event.target.value.toUpperCase())}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && normalized) onJoin(normalized);
-                      }}
-                      placeholder={text('net.codePlaceholder')}
-                      maxLength={CODE_LENGTH + 2}
-                      autoCapitalize="characters"
-                      autoComplete="off"
-                      spellCheck={false}
-                      className="w-full border border-[#343a42] bg-black/45 px-3 py-2 font-mono text-[15px] tracking-[0.3em] text-white uppercase outline-none focus:border-[#f0a020]/70"
-                    />
-                  </label>
-                  <GameButton variant="ghost" disabled={!canJoin} onClick={() => normalized && onJoin(normalized)}>
-                    {text('net.join')}
-                  </GameButton>
-                </div>
-
-                <div className="mt-4">
-                  <div className="mb-1.5 flex items-baseline justify-between">
+                <div className="mt-3">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
                     <span className="text-[11px] tracking-wide text-white/45">{text('net.rooms')}</span>
-                    <span className="font-mono text-[10px] text-white/25">{rooms.length}</span>
+                    {/* 手动刷新：大厅没有「查询」动作（列表靠房主每 2 秒广播喂），
+                        所以刷新 = 清列表重新等下一轮公告。搜索中禁用 —— 转圈本身就是
+                        「正在刷新」，再点只会把计时器越排越长 */}
+                    <button
+                      type="button"
+                      onClick={onRefreshRooms}
+                      disabled={scanning}
+                      title={text('net.refresh')}
+                      aria-label={text('net.refresh')}
+                      className="flex items-center gap-1.5 border border-[#343a42] bg-black/45 px-2 py-1 font-mono text-[10px] tabular-nums text-white/55 transition-colors hover:border-[#f0a020]/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <svg
+                        aria-hidden
+                        viewBox="0 0 24 24"
+                        className={`h-3 w-3 shrink-0 ${scanning ? 'animate-spin' : ''}`}
+                        fill="currentColor"
+                      >
+                        {/* 环形箭头：圆弧 + 三角头。两段 3/4 圆弧拼不圆，
+                            直接用一条 path 画 300° 弧再补箭头最稳 */}
+                        <path d="M12 4a8 8 0 1 0 8 8h-2.4a5.6 5.6 0 1 1-5.6-5.6c1.55 0 2.94.63 3.95 1.65L13.6 10.4H20V4l-2.24 2.24A7.96 7.96 0 0 0 12 4z" />
+                      </svg>
+                      {rooms.length}
+                    </button>
                   </div>
 
                   {rooms.length === 0 ? (
@@ -381,12 +429,30 @@ export default function ShipModeSelect({
           {/* 不再 mt-auto：父层是 justify-center，mt-auto 会把这块又顶回屏幕最底，
               刚好抵消掉居中。现在它是卡片自己的页脚（一条内分隔线），跟正文同宽 */}
           <div className="flex items-center justify-between gap-4 border-t border-[#2b323a] px-5 py-4">
-            <span className="hidden text-[10px] leading-4 tracking-wide text-white/22 sm:block">
-              {text(solo ? 'start.hint' : 'net.startHint')}
-            </span>
-            {/* 单人：直接开局；联机：建房直接开局（等别人的话走上面那张卡里的「加入房间」） */}
-            <GameButton onClick={solo ? onEnter : onCreate} className="ml-auto shrink-0 px-8 py-3 text-[14px]">
-              {text(solo ? 'start.begin' : 'net.create')}
+            {/* 左侧小字跟子页签走：加房页那行「输房间码或点列表」已经写在输入框下面了，
+                页脚再重复一遍只是噪声，所以加房页页脚不画小字 */}
+            {solo || netTab === 'create' ? (
+              <span className="hidden text-[10px] leading-4 tracking-wide text-white/22 sm:block">
+                {text(solo ? 'start.hint' : 'net.startHint')}
+              </span>
+            ) : null}
+            {/* 单人：直接开局。联机：主按钮跟子页签走 —— 建房页就是「创建房间」，
+                加房页变成「加入房间」（没填合法房间码时禁用）。房间列表里点某条
+                是直达的，页脚这个按钮只负责把「这一页的主动作」补齐 */}
+            <GameButton
+              onClick={
+                solo
+                  ? onEnter
+                  : netTab === 'create'
+                    ? onCreate
+                    : () => {
+                        if (normalized) onJoin(normalized);
+                      }
+              }
+              disabled={!solo && netTab === 'join' && !canJoin}
+              className="ml-auto shrink-0 px-8 py-3 text-[14px]"
+            >
+              {text(solo ? 'start.begin' : netTab === 'create' ? 'net.create' : 'net.join')}
             </GameButton>
           </div>
         </div>
