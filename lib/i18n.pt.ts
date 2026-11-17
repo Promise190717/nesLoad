@@ -80,21 +80,36 @@ export const pt: Record<MessageKey, string> = {
   'home.empty':
     'A biblioteca está vazia agora — abra a sala e arraste uma ROM para a TV para começar a jogar.',
   'home.faq.title': 'Perguntas frequentes',
-  'home.faq.q1': 'É grátis?',
+  'home.faq.q1': 'O que é o {site}?',
   'home.faq.a1':
+    'Um fliperama de consoles clássicos no navegador — escolha um jogo da biblioteca e ele começa na hora, sem downloads e sem instalação.',
+  'home.faq.q2': 'É grátis?',
+  'home.faq.a2':
     'Totalmente grátis — todos os jogos estão liberados. Ao entrar, você ganha saves na nuvem para o histórico e os arquivos de save.',
-  'home.faq.q2': 'Preciso instalar alguma coisa?',
-  'home.faq.a2': 'Não — basta clicar em um jogo e jogar direto no navegador.',
-  'home.faq.q3': 'Funciona em celulares e tablets?',
-  'home.faq.a3': 'Sim — funciona direto no navegador do celular e do tablet.',
+  'home.faq.q3': 'Quais consoles são suportados?',
+  'home.faq.a3':
+    'Quatorze sistemas clássicos — NES, SNES, Game Boy e GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade e mais. A lista completa está na página de consoles.',
   'home.faq.q4': 'Posso baixar os arquivos ROM?',
   'home.faq.a4':
     'Sim — toda página de jogo tem um botão de download. Baixe apenas arquivos ROM que você tem direito legal de usar.',
-  'home.faq.q5': 'Posso jogar com um amigo?',
-  'home.faq.a5': 'Claro! Chame um amigo e abra uma sala para a partida.',
+  'home.faq.q5': 'Funciona em celulares e tablets?',
+  'home.faq.a5':
+    'Sim — funciona direto no navegador do celular e do tablet, com botões touch na tela quando não há teclado.',
   'home.faq.q6': 'Suporta controle?',
   'home.faq.a6':
     'Sim — um controle USB ou Bluetooth funciona assim que o navegador o reconhece. O mapeamento de botões é o padrão de cada console.',
+  'home.faq.q7': 'Posso jogar com um amigo?',
+  'home.faq.a7':
+    'Claro! Chame um amigo e abra uma sala para a partida.',
+  'home.faq.q8': 'Como funciona o salvamento?',
+  'home.faq.a8':
+    'Como nos consoles de verdade: cada jogo guarda seu save de bateria no seu aparelho. Fazendo login, os saves também sincronizam com a nuvem.',
+  'home.faq.q9': 'Um jogo não carrega — o que faço?',
+  'home.faq.a9':
+    'Primeiro recarregue a página — isso resolve quase tudo. Ainda travou? Tente outro navegador ou limpe o cache do navegador.',
+  'home.faq.q10': 'Posso colocar jogos no meu próprio site?',
+  'home.faq.a10':
+    'Sim — toda página de jogo tem um painel de incorporação com o código iframe pronto. Cole no seu site e os visitantes jogam ali mesmo.',
 
   'seo.heading': 'Jogue jogos retrô no navegador',
   'seo.intro':
@@ -702,6 +717,7 @@ export const pt: Record<MessageKey, string> = {
   'gamesPage.controls': 'Controles',
   'gamesPage.about': 'Sobre {title}',
   'gamesPage.tags': 'Etiquetas',
+  'gamesPage.related': 'Você também pode gostar',
   'gamesPage.readMore': 'Ler mais',
   'gamesPage.showLess': 'Mostrar menos',
   'gamesPage.selectLanguage': 'Escolher idioma',

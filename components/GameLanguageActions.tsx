@@ -92,7 +92,7 @@ export default function GameLanguageActions({
   playLabel,
   playOnlineLabel,
   downloadLabel,
-  children,
+  children
 }: {
   /** 开始游戏（solo）的地址，**已经带好 `?id=` 与 `mode=solo`** */
   playHref: string;
@@ -168,18 +168,30 @@ export default function GameLanguageActions({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
+      {/* gap-3（2026-11-17 用户「这几个按钮间 增大左右间距」，原 gap-2 太挤） */}
+      <div className="flex flex-wrap items-center gap-3">
         {needsChoice ? (
-          <button type="button" onClick={openDialog(playHref)} className={`${PLAY_CLASS} cursor-pointer`}>
-            <span aria-hidden="true" className="text-[15px] leading-none">
-              ▸
+          <button
+            type="button"
+            onClick={openDialog(playHref)}
+            className={`${PLAY_CLASS} cursor-pointer`}
+          >
+            {/* ▸ 20px（2026-11-17 用户二轮反馈「里面的三角很小」）：▸ 这个字形
+                本身就比同字号字符小一圈，17px 还是被字压住，提到 20px 才出来。
+                下载 ↓ / 收藏 ★ 同步 20px，三颗同重。 */}
+            <span aria-hidden="true" className="text-[10px] leading-none">
+              ▶
             </span>
             {playLabel}
           </button>
         ) : (
-          <Link href={withLang(playHref, defaultCode)} className={PLAY_CLASS} prefetch={false}>
-            <span aria-hidden="true" className="text-[15px] leading-none">
-              ▸
+          <Link
+            href={withLang(playHref, defaultCode)}
+            className={PLAY_CLASS}
+            prefetch={false}
+          >
+            <span aria-hidden="true" className="text-[10px] leading-none">
+              ▶
             </span>
             {playLabel}
           </Link>
@@ -196,7 +208,11 @@ export default function GameLanguageActions({
               {playOnlineLabel}
             </button>
           ) : (
-            <Link href={withLang(hostHref, defaultCode)} className={HOST_CLASS} prefetch={false}>
+            <Link
+              href={withLang(hostHref, defaultCode)}
+              className={HOST_CLASS}
+              prefetch={false}
+            >
               <PlayersIcon size={16} />
               {playOnlineLabel}
             </Link>
@@ -230,7 +246,7 @@ export default function GameLanguageActions({
         */}
         {downloadHref && (
           <a href={downloadHref} className={DOWNLOAD_CLASS}>
-            <span aria-hidden="true" className="text-[15px] leading-none">
+            <span aria-hidden="true" className="text-[20px] leading-none">
               ↓
             </span>
             {downloadLabel}
@@ -273,7 +289,10 @@ export default function GameLanguageActions({
                   >
                     <span>{item.label}</span>
                     {active && (
-                      <span aria-hidden="true" className="text-[13px] leading-none">
+                      <span
+                        aria-hidden="true"
+                        className="text-[13px] leading-none"
+                      >
                         ▸
                       </span>
                     )}

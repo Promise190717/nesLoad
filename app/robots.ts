@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { AI_CRAWLER_TOKENS } from '@/lib/ai-policy';
-import { LOCALES } from '@/lib/i18n';
+import { SITEMAP_LOCALES } from '@/lib/features';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
@@ -91,10 +91,14 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
      *
      * ✅ **2026-10-30 补：索引后来还是自己写了**（`app/sitemap-index.xml/route.ts` +
      *    `next.config.js` 的 rewrite，对外就是 `/sitemap.xml`，因为 `/llms.txt` 和
-     *    站长工具都默认先试这个地址）。这里**仍然列 18 个分片、不改** —— 索引只是
+     *    站长工具都默认先试这个地址）。这里**仍然逐个列分片、不改** —— 索引只是
      *    「分片在哪」的目录，列分片是直接答案；万一那条 rewrite 哪天被改坏，
      *    robots 这份还是通的。两条路都指向同一批分片，重复提交没有副作用。
+     *
+     * ✅ **2026-11-17：分片清单从 `LOCALES`（18）换成 `SITEMAP_LOCALES`（4，白名单
+     *    见 lib/features.ts）** —— 和 `generateSitemaps` / 索引路由必须三处同步，
+     *    否则就是「robots 推荐了一个 404 的分片」。
      */
-    sitemap: LOCALES.map((locale) => `${origin}/sitemap/${locale}.xml`),
+    sitemap: SITEMAP_LOCALES.map((locale) => `${origin}/sitemap/${locale}.xml`),
   };
 }

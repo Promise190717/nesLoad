@@ -84,20 +84,35 @@ export const zhTW: Record<MessageKey, string> = {
   'home.empty': '遊戲庫現在還是空的 —— 進小屋把 ROM 拖到電視上就能開玩。',
   /* 折疊問答六條（只寫真的做到了的事） */
   'home.faq.title': '常見問題',
-  'home.faq.q1': '免費嗎？',
+  'home.faq.q1': '{site}是什麼？',
   'home.faq.a1':
+    '一個開在瀏覽器裡的復古遊戲廳。選好遊戲點開就玩，不用下載、也不用安裝任何東西。',
+  'home.faq.q2': '免費嗎？',
+  'home.faq.a2':
     '完全免費，任何遊戲都可以隨便玩。登入之後可以雲端儲存遊戲紀錄和存檔。',
-  'home.faq.q2': '要裝什麼東西嗎？',
-  'home.faq.a2': '不用，點一下遊戲就能在網頁上線上玩。',
-  'home.faq.q3': '手機上能玩嗎？',
-  'home.faq.a3': '支援，手機和平板上直接在瀏覽器裡玩。',
+  'home.faq.q3': '支援哪些機種？',
+  'home.faq.a3':
+    '十四款經典機種：FC、SFC、Game Boy、GBA、NDS、世嘉 MD、PS、街機等。完整清單見機種頁。',
   'home.faq.q4': '能下載 ROM 嗎？',
   'home.faq.a4': '能，每個遊戲頁上都有下載按鈕。請只下載你有權使用的 ROM 檔案。',
-  'home.faq.q5': '能和朋友一起玩嗎？',
-  'home.faq.a5': '當然！快找朋友一起，開個房間連線對戰吧。',
+  'home.faq.q5': '手機上能玩嗎？',
+  'home.faq.a5':
+    '支援，手機和平板上直接在瀏覽器裡玩，沒有鍵盤時畫面上也有觸控按鍵。',
   'home.faq.q6': '支援手把嗎？',
   'home.faq.a6':
     '支援。USB 或藍牙手把，瀏覽器辨識到就能玩，鍵位沿用各機型的預設設定。',
+  'home.faq.q7': '能和朋友一起玩嗎？',
+  'home.faq.a7':
+    '當然！快找朋友一起，開個房間連線對戰吧。',
+  'home.faq.q8': '進度怎麼保存？',
+  'home.faq.a8':
+    '跟真機一樣，遊戲存檔按遊戲存在本機；登入之後，存檔還會同步到雲端。',
+  'home.faq.q9': '遊戲載入不出來怎麼辦？',
+  'home.faq.a9':
+    '先重新整理頁面，多數問題就解決了。還不行的話，換個瀏覽器或清一清瀏覽器快取。',
+  'home.faq.q10': '能把遊戲放到自己的網站上嗎？',
+  'home.faq.a10':
+    '能。每個遊戲頁都有嵌入面板，複製 iframe 程式碼貼到自己的網站，訪客就能直接開玩。',
 
   'seo.heading': '用瀏覽器玩復古遊戲',
   'seo.intro':
@@ -666,6 +681,7 @@ export const zhTW: Record<MessageKey, string> = {
   'gamesPage.controls': '操作說明',
   'gamesPage.about': '關於《{title}》',
   'gamesPage.tags': '遊戲標籤',
+  'gamesPage.related': '你可能還喜歡',
   'gamesPage.readMore': '查看更多',
   'gamesPage.showLess': '收合',
   'gamesPage.selectLanguage': '選擇語言',

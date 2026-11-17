@@ -84,21 +84,36 @@ export const fr: Record<MessageKey, string> = {
   'home.empty':
     'La bibliothèque est vide pour le moment — ouvrez la pièce et déposez une ROM sur le téléviseur pour commencer à jouer.',
   'home.faq.title': 'Questions fréquentes',
-  'home.faq.q1': 'Est-ce gratuit ?',
+  'home.faq.q1': 'Qu’est-ce que {site} ?',
   'home.faq.a1':
+    'Une salle d’arcade classique dans le navigateur : choisissez un jeu dans la bibliothèque et il se lance aussitôt, sans téléchargement ni installation.',
+  'home.faq.q2': 'Est-ce gratuit ?',
+  'home.faq.a2':
     'Entièrement gratuit — tous les jeux sont accessibles. La connexion ajoute des sauvegardes cloud pour votre historique et vos fichiers de sauvegarde.',
-  'home.faq.q2': 'Faut-il installer quelque chose ?',
-  'home.faq.a2': 'Non — cliquez sur un jeu et jouez directement dans votre navigateur.',
-  'home.faq.q3': 'Ça fonctionne sur téléphone et sur tablette ?',
-  'home.faq.a3': 'Oui — tout se passe dans le navigateur, sur téléphone comme sur tablette.',
+  'home.faq.q3': 'Quelles consoles sont prises en charge ?',
+  'home.faq.a3':
+    'Quatorze systèmes classiques : NES, SNES, Game Boy et GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade et plus. La liste complète est sur la page des consoles.',
   'home.faq.q4': 'Peut-on télécharger les fichiers ROM ?',
   'home.faq.a4':
     'Oui — chaque page de jeu a un bouton de téléchargement. Ne téléchargez que des fichiers ROM que vous êtes en droit d’utiliser.',
-  'home.faq.q5': 'Peut-on jouer avec un ami ?',
-  'home.faq.a5': 'Bien sûr ! Invitez un ami et créez une salle pour faire une partie.',
+  'home.faq.q5': 'Ça fonctionne sur téléphone et sur tablette ?',
+  'home.faq.a5':
+    'Oui — tout se passe dans le navigateur, sur téléphone comme sur tablette, avec des boutons tactiles à l’écran quand il n’y a pas de clavier.',
   'home.faq.q6': 'Les manettes sont-elles prises en charge ?',
   'home.faq.a6':
     'Oui — une manette USB ou Bluetooth fonctionne dès que le navigateur la détecte. La disposition des boutons reste celle par défaut de chaque console.',
+  'home.faq.q7': 'Peut-on jouer avec un ami ?',
+  'home.faq.a7':
+    'Bien sûr ! Invitez un ami et créez une salle pour faire une partie.',
+  'home.faq.q8': 'Comment fonctionne la sauvegarde ?',
+  'home.faq.a8':
+    'Comme sur les vraies consoles : chaque jeu garde sa sauvegarde pile sur votre appareil. Connectez-vous et ces sauvegardes se synchronisent aussi dans le cloud.',
+  'home.faq.q9': 'Un jeu ne se charge pas, que faire ?',
+  'home.faq.a9':
+    'Rechargez d’abord la page : ça règle la plupart des soucis. Toujours bloqué ? Essayez un autre navigateur ou videz le cache du navigateur.',
+  'home.faq.q10': 'Puis-je mettre des jeux sur mon propre site ?',
+  'home.faq.a10':
+    'Oui — chaque page de jeu propose un panneau d’intégration avec le code iframe prêt à l’emploi. Collez-le sur votre site et vos visiteurs jouent sur place.',
 
   /* 首屏那段看不见的正文（sr-only） */
   'seo.heading': 'Jouez aux jeux rétro dans votre navigateur',
@@ -717,6 +732,7 @@ export const fr: Record<MessageKey, string> = {
   'gamesPage.controls': 'Commandes',
   'gamesPage.about': 'À propos de {title}',
   'gamesPage.tags': 'Étiquettes',
+  'gamesPage.related': 'Vous aimerez aussi',
   'gamesPage.readMore': 'Lire la suite',
   'gamesPage.showLess': 'Réduire',
   'gamesPage.selectLanguage': 'Choisir la langue',

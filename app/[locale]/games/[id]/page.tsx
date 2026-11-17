@@ -2,13 +2,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { cache, type ReactNode } from 'react';
-import { consoleLabel } from '@/lib/consoles';
+import { consoleFullName } from '@/lib/consoles';
 import { ROM_DOWNLOAD_ENABLED } from '@/lib/features';
 import AboutText from '@/components/AboutText';
 import EmbedPanel from '@/components/EmbedPanel';
 import FavoriteButton from '@/components/FavoriteButton';
 import GameLanguageActions from '@/components/GameLanguageActions';
 import GameComments from '@/components/GameComments';
+import GameCardGrid from '@/components/GameCardGrid';
 import GamesShell from '@/components/GamesShell';
 import ReportGameButton from '@/components/ReportGameButton';
 import ShareGameButton from '@/components/ShareGameButton';
@@ -21,14 +22,20 @@ import {
   otherLocales,
   translate,
   type Locale,
-  type MessageKey,
+  type MessageKey
 } from '@/lib/i18n';
 import {
   gameLanguageLabel,
   defaultRomLanguage as defaultRomLanguageOf,
-  romLanguageOptions as romLanguageChoices,
+  romLanguageOptions as romLanguageChoices
 } from '@/lib/rom-lang';
-import { getGameCached, localizeGame, type Game, type LocalizedGameText } from '@/lib/server/sb-games';
+import {
+  getGameCached,
+  listRelatedGames,
+  localizeGame,
+  type Game,
+  type LocalizedGameText
+} from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import { countGameFavorites } from '@/lib/server/user-data';
 import { resolveSiteOrigin } from '@/lib/site';
@@ -49,7 +56,9 @@ import { resolveSiteOrigin } from '@/lib/site';
  *
  * 常用游戏构建期预生成，剩余详情按需生成；公共 HTML 缓存 30 天。
  */
-const loadGame = cache(async (id: string, locale: string) => getGameCached(id, locale));
+const loadGame = cache(async (id: string, locale: string) =>
+  getGameCached(id, locale)
+);
 
 /**
  * 当前浏览者是谁（没登录就是 null）。
@@ -64,7 +73,6 @@ const loadGame = cache(async (id: string, locale: string) => getGameCached(id, l
  * 用 `cache()` 包一层（同 `loadGame`）：一次渲染里它只会被读一遍。
  */
 
-
 /**
  * 说明文字的长度上限。
  *
@@ -75,11 +83,16 @@ const loadGame = cache(async (id: string, locale: string) => getGameCached(id, l
 const DESC_LIMIT = 100;
 
 /** 把 `translate` 收成「已经定好语言」的那个函数，省得每个调用点都带一遍 locale。 */
-type Transl = (key: MessageKey, vars?: Record<string, string | number>) => string;
+type Transl = (
+  key: MessageKey,
+  vars?: Record<string, string | number>
+) => string;
 
 function clamp(text: string): string {
   const trimmed = text.trim();
-  return trimmed.length > DESC_LIMIT ? `${trimmed.slice(0, DESC_LIMIT)}…` : trimmed;
+  return trimmed.length > DESC_LIMIT
+    ? `${trimmed.slice(0, DESC_LIMIT)}…`
+    : trimmed;
 }
 
 /**
@@ -92,17 +105,21 @@ function clamp(text: string): string {
  * ⚠️ 2026-10-13 起收 `LocalizedGameText`（已按语言选好的那一份）而不是整个 `Game` ——
  *    搜索结果的标题 / 描述必须跟页面语言一致，英文站不能吐中文。
  */
-function metaDescription(locale: Locale, game: Game, text: LocalizedGameText): string {
+function metaDescription(
+  locale: Locale,
+  game: Game,
+  text: LocalizedGameText
+): string {
   const boilerplate = translate(locale, 'seo.game.description', {
     title: text.title,
-    console: consoleLabel(game.consoleType, locale),
+    console: consoleFullName(game.consoleType, locale)
   });
   const own = text.description?.trim();
   return own ? `${clamp(own)} · ${boilerplate}` : boilerplate;
 }
 
 export async function generateMetadata({
-  params,
+  params
 }: {
   params: Promise<{ locale: string; id: string }>;
 }): Promise<Metadata> {
@@ -121,7 +138,7 @@ export async function generateMetadata({
   const text = localizeGame(game, locale);
   const title = translate(locale, 'seo.game.title', {
     title: text.title,
-    console: consoleLabel(game.consoleType, locale),
+    console: consoleFullName(game.consoleType, locale)
   });
   const description = metaDescription(locale, game, text);
 
@@ -138,8 +155,8 @@ export async function generateMetadata({
       /* 直接用 R2 上那张封面当分享图（绝对地址，本来就公网可读） */
       images: [{ url: game.imageUrl, alt: text.title }],
       locale: ogLocale(locale),
-      alternateLocale: otherLocales(locale).map(ogLocale),
-    },
+      alternateLocale: otherLocales(locale).map(ogLocale)
+    }
   };
 }
 
@@ -180,7 +197,7 @@ function buildJsonLd(
         url,
         description: metaDescription(locale, game, text),
         image: game.imageUrl,
-        gamePlatform: consoleLabel(game.consoleType, locale),
+        gamePlatform: consoleFullName(game.consoleType, locale),
         applicationCategory: 'Game',
         operatingSystem: 'Any (runs in a web browser)',
         isAccessibleForFree: true,
@@ -196,11 +213,13 @@ function buildJsonLd(
                 name: text.developer,
                 /* 接上了开发商库就指过去 —— 让搜索引擎把「这家公司」串成同一个实体 */
                 ...(game.developerId
-                  ? { url: `${origin}${localePath(locale, `/developers/${game.developerId}`)}` }
-                  : {}),
-              },
+                  ? {
+                      url: `${origin}${localePath(locale, `/developers/${game.developerId}`)}`
+                    }
+                  : {})
+              }
             }
-          : {}),
+          : {})
       },
       {
         '@type': 'BreadcrumbList',
@@ -213,23 +232,23 @@ function buildJsonLd(
              * 所以用 `common.home` 那颗（名字与落点都得是首页）。
              */
             name: t('common.home'),
-            item: `${origin}${localePath(locale, '/')}`,
+            item: `${origin}${localePath(locale, '/')}`
           },
           {
             '@type': 'ListItem',
             position: 2,
             name: t('gamesPage.backToGames'),
-            item: `${origin}${localePath(locale, '/games')}`,
+            item: `${origin}${localePath(locale, '/games')}`
           },
-          { '@type': 'ListItem', position: 3, name: text.title, item: url },
-        ],
-      },
-    ],
+          { '@type': 'ListItem', position: 3, name: text.title, item: url }
+        ]
+      }
+    ]
   };
 }
 
 export default async function GameDetailPage({
-  params,
+  params
 }: {
   params: Promise<{ locale: string; id: string }>;
 }) {
@@ -247,7 +266,7 @@ export default async function GameDetailPage({
     /* ⚠️ `locale` 必须先拿到：文案只取「当前语言 + 回退链」那一小份，取全量要贵 20 倍 */
     loadGame(id, locale),
     resolveSiteOrigin(),
-    countFavorites(id),
+    countFavorites(id)
   ]);
   if (!game) notFound();
 
@@ -275,6 +294,28 @@ export default async function GameDetailPage({
    */
   const tags = text.tags ?? game.tags ?? null;
   const jsonLd = buildJsonLd(origin, locale, game, text, t);
+
+  /*
+   * 「相关推荐」的数据（2026-11-16 加；2026-11-17 详情页 UI 整体回滚，这一块**保留**）。
+   *
+   * 口径：**标签重叠优先，不足用同机种补齐**（「选择了拳皇，下面就应该都是格斗游戏」，
+   * 同开发商 / 同机种都保证不了这个，开发商也不是品味信号 —— 2026-11-16 用户明确
+   * 「不要加开发商」，两条开发商来源已从取数函数里删掉）。
+   *
+   * ⚠️ 这趟取数不在文件顶部的 `Promise.all` 里：它需要 `game` / `tags` 先落地。
+   * 取数函数内部走「标签交集一次 SQL + 同机种走既有缓存查询」，详情页 7 天 ISR
+   * 会让绝大多数请求根本走不到这里（整页缓存）。查询失败不拦渲染 —— 推荐区
+   * 整块不画，比详情页 500 划算。
+   */
+  const related = await listRelatedGames(
+    game.id,
+    tags ?? [],
+    game.consoleType,
+    locale
+  ).catch(() => [] as Game[]);
+  const relatedGames = related
+    .filter((item) => item.id !== game.id)
+    .slice(0, 5);
 
   /*
    * 多语言 ROM（`Game.romLanguages`，见 lib/server/sb-games.ts）。
@@ -306,7 +347,8 @@ export default async function GameDetailPage({
    *    老数据的行为不变。
    */
   const languageLabel =
-    romLanguageOptions.map((item) => item.label).join(' / ') || gameLanguageLabel(game.language);
+    romLanguageOptions.map((item) => item.label).join(' / ') ||
+    gameLanguageLabel(game.language);
 
   /*
    * 资料那一行行。**空的不占位**（后台所有字段都是选填）——
@@ -318,8 +360,13 @@ export default async function GameDetailPage({
    * 所以标题下面那句摘要不能再从 `facts` 里拼 —— 见 `introLine`。
    */
   const facts: { label: string; value: ReactNode }[] = [
-    { label: t('gamesPage.field.console'), value: consoleLabel(game.consoleType, locale) },
-    ...(game.year ? [{ label: t('gamesPage.field.year'), value: String(game.year) }] : []),
+    {
+      label: t('gamesPage.field.console'),
+      value: consoleFullName(game.consoleType, locale)
+    },
+    ...(game.year
+      ? [{ label: t('gamesPage.field.year'), value: String(game.year) }]
+      : []),
     ...(text.developer
       ? [
           {
@@ -338,11 +385,13 @@ export default async function GameDetailPage({
               </Link>
             ) : (
               text.developer
-            ),
-          },
+            )
+          }
         ]
       : []),
-    ...(text.series ? [{ label: t('gamesPage.field.series'), value: text.series }] : []),
+    ...(text.series
+      ? [{ label: t('gamesPage.field.series'), value: text.series }]
+      : []),
     /*
      * 「语言」那一行走**全称**（`简体中文` / `English` / `日本語` / `한국어`），
      * 和列表卡片上的角标共用同一份文案 —— 2026-10-15 之前这里显示的是 `ZH` / `EN` 短码。
@@ -353,10 +402,10 @@ export default async function GameDetailPage({
       ? [
           {
             label: t('gamesPage.field.language'),
-            value: languageLabel,
-          },
+            value: languageLabel
+          }
         ]
-      : []),
+      : [])
   ];
 
   /*
@@ -365,7 +414,12 @@ export default async function GameDetailPage({
    * join 出来会是 `[object Object]`），所以另拼一份。
    */
   /* 语言那截同样走全称、且列全（见上面 `languageLabel`）—— `null` 会被 filter 掉 */
-  const introLine = [game.year ? String(game.year) : null, text.developer, text.series, languageLabel]
+  const introLine = [
+    game.year ? String(game.year) : null,
+    text.developer,
+    text.series,
+    languageLabel
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -375,11 +429,17 @@ export default async function GameDetailPage({
       label="GAME"
       title={text.title}
       intro={introLine}
-      back={{ href: localePath(locale, '/games'), label: 'common.back', mode: 'history' }}
+      back={{
+        href: localePath(locale, '/games'),
+        label: 'common.back',
+        mode: 'history'
+      }}
     >
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c')
+        }}
       />
 
       <div className="mt-8 flex flex-col gap-8 sm:flex-row sm:items-start">
@@ -399,7 +459,12 @@ export default async function GameDetailPage({
           ⚠️ 吸附范围到父容器底为止（右栏那块内容有多高就吸多久），
             所以滚到下面的评论区时它会自然跟着走开 —— 这是 `sticky` 的正确行为，别改。
         */}
-        <div className="pixel-edge pxw-2 pxc-700 w-[180px] shrink-0 bg-ink-900 sm:sticky sm:top-6 sm:w-[220px]">
+        {/* ⚠️ 封面宽度（2026-11-17 用户「详情左侧图片可以大一点」）：180/220 → 220/280。
+            280px 是 3:4 竖版封面在两栏布局里的舒适上限 —— 再大（>300px）右栏正文在
+            1280~1440 宽的屏幕上会被挤到 60% 以下，长文一行剩的字太少不好读。 */}
+        {/* ⚠️ 封面栏**裸排**（2026-11-17 用户「边框也不要」）：不描边、不加底色，
+            就是一张图 + 一组资料直接落在页面底色上 —— 别把壳加回来。 */}
+        <div className="w-[220px] shrink-0 sm:sticky sm:top-6 sm:w-[280px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={game.imageUrl}
@@ -409,6 +474,23 @@ export default async function GameDetailPage({
             decoding="async"
             className="block aspect-[3/4] w-full object-cover"
           />
+
+          {/*
+            资料表（2026-11-17 用户要求「放在图片下方」「一行两个」）。
+            `dl` 语义保留：这一页的语义就是「字段名 : 值」。每格上下两行
+            （label 在上、value 在下），`grid-cols-2` 一行两个 —— 280px 的列宽
+            排不下「label 左 value 右」的行式两对。
+          */}
+          <dl className="grid grid-cols-2 gap-x-2 gap-y-1.5 px-1 pb-1 pt-3">
+            {facts.map((fact) => (
+              <div key={fact.label} className="min-w-0">
+                <dt className="text-[11px] text-ink-500">{fact.label}</dt>
+                <dd className="mt-0.5 text-[12px] leading-5 text-ink-200 [&_a]:break-all">
+                  {fact.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <div className="min-w-0 flex-1">
@@ -533,19 +615,11 @@ export default async function GameDetailPage({
             {text.description?.trim() ||
               t('gamesPage.fallbackDescription', {
                 title: text.title,
-                console: consoleLabel(game.consoleType, locale),
+                console: consoleFullName(game.consoleType, locale)
               })}
           </p>
 
-          {/* 资料表。`dl` 而不是一排 `<span>`：这一页的语义就是「字段名 : 值」 */}
-          <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-ink-800 pt-5">
-            {facts.map((fact) => (
-              <div key={fact.label} className="contents">
-                <dt className="text-[12px] text-ink-500">{fact.label}</dt>
-                <dd className="text-[12px] text-ink-200">{fact.value}</dd>
-              </div>
-            ))}
-          </dl>
+          {/* 资料表已挪进左栏封面下方（2026-11-17 用户要求「放在图片下方」）。 */}
 
           {/*
             操作说明（2026-10-19 加，用户要求「把源站的游戏控制说明也放到详情页面」）。
@@ -558,15 +632,16 @@ export default async function GameDetailPage({
             ⚠️ **没有就整块不画**：后台手动添加的那几款没有这个字段（表单里没有这一栏），
                `controls` 恒为 `null` —— 这块天然是「爬来的才有」的内容，
                不要给它编一段默认文案。
-            ⚠️ 位置在**资料表之后**（2026-10-19 用户要求「放在类型 / 年份 / 开发商 / 系列 /
-               语言这个下面」，第一版放在正文与资料表之间是错的）。用 `border-t` 与资料表
-               隔开，和评论模块同一套「小节」口径（那条线属于这一块，不属于资料表）。
+            ⚠️ 位置紧跟**正文之后**（资料表 2026-11-17 挪进了左栏封面下方，原来是
+               「资料表之后」，挪动后这里顺位成为正文后的第一小节）。用 `border-t` 隔开，
+               和评论模块同一套「小节」口径（那条线属于这一块，不属于正文）。
             ⚠️ 键位是**三列等宽网格**（2026-10-19 用户要求「一行最多三个、等宽、文字超出
                就换行、不增加宽度」）。第一版是 `flex-wrap` 横排，动作文字长短不一时
                每一行的列宽都在变，看着很乱。
                · `grid-cols-3` = `repeat(3, minmax(0, 1fr))` —— **等宽**且不会被内容撑开；
                · 每项 `min-w-0` + 动作 `break-words` —— 长文案在**格内折行**，不顶宽列；
-               · 窄屏降到 2 列 / 1 列（`sm` / 默认），手机上三列会把动作挤成一列字。
+               · 窄屏 2 列（2026-11-17 用户要求「小屏幕下一行两个」，原先手机上只给 1 列、
+                 一长串键位要滚很久），`lg` 起才升 3 列。
             ⚠️ 格内是**上下两行**（`kbd` 在上、动作在下），不是左右并排（2026-10-19 第二版）：
                左右并排时动作一折行，第二行会从**文字起点**开始缩进，跟上一行的按键错位，
                整片看着像散落的方块；上下排之后每格都从**左边缘**起，三列自然对齐。
@@ -576,12 +651,16 @@ export default async function GameDetailPage({
           */}
           {text.controls ? (
             <section className="mt-6 border-t border-ink-800 pt-5">
-              <h2 className="text-[13px] font-semibold text-ink-200">{t('gamesPage.controls')}</h2>
+              <h2 className="text-[13px] font-semibold text-ink-200">
+                {t('gamesPage.controls')}
+              </h2>
               {text.controls.description ? (
-                <p className="mt-2 text-[13px] leading-7 text-ink-300">{text.controls.description}</p>
+                <p className="mt-2 text-[13px] leading-7 text-ink-300">
+                  {text.controls.description}
+                </p>
               ) : null}
               {text.controls.keys.length > 0 ? (
-                <ul className="mt-4 grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+                <ul className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4 lg:grid-cols-3">
                   {text.controls.keys.map((item, index) => (
                     /* 上游偶尔给出同名按键（不同动作），所以 key 里带上序号 */
                     <li key={`${item.label}-${index}`} className="min-w-0">
@@ -642,7 +721,9 @@ export default async function GameDetailPage({
           */}
           {tags && tags.length > 0 ? (
             <section className="mt-6 border-t border-ink-800 pt-5">
-              <h2 className="text-[13px] font-semibold text-ink-200">{t('gamesPage.tags')}</h2>
+              <h2 className="text-[13px] font-semibold text-ink-200">
+                {t('gamesPage.tags')}
+              </h2>
               <ul className="mt-3 flex flex-wrap gap-2">
                 {tags.map((tag, index) => (
                   <li
@@ -689,6 +770,26 @@ export default async function GameDetailPage({
         **所以首屏就是对的**，不会先画输入框再跳成「去登录」），`signInHref` 见上面那段注释。
       */}
       <GameComments gameId={game.id} signInHref={signInHref} />
+
+      {/*
+        「相关推荐」（2026-11-16 加；2026-11-17 详情页 UI 整体回滚后**唯一保留**的新区块
+        —— 用户「保留推荐模块」，当天又要求挪到**评论区下方**）。
+
+        位置：整页最底部 —— 详情块 → 评论 → 推荐收尾，它是读完/聊完之后的「继续逛」出口
+        （AdSense「低价值内容」复盘里详情页缺的就是这个）。
+
+        卡片复用 `GameCardGrid`（和 `/games` 列表、机种页 / 开发商页同一套版式与入场
+        动效），不另造一种卡；取 5 张正好 `lg` 一行排满。没有可推荐的（孤款）整块不画。
+        数据口径见上面 `related` 那段注释。
+      */}
+      {relatedGames.length > 0 ? (
+        <section className="mt-10 border-t border-ink-800 pt-6">
+          <h2 className="text-[16px] font-semibold text-ink-100">
+            {t('gamesPage.related')}
+          </h2>
+          <GameCardGrid games={relatedGames} locale={locale} />
+        </section>
+      ) : null}
     </GamesShell>
   );
 }

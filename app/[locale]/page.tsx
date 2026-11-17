@@ -70,6 +70,10 @@ const FAQS_ALL = [
   { q: 'home.faq.q4', a: 'home.faq.a4' },
   { q: 'home.faq.q5', a: 'home.faq.a5' },
   { q: 'home.faq.q6', a: 'home.faq.a6' },
+  { q: 'home.faq.q7', a: 'home.faq.a7' },
+  { q: 'home.faq.q8', a: 'home.faq.a8' },
+  { q: 'home.faq.q9', a: 'home.faq.a9' },
+  { q: 'home.faq.q10', a: 'home.faq.a10' },
 ] as const satisfies readonly { q: MessageKey; a: MessageKey }[];
 
 /**

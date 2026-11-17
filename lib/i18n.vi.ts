@@ -89,21 +89,36 @@ export const vi: Record<MessageKey, string> = {
   'home.empty':
     'Thư viện đang trống — mở phòng và thả một file ROM lên màn hình CRT để bắt đầu chơi.',
   'home.faq.title': 'Câu hỏi thường gặp',
-  'home.faq.q1': 'Có miễn phí không?',
+  'home.faq.q1': '{site} là gì?',
   'home.faq.a1':
+    'Một sảnh game máy console cổ điển chạy ngay trong trình duyệt — chọn game trong thư viện là chơi được ngay, không cần tải xuống hay cài đặt gì.',
+  'home.faq.q2': 'Có miễn phí không?',
+  'home.faq.a2':
     'Hoàn toàn miễn phí — mọi game đều chơi được. Đăng nhập để có thêm bản lưu đám mây cho lịch sử chơi và file lưu.',
-  'home.faq.q2': 'Tôi có phải cài đặt gì không?',
-  'home.faq.a2': 'Không — chỉ cần bấm vào một game là chơi được ngay trên trình duyệt.',
-  'home.faq.q3': 'Có chơi được trên điện thoại và máy tính bảng không?',
-  'home.faq.a3': 'Có — chơi được ngay trên trình duyệt của điện thoại và máy tính bảng.',
+  'home.faq.q3': 'Hỗ trợ những hệ máy nào?',
+  'home.faq.a3':
+    'Mười bốn hệ máy cổ điển — NES, SNES, Game Boy và GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade và hơn nữa. Danh sách đầy đủ nằm ở trang hệ máy.',
   'home.faq.q4': 'Tôi có tải file ROM về được không?',
   'home.faq.a4':
     'Có — trang của mỗi game đều có nút tải xuống. Chỉ tải những file ROM mà bạn có quyền sử dụng.',
-  'home.faq.q5': 'Có chơi cùng bạn bè được không?',
-  'home.faq.a5': 'Tất nhiên! Rủ một người bạn rồi mở phòng để đấu với nhau.',
+  'home.faq.q5': 'Có chơi được trên điện thoại và máy tính bảng không?',
+  'home.faq.a5':
+    'Có — chơi được ngay trên trình duyệt của điện thoại và máy tính bảng, có nút cảm ứng trên màn hình khi không có bàn phím.',
   'home.faq.q6': 'Có hỗ trợ tay cầm không?',
   'home.faq.a6':
     'Có — tay cầm USB hay Bluetooth đều dùng được ngay khi trình duyệt nhận ra nó. Cách gán nút vẫn theo mặc định của từng hệ máy.',
+  'home.faq.q7': 'Có chơi cùng bạn bè được không?',
+  'home.faq.a7':
+    'Tất nhiên! Rủ một người bạn rồi mở phòng để đấu với nhau.',
+  'home.faq.q8': 'Tiến trình được lưu thế nào?',
+  'home.faq.a8':
+    'Giống máy thật: mỗi game giữ bộ lưu pin riêng trên máy của bạn. Đăng nhập thì bộ lưu còn được đồng bộ lên đám mây.',
+  'home.faq.q9': 'Game không tải được thì làm sao?',
+  'home.faq.a9':
+    'Tải lại trang trước — đa số trục trặc hết ngay. Vẫn không được thì thử trình duyệt khác hoặc xóa cache của trình duyệt.',
+  'home.faq.q10': 'Có nhúng game vào trang web của mình được không?',
+  'home.faq.a10':
+    'Có — mỗi trang game có bảng nhúng kèm mã iframe làm sẵn. Dán vào web của bạn là khách truy cập chơi được ngay tại đó.',
 
   /* 首屏那段看不见的正文（sr-only）：简短、且与页面真实功能一致 */
   'seo.heading': 'Chơi game retro trên trình duyệt',
@@ -703,6 +718,7 @@ export const vi: Record<MessageKey, string> = {
   'gamesPage.controls': 'Cách điều khiển',
   'gamesPage.about': 'Giới thiệu về {title}',
   'gamesPage.tags': 'Thẻ',
+  'gamesPage.related': 'Bạn cũng có thể thích',
   'gamesPage.readMore': 'Đọc thêm',
   'gamesPage.showLess': 'Thu gọn',
   'gamesPage.selectLanguage': 'Chọn ngôn ngữ',

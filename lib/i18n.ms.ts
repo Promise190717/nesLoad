@@ -90,21 +90,36 @@ export const ms: Record<MessageKey, string> = {
   'home.empty':
     'Pustaka kosong sekarang — buka bilik dan lepaskan ROM ke TV CRT untuk mula bermain.',
   'home.faq.title': 'Soalan lazim',
-  'home.faq.q1': 'Adakah ia percuma?',
+  'home.faq.q1': 'Apakah itu {site}?',
   'home.faq.a1':
+    'Arkade konsol klasik dalam pelayar — pilih permainan dari pustaka dan terus boleh dimainkan, tanpa muat turun dan tanpa pemasangan.',
+  'home.faq.q2': 'Adakah ia percuma?',
+  'home.faq.a2':
     'Sepenuhnya percuma — setiap permainan boleh dimainkan. Log masuk menambah simpanan awan untuk sejarah permainan dan fail simpanan anda.',
-  'home.faq.q2': 'Perlukah saya memasang apa-apa?',
-  'home.faq.a2': 'Tidak — klik sahaja permainan dan main terus dalam pelayar.',
-  'home.faq.q3': 'Adakah ia berfungsi pada telefon dan tablet?',
-  'home.faq.a3': 'Ya — ia berfungsi terus dalam pelayar pada telefon dan tablet.',
+  'home.faq.q3': 'Konsol apa yang disokong?',
+  'home.faq.a3':
+    'Empat belas sistem klasik — NES, SNES, Game Boy dan GBA, Nintendo DS, Sega Mega Drive, PlayStation, arkade dan lain-lain. Senarai penuh ada di halaman konsol.',
   'home.faq.q4': 'Bolehkah saya memuat turun fail ROM?',
   'home.faq.a4':
     'Ya — setiap halaman permainan ada butang muat turun. Muat turun hanya fail ROM yang anda sah berhak gunakan.',
-  'home.faq.q5': 'Bolehkah saya bermain bersama rakan?',
-  'home.faq.a5': 'Sudah tentu! Ajak rakan dan buka bilik untuk bertanding.',
+  'home.faq.q5': 'Adakah ia berfungsi pada telefon dan tablet?',
+  'home.faq.a5':
+    'Ya — ia berfungsi terus dalam pelayar pada telefon dan tablet, dengan butang sentuh di skrin apabila tiada papan kekunci.',
   'home.faq.q6': 'Adakah ia menyokong pengawal permainan?',
   'home.faq.a6':
     'Ya — pengawal USB atau Bluetooth terus berfungsi apabila pelayar mengesannya. Susunan butang kekal seperti lalai setiap konsol.',
+  'home.faq.q7': 'Bolehkah saya bermain bersama rakan?',
+  'home.faq.a7':
+    'Sudah tentu! Ajak rakan dan buka bilik untuk bertanding.',
+  'home.faq.q8': 'Bagaimana kemajuan disimpan?',
+  'home.faq.a8':
+    'Seperti konsol sebenar: setiap permainan menyimpan data simpanannya pada peranti anda. Log masuk dan data itu turut disegerakkan ke awan.',
+  'home.faq.q9': 'Permainan tidak dapat dimuat — apa nak buat?',
+  'home.faq.a9':
+    'Muat semula halaman dahulu — itu sudah menyelesaikan kebanyakan masalah. Masih tersangkut? Cuba pelayar lain atau kosongkan cache pelayar.',
+  'home.faq.q10': 'Bolehkah saya letakkan permainan di laman sendiri?',
+  'home.faq.a10':
+    'Boleh — setiap halaman permainan ada panel semben dengan kod iframe sedia ada. Salin dan tampal ke laman anda, pelawat boleh terus bermain di sana.',
 
   /* 首屏那段看不见的正文（sr-only），简短且与页面真实功能一致 */
   'seo.heading': 'Main permainan retro dalam pelayar',
@@ -731,6 +746,7 @@ export const ms: Record<MessageKey, string> = {
   'gamesPage.controls': 'Kawalan',
   'gamesPage.about': 'Tentang {title}',
   'gamesPage.tags': 'Tag',
+  'gamesPage.related': 'Anda mungkin juga suka',
   'gamesPage.readMore': 'Baca lagi',
   'gamesPage.showLess': 'Sembunyikan',
   'gamesPage.selectLanguage': 'Pilih bahasa',

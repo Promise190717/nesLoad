@@ -89,21 +89,36 @@ export const es: Record<MessageKey, string> = {
   'home.empty':
     'La biblioteca está vacía ahora mismo: abre la sala y suelta una ROM en el televisor para empezar a jugar.',
   'home.faq.title': 'Preguntas frecuentes',
-  'home.faq.q1': '¿Es gratis?',
+  'home.faq.q1': '¿Qué es {site}?',
   'home.faq.a1':
+    'Una sala de juegos clásicos de consola en el navegador: eliges un juego de la biblioteca y arranca al instante, sin descargas ni instalaciones.',
+  'home.faq.q2': '¿Es gratis?',
+  'home.faq.a2':
     'Totalmente gratis: todos los juegos están disponibles. Al iniciar sesión añades guardado en la nube para tu historial y tus partidas.',
-  'home.faq.q2': '¿Hay que instalar algo?',
-  'home.faq.a2': 'No: haz clic en un juego y juégalo directamente en el navegador.',
-  'home.faq.q3': '¿Funciona en móviles y tablets?',
-  'home.faq.a3': 'Sí: funciona directamente en el navegador del móvil o la tablet.',
+  'home.faq.q3': '¿Qué consolas hay?',
+  'home.faq.a3':
+    'Catorce sistemas clásicos: NES, SNES, Game Boy y GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade y más. La lista completa está en la página de consolas.',
   'home.faq.q4': '¿Puedo descargar los archivos ROM?',
   'home.faq.a4':
     'Sí: cada juego tiene un botón de descarga. Descarga solo archivos ROM que tengas derecho a usar.',
-  'home.faq.q5': '¿Puedo jugar con un amigo?',
-  'home.faq.a5': '¡Claro! Llama a un amigo y abrid una sala para echar una partida.',
+  'home.faq.q5': '¿Funciona en móviles y tablets?',
+  'home.faq.a5':
+    'Sí: funciona directamente en el navegador del móvil o la tablet, con botones táctiles en pantalla cuando no hay teclado.',
   'home.faq.q6': '¿Admite mandos de juego?',
   'home.faq.a6':
     'Sí: un mando USB o Bluetooth funciona en cuanto el navegador lo detecta. La disposición de botones es la predeterminada de cada consola.',
+  'home.faq.q7': '¿Puedo jugar con un amigo?',
+  'home.faq.a7':
+    '¡Claro! Llama a un amigo y abrid una sala para echar una partida.',
+  'home.faq.q8': '¿Cómo se guarda el progreso?',
+  'home.faq.a8':
+    'Como en las consolas de siempre: cada juego guarda su partida en tu dispositivo. Si inicias sesión, esas partidas también se sincronizan con la nube.',
+  'home.faq.q9': 'Un juego no carga, ¿qué puedo hacer?',
+  'home.faq.a9':
+    'Primero recarga la página: eso arregla casi todo. ¿Sigue igual? Prueba otro navegador o borra la caché del navegador.',
+  'home.faq.q10': '¿Puedo poner juegos en mi propia web?',
+  'home.faq.a10':
+    'Sí: cada página de juego tiene un panel para incrustar con el código iframe listo. Cópialo, pégalo en tu sitio y tus visitas podrán jugar allí mismo.',
 
   /* 首屏那段看不见的正文（sr-only），给爬虫和读屏用 */
   'seo.heading': 'Juega a juegos retro en tu navegador',
@@ -710,6 +725,7 @@ export const es: Record<MessageKey, string> = {
   'gamesPage.controls': 'Controles',
   'gamesPage.about': 'Acerca de {title}',
   'gamesPage.tags': 'Etiquetas',
+  'gamesPage.related': 'También te puede gustar',
   'gamesPage.readMore': 'Leer más',
   'gamesPage.showLess': 'Mostrar menos',
   'gamesPage.selectLanguage': 'Elegir idioma',

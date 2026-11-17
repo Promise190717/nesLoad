@@ -94,21 +94,36 @@ export const id: Record<MessageKey, string> = {
     'Pustaka masih kosong — buka ruang dan seret ROM ke layar CRT untuk mulai main.',
   /* 折叠问答：只写真的实现了的事，不写没做的卖点 */
   'home.faq.title': 'Pertanyaan umum',
-  'home.faq.q1': 'Apakah gratis?',
+  'home.faq.q1': 'Apa itu {site}?',
   'home.faq.a1':
+    'Arcade konsol klasik di dalam browser — pilih game dari pustaka dan langsung bisa dimainkan, tanpa unduhan dan tanpa pemasangan.',
+  'home.faq.q2': 'Apakah gratis?',
+  'home.faq.a2':
     'Sepenuhnya gratis — semua game bisa dimainkan. Masuk untuk menyimpan riwayat main dan file simpanan di cloud.',
-  'home.faq.q2': 'Perlu memasang sesuatu?',
-  'home.faq.a2': 'Tidak — cukup klik game dan langsung main di browser.',
-  'home.faq.q3': 'Bisa dimainkan di ponsel dan tablet?',
-  'home.faq.a3': 'Bisa — jalan langsung di browser ponsel dan tablet.',
+  'home.faq.q3': 'Konsol apa saja yang didukung?',
+  'home.faq.a3':
+    'Empat belas sistem klasik — NES, SNES, Game Boy dan GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade, dan lainnya. Daftar lengkapnya ada di halaman konsol.',
   'home.faq.q4': 'Bisakah mengunduh file ROM?',
   'home.faq.a4':
     'Bisa — setiap halaman game punya tombol unduh. Unduh hanya ROM yang memang berhak kamu gunakan.',
-  'home.faq.q5': 'Bisa main bareng teman?',
-  'home.faq.a5': 'Tentu! Ajak teman dan buat ruang untuk bertanding.',
+  'home.faq.q5': 'Bisa dimainkan di ponsel dan tablet?',
+  'home.faq.a5':
+    'Bisa — jalan langsung di browser ponsel dan tablet, dengan tombol sentuh di layar saat tidak ada papan ketik.',
   'home.faq.q6': 'Apakah mendukung gamepad?',
   'home.faq.a6':
     'Mendukung — gamepad USB atau Bluetooth langsung jalan begitu browser mengenalinya. Susunan tombol tetap mengikuti bawaan tiap konsol.',
+  'home.faq.q7': 'Bisa main bareng teman?',
+  'home.faq.a7':
+    'Tentu! Ajak teman dan buat ruang untuk bertanding.',
+  'home.faq.q8': 'Bagaimana cara menyimpan progres?',
+  'home.faq.a8':
+    'Persis konsol asli: tiap game menyimpan save-nya di perangkatmu. Masuk akun dan save itu juga tersinkron ke cloud.',
+  'home.faq.q9': 'Game tidak mau dimuat — apa yang harus dilakukan?',
+  'home.faq.a9':
+    'Muat ulang halamannya dulu — itu menyelesaikan sebagian besar masalah. Masih macet? Coba browser lain atau hapus cache browser.',
+  'home.faq.q10': 'Bolehkah memasang game di situs sendiri?',
+  'home.faq.a10':
+    'Boleh — setiap halaman game punya panel semat dengan kode iframe siap pakai. Tempel di situsmu dan pengunjung bisa langsung bermain di sana.',
 
   /* 首屏那段看不见的正文（sr-only）：这页除了按钮没有可索引的文字 */
   'seo.heading': 'Main game retro di browser',
@@ -779,6 +794,7 @@ export const id: Record<MessageKey, string> = {
   'gamesPage.controls': 'Kontrol',
   'gamesPage.about': 'Tentang {title}',
   'gamesPage.tags': 'Tag',
+  'gamesPage.related': 'Kamu mungkin juga suka',
   'gamesPage.readMore': 'Baca selengkapnya',
   'gamesPage.showLess': 'Sembunyikan',
   /* 点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */

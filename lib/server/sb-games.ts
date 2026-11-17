@@ -814,6 +814,113 @@ export const listGamesByDeveloperCached = cached(
   { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
 );
 
+/**
+ * 详情页「相关推荐」（2026-11-16 加，AdSense「低价值内容」复盘后的内容补充之一 ——
+ * 详情页原来只有一块封面 + 几行资料，往下没有任何「继续逛」的出口）。
+ *
+ * ## 推荐口径（2026-11-16 用户定的）：**标签重叠优先，同机种补位，不用开发商**
+ *
+ * 「选择了拳皇，下面就应该都是格斗游戏」—— 同开发商 / 同机种都给不出这个保证，
+ * **标签才是类型品味的最小单位**。所以主路是：
+ *
+ *   1. 用当前游戏的标签集（`games.tags`，**中文那份**）和全库 `games.tags` 求交集，
+ *      按「重叠数多 → 入库新」排，排除自己；
+ *   2. 不足额（或压根没标签的后台手填那批）用同机种补齐 —— 同平台至少是
+ *      「同一类机器上的游戏」。
+ *
+ * ⚠️ **开发商刻意不参与**（2026-11-16 同日用户明确要求「不要加开发商」）：
+ *    一个开发商什么都做，名下的下一款和这一款可能类型完全无关 —— 它不是品味信号；
+ *    类型层面的「相关」标签已经覆盖了。原方案里「没标签退同开发商」「补位兜底同开发商」
+ *    两条路都删了，`developerId` 参数随之撤掉。
+ *
+ * 为什么匹配 `games.tags`（中文）而不是 `game_texts.tags`（按语言）：
+ * 18 种语言的标签是**同一组标签的翻译**，跨语言字符串比对毫无意义；
+ * 而 `games.tags` 有现成的 GIN 索引（`idx_games_tags`，见 db/schema.pg.sql），
+ * `game_texts.tags` 没有 —— 在 2.1k 行的表上挑有索引的那份，别让推荐查询全表扫。
+ * 展示时卡片照旧按当前语言取文案（`GameCardGrid` → `localizeGame`），两件事不冲突。
+ *
+ * ## 为什么**不**包 `unstable_cache`
+ *
+ * 推荐结果的键本质是「这一款游戏」—— 每款游戏的标签集不同，缓存键基数 =
+ * 游戏数。这和 `countFavorites` 2026-10-23 被拆掉是同一条教训：长尾详情页
+ * 一天顶多被渲染一两次（整页还有 7 天 ISR 兜着），unstable_cache 条目
+ * **几乎每次都走完整的 miss 路径**（R2 GET + 查询 + R2 PUT + tag DO 通知），
+ * 比直查一次还贵。直查，让整页 ISR（`revalidate = 604800`）负责别重复算。
+ *
+ * ⚠️ 标签集**内联成 SQL 字面量**（`ARRAY['格斗','动作']::text[]`）：
+ *    `query()` 的 `bindParams` 对数组参数直接抛错（见 lib/server/pg.ts），
+ *    这是全站既定口径，不是这里能改的。标签字符串里的单引号要自己转义 ——
+ *    标签虽是后台 / 爬虫可控的数据，转义照做，别赌内容干净。
+ */
+export async function listRelatedGames(
+  selfSlug: string,
+  selfTags: readonly string[],
+  consoleType: ConsoleType,
+  locale: string
+): Promise<Game[]> {
+  const LIMIT = 6;
+  const seen = new Set<string>([selfSlug]);
+  const out: Game[] = [];
+
+  /** 往 `out` 里灌，去重（自己一开始就在 `seen` 里）、封顶。 */
+  const take = (games: readonly Game[]) => {
+    for (const game of games) {
+      if (out.length >= LIMIT) return;
+      if (seen.has(game.id)) continue;
+      seen.add(game.id);
+      out.push(game);
+    }
+  };
+
+  /* ── 主路：标签重叠 ─────────────────────────────────────────────── */
+  if (selfTags.length > 0) {
+    /*
+     * 数组字面量逐个转义单引号（规则同 pg.ts 的 `stringLiteral`）。
+     * 标签是 text[]，`ARRAY[...]::text[]` 比花括号字面量省一层转义歧义。
+     */
+    const tagsLiteral = `ARRAY[${selfTags
+      .map((tag) => `'${tag.replace(/'/g, "''")}'`)
+      .join(', ')}]::text[]`;
+
+    /*
+     * 重叠数现算现排：`unnest` 各自展开后 `INTERSECT`，`cardinality` 数一下。
+     * 结果必须确定性（重叠数 DESC → created_at DESC → slug DESC），整页 7 天 ISR
+     * 经不起两次渲染两个顺序。重叠数相同的排新的在前 —— 和列表页的时序口径一致。
+     */
+    const rows = await query<GameBaseRow & { overlap: number | string }>(
+      `SELECT ${BASE_COLUMNS},
+              cardinality(ARRAY(SELECT unnest(g.tags) INTERSECT SELECT unnest(${tagsLiteral}))) AS overlap
+         FROM games g
+        WHERE g.tags && ${tagsLiteral}
+          AND g.slug <> ?
+        ORDER BY overlap DESC, g.created_at DESC, g.slug DESC
+        LIMIT ${LIMIT}`,
+      [selfSlug]
+    );
+    take(await attach(rows, cardAttachOptions(locale)));
+  }
+
+  /*
+   * ── 补位：同机种 ─────────────────────────────────────────────────
+   *
+   * 标签给几个算几个，缺的用同机种补（同平台至少是「同一类机器上的游戏」）；
+   * 没标签（后台手填的那批）整条走这里。走**既有缓存查询**（和机种页共用
+   * 条目），这条路径不多付一分 CPU。
+   * ⚠️ 开发商不参与（用户 2026-11-16 明确要求，见函数头那段）。
+   */
+  let consolePool: readonly Game[] | null = null;
+  const takeConsole = async () => {
+    consolePool ??= (
+      await listGamesByConsoleCached(consoleType, 0, LIMIT + 2, null, locale)
+    ).games;
+    take(consolePool);
+  };
+
+  if (out.length < LIMIT) await takeConsole();
+
+  return out;
+}
+
 /* ── 汇总 ──────────────────────────────────────────────────────────────── */
 
 export const countGamesByConsoleCached = cached(
@@ -835,62 +942,12 @@ export const countGamesByConsoleCached = cached(
 /** 旧名字，页面里两种写法都有，保留别名。 */
 export const countGamesByConsole = countGamesByConsoleCached;
 
-/**
- * 一个机种下各语种各有几款（机种页那条语种筛选条上的数字）。
- *
- * 注意口径：这里数的是 **ROM 的语言**（`game_roms.language`），不是界面语言。
- * 返回**四个键齐全**，没数据的补 0 —— 调用方拿到的形状是固定的。
+/*
+ * 「一个机种下各语种各有几款」（`countConsoleGamesByLanguageCached`）已于 2026-11-17
+ * 整条删除（用户要求「不要每个语言的数量显示了 接口相关字段也去除」）：机种页的语种
+ * 筛选条不再挂条数，这条 GROUP BY 查询和它的缓存条目（键基数 = 机种 × 关键词）没有
+ * 存在的理由了。别再从 git 历史里捞回来 —— 筛选条上要数字的需求已被明确撤销。
  */
-export const countConsoleGamesByLanguageCached = cached(
-  /*
-   * ⚠️ v1 → v2（2026-11-03）：短关键词改成只在 `locales` 里搜（见 `keywordWhere`），
-   *    返回值的口径跟着变（从「18 种语言」变成「当前语言 + 回退链」），所以 `locales`
-   *    进了键、键尾升版。不升版本会继续读到 18 种语言口径的旧条目，筛选条上的数会对不上列表。
-   *
-   * ⚠️ v2 → v3（2026-11-03 同日）：关键词从「只搜标题」扩到「标题 + slug + 开发商 + 系列」，
-   *    带关键词的旧条目口径又变了 —— 不升版的话，同一个词在筛选条上还是旧数（7 天），
-   *    而列表已经按新口径出结果，两个数对不上。不带关键词的分支成本低，重新算一遍无所谓。
-   */
-  async (
-    consoleType: ConsoleType,
-    keyword: string = '',
-    locales: readonly string[] = []
-  ): Promise<Record<string, number>> => {
-    const needle = keyword.trim();
-    const keyword_ = needle ? keywordWhere(needle, locales) : null;
-    const rows = keyword_
-      ? await query<{ language: string; total: number }>(
-          `SELECT r.language, COUNT(DISTINCT g.slug)::int AS total
-             FROM games g JOIN game_roms r ON r.game_slug = g.slug
-            WHERE g.console_type = ?
-              AND ${keyword_.sql}
-            GROUP BY r.language`,
-          [consoleType, ...keyword_.params]
-        )
-      : await query<{ language: string; total: number }>(
-          `SELECT r.language, COUNT(DISTINCT g.slug)::int AS total
-             FROM games g JOIN game_roms r ON r.game_slug = g.slug
-            WHERE g.console_type = ?
-            GROUP BY r.language`,
-          [consoleType]
-        );
-
-    const counts: Record<string, number> = {};
-    for (const value of GAME_LANGUAGE_VALUES) counts[value] = 0;
-    for (const row of rows) {
-      /*
-       * 只认站内那四个语种（`GAME_LANGUAGE_VALUES`，唯一出处）。
-       * 上游还有 `es` / `zh-tw` 这些我们界面没开的版本 —— 混进来会让返回值的
-       * 形状随机（筛选条只画四个），所以直接丢掉，不进 counts。
-       */
-      if (!(row.language in counts)) continue;
-      counts[row.language] = Number(row.total);
-    }
-    return counts;
-  },
-  ['sb:games:lang-counts', 'v3'],
-  { revalidate: GAMES_PAGE_REVALIDATE_SECONDS, tags: ['games'] }
-);
 
 /* ── 单条 ──────────────────────────────────────────────────────────────── */
 

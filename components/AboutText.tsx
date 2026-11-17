@@ -33,11 +33,13 @@ import Paragraphs from './Paragraphs';
  *    mask 只作用在透明度上，与背景无关。
  */
 
-/** 折叠后露出的高度（px）。`leading-7` = 28px，这里约 6 行多一点。 */
-const VISIBLE_HEIGHT = 176;
+/** 折叠后露出的高度（px）。`leading-7` = 28px，约 8 行多一点。
+ *  2026-11-16 从 176（约 6 行）放宽 —— 用户「关于的默认高度可以加一点」。 */
+const VISIBLE_HEIGHT = 232;
 
-/** 粗判阈值（字符数）：短于这个长度基本不会溢出 6 行，服务端直接全展开。 */
-const COLLAPSE_CHARS = 240;
+/** 粗判阈值（字符数）：短于这个长度基本不会溢出 8 行，服务端直接全展开。
+ *  （随 VISIBLE_HEIGHT 同比例放宽：约 40 字/行 × 8 行。） */
+const COLLAPSE_CHARS = 320;
 
 export default function AboutText({
   text,

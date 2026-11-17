@@ -142,7 +142,7 @@ function loadPage(gameId: string, cursor: string | null): Promise<CommentPage> {
 
 export default function GameComments({
   gameId,
-  signInHref,
+  signInHref
 }: {
   gameId: string;
   /** 服务端读 cookie 判出来的登录态（只验签名，不查库） */
@@ -158,7 +158,10 @@ export default function GameComments({
    * 均分 / 评分数。初值给 `{ average: 0, count: 0 }`（「还没读到」和「没人评过」
    * 在这一页画出来是一样的 —— 都不显示那个数，所以不另设 null 态）。
    */
-  const [summary, setSummary] = useState<RatingSummary>({ average: 0, count: 0 });
+  const [summary, setSummary] = useState<RatingSummary>({
+    average: 0,
+    count: 0
+  });
   /** 首屏三态：loading / ready / error。「加载更多」另有 `loadingMore`，别混用。 */
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
 
@@ -226,20 +229,28 @@ export default function GameComments({
     setSubmitting(true);
     setNotice(null);
     try {
-      const res = await fetch(`/api/games/${encodeURIComponent(gameId)}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, rating }),
-      });
+      const res = await fetch(
+        `/api/games/${encodeURIComponent(gameId)}/comments`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, rating })
+        }
+      );
       if (!res.ok) {
         /*
          * 服务端的 `detail` 更具体（「最多 500 个字」这种），有就用它；
          * 401/403（会话过期 / 账号被封）没有 detail，给一句「请重新登录」——
          * 那是这两档唯一能做的动作。
          */
-        const data = (await res.json().catch(() => null)) as { detail?: string } | null;
+        const data = (await res.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
         const needsSignIn = res.status === 401 || res.status === 403;
-        throw new Error(data?.detail ?? (needsSignIn ? t('comments.signInRequired') : t('comments.failed')));
+        throw new Error(
+          data?.detail ??
+            (needsSignIn ? t('comments.signInRequired') : t('comments.failed'))
+        );
       }
 
       const data = (await res.json()) as { item: CommentItem };
@@ -258,7 +269,7 @@ export default function GameComments({
     } catch (error) {
       setNotice({
         tone: 'error',
-        text: error instanceof Error ? error.message : t('comments.failed'),
+        text: error instanceof Error ? error.message : t('comments.failed')
       });
     } finally {
       setSubmitting(false);
@@ -296,7 +307,9 @@ export default function GameComments({
     setItems((prev) => prev.filter((comment) => comment.id !== id));
     if (victim) setSummary((prev) => shiftSummary(prev, victim.rating, -1));
     try {
-      const res = await fetch(`/api/comments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/comments/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
       if (!res.ok) throw new Error(String(res.status));
       setNotice({ tone: 'ok', text: t('comments.deleted') });
     } catch {
@@ -315,7 +328,10 @@ export default function GameComments({
   const total = summary.count;
 
   return (
-    <section className="mt-10 border-t border-ink-800 pt-6" aria-labelledby="game-comments-heading">
+    <section
+      className="mt-10 border-t border-ink-800 pt-6"
+      aria-labelledby="game-comments-heading"
+    >
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         {/*
           标题：**14px + `font-semibold`**（2026-10-13 用户要求「字号大点 加粗」）。
@@ -323,7 +339,10 @@ export default function GameComments({
           连页面 h1（GamesShell，22px）都是 semibold，这里跟同一个口径。
           字色不动（还是 ink-200）：放大 + 加粗已经够压住旁边那行小字了，别一次动三样。
         */}
-        <h2 id="game-comments-heading" className="text-[14px] font-semibold text-ink-200">
+        <h2
+          id="game-comments-heading"
+          className="text-[16px] font-semibold text-ink-200"
+        >
           {t('comments.heading')}
         </h2>
         {/*
@@ -339,7 +358,10 @@ export default function GameComments({
               只放大那两处会让这一颗显得是掉队的。13px 略小于标题的 14px，
               不至于盖过标题；`items-baseline` 下不同字号仍按基线对齐，不会顶歪。
             */}
-            <span aria-hidden="true" className="star-glyph text-[13px] text-accent">
+            <span
+              aria-hidden="true"
+              className="star-glyph text-[13px] text-accent"
+            >
               ★
             </span>
             <span className="text-ink-200">
@@ -366,7 +388,10 @@ export default function GameComments({
         点了才报错的输入框（那是在骗人）。已登录但会话在这里过期的情况由 POST 兜住。
       */}
       {signedIn ? (
-        <form onSubmit={(event) => void submit(event)} className="mt-4 flex flex-col gap-2">
+        <form
+          onSubmit={(event) => void submit(event)}
+          className="mt-4 flex flex-col gap-2"
+        >
           {/*
             打分排在正文**前面**：先说「给几分」再说「为什么」—— 这也让它在视觉上
             和下面那行「计数 + 发表钮」分开，不会被当成正文的一部分。
@@ -374,7 +399,9 @@ export default function GameComments({
             悬停 / 键盘聚焦都给预览高亮（`hoverRating`），离开就回到已选值。
           */}
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-[12px] text-ink-500">{t('comments.ratingLabel')}</span>
+            <span className="text-[12px] text-ink-500">
+              {t('comments.ratingLabel')}
+            </span>
             <span
               role="group"
               aria-label={t('comments.ratingLabel')}
@@ -407,7 +434,9 @@ export default function GameComments({
                      * （用户报过「英文下星星还是小的」，根因写在 app/globals.css 那个类上）。
                      */
                     className={`star-glyph px-0.5 py-1 text-[24px] leading-none transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                      filled ? 'text-accent' : 'text-ink-600 hover:text-accent/70'
+                      filled
+                        ? 'text-accent'
+                        : 'text-ink-600 hover:text-accent/70'
                     }`}
                   >
                     {filled ? '★' : '☆'}
@@ -466,11 +495,15 @@ export default function GameComments({
 
       {/* 列表 */}
       <div className="mt-6">
-        {state === 'loading' && <p className="text-[12px] text-ink-500">{t('comments.loading')}</p>}
+        {state === 'loading' && (
+          <p className="text-[12px] text-ink-500">{t('comments.loading')}</p>
+        )}
 
         {state === 'error' && (
           <div className="flex items-center gap-3">
-            <p className="text-[12px] text-danger">{t('comments.loadFailed')}</p>
+            <p className="text-[12px] text-danger">
+              {t('comments.loadFailed')}
+            </p>
             {/* 重试 = 原地重来一次。失败的那次没进 in-flight 表，所以会真的重发 */}
             <button
               type="button"
@@ -502,20 +535,27 @@ export default function GameComments({
                 <CommentAvatar url={comment.avatarUrl} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span className="text-[12px] text-ink-200">{comment.username}</span>
+                    <span className="text-[12px] text-ink-200">
+                      {comment.username}
+                    </span>
                     {/*
                       这一条的星。`repeat` 夹一下上下界，脏数据（理论上进不来）也不会
                       把那一行撑破。实心走强调色、空心走灰 —— 两端分开画所以是两层。
                       `star-glyph` 同上：不给它锁字体栈，英文下这一排会缩水。
                       图形本身 `aria-hidden`，真正的分数由后面那句 `sr-only` 念出来。
                     */}
-                    <span className="star-glyph text-[14px] leading-none text-accent" aria-hidden="true">
+                    <span
+                      className="star-glyph text-[14px] leading-none text-accent"
+                      aria-hidden="true"
+                    >
                       {'★'.repeat(Math.min(comment.rating, RATING_MAX))}
                       <span className="text-ink-600">
                         {'☆'.repeat(Math.max(0, RATING_MAX - comment.rating))}
                       </span>
                     </span>
-                    <span className="sr-only">{t('comments.ratingValue', { n: comment.rating })}</span>
+                    <span className="sr-only">
+                      {t('comments.ratingValue', { n: comment.rating })}
+                    </span>
                     <span className="text-[12px] text-ink-500">
                       {formatTime(comment.createdAt, locale)}
                     </span>

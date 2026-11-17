@@ -87,21 +87,36 @@ export const fil: Record<MessageKey, string> = {
   'home.empty':
     'Walang laman ang library ngayon — buksan ang room at i-drop ang ROM sa CRT para makapaglaro.',
   'home.faq.title': 'Mga madalas itanong',
-  'home.faq.q1': 'Libre ba ito?',
+  'home.faq.q1': 'Ano ang {site}?',
   'home.faq.a1':
+    'Isang arcade ng mga classic console game sa browser — pumili ng laro sa library at maglalaro agad, walang download at walang i-i-install.',
+  'home.faq.q2': 'Libre ba ito?',
+  'home.faq.a2':
     'Libre nang buo — bukas lahat ng laro. Kapag nag-sign in ka, may cloud saves ang play history at save files mo.',
-  'home.faq.q2': 'Kailangan bang mag-install ng kahit ano?',
-  'home.faq.a2': 'Hindi — i-click lang ang isang laro at malalaro agad sa browser.',
-  'home.faq.q3': 'Gumagana ba ito sa phone at tablet?',
-  'home.faq.a3': 'Oo — gumagana ito sa browser ng phone at tablet.',
+  'home.faq.q3': 'Anong mga console ang suportado?',
+  'home.faq.a3':
+    'Apat na klasikong sistema — NES, SNES, Game Boy at GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade at iba pa. Ang buong listahan ay nasa consoles page.',
   'home.faq.q4': 'Mada-download ko ba ang mga ROM file?',
   'home.faq.a4':
     'Oo — may download button ang bawat page ng laro. I-download lang ang mga ROM file na legal mong gamitin.',
-  'home.faq.q5': 'Makakapaglaro ba ako kasama ang kaibigan?',
-  'home.faq.a5': 'Siyempre! Isama ang kaibigan at gumawa ng room para sa laban.',
+  'home.faq.q5': 'Gumagana ba ito sa phone at tablet?',
+  'home.faq.a5':
+    'Oo — gumagana ito sa browser ng phone at tablet, may on-screen touch buttons kapag walang keyboard.',
   'home.faq.q6': 'Sinusuportahan ba nito ang game controller?',
   'home.faq.a6':
     'Oo — gumagana agad ang USB o Bluetooth controller kapag nakita ito ng browser. Default na layout ng bawat console ang gamit sa mga button.',
+  'home.faq.q7': 'Makakapaglaro ba ako kasama ang kaibigan?',
+  'home.faq.a7':
+    'Siyempre! Isama ang kaibigan at gumawa ng room para sa laban.',
+  'home.faq.q8': 'Paano nagse-save ang progress?',
+  'home.faq.a8':
+    'Parang totoong console: bawat laro ay may sariling battery save na nakatago sa device mo. Kapag nag-sign in ka, naka-sync rin ang mga save sa cloud.',
+  'home.faq.q9': 'Hindi naglo-load ang laro — ano ang gagawin?',
+  'home.faq.a9':
+    'I-refresh muna ang page — iyon ang solusyon sa karamihan. Hindi pa rin? Subukan ang ibang browser o i-clear ang browser cache.',
+  'home.faq.q10': 'Pwede bang ilagay ang mga laro sa sarili kong website?',
+  'home.faq.a10':
+    'Oo — may embed panel ang bawat game page na may ready-made iframe code. I-copy at i-paste sa site mo, at puwedeng maglaro ang mga bisita doon mismo.',
 
   'seo.heading': 'Maglaro ng retro games sa browser',
   'seo.intro':
@@ -668,6 +683,7 @@ export const fil: Record<MessageKey, string> = {
   'gamesPage.controls': 'Controls',
   'gamesPage.about': 'Tungkol sa {title}',
   'gamesPage.tags': 'Mga tag',
+  'gamesPage.related': 'Maaaring magustuhan mo rin ito',
   'gamesPage.readMore': 'Magbasa pa',
   'gamesPage.showLess': 'Itago',
   'gamesPage.selectLanguage': 'Pumili ng wika',

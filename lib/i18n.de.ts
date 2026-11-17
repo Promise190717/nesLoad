@@ -75,21 +75,36 @@ export const de: Record<MessageKey, string> = {
   'home.empty':
     'Die Bibliothek ist derzeit leer — öffne das Zimmer und zieh eine ROM auf die Röhre, um zu spielen.',
   'home.faq.title': 'Häufige Fragen',
-  'home.faq.q1': 'Ist es kostenlos?',
+  'home.faq.q1': 'Was ist {site}?',
   'home.faq.a1':
+    'Eine Spielhalle im Browser für klassische Konsolenspiele — Spiel aus der Bibliothek aussuchen und es startet sofort, ohne Downloads und ohne Installation.',
+  'home.faq.q2': 'Ist es kostenlos?',
+  'home.faq.a2':
     'Völlig kostenlos — jedes Spiel steht offen. Mit einer Anmeldung kommen Cloud-Spielstände für Verlauf und Speicherdateien dazu.',
-  'home.faq.q2': 'Muss ich etwas installieren?',
-  'home.faq.a2': 'Nein — klicke ein Spiel an und spiele direkt im Browser.',
-  'home.faq.q3': 'Funktioniert es auf Handys und Tablets?',
-  'home.faq.a3': 'Ja — es läuft direkt im Browser auf Handys und Tablets.',
+  'home.faq.q3': 'Welche Konsolen werden unterstützt?',
+  'home.faq.a3':
+    'Vierzehn klassische Systeme — NES, SNES, Game Boy und GBA, Nintendo DS, Sega Mega Drive, PlayStation, Arcade und mehr. Die vollständige Liste steht auf der Konsolen-Seite.',
   'home.faq.q4': 'Kann ich die ROM-Dateien herunterladen?',
   'home.faq.a4':
     'Ja — jede Spielseite hat einen Download-Button. Lade nur ROM-Dateien herunter, die du rechtlich nutzen darfst.',
-  'home.faq.q5': 'Kann ich mit einem Freund spielen?',
-  'home.faq.a5': 'Natürlich! Schnapp dir einen Freund und eröffne einen Raum für eine Partie.',
+  'home.faq.q5': 'Funktioniert es auf Handys und Tablets?',
+  'home.faq.a5':
+    'Ja — es läuft direkt im Browser auf Handys und Tablets, mit Touch-Tasten auf dem Bildschirm, wenn keine Tastatur vorhanden ist.',
   'home.faq.q6': 'Werden Gamepads unterstützt?',
   'home.faq.a6':
     'Ja — ein USB- oder Bluetooth-Gamepad funktioniert, sobald der Browser es erkennt. Die Tastenbelegung bleibt die Standardbelegung der jeweiligen Konsole.',
+  'home.faq.q7': 'Kann ich mit einem Freund spielen?',
+  'home.faq.a7':
+    'Natürlich! Schnapp dir einen Freund und eröffne einen Raum für eine Partie.',
+  'home.faq.q8': 'Wie funktioniert das Speichern?',
+  'home.faq.a8':
+    'Wie auf echten Konsolen: Jedes Spiel behält seinen Batterie-Speicherstand auf deinem Gerät. Angemeldet synchronisieren wir die Spielstände zusätzlich in die Cloud.',
+  'home.faq.q9': 'Ein Spiel lädt nicht — was kann ich tun?',
+  'home.faq.a9':
+    'Lade zuerst die Seite neu — das behebt die meisten Stolperer. Immer noch blockiert? Probiere einen anderen Browser oder leere den Browser-Cache.',
+  'home.faq.q10': 'Kann ich Spiele auf meine eigene Website stellen?',
+  'home.faq.a10':
+    'Ja — jede Spielseite hat ein Einbetten-Panel mit fertigem iframe-Snippet. Einfach in deine Seite einfügen, und Besucher können direkt dort spielen.',
   'seo.heading': 'Retro-Games im Browser spielen',
   'seo.intro':
     '{site} ist ein Online-Retrospielzimmer. NES, SNES / SFC, Game Boy, GBA, Sega Mega Drive und Arcade-Titel laufen direkt hier im Browser — emuliert auf deinem eigenen Gerät, mit RetroArch, kompiliert zu WebAssembly.',
@@ -668,6 +683,7 @@ export const de: Record<MessageKey, string> = {
   'gamesPage.controls': 'Steuerung',
   'gamesPage.about': 'Über {title}',
   'gamesPage.tags': 'Schlagwörter',
+  'gamesPage.related': 'Das könnte dir auch gefallen',
   'gamesPage.readMore': 'Mehr anzeigen',
   'gamesPage.showLess': 'Weniger anzeigen',
   'gamesPage.selectLanguage': 'Sprache wählen',

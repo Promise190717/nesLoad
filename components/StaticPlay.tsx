@@ -9,6 +9,7 @@ import PlayScene from './PlayScene';
 import { useI18n } from './I18nProvider';
 import { localizeLibraryGame, type LibraryGame } from './GameLibraryPanel';
 import { consoleLabel } from '@/lib/consoles';
+import { SITE_NAME } from '@/lib/i18n';
 import { GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
 import type { Locale } from '@/lib/i18n';
 
@@ -120,6 +121,20 @@ export default function StaticPlay() {
       .catch(() => { if (!controller.signal.aborted) setGame(null); });
     return () => controller.abort();
   }, [id]);
+
+  /*
+   * 标签页标题带上游戏名（2026-11-17）：这一页服务端是逐语言一份的空壳
+   * （`worker.ts` 还会把查询串整个剥掉当缓存键），`?id=` 只活在浏览器里，
+   * 所以标题没法走 `generateMetadata`，只能在这层拿到接口数据后写 `document.title`。
+   * 格式对齐全站的 `title.template`（SiteDocument 里 `%s · 站名`），
+   * 站名照样只从 `SITE_NAME` 读 —— 别在组件里硬写站名。
+   * 没有 id / 查无此款时保持服务端那份默认标题（`seo.play.title`），什么都不写。
+   */
+  const gameTitle = game ? localizeLibraryGame(game, locale).title : '';
+  useEffect(() => {
+    if (!gameTitle) return;
+    document.title = `${gameTitle} · ${SITE_NAME[locale]}`;
+  }, [gameTitle, locale]);
 
   return (
     <GamesShell locale={locale} label="PLAY" title={t('gamesPage.playOnline')}

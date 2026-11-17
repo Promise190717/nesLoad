@@ -14,7 +14,7 @@
  * ⚠️ `components/CartridgeSprite.tsx` 仍然原样再导出这三个名字，老 import 路径不用动。
  *
  * ⚠️ **加机种要动的地方**（`Record<ConsoleType, …>` 那几处会编译报错提醒，数组不会）：
- *   ① 这里（`CONSOLE_LABEL` / `CONSOLE_TYPES` / `CONSOLE_TINT`）；
+ *   ① 这里（`CONSOLE_LABEL` / `CONSOLE_FULL_NAME` / `CONSOLE_TYPES` / `CONSOLE_TINT`）；
  *   ② `lib/emulator.ts`（`ConsoleType` / `CORE_MAP` / `EXTENSION_MAP` / `detectConsole`）
  *      + 把核心两个文件放进 `public/cores/`；
  *   ③ `lib/server/games.ts` 的 `countGamesByConsole` 初始化对象；
@@ -94,6 +94,83 @@ const CONSOLE_LABEL_LOCAL: Partial<Record<Locale, Partial<Record<ConsoleType, st
 };
 
 /**
+ * 机种**全称** —— 给「有版面、读得完」的地方用：详情页资料卡、SEO 标题 / 描述、
+ * JSON-LD 的 `gamePlatform`（2026-11-16 加，用户要求「机种不要缩写」）。
+ *
+ * 为什么是另一张表而不是把 `CONSOLE_LABEL` 拉长：那批短标签要落 `font-pixel`、
+ * 卡片位宽只有 4 个字符（见上面那段），动不得。全称走的是普通字体、正文宽度，
+ * 所以不受那个约束 —— 但两边都要在**加机种时同步维护**（见文件头第 ① 条）。
+ *
+ * 默认那份是英文官方名 —— 机种名绝大多数是国际品牌名（Game Boy / PlayStation），
+ * 各语言照抄即可；**只有叫法真的分叉的机种**才进下面的 `CONSOLE_FULL_NAME_LOCAL`
+ * （任天堂两台日美异名机 + 世嘉 Mega Drive 的日文片假名 + 街机这类普通名词）。
+ *
+ * ⚠️ `console_texts` 侧表里那份 name **不能**拿来当全称：后台填的数据本身就参着缩写
+ *    （「红白机FC」「GBA掌机」「NES」），而且它属于「机种专题页自己的展示名」，
+ *    详情页跟着它走会把两处显示绑死在一份可被后台随手改的数据上。
+ */
+const CONSOLE_FULL_NAME: Record<ConsoleType, string> = {
+  nes: 'Nintendo Entertainment System',
+  snes: 'Super Nintendo',
+  gb: 'Game Boy',
+  gbc: 'Game Boy Color',
+  gba: 'Game Boy Advance',
+  nds: 'Nintendo DS',
+  md: 'Sega Mega Drive',
+  gg: 'Sega Game Gear',
+  sms: 'Sega Master System',
+  '32x': 'Sega 32X',
+  ws: 'WonderSwan',
+  ngp: 'Neo Geo Pocket',
+  ps1: 'PlayStation',
+  arcade: 'Arcade',
+};
+
+/* 全称的本地叫法（同 `CONSOLE_LABEL_LOCAL` 的分叉逻辑，但不受 4 字符约束，写全）：
+ *   · NES ↔ 红白机 / ファミコン / 패미컴，SNES ↔ 超级任天堂 / スーパーファミコン —— 日美异名那两台；
+ *   · Mega Drive 的日韩叫法是片假名 / 谚文；
+ *   · 「街机 / アーケード / 아케이드」是普通名词，翻得动就翻。
+ * 其余机种的品牌名各语言通用，落在默认表即可。 */
+const CONSOLE_FULL_NAME_LOCAL: Partial<Record<Locale, Partial<Record<ConsoleType, string>>>> = {
+  zh: {
+    nes: '红白机',
+    snes: '超级任天堂',
+    md: '世嘉 Mega Drive',
+    gg: 'Game Gear',
+    sms: '世嘉 Master System',
+    '32x': '世嘉 32X',
+    arcade: '街机',
+  },
+  'zh-TW': {
+    nes: '紅白機',
+    snes: '超級任天堂',
+    md: '世嘉 Mega Drive',
+    gg: 'Game Gear',
+    sms: '世嘉 Master System',
+    '32x': '世嘉 32X',
+    arcade: '街機',
+  },
+  ja: {
+    nes: 'ファミコン',
+    snes: 'スーパーファミコン',
+    md: 'メガドライブ',
+    gg: 'ゲームギア',
+    nds: 'ニンテンドーDS',
+    ps1: 'プレイステーション',
+    arcade: 'アーケード',
+  },
+  ko: {
+    nes: '패미컴',
+    snes: '슈퍼 패미컴',
+    md: '메가 드라이브',
+    gg: '게임기어',
+    nds: '닌텐도 DS',
+    ps1: '플레이스테이션',
+    arcade: '아케이드',
+  },
+};
+
+/**
  * 取机种短标签 —— **前台唯一入口**（后台表格那种管理语境直接用 `CONSOLE_LABEL` 也行，
  * 那里看的是机种代码，不该跟着界面语言变）。
  *
@@ -102,6 +179,14 @@ const CONSOLE_LABEL_LOCAL: Partial<Record<Locale, Partial<Record<ConsoleType, st
  */
 export function consoleLabel(type: ConsoleType, locale: Locale): string {
   return CONSOLE_LABEL_LOCAL[locale]?.[type] ?? CONSOLE_LABEL[type];
+}
+
+/**
+ * 取机种**全称** —— 前台唯一入口（同 `consoleLabel` 的分工：短标签管窄位，全称管正文）。
+ * 详情页（资料卡 / SEO / JSON-LD）用这一份，卡片墙继续用 `consoleLabel`。
+ */
+export function consoleFullName(type: ConsoleType, locale: Locale): string {
+  return CONSOLE_FULL_NAME_LOCAL[locale]?.[type] ?? CONSOLE_FULL_NAME[type];
 }
 
 /**

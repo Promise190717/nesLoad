@@ -76,21 +76,36 @@ export const it: Record<MessageKey, string> = {
   'home.empty':
     'La libreria è vuota — apri la stanza e trascina una ROM sul tubo catodico per iniziare.',
   'home.faq.title': 'Domande frequenti',
-  'home.faq.q1': 'È gratis?',
+  'home.faq.q1': 'Che cos’è {site}?',
   'home.faq.a1':
+    'Una sala giochi per console classiche direttamente nel browser: scegli un gioco dalla libreria e parte subito, senza download né installazioni.',
+  'home.faq.q2': 'È gratis?',
+  'home.faq.a2':
     'Del tutto gratis — ogni gioco è libero. Accedendo aggiungi i salvataggi cloud per cronologia e file di salvataggio.',
-  'home.faq.q2': 'Devo installare qualcosa?',
-  'home.faq.a2': 'No — clicca un gioco e gioca direttamente nel browser.',
-  'home.faq.q3': 'Funziona su telefoni e tablet?',
-  'home.faq.a3': 'Sì — funziona direttamente nel browser di telefoni e tablet.',
+  'home.faq.q3': 'Quali console sono supportate?',
+  'home.faq.a3':
+    'Quattordici sistemi classici: NES, SNES, Game Boy e GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade e altri. L’elenco completo è nella pagina delle console.',
   'home.faq.q4': 'Posso scaricare i file ROM?',
   'home.faq.a4':
     'Sì — ogni pagina di gioco ha un pulsante di download. Scarica solo file ROM che hai il diritto legale di usare.',
-  'home.faq.q5': 'Posso giocare con un amico?',
-  'home.faq.a5': 'Certo! Chiama un amico e apri una stanza per una sfida.',
+  'home.faq.q5': 'Funziona su telefoni e tablet?',
+  'home.faq.a5':
+    'Sì — funziona direttamente nel browser di telefoni e tablet, con pulsanti touch a schermo quando non c’è la tastiera.',
   'home.faq.q6': 'Supporta i controller?',
   'home.faq.a6':
     'Sì — un controller USB o Bluetooth funziona appena il browser lo rileva. La disposizione dei pulsanti resta quella predefinita di ogni console.',
+  'home.faq.q7': 'Posso giocare con un amico?',
+  'home.faq.a7':
+    'Certo! Chiama un amico e apri una stanza per una sfida.',
+  'home.faq.q8': 'Come funzionano i salvataggi?',
+  'home.faq.a8':
+    'Come sulle console vere: ogni gioco conserva il suo salvataggio a batteria sul tuo dispositivo. Accedendo, i salvataggi si sincronizzano anche sul cloud.',
+  'home.faq.q9': 'Un gioco non si carica — cosa posso fare?',
+  'home.faq.a9':
+    'Prima ricarica la pagina: risolve quasi tutto. Ancora bloccato? Prova un altro browser o svuota la cache del browser.',
+  'home.faq.q10': 'Posso mettere i giochi sul mio sito?',
+  'home.faq.a10':
+    'Sì — ogni pagina di gioco ha un pannello di incorporamento con il codice iframe pronto. Copialo nel tuo sito e i visitatori giocheranno lì.',
   'seo.heading': 'Gioca ai giochi retrò nel browser',
   'seo.intro':
     '{site} è una stanza di giochi retrò online. Titoli NES, Super Nintendo (SNES), Game Boy, GBA, Mega Drive e arcade girano qui nel browser — emulati sulla tua macchina, con RetroArch compilato in WebAssembly.',
@@ -704,6 +719,7 @@ export const it: Record<MessageKey, string> = {
   'gamesPage.controls': 'Comandi',
   'gamesPage.about': 'Informazioni su {title}',
   'gamesPage.tags': 'Tag',
+  'gamesPage.related': 'Potrebbero piacerti anche',
   'gamesPage.readMore': 'Leggi di più',
   'gamesPage.showLess': 'Mostra meno',
   'gamesPage.selectLanguage': 'Scegli la lingua',

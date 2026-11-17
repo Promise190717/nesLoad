@@ -24,7 +24,7 @@ import { consoleLabel } from '@/lib/consoles';
 export default function GameCardGrid({
   games,
   locale,
-  showDeveloper = true,
+  showDeveloper = true
 }: {
   games: readonly Game[];
   /** 当前语言。卡片文案按它取一份 —— 见文件头那条 ⚠️。 */
@@ -36,7 +36,7 @@ export default function GameCardGrid({
   showDeveloper?: boolean;
 }) {
   return (
-    <ul className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+    <ul className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       {games.map((game, index) => {
         /* 卡片的文案（标题 / 开发商）按当前语言取一份 —— 见文件头那条 ⚠️ */
         const text = localizeGame(game, locale);
@@ -55,7 +55,7 @@ export default function GameCardGrid({
         const meta = [
           game.year,
           showDeveloper ? text.developer : null,
-          consoleLabel(game.consoleType, locale),
+          consoleLabel(game.consoleType, locale)
         ]
           .filter(Boolean)
           .join(' · ');
@@ -115,14 +115,18 @@ export default function GameCardGrid({
                 />
               </span>
               <span className="mt-2 block px-1">
-                <span className="block truncate text-[12px] text-ink-100">{text.title}</span>
+                <span className="block truncate text-[12px] text-ink-100">
+                  {text.title}
+                </span>
                 {/*
                   元信息这一行用 `ink-400` 而不是 `ink-500`（2026-11-05）：11px + ink-500
                   在浅色主题下是 #909090 压在 #eeeeee 上（约 2.7:1），卡片底下一行几乎
                   读不清；深色下 #707070 也只有 3 出头。`ink-400` 两个主题都够（4.0 / 5.4），
                   仍然明显弱于标题的 ink-100 —— 层级还在，只是从「勉强看见」变成「读得出」。
                 */}
-                <span className="mt-0.5 block truncate text-[11px] text-ink-400">{meta}</span>
+                <span className="mt-0.5 block truncate text-[11px] text-ink-400">
+                  {meta}
+                </span>
               </span>
             </Link>
           </li>

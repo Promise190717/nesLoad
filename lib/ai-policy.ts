@@ -190,7 +190,7 @@ export function buildLlmsTxt(origin: string): string {
 
 本文件（/llms.txt）面向所有 AI 助手、AI 搜索与智能体，说明本站**欢迎什么**、**拒绝什么**。
 **对所有厂商、所有地区的 AI 一视同仁**（国内 / 国外、任何模型、任何语言均适用），不区分平台。
-配套文件：/ai.txt（机器可读版）、/robots.txt、/sitemap.xml（站点地图索引，18 份按语言的分片在
+配套文件：/ai.txt（机器可读版）、/robots.txt、/sitemap.xml（站点地图索引，英/中/日/西 4 份按语言的分片在
 /sitemap/\`<locale>\`.xml）
 
 ## 站点简介
@@ -243,7 +243,7 @@ ${refuseZh}
 This file (/llms.txt) tells AI assistants, AI search engines and agents what this site **welcomes**
 and what it **refuses**. It applies to **all** AI providers and regions — any model, any language,
 no exceptions. Companion files: /ai.txt (machine-readable), /robots.txt, /sitemap.xml (the sitemap
-index; the 18 per-language shards live under /sitemap/\`<locale>\`.xml).
+index; the 4 per-language shards (en/zh/ja/es) live under /sitemap/\`<locale>\`.xml).
 
 ## About
 

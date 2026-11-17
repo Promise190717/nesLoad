@@ -79,3 +79,4 @@
 - 大 ROM 唯一下载路 `lib/http.ts` `fetchRomWithProgress`；R2 无版本控制，删 ROM 永久丢；键 `roms/<机种>/<slug>-<lang><ext>`。
 - 展示地址一律 `publicUrlOrNull()`；`next-cache-purge.mjs` / `r2-purge.mjs` 都不收 --bucket/--prefix。
 - `pnpm dev` 别在沙箱起；typecheck 用 `npx tsc --noEmit --incremental false`；`pnpm build` 交给用户。
+- 🔴 **push 必须走代理且拆包**：直连 github `000`；`git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=... -c http.version=HTTP/1.1 -c http.postBuffer=104857600 push`。**单次 >~10MB 会被代理掐成 HTTP 408**（改 postBuffer / --no-thin / HTTP2 都无效），大二进制要按目录拆成多个提交逐个推。

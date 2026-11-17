@@ -142,11 +142,19 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
    * 只在桌面出现。
    */
   return (
-    <div className="flex w-full flex-col items-stretch gap-y-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-3">
+    /*
+     * ⚠️ gap 口径（2026-11-17）：文字链接全部带 `px-2` 左右 padding（用户要求
+     * 「增大点击区域」），组内 gap 相应用 `gap-x-2`（8px，用户定的）——
+     * 8px padding + 8px gap = 16px 文字 ↔ 分隔线。别只加 padding 不收 gap，
+     * 那会整排突然变稀。
+     */
+    <div className="flex w-full flex-col items-stretch gap-y-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-x-2">
       {/*
         第一行：左边那颗（窄屏专供）+ 语言。
         `mr-auto` 把语言顶到最右；`sm:hidden` 让桌面版继续用宿主页自己那份
         （`/` 的品牌标、内容页下面那一行的「返回」）。
+        这一组内部保持 `gap-x-3`：语言菜单自己有边框底座（不靠 padding 扩点击区），
+        它到分隔线的 12px 不用补偿。
       */}
       <div className="flex items-center gap-x-3">
         {left && <div className="mr-auto min-w-0 sm:hidden">{left}</div>}
@@ -158,13 +166,19 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
           留它会变成行尾一截孤零零的短竖杠（第一版就踩了这个，用户截图上明摆着）。
           所以它挂在这一组的末尾（跟着语言走），而不是 `<nav>` 的开头 ——
           挂在 nav 开头的话，桌面下它前面会多出一段组间距，左右不对称。
+
+          ⚠️ **竖线一律 `w-[2px]`**（2026-11-17 用户「分割线有粗有细 都使用粗的」）：
+          原来是 `w-px`，Windows 缩放（125%/150%）下 1px 竖线落在半像素位置时，
+          有的被凑整成 2 物理像素、有的 1 物理像素 —— 同一行里肉眼可见的粗细不一。
+          改 2px 后残余波动只剩 2↔3 物理像素（12% vs 原先 50%），肉眼基本看不出。
+          全站这一排的分隔线共用这套类，改粗细只动这里的四条 span。
         */}
-        <span aria-hidden className="hidden h-[10px] w-px shrink-0 bg-ink-500 sm:block" />
+        <span aria-hidden className="hidden h-[10px] w-[2px] shrink-0 bg-ink-500 sm:block" />
       </div>
 
       <nav
         aria-label={t('topLinks.label')}
-        className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2"
+        className="flex flex-wrap items-center justify-end gap-x-2 gap-y-2"
       >
         {/* 首页（2026-10-13 加）。用户要求「除首页外，每个页面都有一颗回首页的入口」——
             顶栏是内容页唯一常驻的导航，放这一处就覆盖了 `/games*`、`/developers*`、
@@ -174,12 +188,12 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         */}
         <Link
           href={localeHref('/')}
-          className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+          className="whitespace-nowrap px-2 text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
           {t('common.home')}
         </Link>
 
-        <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+        <span aria-hidden className="h-[10px] w-[2px] shrink-0 bg-ink-500" />
         {/*
           游戏库。文案借 `topLinks.games`（法务页页脚用的是同一个键）——
           同一个落点（`/games`）在站里只该有一个名字。
@@ -197,26 +211,22 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         */}
         <Link
           href={localeHref('/games')}
-          className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+          className="whitespace-nowrap px-2 text-[12px] text-ink-300 transition-colors hover:text-accent"
         >
           {t('topLinks.games')}
         </Link>
 
-        <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
         {/*
-          H5 小游戏（2026-11-12 加）。排在「游戏库」后面：两者都是「去哪玩游戏」，
-          但这里放的是**本站原创的网页游戏**，不是库里的复古 ROM，所以是并列的第二格，
-          不是游戏库的子项。
+          H5 小游戏入口（2026-11-16 用户要求「关闭 h5 游戏的入口」再次摘掉）。
 
-          2026-11-12 晚曾把入口注释掉；2026-11-13 用户要求「开放 H5 游戏的入口」，
-          恢复成正常链接。分隔线和链接是一对，别只解开其中一个。
+          历史：2026-11-12 加 → 当晚注释掉 → 2026-11-13 用户要求开放 → 2026-11-16 再关。
+          关的只是**顶栏这一格**，`/h5` 与 `/h5/transport-ship` 两条路由仍然在线上可达
+          （`app/sitemap.ts` 也还列着），旧外链打进来还能玩。要彻底下线得另外动路由和
+          sitemap，别把这里当成全站开关。
+
+          ⚠️ **分隔线和链接是一对**：这一格连它前面那条竖线一起解开，只解一个会在
+          「游戏库」和「账号」之间留一条孤零零的竖线。
         */}
-        <Link
-          href={localeHref('/h5')}
-          className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
-        >
-          {t('h5.title')}
-        </Link>
 
         {/*
           账号那一格（2026-10-14 用户要求挪到「游戏库」**后面**：组顺序为
@@ -228,7 +238,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         */}
         {!loading && (
           <>
-            <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+            <span aria-hidden className="h-[10px] w-[2px] shrink-0 bg-ink-500" />
             {user ? (
               /*
                * ⚠️ **这两颗（个人中心 / 登录页）都关掉了预取**（`prefetch={false}`，2026-10-19）。
@@ -245,7 +255,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
                 href={localeHref('/account')}
                 prefetch={false}
                 title={t('user.openSignedIn', { name: user.username })}
-                className="max-w-[9rem] shrink-0 truncate text-[12px] text-ink-300 transition-colors hover:text-accent"
+                className="max-w-[9rem] shrink-0 truncate px-2 text-[12px] text-ink-300 transition-colors hover:text-accent"
               >
                 {user.username}
               </Link>
@@ -253,7 +263,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
               <Link
                 href={signInHref}
                 prefetch={false}
-                className="whitespace-nowrap text-[12px] text-ink-300 transition-colors hover:text-accent"
+                className="whitespace-nowrap px-2 text-[12px] text-ink-300 transition-colors hover:text-accent"
               >
                 {t('user.signIn')}
               </Link>
@@ -269,7 +279,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         */}
         {showTheme && (
           <>
-            <span aria-hidden className="h-[10px] w-px shrink-0 bg-ink-500" />
+            <span aria-hidden className="h-[10px] w-[2px] shrink-0 bg-ink-500" />
             {/*
               ⚠️ **方钮 + 圆润月牙**（2026-11-10，用户定的形态：「还是底座加图标，
               图标使用 play 页面的那个」）。这一格当天来回试过三版，别再自己发挥：
@@ -288,6 +298,11 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
               只比旁边 12px 文字高一点。想再大就加 `p`，但 24px 配无边框会重新变成
               「一行字里贴了块砖」；再小则图标贴边（2px 是下限）。
 
+              `ml-2`（2026-11-17）：主题钮不是文字链接、没有 px-2 padding，组 gap
+              收到 8px 后它到分隔线的距离会塌成 8px —— 补一个 8px 左外边距，
+              凑回和文字链接一致的 16px 节奏。只补左边：右边没有分隔线，
+              且这排右对齐，右外边距会把它从行尾顶开 8px。
+
               ⚠️ **两颗图标都渲染，由 CSS 按 `<html data-theme>` 挑**（globals.css 的
               `.theme-toggle`），别写成 `theme === 'light' ? … : …`：`theme` 首帧只能
               给 'dark'，那样浅色用户会先看见太阳再「啪」地翻成月亮。
@@ -301,7 +316,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
               onClick={toggleTheme}
               title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
               aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
-              className="theme-toggle shrink-0 rounded-[2px] bg-ink-800 p-0.5 text-ink-300 transition-colors hover:bg-ink-700 hover:text-accent"
+              className="theme-toggle ml-2 shrink-0 rounded-[2px] bg-ink-800 p-0.5 text-ink-300 transition-colors hover:bg-ink-700 hover:text-accent"
             >
               {/* 图标画的是**切过去之后**的那一颗，和 title 同方向 */}
               <span className="theme-icon-light">

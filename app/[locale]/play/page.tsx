@@ -7,7 +7,14 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
   const locale = await readLocaleParam(params);
   const title = translate(locale, 'seo.play.title');
   const description = translate(locale, 'seo.play.description');
-  return { title, description, alternates: alternatesFor(locale, '/play'), openGraph: {
+  /*
+   * noindex（2026-11-16）：这一页的 HTML 是空壳（正文只有一块 canvas，文案全靠客户端
+   * 挂载），被收录就是给 Google 的「低价值内容」评分喂薄页 —— AdSense 那次判词之后的
+   * 收缩动作之一，sitemap 同步移出（见 app/sitemap.ts 顶上那段）。
+   * `follow: true` 保留：页面上的链接（顶栏 / 返回）照常可被顺着走。
+   * ⚠️ robots.txt 别加 Disallow：挡掉抓取就连 noindex 一起挡了，已收录的地址收不回去。
+   */
+  return { title, description, robots: { index: false, follow: true }, alternates: alternatesFor(locale, '/play'), openGraph: {
     type: 'website', url: localePath(locale, '/play'), siteName: SITE_NAME[locale], title, description,
     locale: ogLocale(locale), alternateLocale: otherLocales(locale).map(ogLocale),
   } };

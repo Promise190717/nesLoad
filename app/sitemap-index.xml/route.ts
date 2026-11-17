@@ -1,4 +1,4 @@
-import { LOCALES } from '@/lib/i18n';
+import { SITEMAP_LOCALES } from '@/lib/features';
 import { resolveSiteOrigin } from '@/lib/site';
 
 /*
@@ -11,7 +11,8 @@ import { resolveSiteOrigin } from '@/lib/site';
  *   没有就是 404，等于把「站点地图在哪」这个问题的默认答案弄丢了。
  *
  * 为什么不直接删掉 `/llms.txt` 里那行地址：那只是把问题藏起来。
- * 索引本身没有任何查询（18 条字符串，来自 `LOCALES` 常量），渲染成本可忽略，
+ * 索引本身没有任何查询（几条字符串，来自 `SITEMAP_LOCALES` 白名单，见
+ * lib/features.ts —— 2026-11-17 从 18 份收缩到 4 份），渲染成本可忽略，
  * 而它给的是一个**稳定的单一入口** —— Google Search Console 提交一次就够，
  * 不用每次加语言都去改一处配置。
  *
@@ -46,7 +47,7 @@ export async function GET() {
 
   const body = `<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${LOCALES.map(
+${SITEMAP_LOCALES.map(
   (locale) => `  <sitemap><loc>${escapeXml(`${origin}/sitemap/${locale}.xml`)}</loc></sitemap>`
 ).join('\n')}
 </sitemapindex>

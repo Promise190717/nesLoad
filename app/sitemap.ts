@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
-import { DEFAULT_LOCALE, LOCALES, isLocale, localePath, type Locale } from '@/lib/i18n';
+import { DEFAULT_LOCALE, isLocale, localePath, type Locale } from '@/lib/i18n';
+import { SITEMAP_LOCALES } from '@/lib/features';
 import { listConsoleStubsCached } from '@/lib/server/consoles';
 import { listDeveloperStubsCached } from '@/lib/server/developers';
 import { listGameStubsCached } from '@/lib/server/sb-games';
@@ -8,9 +9,8 @@ import { resolveSiteOrigin } from '@/lib/site';
 /*
  * /sitemap.xml。
  *
- * 本站可收录的地址分六类：
+ * 本站可收录的地址分五类：
  *   · 首页落地页（`/`，2026-10-13 起）—— Hero + 按机种 / 开发商浏览 + FAQ；
- *   · 应用页（`/play`，2026-10-14 加）；
  *   · `/privacy` / `/terms` 两页法务文档；`/about` / `/contact` 两页站务说明（2026-11-03 加）；
  *   · `/games` 游戏列表（机种筛选 `/games/console/<机种>` 没列进来：它是同一份列表的子集，
  *     只差一个筛选维度，全列等于把一个库拆成十几份近似重复的地址；分页同理只列第 1 页）；
@@ -25,14 +25,18 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 只挂在某个弹层里等于不存在。优先级给得比首页低：它们不是内容主体。
  *
  * 2026-10-13 语言分路径之后，**每条地址每种语言一份**（英文无前缀、中文 `/zh`、
- * 日文 `/ja`、韩文 `/ko`，2026-10-16 从两份扩到四份，**2026-10-20 扩到 18 份**），
- * 由下面的 `entry()` 统一生成 —— 它顺带把 18 条 `hreflang` 互相指好。
+ * 日文 `/ja`……，2026-10-20 扩到 18 份）。
+ * ⚠️ **2026-11-17 收缩到 4 份**（英 / 中 / 日 / 西，白名单 `SITEMAP_LOCALES` 见
+ *    `lib/features.ts`）：18 语言 × 2300 款游戏 ≈ 4.1 万条主动推荐，是 AdSense
+ *    判「低价值内容」的画像之一 —— 理由和白名单的完整背景写在 features.ts。
+ *    其余 14 种语言**照常可访问**，只是不再主动推荐。
+ * 由下面的 `entry()` 统一生成。
  * 别手写其中一份：漏了 alternates 的那份在 Google 眼里就是「重复内容」，
  * 这正是分语言路径最容易被忽略的代价。
  *
- * ⚠️ **18 种语言必须拆成 18 份 sitemap**（`generateSitemaps`）：2110 款游戏 ×
- *    18 语言 ≈ 3.8 万条（2026-10-24 起下载页不进 sitemap，此前是 × 2 个地址 ≈ 7.6 万条），
- *    单文件上限是 5 万，历史上就是为了这个上限拆的份。
+ * ⚠️ **拆成多份 sitemap**（`generateSitemaps`）：2300 款游戏 × 4 语言 ≈ 9 千条。
+ *    单文件上限是 5 万，现在装得下，但保留按语言分片的结构 ——
+ *    白名单哪天要扩回去，只改 features.ts 一处，分片结构不用动。
  *
  * ⚠️ **每条 URL 都是一次会超免费版 CPU 的现场渲染**（全站 force-dynamic，
  *    见 docs/cloudflare-deployment.md），所以 sitemap 只列真正值得收录的地址：
@@ -48,6 +52,14 @@ import { resolveSiteOrigin } from '@/lib/site';
  * robots.txt 也挡了一道，页面自己还有 noindex。三处都做，是因为它们防的是不同的东西 ——
  * sitemap 是「主动推荐」，robots 是「请求别来」，noindex 是「来了也别收」。
  * 同理 `/account`（noindex 的私有视图）也不列。
+ *
+ * **薄壳页（`/play`、`/h5`、`/h5/<id>`）2026-11-16 起不列**：这三页正文只有一块 canvas，
+ * 对搜索引擎读不出任何字 —— Google AdSense 2026-11-16 判「低价值内容」之后复盘，
+ * 薄壳页 ×18 语言 ≈ 54 条零正文地址全在主动推荐给爬虫，是扣分项之一。
+ * 处理是三道一起：sitemap 不列（本文）、页面加 noindex（`/play` 与 `/h5/[id]` 的
+ * generateMetadata）、robots.txt **不** Disallow —— Disallow 会连 noindex 一起挡住，
+ * 已收录的地址反而收不回去。`/h5` 目录页**没**加 noindex（它有真文案、是原创内容，
+ * 将来入口恢复还能被收录），但同样不再主动推荐。
  *
  * 静态那几条刻意**不写 `lastModified`**：本站没有按页面的真实修改时间（正文全在代码里，
  * 没有 CMS 时间戳）。写成 `new Date()` 等于每次抓取都声称「刚刚更新过」，
@@ -110,14 +122,17 @@ function entry(
 }
 
 /**
- * 每语言一份 sitemap —— Next 据此生成 `/sitemap/<locale>.xml`（18 份）。
+ * 每语言一份 sitemap —— Next 据此生成 `/sitemap/<locale>.xml`。
+ *
+ * ⚠️ **2026-11-17 起只产出白名单里的 4 份**（`SITEMAP_LOCALES`，lib/features.ts）；
+ *    其余 14 种语言的分片随部署消失（404）—— 预期行为，别当 bug 修。
  *
  * ⚠️ **这里没有 `/sitemap.xml` 索引**（见上面那段 2026-10-23 的实测），
- *    `app/robots.ts` 里列的就是这 18 条分片，不是索引地址。
+ *    `app/robots.ts` 里列的就是这些分片，不是索引地址。
  * ⚠️ 别改回「一个文件装下所有语言」：那就是上面那段说过的 5 万条上限。
  */
 export async function generateSitemaps() {
-  return LOCALES.map((locale) => ({ id: locale }));
+  return SITEMAP_LOCALES.map((locale) => ({ id: locale }));
 }
 
 /**
@@ -182,20 +197,10 @@ export default async function sitemap({
   return [
     entry(origin, locale, '/', { changeFrequency: 'weekly', priority: 1 }),
     /*
-     * `/play`（2026-10-14 加）：正文只有一块 canvas，对搜索引擎几乎没有价值，
-     * 但它的 canonical 指自己、分享链接又常常带 `?id=`，总得有个正式地址。
+     * `/play` / `/h5` / `/h5/<id>` 三条薄壳地址 2026-11-16 起移出 sitemap ——
+     * 理由见文件顶上「薄壳页」那段。`/play` 的原备注（「canonical 指自己、
+     * 分享链接总得有个正式地址」）仍然成立，只是不再主动推荐、也不再收录。
      */
-    entry(origin, locale, '/play', { changeFrequency: 'weekly', priority: 0.6 }),
-    /*
-     * H5 小游戏专栏（2026-11-12 加）。
-     *
-     * `/h5/<id>` 也列进去：那一页正文只有一个 canvas，和 `/play` 是同一类
-     * 「跑得起来但读不出字」的页面 —— 它的价值在于分享出去的地址有个正式落点，
-     * 不在于被搜到。
-     */
-    entry(origin, locale, '/h5', { changeFrequency: 'weekly', priority: 0.7 }),
-    /* ⚠️ id 必须和 `lib/h5/catalog.ts` 的 `H5GameId` 一致（旧值 toy-gunfight 已不存在） */
-    entry(origin, locale, '/h5/transport-ship', { changeFrequency: 'monthly', priority: 0.6 }),
     entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*
      * 详情页给 0.8。

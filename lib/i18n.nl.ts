@@ -82,21 +82,36 @@ export const nl: Record<MessageKey, string> = {
   'home.empty':
     'De bibliotheek is nu leeg — open de kamer en sleep een ROM naar de CRT om te beginnen.',
   'home.faq.title': 'Veelgestelde vragen',
-  'home.faq.q1': 'Is het gratis?',
+  'home.faq.q1': 'Wat is {site}?',
   'home.faq.a1':
+    'Een arcadehal in je browser voor klassieke consolegames — kies een spel uit de bibliotheek en het begint meteen, zonder downloads en zonder installatie.',
+  'home.faq.q2': 'Is het gratis?',
+  'home.faq.a2':
     'Helemaal gratis — elke game is vrij te spelen. Met een account krijg je cloudsaves voor je speelgeschiedenis en savebestanden.',
-  'home.faq.q2': 'Moet ik iets installeren?',
-  'home.faq.a2': 'Nee — klik op een game en speel hem meteen in je browser.',
-  'home.faq.q3': 'Werkt het op telefoons en tablets?',
-  'home.faq.a3': 'Ja — het werkt gewoon in de browser op telefoons en tablets.',
+  'home.faq.q3': 'Welke consoles worden ondersteund?',
+  'home.faq.a3':
+    'Viertien klassieke systemen — NES, SNES, Game Boy en GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade en meer. De volledige lijst staat op de consolepagina.',
   'home.faq.q4': 'Kan ik de ROM-bestanden downloaden?',
   'home.faq.a4':
     'Ja — elke gamepagina heeft een downloadknop. Download alleen ROM-bestanden die je wettelijk mag gebruiken.',
-  'home.faq.q5': 'Kan ik met een vriend spelen?',
-  'home.faq.a5': 'Natuurlijk! Pak een vriend erbij en open een kamer voor een potje.',
+  'home.faq.q5': 'Werkt het op telefoons en tablets?',
+  'home.faq.a5':
+    'Ja — het werkt gewoon in de browser op telefoons en tablets, met aanraakknoppen op het scherm als er geen toetsenbord is.',
   'home.faq.q6': 'Werkt het met gamecontrollers?',
   'home.faq.a6':
     'Ja — een USB- of bluetoothcontroller werkt zodra je browser hem ziet. De toetsen blijven de standaardindeling van elke console.',
+  'home.faq.q7': 'Kan ik met een vriend spelen?',
+  'home.faq.a7':
+    'Natuurlijk! Pak een vriend erbij en open een kamer voor een potje.',
+  'home.faq.q8': 'Hoe werkt opslaan?',
+  'home.faq.a8':
+    'Zoals op echte consoles: elk spel bewaart zijn batterijsave op je eigen apparaat. Na het inloggen synchroniseren die saves ook met de cloud.',
+  'home.faq.q9': 'Een spel laadt niet — wat nu?',
+  'home.faq.a9':
+    'Ververs eerst de pagina; dat lost de meeste problemen op. Nog steeds vast? Probeer een andere browser of leeg de cache van je browser.',
+  'home.faq.q10': 'Kan ik games op mijn eigen website zetten?',
+  'home.faq.a10':
+    'Ja — elke gamepagina heeft een embedpaneel met een kant-en-klare iframe-code. Plak die op je site en bezoekers spelen er meteen.',
   'seo.heading': 'Speel retrospellen in je browser',
   'seo.intro':
     '{site} is een online retrogamekamer. NES, SNES, Game Boy, GBA, Mega Drive en arcadegames draaien gewoon in de browser — geëmuleerd op je eigen machine, met RetroArch gecompileerd naar WebAssembly.',
@@ -682,6 +697,7 @@ export const nl: Record<MessageKey, string> = {
   'gamesPage.controls': 'Besturing',
   'gamesPage.about': 'Over {title}',
   'gamesPage.tags': 'Tags',
+  'gamesPage.related': 'Wellicht ook leuk',
   'gamesPage.readMore': 'Meer lezen',
   'gamesPage.showLess': 'Minder tonen',
   'gamesPage.selectLanguage': 'Kies taal',

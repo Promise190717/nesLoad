@@ -29,9 +29,16 @@ export async function generateMetadata({
   const game = findGame(id);
   if (!game) return { title: 'H5', robots: { index: false, follow: false } };
   const copy = gameCopy(locale, game);
+  /*
+   * noindex（2026-11-16）：整页正文就是一块 canvas（首屏那点模式选择文案撑不起一个
+   * 收录页），加上 sitemap 同步移出 —— AdSense「低价值内容」判词后的收缩动作之一，
+   * 理由同 /play 的 metadata 注释。机器人找不到这款游戏时才走上面那个 notFound 分支，
+   * 正常分支也要挡住：原版只有 404 分支 noindex，等于「正常页照收」。
+   */
   return {
     title: copy.title,
     description: copy.tagline,
+    robots: { index: false, follow: true },
     alternates: alternatesFor(locale, `/h5/${game.id}`),
     openGraph: {
       type: 'article',

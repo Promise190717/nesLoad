@@ -34,7 +34,13 @@ import { useI18n } from './I18nProvider';
  *     不需要刷新页面。另放一行的话，那颗数字要么滞后、要么得再拆一层状态。
  * 初值由详情页服务端取好传进来（`count`），所以首屏 / 爬虫都能看见真实数字。
  */
-export default function FavoriteButton({ gameId, count }: { gameId: string; count: number }) {
+export default function FavoriteButton({
+  gameId,
+  count
+}: {
+  gameId: string;
+  count: number;
+}) {
   const { t } = useI18n();
   const /** null = 未登录 / 未知；true / false = 已收 / 未收 */
     [favorited, setFavorited] = useState<boolean | null>(null);
@@ -105,11 +111,13 @@ export default function FavoriteButton({ gameId, count }: { gameId: string; coun
     setTotal((n) => Math.max(0, n + (owned ? -1 : 1)));
     try {
       const res = await fetch(
-        owned ? `/api/user/favorites?gameId=${encodeURIComponent(gameId)}` : '/api/user/favorites',
+        owned
+          ? `/api/user/favorites?gameId=${encodeURIComponent(gameId)}`
+          : '/api/user/favorites',
         {
           method: owned ? 'DELETE' : 'POST',
           headers: owned ? undefined : { 'Content-Type': 'application/json' },
-          body: owned ? undefined : JSON.stringify({ gameId }),
+          body: owned ? undefined : JSON.stringify({ gameId })
         }
       );
       if (!res.ok) throw new Error(String(res.status));
@@ -148,19 +156,22 @@ export default function FavoriteButton({ gameId, count }: { gameId: string; coun
          * 口径同 AdminGames / GameLibraryPanel 里那批钮。
          */
         className={`pixel-edge pxw-2 pxc-600 flex items-center gap-1.5 px-3.5 py-2 text-[12px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-          active
-            ? 'bg-accent text-ink-950 hover:bg-accent/80'
-            : 'bg-ink-800 text-ink-200 hover:bg-ink-700 hover:text-accent'
+          /* 收藏钮 = **黄色实心**（2026-11-17 用户「收藏用黄色吧」+「不要亮黄色」）。
+             全站按钮色彩分工：开始游戏 = 强调色 / 联机 = 绿 / 下载 = 中性灰 / 收藏 = 黄。
+             用 Tailwind 默认 yellow（主题里没有黄色令牌，不想为了一颗钮加 token）；
+             yellow-400 太扎眼被否，压到 **yellow-500**（琥珀档，明暗主题都不刺眼），
+             hover 回 yellow-400。文字压 ink-950，和联机钮同一套写法。
+             收藏与否的差异靠 ★ / ☆ 字形本身表达，底色不再分两套。 */
+          'bg-yellow-600 text-ink-950 hover:bg-yellow-400'
         }`}
       >
         {/*
           ★ 实心 / ☆ 空心 —— 用同一个字符集里的两颗星，比画 SVG 更像素风。
-          字号 15px（钮里的字只有 12px）—— 和「开始游戏」的 `▸`、「下载 ROM」的 `↓`
-          同一个尺寸：三颗钮的图标得一样大，不然一行里三个符号三种重量。
-          配 `leading-none` 是为了**不撑高钮**（15px < 文字的 18px 行高），
-          和字号本身是两件事。
+          字号 20px（2026-11-17 跟「开始游戏」的 ▸ 一起提到 20px）——
+          三颗钮的图标得一样大，不然一行里三个符号三种重量。
+          配 `leading-none` 是为了**不撑高钮**，和字号本身是两件事。
         */}
-        <span aria-hidden="true" className="text-[15px] leading-none">
+        <span aria-hidden="true" className="text-[16px] leading-none">
           {active ? '★' : '☆'}
         </span>
         {label}

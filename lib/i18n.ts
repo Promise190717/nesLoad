@@ -432,33 +432,53 @@ const en = {
   'home.empty':
     'The library is empty right now — open the room and drop a ROM onto the CRT to start playing.',
   /*
-   * 折叠问答（`<details>`，零 JS）。都只讲**真的实现了**的事，不写没做的卖点 ——
-   * 「能用自己的 ROM 吗」那条 2026-10-15 用户要求删掉；手机那条**只说支持**，
-   * 别提「变成掌机」（内部实现细节，用户不需要知道）。
-   * 联机那条讲联机，2026-10-13 用户明确要求**就写一句招呼**（「快喊上小伙伴，开个房间一起对战吧」），
+   * 折叠问答（`<details>`，零 JS）。2026-11-17 参考 retrogamesnexus 首页 FAQ 的选题
+   * 重排、从六条扩到十条，但**文案全部自己写**，不搬原句。选题对照：它有
+   * 「愿望单求游戏」那条，我们没做这功能 ⇒ 不写（老规矩不变：只讲**真的实现了**的事）。
+   * 新增四条：q3 机种清单（数字来自 `lib/consoles.ts` 的 14 台，清单只点名常见几台）、
+   * q8 存档机制（电池存档按游戏存本机 + 登录云端同步，和 q2 的说法口径一致）、
+   * q9 加载不出来的排查（刷新 → 换浏览器 / 清缓存，不承诺任何我们没有的自助渠道）、
+   * q10 嵌入（详情页 EmbedPanel + `/embed/games/<id>`，都是真做了的）。
+   * 仍守的旧规：手机那条**只说支持**，别提「变成掌机」（内部实现细节，用户不需要知道）；
+   * 联机那条按 2026-10-13 用户明确要求**只写一句招呼**（「快喊上小伙伴，开个房间一起对战吧」），
    * 不展开「谁开房 / 怎么连」这些技术细节。⚠️ 代价：「公网那一档要站点配了 TURN 才放行」
    * 这件事只剩**联机面板里的提示**兜着（没配时那里显示 `netplay.wanDev`）——
    * 那条提示别删，否则「跨网络连不上」就没人告知了。
+   * ⚠️ **q4 必须还是「下载 ROM」**：`page.tsx` 按 `ROM_DOWNLOAD_ENABLED` 过滤的就是
+   * `home.faq.q4` 这个键名，键位顺序不能动。「要装什么吗」那条并进了 q1 的答案
+   * （「点开就玩、无需安装」本来就是它的答案，单独一条反而重复）。
    */
   'home.faq.title': 'Frequently asked questions',
-  'home.faq.q1': 'Is it free?',
+  'home.faq.q1': 'What is {site}?',
   'home.faq.a1':
-    'Completely free — every game is open to play. Signing in adds cloud saves for your play history and save files.',
-  'home.faq.q2': 'Do I need to install anything?',
+    'A browser arcade of classic console games — pick a game from the library and it starts right away, with no downloads and nothing to install.',
+  'home.faq.q2': 'Is it free?',
   'home.faq.a2':
-    'No — just click a game and play it right in your browser.',
-  'home.faq.q3': 'Does it work on phones and tablets?',
+    'Completely free — every game is open to play. Signing in adds cloud saves for your play history and save files.',
+  'home.faq.q3': 'Which consoles are supported?',
   'home.faq.a3':
-    'Yes — it works right in the browser on phones and tablets.',
+    'Fourteen classic systems — NES, SNES, Game Boy and GBA, Nintendo DS, Sega Mega Drive, PlayStation, arcade and more. The full list is on the consoles page.',
   'home.faq.q4': 'Can I download the ROM files?',
   'home.faq.a4':
     'Yes — every game page has a download button. Only download ROM files you are legally allowed to use.',
-  'home.faq.q5': 'Can I play with a friend?',
+  'home.faq.q5': 'Does it work on phones and tablets?',
   'home.faq.a5':
-    'Of course! Grab a friend and start a room for a match.',
+    'Yes — it works right in the browser on phones and tablets, with on-screen touch controls when there is no keyboard.',
   'home.faq.q6': 'Does it support game controllers?',
   'home.faq.a6':
     'Yes — a USB or Bluetooth controller works as soon as your browser sees it. Each console keeps its default button layout.',
+  'home.faq.q7': 'Can I play with a friend?',
+  'home.faq.a7':
+    'Of course! Grab a friend and start a room for a match.',
+  'home.faq.q8': 'How does saving progress work?',
+  'home.faq.a8':
+    'Games save the way they did on real hardware — each game keeps its battery save on your device. Sign in and those saves sync to the cloud too.',
+  'home.faq.q9': 'A game won\'t load — what can I do?',
+  'home.faq.a9':
+    'Refresh the page first — that fixes most hiccups. Still stuck? Try another browser or clear your browser cache.',
+  'home.faq.q10': 'Can I put games on my own website?',
+  'home.faq.a10':
+    'Yes — every game page has an embed panel with a ready-made iframe snippet. Copy it into your site and visitors can play right there.',
 
   /*
    * 首屏那段**看不见的正文**（ConsoleScene 里用 sr-only 渲染）。
@@ -1674,6 +1694,7 @@ const en = {
    */
   'gamesPage.about': 'About {title}',
   'gamesPage.tags': 'Tags',
+  'gamesPage.related': 'You may also like',
   'gamesPage.readMore': 'Read more',
   'gamesPage.showLess': 'Show less',
   /* 详情页点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */
@@ -1758,7 +1779,7 @@ const en = {
   'deepLink.title': 'Loading game',
   'deepLink.loading': 'Downloading the ROM…',
   'deepLink.hint': 'Starts automatically once the download finishes.',
-  /* H5 小游戏专栏（2026-11-12 加）：入口在顶栏、列表在 /h5 */
+  /* H5 小游戏专栏（2026-11-12 加）：列表在 /h5。顶栏入口 2026-11-16 已摘掉，只剩直达地址 */
   'h5.title': 'H5 games',
   'h5.intro': 'Small browser games you can start instantly, with no download and no plugin. {count} title so far.',
   'h5.play': 'Play',
@@ -1830,25 +1851,37 @@ const zh: Record<MessageKey, string> = {
   'home.developers.lead': '库内游戏最多的几家开发商。',
   'home.developers.viewAll': '全部开发商',
   'home.empty': '游戏库还是空的。进小屋，把 ROM 拖到电视上就能开玩。',
-  /* 折叠问答六条，见上面英文那份的注释（只写真的实现了的事） */
+  /* 折叠问答十条，见上面英文那份的注释（只写真的实现了的事；q4 必须还是下载 ROM） */
   'home.faq.title': '常见问题',
-  'home.faq.q1': '免费吗？',
+  'home.faq.q1': '{site}是什么？',
   'home.faq.a1':
-    '全部免费。登录后可将游戏进度与存档保存到云端。',
-  'home.faq.q2': '要装什么东西吗？',
+    '一个开在浏览器里的复古游戏厅。选好游戏点开就玩，不用下载、也不用装任何东西。',
+  'home.faq.q2': '免费吗？',
   'home.faq.a2':
-    '不用，点开就能玩。',
-  'home.faq.q3': '手机上能玩吗？',
+    '全部免费。登录后可将游戏进度与存档保存到云端。',
+  'home.faq.q3': '支持哪些机种？',
   'home.faq.a3':
-    '能，手机和平板打开浏览器就能玩。',
+    '十四款经典机种：FC、SFC、Game Boy、GBA、NDS、世嘉 MD、PS、街机等。完整清单见机种页。',
   'home.faq.q4': '能下载 ROM 吗？',
   'home.faq.a4': '能，每个游戏页上都有下载按钮。不过请只下载你有权使用的 ROM 文件。',
-  'home.faq.q5': '能和朋友一起玩吗？',
+  'home.faq.q5': '手机上能玩吗？',
   'home.faq.a5':
-    '可以，创建房间即可联机对战。',
+    '能，手机和平板打开浏览器就能玩，没有键盘时画面上自带触屏按键。',
   'home.faq.q6': '支持手柄吗？',
   'home.faq.a6':
     '支持。USB 或蓝牙手柄接上就行，浏览器认到直接能玩，键位沿用各机型的默认设置。',
+  'home.faq.q7': '能和朋友一起玩吗？',
+  'home.faq.a7':
+    '可以，创建房间即可联机对战。',
+  'home.faq.q8': '进度怎么保存？',
+  'home.faq.a8':
+    '和真机一样，游戏存档按游戏存在本机；登录之后，存档还会同步到云端。',
+  'home.faq.q9': '游戏加载不出来怎么办？',
+  'home.faq.a9':
+    '先刷新一下页面，多数问题就解决了。还不行的话，换个浏览器或清一清浏览器缓存。',
+  'home.faq.q10': '能把游戏放到自己的网站上吗？',
+  'home.faq.a10':
+    '能。每个游戏页都有嵌入面板，复制 iframe 代码贴到自己的网站，访客就能直接开玩。',
 
   'seo.heading': '在浏览器里玩复古游戏',
   'seo.intro':
@@ -2499,6 +2532,7 @@ const zh: Record<MessageKey, string> = {
   /* 详情页「关于 <游戏名>」那块，见英文那份的注释 */
   'gamesPage.about': '关于《{title}》',
   'gamesPage.tags': '游戏标签',
+  'gamesPage.related': '你可能还喜欢',
   'gamesPage.readMore': '查看更多',
   'gamesPage.showLess': '收起',
   'gamesPage.selectLanguage': '选择语言',

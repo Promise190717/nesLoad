@@ -1,6 +1,5 @@
 import { cached } from '@/lib/server/cache';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { cache } from 'react';
 import { consoleLabel, isConsoleType } from '@/lib/consoles';
@@ -23,7 +22,6 @@ import { pageCountOf, parsePageParam } from '@/lib/pager';
 import { GAME_LANGUAGE_LABEL, GAME_LANGUAGE_VALUES } from '@/lib/rom-lang';
 import { CONSOLES_PAGE_REVALIDATE_SECONDS, getConsolePageData, localizeConsole, type Console, type LocalizedConsoleText } from '@/lib/server/consoles';
 import {
-  countConsoleGamesByLanguageCached,
   countGamesCached,
   listGamesByConsoleCached,
   listGamesPageCached,
@@ -124,8 +122,6 @@ const loadGames = cache(
  */
 
 /** 这个短码是不是站内认得的游戏语种。白名单来自 lib/rom-lang.ts，别在这儿另抄一张。 */
-const FILTER_ALL = 'all';
-
 function isGameLanguage(value: string): boolean {
   return (GAME_LANGUAGE_VALUES as readonly string[]).includes(value);
 }
@@ -355,7 +351,14 @@ export default async function ConsoleDetailPage({
     redirect(consoleHref(locale, id, page, keyword, lang.param));
   }
 
-  const [data, gameCount, matchCount, langCounts] = await Promise.all([
+  /*
+   * 语种筛选条上的条数已整条撤掉（2026-11-17 用户要求「不要每个语言的数量显示了
+   * 接口相关字段也去除」）：原先这里还要并行发两条 count 查询 ——
+   * `countConsoleGamesByLanguageCached`（各语种条数，已从 sb-games 删除）和
+   * 关键词命中数（`matchCount`，喂「全部」那颗的数字）—— 现在都不要了，
+   * 这页只剩「列表 + 机种总数」两次取数。
+   */
+  const [data, gameCount] = await Promise.all([
     loadGames(id, page, keyword, lang.language, locale),
     /*
      * 机种总数：**不筛语种、也不筛关键词**（`countGamesCached` 的四个参数里那两个都是
@@ -363,24 +366,12 @@ export default async function ConsoleDetailPage({
      * 搜索结果的条数由列表自己报「『xxx』共 N 个结果」，两处刻意分开。
      */
     countGamesCached('', id, null, null),
-    /*
-     * 筛选条上「全部」那颗的条数（2026-10-19）：有关键词时要跟着关键词走，没有就用上面
-     * 那个总数。⛔ 别改成「把四个语种加起来」—— 语种为空的脏数据不在那四个键里，
-     * 加出来会比真实条数少。
-     */
-    keyword ? countGamesCached(keyword, id, null, null, textLocalesFor(locale)) : Promise.resolve(null),
-    /* 各语种的条数：**跟着关键词走**（用户 2026-10-19 报「搜了词标签上的数没变」）
-     * ⚠️ 短关键词只在该语言族里搜（见 sb-games 的 keywordWhere），所以 locale 必须传 */
-    countConsoleGamesByLanguageCached(id, keyword, textLocalesFor(locale)),
   ]);
   /* 总页数按这次数据自己报的每页条数算（源站模式下那批一页 18 款，见 games.tsx 同款注释） */
   const pageCount = pageCountOf(data.total, data.limit || PAGE_SIZE);
 
   // 越界（这个机种 / 这个语种的游戏被删到不够这么多页）退到最后一页，地址栏一起纠正
   if (page > pageCount) redirect(consoleHref(locale, id, pageCount, keyword, lang.param));
-
-  /* 「全部」那颗的条数：有关键词就是命中条数，没有就是机种总数 */
-  const allCount = matchCount ?? gameCount;
 
   const facts: { label: string; value: string }[] = [
     ...(consoleRow.releaseYear
@@ -479,56 +470,16 @@ export default async function ConsoleDetailPage({
         />
 
         {/*
-          语种筛选条（2026-10-16 加）。版式与行为照抄 `/games` 那条机种筛选：
-          **一排链接**（每个语种一个真地址，能中键新标签、能复制、爬虫也顺得下去），
-          当前那颗 accent 高亮 + `aria-current`，「全部」那颗对应「不筛语种」。
+          语种筛选条已整条下线（2026-11-17，用户在撤掉条数之后接着要求「这几个按钮
+          也去掉」）：全部 / 简体中文 / English / 日本語 / 한국어 那排 chips 不再渲染。
+          2026-10-16 加它、2026-10-19 挂条数、今天数字和按钮先后都撤 —— 这一页回到
+          「这个机种下的全部游戏」的最初形态。
 
-          ⚠️ 每颗后面挂**这个机种下该语种的条数**（用户要求「每个语种还是显示数量」）：
-          数字来自 `countConsoleGamesByLanguageCached`（一条 GROUP BY，30 天缓存）。
-          2026-10-19 起它**跟着关键词走**（用户报「搜了词标签上的数没变」）——
-          搜「合金」时标签上就该是 12，不是全机种的 162。
-          「全部」那颗用 `allCount`（有关键词 = 命中条数，没有 = 机种总数），和列表上方
-          「『xxx』共 N 个结果」那句是同一个数。
-          ⚠️ 资料表里那个「共 N 款游戏」**仍然不跟关键词**（`gameCount`）：它说的是
-          「这个机种有多少款」，和「这次搜到几个」是两回事。
-          ⚠️ **0 款的语种不画**（2026-10-19 用户要求：`/consoles/nds` 上没有的语种别占位置）。
-          唯一例外是**当前正筛着的那一颗**：那份地址可能来自收藏 / 外链，标签一消失，
-          页面上就只剩一句「没有这个语种的游戏」而看不出自己在筛什么，也回不去「全部」。
-          ⚠️ 切语种时**把关键词带上**、页码一律回第 1 页（换了筛选条件，第 3 页毫无意义）。
+          ⚠️ **`?lang=` / `/lang/x` 的地址解析没拆**（`parseLanguage` / `consoleHref`
+          里的 langParam / GamesSearchForm 的 languageParam 都还在）：旧外链、收藏夹里
+          打进来的语种地址仍按原样过滤 + 307 收敛，只是页面上没有入口了。真要连路由
+          一起下线是另一件事（涉及 catalog-route 改写表和已有收录），别顺手删。
         */}
-        <nav
-          aria-label={t('consolesPage.filterLangLabel')}
-          className="mt-4 flex flex-wrap items-center gap-2"
-        >
-          {[null, ...GAME_LANGUAGE_VALUES].map((code) => {
-            const active = code === lang.language;
-            const count = code ? (langCounts[code] ?? 0) : allCount;
-            /* 0 款的不画；「全部」那颗（`code === null`）永远在 —— 它是默认那一份的入口 */
-            if (code && count === 0 && !active) return null;
-            return (
-              /* 2026-10-20 起语种进路径（`/consoles/nds/lang/zh`），是真路由 ⇒ 可以软导航 */
-              <Link
-                key={code ?? FILTER_ALL}
-                /* 「全部」那颗给空串 ⇒ 指回裸地址（唯一的那一份，也是默认那份） */
-                href={consoleHref(locale, id, 1, keyword, languageParamOf(code))}
-                /* 语种 tab 是十几颗一排，全预取等于每开一次机种页就多渲染十几条路由 */
-                prefetch={false}
-                aria-current={active ? 'true' : undefined}
-                /* 未选中压一档描边（理由见 games.tsx 同一个 chip 那段） */
-                className={`pixel-edge pxw-2 px-3 py-1.5 text-[12px] transition-colors ${
-                  active
-                    ? 'pxc-500 bg-accent text-ink-950'
-                    : 'pxc-600 bg-ink-800 text-ink-200 hover:text-accent'
-                }`}
-              >
-                {/* 语言名用它自己的语言写（简体中文 / English / 日本語 / 한국어），不进文案表 */}
-                {code ? GAME_LANGUAGE_LABEL[code] : t('gamesPage.filterAll')}
-                {/* 条数：不写 `font-pixel`（那一列字形里没有 CJK），跟着标签同一套字体 */}
-                <span className="ml-1.5 opacity-70">{count}</span>
-              </Link>
-            );
-          })}
-        </nav>
 
         {keyword && (
           <p className="mt-4 text-[12px] text-ink-300">
