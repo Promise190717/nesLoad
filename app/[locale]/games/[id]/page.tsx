@@ -46,13 +46,14 @@ import { resolveSiteOrigin } from '@/lib/site';
  * 三件事：
  *   ① 给搜索引擎一页**有正文**的 URL（标题、机种、年份、开发者、说明），
  *      而不是只看得见一块 canvas；
- *   ② 三个动作入口 —— 「开始游戏」带着 id 去 `/play`（那一页会自动取数据载入），
+ *   ② 三个动作入口 —— 「开始游戏」进 `/games/<id>/play` 开局（2026-11-17 从
+ *      `/play?id=` 路径化迁移，见那条路由的文件头），
  *      「收藏」就地收 / 取（`FavoriteButton`，客户端组件），「下载 ROM」进
  *      `/games/<id>/download`（另加一颗「分享游戏」）；
  *   ③ 结构化数据（VideoGame + BreadcrumbList），让搜索结果能带上封面和面包屑。
  *
- * ⚠️ **`?id=` 是给 `/play` 用的，不是给这一页用的** —— 这一页的地址永远是
- * `/games/<id>`，canonical 也只指自己。`/play` 读到这个参数会自动开玩，两个地址各司其职。
+ * ⚠️ 这一页的地址永远是 `/games/<id>`，canonical 也只指自己；开玩走它的子路由
+ * `/games/<id>/play`，两个地址各司其职。带 id 的旧 `/play` 深链由 middleware 301。
  *
  * 常用游戏构建期预生成，剩余详情按需生成；公共 HTML 缓存 30 天。
  */
@@ -464,7 +465,7 @@ export default async function GameDetailPage({
             1280~1440 宽的屏幕上会被挤到 60% 以下，长文一行剩的字太少不好读。 */}
         {/* ⚠️ 封面栏**裸排**（2026-11-17 用户「边框也不要」）：不描边、不加底色，
             就是一张图 + 一组资料直接落在页面底色上 —— 别把壳加回来。 */}
-        <div className="w-[220px] shrink-0 sm:sticky sm:top-6 sm:w-[280px]">
+        <div className="w-[220px] shrink-0 sm:sticky sm:top-6 sm:w-[260px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={game.imageUrl}
@@ -502,7 +503,7 @@ export default async function GameDetailPage({
             却被画成了同一种东西。
 
             第一层 · **主行动**（2026-10-14 起四颗，有描边的实体钮，同一档高度）
-              第四颗「联机游戏」是当天加的（去 `/play`，见那颗钮自己的注释）。
+              第四颗「联机游戏」是当天加的（去 `/games/<id>/play`，见那颗钮自己的注释）。
               原来的备注是「别再塞第 4 颗」，作废 —— 但**顺序**仍然有意：
               先「开始游戏」（唯一带强调色的），紧跟「联机游戏」（同样是「玩」这件事，
               只是换个地方），再是收藏、下载这两颗「把这盘带子怎么处置」的。
@@ -542,7 +543,7 @@ export default async function GameDetailPage({
               这五颗却是五件不同的事，语义也不对。
 
             前两颗**都是 `<Link>` 不是 `<button>`** —— 它们去的是两个真地址
-            （`/play?id=` 和 `/games/<id>/download`），用链接才能：新标签打开、被复制、
+            （`/games/<id>/play` 和 `/games/<id>/download`），用链接才能：新标签打开、被复制、
             被爬虫顺着走。按钮语义在这里是错的。
             「分享游戏」不一样：它不跳转，只是把**这一页的地址**摊出来给人分发
             （2026-10-30 起是个弹窗，见 ShareGameButton），
@@ -553,7 +554,7 @@ export default async function GameDetailPage({
             （一个要读登录态 + 打接口，一个要开关弹窗 + 提交）。
           */}
           <GameLanguageActions
-            playHref={localePath(locale, `/play?id=${game.id}&mode=solo`)}
+            playHref={localePath(locale, `/games/${game.id}/play?mode=solo`)}
             /*
              * 联机钮画不画 —— **只看这一款支持几个人**（`games.players`，2026-10-30 加，
              * 后台「人数」那栏填）。联机的本质是「把另一台设备当 2P 手柄」，单人游戏
@@ -569,7 +570,7 @@ export default async function GameDetailPage({
              */
             hostHref={
               game.players !== 1
-                ? localePath(locale, `/play?id=${game.id}&mode=host`)
+                ? localePath(locale, `/games/${game.id}/play?mode=host`)
                 : null
             }
             /*

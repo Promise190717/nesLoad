@@ -82,12 +82,18 @@ function PlaySession({ id, game, room, host, lang }: {
     autoStart={Boolean(id) && !effectiveRoom && !effectiveHost} />;
 }
 
-/** Query parameters belong to the browser; the document is shared by all players. */
-export default function StaticPlay() {
+/**
+ * Query parameters belong to the browser; the document is shared by all players.
+ *
+ * `gameId`（2026-11-17 加）：`/games/<id>/play` 这条路由把 id 放进了路径段，
+ * 服务端直接传进来；query 里的 `?id=` 只剩兜底作用 —— 带 id 的旧深链已被
+ * middleware 301 走，裸 `/play` 理论上不会再见到它，留着是防内部链接漏改。
+ */
+export default function StaticPlay({ gameId }: { gameId?: string }) {
   const query = useSearchParams();
   const { locale, href, t } = useI18n();
   const single = (key: string) => query.getAll(key).length === 1 ? query.get(key)!.trim() : '';
-  const id = single('id');
+  const id = gameId ?? single('id');
   const room = single('room');
   const host = single('mode') === 'host';
   /*

@@ -118,6 +118,22 @@ function adminLocale(): Locale {
 function publicRoute(request: NextRequest, locale: Locale, path: string): NextResponse {
   const url = request.nextUrl.clone();
   /*
+   * 带 id 的旧 `/play` 深链 301 到 `/games/<id>/play`（2026-11-17 开局页路径化迁移）。
+   *
+   * 只拦「带 id」的：裸 `/play` 是首页「加入房间」表单（`?room=`）和本机文件的
+   * 入口，没有游戏上下文，原样放行。用 301 而不是 307 —— 旧地址已不存在，
+   * 收藏夹和分享出去的老链接换了新地址就别再回头；`room` / `mode` / `lang`
+   * 原样留在查询串上（clone 自带），只有 `id` 被搬进路径段，老房间链接不断。
+   */
+  if (path === '/play') {
+    const gameId = url.searchParams.get('id');
+    if (gameId) {
+      url.searchParams.delete('id');
+      url.pathname = `${LOCALE_PREFIX[locale]}games/${gameId}/play`;
+      return NextResponse.redirect(url, 301);
+    }
+  }
+  /*
    * 旧目录地址的兼容改写（`/games?page=2`、`/consoles/nds?lang=zh` 这类）。
    *
    * ⚠️ **2026-10-20 起这些维度已经是路径段**（`/games/page/2`、`/consoles/nds/lang/zh`），

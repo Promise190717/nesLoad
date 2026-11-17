@@ -93,9 +93,10 @@
  *     重定向（语言 307 / 301）与 5xx 两边都不缓存 —— 语言跳转依赖 cookie，
  *     缓存了会把没设过语言的人跳去错误的语言；
  *   · 缓存键剥掉 `utm_*` / `fbclid` / `gclid` / `msclkid` / `_rsc`；
- *     `/play` 更进一步**整个查询串都不要** —— 那一页的 HTML 是一个空壳，
- *     `id` / `room` / `lang` 三个参数全由客户端读（见 `components/StaticPlay.tsx`），
- *     服务端渲染结果逐字节相同，按参数分键只是把同一份副本存几十遍。
+ *     `/play` 与 `/games/<id>/play`（2026-11-17 路径化迁移）更进一步**整个查询串
+ *     都不要** —— 那两页的 HTML 是空壳，`room` / `mode` / `lang` 三个参数全由
+ *     客户端读（见 `components/StaticPlay.tsx`），按参数分键只是把同一份副本存
+ *     几十遍；`<id>` 路径段不折叠（新开局页标题带游戏名，HTML 逐 id 不同）。
  *
  * TTL：页面 200 存 **24 小时**、404 存 1 小时、`/api/games*` 存 30 秒。
  * 页面内容只有后台上传游戏时才变（数据层还有 7 天缓存），24 小时的陈旧窗口
@@ -205,8 +206,16 @@ const PUBLIC_API = /^\/api\/games(?:\/[^/]+)?$/;
 /** ROM 只能走外层 Workers Caching，不能进 Cache API（后者会缓冲整份大文件）。 */
 const ROM_API = /^\/api\/games\/[^/]+\/rom$/;
 
-/** `/play` 的 HTML 与查询串无关（见文件头那段）。允许带一层语言前缀：`/play`、`/zh/play`。 */
-const PLAY_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?play$/;
+/**
+ * `/play` 与 `/games/<id>/play` 的 HTML 都与查询串无关（见文件头那段）：
+ * `room` / `mode` / `lang` 全由客户端读。允许带一层语言前缀：
+ * `/play`、`/zh/play`、`/games/x/play`、`/zh/games/x/play`。
+ *
+ * ⚠️ 2026-11-17 路径化迁移后 `<id>` 那段**不折叠**：新开局页的 metadata 里带
+ * 游戏名，HTML 已逐 id 不同，下载页那种按语言折叠（`downloadKeyPath`）做不了。
+ * 副本量从「每语言 1 份」变「每 id × 语言 1 份」，都是几 KB 空壳，接受的代价。
+ */
+const PLAY_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?(?:play|games\/[^/]+\/play)$/;
 
 /**
  * 下载页：`/<locale>/games/<id>/download`，语言前缀可省。

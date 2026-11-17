@@ -68,6 +68,15 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
 }) {
   const { t, locale } = useI18n();
   const [open, setOpen] = useState(false);
+  /*
+   * 登录后回跳的地址（2026-11-17 改）：原来写死 `/play`，开局页路径化迁移后
+   * 这一页可能在 `/games/<id>/play` 上，回去落成裸 `/play` 会把游戏丢了。
+   * 渲染期现算（兜底 `/play`）：这条链接只在弹窗里出现，而弹窗是 `{open && …}`
+   * 条件渲染的、只在用户点开后挂载 —— SSR 到不了这个分支，客户端渲染时
+   * `window` 一定在，不存在水合不一致。
+   */
+  const loginNext =
+    typeof window === 'undefined' ? '/play' : window.location.pathname + window.location.search;
   const [pending, setPending] = useState(false);
   const [download, setDownload] = useState<{ ratio: number | null; restoring: boolean } | null>(null);
   const [local, setLocal] = useState<SaveInfo | null>(null);
@@ -336,7 +345,7 @@ export default function PlaySaveControls({ controller, rom, gameId, disabled, on
                 <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-300">
                   <span>{t('saves.loginHint')}</span>
                   <a
-                    href={`${localePath(locale, '/login')}?next=${encodeURIComponent('/play')}`}
+                    href={`${localePath(locale, '/login')}?next=${encodeURIComponent(loginNext)}`}
                     className="shrink-0 text-accent underline underline-offset-2 hover:opacity-80"
                   >
                     {t('saves.login')}

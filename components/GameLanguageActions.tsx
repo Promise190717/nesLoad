@@ -43,7 +43,8 @@ import { PlayersIcon } from './icons';
  * ⚠️ 2026-10-23：**这三颗 `<Link>` 全部 `prefetch={false}`**（开始游戏 / 联机游戏 /
  *    下载 ROM）。它们是详情页首屏唯一可见的三个站内链接，Next 生产模式会把
  *    **进入视口的 `<Link>`** 全部预取 —— 于是每访问一个详情页，浏览器就额外渲染
- *    `/play?id=…&mode=solo`、`/play?id=…&mode=host`、`/games/<id>/download` **三个页面**
+ *    `/games/<id>/play?mode=solo`、`/games/<id>/play?mode=host`、
+ *    `/games/<id>/download` **三个页面**
  *    （下载页 40 KB、`/play` 是模拟器外壳，都不比详情页轻）。
  *    🔴 2026-11-04 起下载那颗已换成裸 `<a>`（连预取这回事都不存在了），
  *    理由见下面下载钮上方那段；剩下的两颗仍然是 `prefetch={false}` 的 `<Link>`。

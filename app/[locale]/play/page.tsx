@@ -3,6 +3,12 @@ import { Suspense } from 'react';
 import { SITE_NAME, alternatesFor, localePath, ogLocale, otherLocales, translate } from '@/lib/i18n';
 import { readLocaleParam } from '@/lib/server/locale';
 import StaticPlay from '@/components/StaticPlay';
+/*
+ * 裸 `/play`（2026-11-17 起角色收窄）：开一款**库里已有**的游戏去 `/games/<id>/play`
+ * （路径化迁移，见那条路由的文件头），这一页只剩两个没有游戏上下文的入口 ——
+ * 首页「加入房间」表单（`/play?room=<码>`）和本机文件开 ROM。
+ * 带 `?id=` 的旧深链由 middleware 301 到新路由，这里不再服务「按 id 开玩」。
+ */
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const locale = await readLocaleParam(params);
   const title = translate(locale, 'seo.play.title');

@@ -68,7 +68,7 @@
 - 🔴 下载页 HTML 与 id 无关（缓存键折叠成 `/<locale>/__nesload_download`）：别把 id/逐页 title/canonical 加回服务端；下载钮必须裸 `<a>`；`noindex, follow`。
 - 🔴 `<Link>` 预取：列表型与首屏动作型一律 `prefetch={false}`（全站没有 `loading.tsx`）。
 - 「我是谁」唯一出口 `lib/current-user.ts` `fetchCurrentUser()`。长文档页共用 `DocPage.tsx`；免责声明唯一出处 `disclaimer()`。
-- `/play` 唯一开局页；`/embed/games/<id>` 纯播放页 `noindex`。触屏手柄只有 `:root[data-mobile='on']` 一条判据。
+- 🔴 开局页路径化（2026-11-17）：开库内游戏 = `/games/<id>/play`（`StaticPlay` 复用，id 走路由 params，room/mode/lang 仍 query；服务端 `getGameCached` 出游戏名标题，noindex 照旧）；**裸 `/play` 保留**（首页加入房间表单 + 本机文件，无游戏上下文）；带 id 旧深链 middleware `publicRoute` 301 搬 id 进路径段。🔴 worker.ts `PLAY_PATH` 同时匹配两条且剥整个查询串，但 `<id>` 不折叠（标题带游戏名，HTML 逐 id 不同）。`/embed/games/<id>` 纯播放页 `noindex`。触屏手柄只有 `:root[data-mobile='on']` 一条判据。
 - 存档 = 电池 `.srm` 一款一份。🔴 房间页永久下线，别加入口、别读它。
 - 🔴 功能开关唯一出口 `lib/features.ts`；`ROM_DOWNLOAD_ENABLED=false` 时下载钮不画、下载页 `notFound()`，`/api/games/[id]/rom` 不归它管。编译期常量，改完必须重新构建。
 
