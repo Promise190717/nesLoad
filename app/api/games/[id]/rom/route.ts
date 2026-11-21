@@ -20,7 +20,7 @@ import { getGameRoms } from '@/lib/server/sb-games';
 import { gamesBucket, publicUrl } from '@/lib/server/r2';
 import type { R2ObjectLike } from '@/lib/server/r2';
 import { sourceFileUrl, UPSTREAM_SITE, UPSTREAM_USER_AGENT } from '@/lib/server/upstream';
-import { fetchRomUpstream, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
+import { fetchRomUpstream, isClientAbort, isCompleteByteRange, isSingleByteRange, parseContentRange } from '@/lib/server/rom-upstream';
 import type { RomFetchOptions } from '@/lib/server/rom-upstream';
 
 export const runtime = 'nodejs';
@@ -493,9 +493,18 @@ async function fetchThroughEgress(
       signal: AbortSignal.any([request.signal, controller.signal])
     });
   } catch (error) {
-    // 出口那一跳挂了不该让整个接口跟着挂：记一笔，退回直连（Vercel 上大概还是 403，
-    // 但那是上游的问题，不是这里的问题）。
-    console.error('[games] 上行出口失败，退回直连', id, error);
+    /*
+     * 出口那一跳挂了不该让整个接口跟着挂：记一笔，退回直连（Vercel 上大概还是 403，
+     * 但那是上游的问题，不是这里的问题）。
+     *
+     * ⚠️ 但**访客自己走了**不算「挂了」：那一跳是被 abort 打断的，记 error 只会
+     * 在日志里制造假故障（和 `GET` 里那段同一个理由，判据见 `isClientAbort`）。
+     * 这里仍然退回直连 —— 调用方那条路会立刻再拿到同一个 abort，最终由
+     * `GET` 的 catch 收成 499。
+     */
+    if (!isClientAbort(error, request)) {
+      console.error('[games] 上行出口失败，退回直连', id, error);
+    }
     return null;
   } finally {
     clearTimeout(timer);
@@ -666,8 +675,21 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     upstream = await fetchRomUpstream(target, request, upstreamOptions);
   } catch (error) {
     /*
-     * 超时和「连不上」分开报：前者是上游慢（多半是被限流 / 源站过载），
-     * 后者才是真正的网络问题 —— 两者的修法完全不同，日志里必须分得开。
+     * ① **访客自己走了** —— 不是故障，不该记 error。
+     *
+     * 一次载入要发几百个分片请求，人在载入途中关页面、退出播放页、或者前端为了
+     * 重试掐掉在途那一片，都会让 runtime 打断这一跳（name 是 workerd 的
+     * `ResponseAborted`）。这种行记成 `ROM 回源失败` 会把真故障淹掉
+     * （2026-11-21 用户从日志里捞到的就是这一条），所以先认掉：
+     * 不记日志、回 499（nginx 的「client closed request」，< 500 不计服务端错误）。
+     * 判据见 `isClientAbort`。
+     */
+    if (isClientAbort(error, request)) {
+      return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+    }
+    /*
+     * ② 超时和「连不上」分开报：前者是上游慢（多半是被限流 / 源站过载），
+     *    后者才是真正的网络问题 —— 两者的修法完全不同，日志里必须分得开。
      */
     const timedOut = (error as Error)?.name === 'TimeoutError';
     console.error('[games] ROM 回源失败', id, timedOut ? '超时' : '连接失败', error, target);

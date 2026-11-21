@@ -678,6 +678,10 @@ export const ko: Record<MessageKey, string> = {
   'gamesPage.showLess': '접기',
   'gamesPage.selectLanguage': '언어 선택',
 
+  'error.title': '페이지를 불러오지 못했습니다',
+  'error.description':
+    '지금 서버에 요청이 많이 몰리고 있습니다. 몇 초 기다렸다가 새로고침하면 보통 열립니다.',
+  'error.refresh': '새로고침',
   'notFound.title': '페이지를 찾을 수 없습니다',
   'notFound.description':
     '그 주소는 {site}에 없습니다. 링크를 확인하거나 홈으로 돌아가 보세요.',
@@ -722,14 +726,4 @@ export const ko: Record<MessageKey, string> = {
   'deepLink.title': '게임 불러오는 중',
   'deepLink.loading': 'ROM을 내려받는 중…',
   'deepLink.hint': '다운로드가 끝나면 자동으로 시작됩니다',
-  /* H5 小游戏专栏 */
-  'h5.title': 'H5 게임',
-  'h5.intro': '브라우저에서 바로 즐기는 미니 게임. 다운로드나 플러그인이 필요 없습니다. 현재 {count}종.',
-  'h5.play': '플레이',
-  'h5.note': '이 게임들은 이 사이트를 위해 만든 오리지널 웹 게임입니다. 설정과 방 코드는 브라우저에만 저장되며 전송되지 않습니다.',
-  'h5.badge.online': 'LAN 대전',
-  'h5.badge.bots': '봇 대전',
-  'h5.badge.touch': '터치 지원',
-  'h5.seo.title': 'H5 게임: 브라우저에서 바로 플레이',
-  'h5.seo.description': '사이트 오리지널 브라우저 미니 게임. FPS, 3가지 무기, LAN 대전과 봇 대전 지원. 다운로드 없이 바로 시작.',
 };

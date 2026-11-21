@@ -27,7 +27,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  *    绝不因为资料没填就让一个机种从这页上消失（首页的卡片也指着它呢）。
  *
  * 数据两份都走缓存：`listConsolesCached`（资料）+ `countGamesByConsoleCached`
- * （各机种游戏数，首页同一份），TTL 7 天。后台改完资料，这一页最多晚 7 天更新 ——
+ * （各机种游戏数，首页同一份），TTL 30 天。后台改完资料，这一页最多晚 30 天更新 ——
  * 和 `/developers` 同一个取舍（机种专题页上机种自己的资料**不缓存**，那边改完是立刻的）。
  *
  * ⚠️ 这一页原来**什么缓存声明都没有**，于是被 Next 当成构建期静态页（`[locale]` 有
@@ -35,7 +35,7 @@ import { readLocaleParam } from '@/lib/server/locale';
  *    2026-10-22 迁 Vercel 时改成 `force-dynamic`；2026-10-24 回 CF 免费版后恢复
  *    按需缓存（`revalidate`，首次访问渲染、之后走增量缓存，见 docs/cloudflare-deployment.md）。
  */
-export const revalidate = 604800; // = CONSOLES_PAGE_REVALIDATE_SECONDS(lib/server/consoles.ts)；Next 的段配置只认字面量，别改回常量导入
+export const revalidate = 2592000; // = CONSOLES_PAGE_REVALIDATE_SECONDS(lib/server/consoles.ts)；Next 的段配置只认字面量，别改回常量导入
 export async function generateMetadata({
   params: routeParams,
 }: {

@@ -44,7 +44,7 @@ import { siteDoc } from '@/lib/site-doc';
  *   副作用和后台上传游戏那条一样：新传的游戏最多晚 30 天出现在首页
  *   （`/games` 那边 2026-10-20 起同样是 30 天，见 `HOME_REVALIDATE_SECONDS` 那段注释）。
  *
- * - 公共 HTML 按 locale **按需缓存**（2026-10-24 恢复：`revalidate` 7 天，
+ * - 公共 HTML 按 locale **按需缓存**（2026-10-24 恢复：`revalidate` 30 天，
  *   首次访问渲染、之后走增量缓存；构建期预渲染不做）。
  *
  * - **区块顺序是「广度优先」**：先按机种（四个，一眼看完），
@@ -126,7 +126,7 @@ function Section({
   );
 }
 
-export const revalidate = 604800; // = HOME_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
+export const revalidate = 2592000; // = HOME_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const locale = await readLocaleParam(params);
 

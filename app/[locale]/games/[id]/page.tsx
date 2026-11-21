@@ -304,7 +304,7 @@ export default async function GameDetailPage({
    * 「不要加开发商」，两条开发商来源已从取数函数里删掉）。
    *
    * ⚠️ 这趟取数不在文件顶部的 `Promise.all` 里：它需要 `game` / `tags` 先落地。
-   * 取数函数内部走「标签交集一次 SQL + 同机种走既有缓存查询」，详情页 7 天 ISR
+   * 取数函数内部走「标签交集一次 SQL + 同机种走既有缓存查询」，详情页 30 天 ISR
    * 会让绝大多数请求根本走不到这里（整页缓存）。查询失败不拦渲染 —— 推荐区
    * 整块不画，比详情页 500 划算。
    */
@@ -803,13 +803,13 @@ export default async function GameDetailPage({
  * 全站 `force-dynamic`。后来实际部署仍走 CF 免费版，每个请求现场渲染 2/3 超限
  * （1102），于是 2026-10-24 回到「按需生成」：**没有** `generateStaticParams`
  * （构建期不预渲染任何详情页），首次访问现场渲染并写入增量缓存，之后由
- * `enableCacheInterception` 在初始化渲染器之前直接从 R2 返回。TTL 7 天，
+ * `enableCacheInterception` 在初始化渲染器之前直接从 R2 返回。TTL 30 天，
  * 后台改动靠 `revalidateTag('games')` 立即失效；外面还叠了一层 worker.ts 的
  * 10 分钟边缘缓存（见 docs/cloudflare-deployment.md）。
  *
- * 取数仍由 `getGameCached` 那层负责（同样 7 天，挂 `games` tag）。
+ * 取数仍由 `getGameCached` 那层负责（同样 30 天，挂 `games` tag）。
  */
-export const revalidate = 604800; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
+export const revalidate = 2592000; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 
 /*
  * 动态段要进按需 ISR 必须有这个钩子：返回空数组 = 构建期一个参数组合都不预渲染，
@@ -832,7 +832,7 @@ export function generateStaticParams() {
  *
  * ## 2026-10-23：从 `cached()`（R2 缓存条目）改成 React `cache()`
  *
- * 详情页原来有**两个** `unstable_cache` 条目：`getGameCached`（7 天）+ 这个（24 小时）。
+ * 详情页原来有**两个** `unstable_cache` 条目：`getGameCached`（30 天）+ 这个（24 小时）。
  * 每多一个条目，每个请求就多一次 R2 GET；miss 时还要 R2 PUT + tag DO 通知。
  *
  * 而这个条目的命中率是全站最低的：key 是单个 slug，1995 款 × 18 语言里，

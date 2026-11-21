@@ -117,7 +117,7 @@ export default async function GameDownloadPage({
  * 会撞 10ms CPU，于是恢复「首次访问渲染、之后走增量缓存」的按需形态。
  * 现在正文是客户端组件，这一页的渲染成本只剩外壳，18 种语言各一份。
  */
-export const revalidate = 604800; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
+export const revalidate = 2592000; // = GAME_DETAIL_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 
 /*
  * 动态段要进按需 ISR 必须有这个钩子：返回空数组 = 构建期一个参数组合都不预渲染，

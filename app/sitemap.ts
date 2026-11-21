@@ -53,13 +53,12 @@ import { resolveSiteOrigin } from '@/lib/site';
  * sitemap 是「主动推荐」，robots 是「请求别来」，noindex 是「来了也别收」。
  * 同理 `/account`（noindex 的私有视图）也不列。
  *
- * **薄壳页（`/play`、`/h5`、`/h5/<id>`）2026-11-16 起不列**：这三页正文只有一块 canvas，
+ * **薄壳页（`/play`）2026-11-16 起不列**：这一页正文只有一块 canvas，
  * 对搜索引擎读不出任何字 —— Google AdSense 2026-11-16 判「低价值内容」之后复盘，
- * 薄壳页 ×18 语言 ≈ 54 条零正文地址全在主动推荐给爬虫，是扣分项之一。
- * 处理是三道一起：sitemap 不列（本文）、页面加 noindex（`/play` 与 `/h5/[id]` 的
+ * 薄壳页 ×18 语言全在主动推荐给爬虫，是扣分项之一。
+ * 处理是三道一起：sitemap 不列（本文）、页面加 noindex（`/play` 的
  * generateMetadata）、robots.txt **不** Disallow —— Disallow 会连 noindex 一起挡住，
- * 已收录的地址反而收不回去。`/h5` 目录页**没**加 noindex（它有真文案、是原创内容，
- * 将来入口恢复还能被收录），但同样不再主动推荐。
+ * 已收录的地址反而收不回去。
  *
  * 静态那几条刻意**不写 `lastModified`**：本站没有按页面的真实修改时间（正文全在代码里，
  * 没有 CMS 时间戳）。写成 `new Date()` 等于每次抓取都声称「刚刚更新过」，
@@ -197,9 +196,9 @@ export default async function sitemap({
   return [
     entry(origin, locale, '/', { changeFrequency: 'weekly', priority: 1 }),
     /*
-     * `/play` / `/h5` / `/h5/<id>` 三条薄壳地址 2026-11-16 起移出 sitemap ——
-     * 理由见文件顶上「薄壳页」那段。`/play` 的原备注（「canonical 指自己、
-     * 分享链接总得有个正式地址」）仍然成立，只是不再主动推荐、也不再收录。
+     * `/play` 2026-11-16 起移出 sitemap —— 理由见文件顶上「薄壳页」那段。
+     * 原备注（「canonical 指自己、分享链接总得有个正式地址」）仍然成立，
+     * 只是不再主动推荐、也不再收录。
      */
     entry(origin, locale, '/games', { changeFrequency: 'daily', priority: 0.9 }),
     /*

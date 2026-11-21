@@ -129,7 +129,16 @@ function publicRoute(request: NextRequest, locale: Locale, path: string): NextRe
     const gameId = url.searchParams.get('id');
     if (gameId) {
       url.searchParams.delete('id');
-      url.pathname = `${LOCALE_PREFIX[locale]}games/${gameId}/play`;
+      /*
+       * 🔴 **斜杠必须自己加**：`LOCALE_PREFIX` 存的是 `/ja` 这种**不带尾斜杠**的前缀
+       * （见 lib/i18n.ts），拼成 `${prefix}games/…` 会得到 `/jagames/…`。
+       * 英文之所以一直没露馅，是因为 `'' + 'games/…'` 交给 `URL.pathname` 的 setter
+       * 时会被自动补上前导斜杠，而 `/ja` + `games` 是**合法路径**，没人报错。
+       * 2026-11-21 从 CF 日志里抓到实证：`/jagames/the-king-of-fighters-2000/play`、
+       * `/higames/balloon-fight/play` 各被爬虫抓到一次，两条都落到 404 —— 一次白白
+       * 的 SSR（那次也超了 CPU）。别改成 `prefix + '/games'` 之后又删掉这个 `/`。
+       */
+      url.pathname = `${LOCALE_PREFIX[locale]}/games/${gameId}/play`;
       return NextResponse.redirect(url, 301);
     }
   }

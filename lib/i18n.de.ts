@@ -688,6 +688,10 @@ export const de: Record<MessageKey, string> = {
   'gamesPage.showLess': 'Weniger anzeigen',
   'gamesPage.selectLanguage': 'Sprache wählen',
 
+  'error.title': 'Seite konnte nicht geladen werden',
+  'error.description':
+    'Der Server bekommt gerade sehr viele Anfragen. Warte ein paar Sekunden und lade neu — dann lädt die Seite in der Regel.',
+  'error.refresh': 'Neu laden',
   'notFound.title': 'Seite nicht gefunden',
   'notFound.description':
     'Diese Adresse gibt es auf {site} nicht. Prüfe den Link oder geh zurück zur Startseite.',
@@ -732,14 +736,4 @@ export const de: Record<MessageKey, string> = {
   'deepLink.title': 'Spiel wird geladen',
   'deepLink.loading': 'ROM wird heruntergeladen…',
   'deepLink.hint': 'Startet automatisch, sobald der Download fertig ist.',
-  /* H5 小游戏专栏 */
-  'h5.title': 'H5-Spiele',
-  'h5.intro': 'Kleine Spiele, die direkt im Browser laufen, ohne Download und ohne Plugin. Bisher {count}.',
-  'h5.play': 'Spielen',
-  'h5.note': 'Diese Minispiele wurden eigens für diese Seite entwickelt. Einstellungen und Raumcodes bleiben im Browser; es wird nichts hochgeladen.',
-  'h5.badge.online': 'LAN-Mehrspieler',
-  'h5.badge.bots': 'Gegen Bots',
-  'h5.badge.touch': 'Touch-fähig',
-  'h5.seo.title': 'H5-Spiele: direkt im Browser spielen',
-  'h5.seo.description': 'Eigene Browserspiele: ein Ego-Shooter mit drei Waffen, LAN-Mehrspieler und Bot-Partien. Ohne Download.',
 };

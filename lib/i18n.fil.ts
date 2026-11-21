@@ -687,6 +687,10 @@ export const fil: Record<MessageKey, string> = {
   'gamesPage.readMore': 'Magbasa pa',
   'gamesPage.showLess': 'Itago',
   'gamesPage.selectLanguage': 'Pumili ng wika',
+  'error.title': 'Hindi na-load ang pahina',
+  'error.description':
+    'Maraming kahilingan ang dumarating sa server ngayon. Maghintay ng ilang segundo at i-refresh — kadalasan bumubukas ito.',
+  'error.refresh': 'I-refresh',
   'notFound.title': 'Hindi mahanap ang page',
   'notFound.description':
     'Wala ang address na iyon sa {site}. Tingnan ang link, o bumalik sa home page.',
@@ -729,14 +733,4 @@ export const fil: Record<MessageKey, string> = {
   'deepLink.title': 'Naglo-load ng laro',
   'deepLink.loading': 'Dinodownload ang ROM…',
   'deepLink.hint': 'Awtomatikong magsisimula kapag natapos ang download.',
-  /* H5 小游戏专栏 */
-  'h5.title': 'Mga H5 game',
-  'h5.intro': 'Maliliit na larong tumatakbo agad sa browser, walang download o plugin. Sa ngayon {count}.',
-  'h5.play': 'Maglaro',
-  'h5.note': 'Orihinal na mini game ang mga ito para sa site na ito. Nasa browser mo lang ang mga setting at room code; walang ipinapadala.',
-  'h5.badge.online': 'LAN multiplayer',
-  'h5.badge.bots': 'Laban sa bot',
-  'h5.badge.touch': 'Touch support',
-  'h5.seo.title': 'Mga H5 Game: maglaro sa browser',
-  'h5.seo.description': 'Orihinal na browser mini game: first-person shooter na may tatlong sandata, LAN multiplayer at laban sa bot. Walang download.',
 };

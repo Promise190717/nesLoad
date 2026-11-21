@@ -730,6 +730,10 @@ export const hi: Record<MessageKey, string> = {
   'gamesPage.readMore': 'और पढ़ें',
   'gamesPage.showLess': 'कम दिखाएँ',
   'gamesPage.selectLanguage': 'भाषा चुनें',
+  'error.title': 'पेज लोड नहीं हो सका',
+  'error.description':
+    'सर्वर पर अभी बहुत सारे अनुरोध आ रहे हैं। कुछ सेकंड रुककर रीफ़्रेश करें, आमतौर पर पेज खुल जाता है।',
+  'error.refresh': 'रीफ़्रेश करें',
   'notFound.title': 'पेज नहीं मिला',
   'notFound.description': '{site} पर यह पता नहीं है। लिंक जाँचें, या होम पेज पर वापस जाएँ।',
   'gamesPage.notFoundTitle': 'गेम नहीं मिला',
@@ -776,14 +780,4 @@ export const hi: Record<MessageKey, string> = {
   'deepLink.title': 'गेम लोड हो रहा है',
   'deepLink.loading': 'ROM डाउनलोड हो रही है…',
   'deepLink.hint': 'डाउनलोड पूरा होते ही अपने आप शुरू हो जाएगा।',
-  /* H5 小游戏专栏 */
-  'h5.title': 'H5 गेम',
-  'h5.intro': 'छोटे गेम जो सीधे ब्राउज़र में चलते हैं, बिना डाउनलोड और बिना प्लगइन। अभी {count} हैं।',
-  'h5.play': 'खेलें',
-  'h5.note': 'ये सभी इस साइट के लिए बनाए गए मौलिक मिनी गेम हैं। सेटिंग्स और रूम कोड आपके ब्राउज़र में ही रहते हैं, कुछ भी अपलोड नहीं होता।',
-  'h5.badge.online': 'LAN मल्टीप्लेयर',
-  'h5.badge.bots': 'बॉट से लड़ाई',
-  'h5.badge.touch': 'टच सपोर्ट',
-  'h5.seo.title': 'H5 गेम: ब्राउज़र में खेलें',
-  'h5.seo.description': 'मौलिक ब्राउज़र मिनी गेम: फर्स्ट-पर्सन शूटर, तीन हथियार, LAN मल्टीप्लेयर और बॉट मैच। बिना डाउनलोड।',
 };

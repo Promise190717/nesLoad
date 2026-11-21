@@ -41,7 +41,7 @@ export async function generateMetadata({ params }: { params: Promise<{ locale: s
  * 另外 `worker.ts` 还会把 `/play` 的查询串整个剥掉再当缓存键 —— 同一份空壳
  * 不会因为 `?id=` 不同而存几十遍。
  */
-export const revalidate = 604800;
+export const revalidate = 2592000;
 
 export default function Page() {
   return <Suspense fallback={null}><StaticPlay /></Suspense>;

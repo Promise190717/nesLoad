@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import GamesShell from './GamesShell';
@@ -83,17 +83,43 @@ function PlaySession({ id, game, room, host, lang }: {
 }
 
 /**
+ * 从地址里剥出游戏 id：`/games/<id>/play` → `<id>`，其它地址 → 空串。
+ *
+ * 🔴 **2026-11-21：id 不再由服务端当 prop 传进来**（那天起 `/games/<id>/play`
+ * 的服务端输出必须与 id 无关，否则 `worker.ts` 的缓存键折叠不成立 —— 3.8 万条
+ * URL 各存一份，每条都要先成功渲染一次，冷的那次被 CPU 砍掉就永远冷，见
+ * `app/[locale]/games/[id]/play/page.tsx` 顶上那段）。
+ *
+ * ⚠️ 只认**路径段**，不吃 query：`?id=` 只剩兜底作用（带 id 的旧深链已被
+ * middleware 301 走），留着是防内部链接漏改。
+ * ⚠️ 正则以 `/games/<id>/play` 结尾为准，**不要**假设前面只有语言前缀：
+ * middleware 的内部 rewrite 会让 `usePathname()` 报出 `/en/games/x/play`，
+ * 而地址栏里的无前缀地址又可能是 `/games/x/play` —— 这条正则两头都吃得下。
+ * ⚠️ id 里可能有百分号编码（slug 里出现中文 / 空格时），解一次再交给接口。
+ */
+function gameIdFromPath(pathname: string): string {
+  const hit = /\/games\/([^/]+)\/play\/?$/.exec(pathname);
+  if (!hit) return '';
+  try {
+    return decodeURIComponent(hit[1]);
+  } catch {
+    /* 编码坏了就当没有 id，让这一页退回「本机文件 / 加入房间」的形态 */
+    return '';
+  }
+}
+
+/**
  * Query parameters belong to the browser; the document is shared by all players.
  *
- * `gameId`（2026-11-17 加）：`/games/<id>/play` 这条路由把 id 放进了路径段，
- * 服务端直接传进来；query 里的 `?id=` 只剩兜底作用 —— 带 id 的旧深链已被
- * middleware 301 走，裸 `/play` 理论上不会再见到它，留着是防内部链接漏改。
+ * 组件不再收 props：id 从路径读（`gameIdFromPath`），`room` / `mode` / `lang` 从
+ * query 读 —— **全部在客户端**。这既是折叠缓存键的前提，也让这一页在服务端只剩
+ * 一个 `<Suspense>` 空壳（两边形状和裸 `/play` 一致）。
  */
-export default function StaticPlay({ gameId }: { gameId?: string }) {
+export default function StaticPlay() {
   const query = useSearchParams();
   const { locale, href, t } = useI18n();
   const single = (key: string) => query.getAll(key).length === 1 ? query.get(key)!.trim() : '';
-  const id = gameId ?? single('id');
+  const id = gameIdFromPath(usePathname()) || single('id');
   const room = single('room');
   const host = single('mode') === 'host';
   /*
@@ -103,8 +129,9 @@ export default function StaticPlay({ gameId }: { gameId?: string }) {
   const rawLang = single('lang');
   const lang = GAME_LANGUAGE_VALUES.includes(rawLang) ? rawLang : '';
   /*
-   * 「这一款在哪」的那条地址：有 `?id=` 就是详情页，没有（本机文件 / 直接开 `/play`）
-   * 退回列表页。两个出口共用它 —— 左上那颗「返回」的兜底，和顶栏信息条的点击目标
+   * 「这一款在哪」的那条地址：路径上有 id（`/games/<id>/play`）就是它的详情页，
+   * 没有（本机文件 / 直接开裸 `/play`）退回列表页。两个出口共用它 ——
+   * 左上那颗「返回」的兜底，和顶栏信息条的点击目标
    * （2026-10-19 用户要求信息条可点进详情）。两边必须是**同一个地址**，否则用户会
    * 发现「返回」和信息条去的地方不一样。
    */
@@ -129,9 +156,10 @@ export default function StaticPlay({ gameId }: { gameId?: string }) {
   }, [id]);
 
   /*
-   * 标签页标题带上游戏名（2026-11-17）：这一页服务端是逐语言一份的空壳
-   * （`worker.ts` 还会把查询串整个剥掉当缓存键），`?id=` 只活在浏览器里，
-   * 所以标题没法走 `generateMetadata`，只能在这层拿到接口数据后写 `document.title`。
+   * 标签页标题带上游戏名（2026-11-17，2026-11-21 补注）：这一页**服务端不认 id** ——
+   * 输出是逐语言一份的空壳（`worker.ts` 还把 id 段折叠进同一个缓存键，见
+   * `playKeyPath`），所以标题只能在这层拿到接口数据后写 `document.title`。
+   * 代价是「先通用标题、几百毫秒后才有游戏名」，这是折叠缓存键的既定取舍。
    * 格式对齐全站的 `title.template`（SiteDocument 里 `%s · 站名`），
    * 站名照样只从 `SITE_NAME` 读 —— 别在组件里硬写站名。
    * 没有 id / 查无此款时保持服务端那份默认标题（`seo.play.title`），什么都不写。

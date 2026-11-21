@@ -105,6 +105,29 @@ export function isCompleteByteRange(value: string | null): boolean {
   return parsed !== null && parsed.start === 0 && parsed.end === parsed.total - 1;
 }
 
+/**
+ * 这次回源失败，是不是**访客自己走了**（关页面 / 取消下载 / 前端掐掉一片重试）。
+ *
+ * 为什么要单独认这一种：一次载入要发几百个 8 MiB 分片请求，访客在载入途中离开、
+ * 或者前端为了重试而 abort 在途的那一片，都是**日常行为**。此时 runtime 会把在途的
+ * `fetch()` 直接打断，抛出来的东西不是「连不上上游」，把它按 `upstream error` 记进
+ * 日志只会把真正的上游故障淹掉（2026-11-21 用户从日志里捞到的就是这一条）。
+ *
+ * 判据两路：
+ *   · `request.signal.aborted` —— 权威判据，访客走了 runtime 一定会置位；
+ *   · 错误名 `ResponseAborted` / `AbortError` —— workerd 有时**先**打断在途 fetch、
+ *     signal 晚一拍才置位（`ResponseAborted` 是 workerd 自己的名字，浏览器里见不到），
+ *     只看 signal 会漏掉这个时间窗。
+ *
+ * ⚠️ `TimeoutError` **不在**这里 —— 那是我们自己的 25 秒超时，属于真故障，必须报。
+ */
+export function isClientAbort(error: unknown, request: Request): boolean {
+  if (request.signal.aborted) return true;
+  const name =
+    typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : undefined;
+  return name === 'ResponseAborted' || name === 'AbortError';
+}
+
 export async function fetchRomUpstream(
   target: string,
   request: Request,

@@ -265,9 +265,15 @@ export async function listDevelopers(
   };
 }
 
-/** 列表页与首页「游戏最多的前 N 家」的 TTL（秒）= 7 天（2026-10-22 迁 Vercel、去 ISR 后从 30 天压回来）。 */
-export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 604800;
-export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 604800;
+/**
+ * 列表页与首页「游戏最多的前 N 家」的 TTL（秒）= 30 天。
+ *
+ * 2026-10-22 迁 Vercel、去 ISR 后从 30 天压到 7 天；2026-11-21 因 R2 Class A 超额
+ * （每次过期重写 = 一次 PutObject）回到 30 天。这两个**没有挂 tag**，抬 TTL 意味着
+ * 开发商资料改完最多晚 30 天可见 —— 和 `consoles.ts` 那处一样是硬等待。
+ */
+export const DEVELOPERS_PAGE_REVALIDATE_SECONDS = 2592000;
+export const TOP_DEVELOPERS_REVALIDATE_SECONDS = 2592000;
 
 const countDevelopersCachedRaw = cached(
   async (keyword: string) => countDevelopers({ keyword }),

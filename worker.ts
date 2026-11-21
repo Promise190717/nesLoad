@@ -84,24 +84,33 @@
  * 规则（宁可少缓存也不缓存错）
  *
  *   · 只处理 **GET**；`HEAD` / POST（含 server action）一律放行并显式 `no-store`；
- *   · **不进缓存**的路径：`/admin*`、`/account*`、`/login*`（任何语言前缀下）、
- *     `/_next/*`、以及除 `/api/games` 之外的**所有** `/api/*`（私有接口和评论
- *     都在这条线上，评论晚 60 秒出现是不能接受的）；
+ *   · **不进缓存**的路径：`/admin*`、`/account*`（任何语言前缀下）、`/_next/*`、
+ *     以及除 `/api/games` 之外的**所有** `/api/*`（私有接口和评论都在这条线上，
+ *     评论晚 60 秒出现是不能接受的）；
+ *     ⚠️ `/login*` **2026-11-21 起进来了**（那页已经静态化，对所有人同一份 HTML，
+ *     见 `PRIVATE_PATH` 的注释），别再按老印象把它排掉；
  *   · Cache API 只存 **200 / 404** 且没有 `Set-Cookie` 的 HTML / XML / 纯文本 / flight；
  *     Workers Caching 只接同一个判断下的 **整页 HTML / XML / 纯文本 / 公开 JSON**
  *     ——flight 一律 `no-store`（理由见 `withCdnHeaders` 的注释）。
  *     重定向（语言 307 / 301）与 5xx 两边都不缓存 —— 语言跳转依赖 cookie，
  *     缓存了会把没设过语言的人跳去错误的语言；
  *   · 缓存键剥掉 `utm_*` / `fbclid` / `gclid` / `msclkid` / `_rsc`；
- *     `/play` 与 `/games/<id>/play`（2026-11-17 路径化迁移）更进一步**整个查询串
- *     都不要** —— 那两页的 HTML 是空壳，`room` / `mode` / `lang` 三个参数全由
- *     客户端读（见 `components/StaticPlay.tsx`），按参数分键只是把同一份副本存
- *     几十遍；`<id>` 路径段不折叠（新开局页标题带游戏名，HTML 逐 id 不同）。
+ *     下面三族更进一步**整个查询串都不要**，整页 HTML 还把路径段折叠成一条：
+ *       `/games/<id>/play` → `/<locale>/__nesload_play`（2026-11-21）
+ *       `/games/<id>/download` → `/<locale>/__nesload_download`（2026-11-04）
+ *       `/login` → `/<locale>/__nesload_login`（2026-11-21）
+ *     三页的服务端输出都与 id / 参数无关（参数全由客户端读），不折叠就是
+ *     3.8 万条 URL 各存一份、各赌一次「第一次渲染能不能活下来」。
  *
- * TTL：页面 200 存 **24 小时**、404 存 1 小时、`/api/games*` 存 30 秒。
- * 页面内容只有后台上传游戏时才变（数据层还有 7 天缓存），24 小时的陈旧窗口
+ * TTL：页面 200 存 **24 小时**、404 存 1 小时、`/api/games*` 存 1 小时。
+ * 页面内容只有后台上传游戏时才变（数据层还有 30 天缓存），24 小时的陈旧窗口
  * 对用户和爬虫都无感；想立刻生效就仪表盘 purge 一次。404 也存，是为了挡扫描器对
  * 不存在地址的反复试探 —— 每次试探都是一次会超限的渲染。
+ *
+ * ✅ **2026-11-21 补：过期 ≠ 断供。** 整页 HTML 的那一份另外带
+ * `stale-while-revalidate=7d` + `stale-if-error=1d`（见 `TTL_PAGE_SWR`）：
+ * 副本过期后照发旧的、后台刷新，刷新失败（比如渲染又被 CPU 砍了）也继续发旧的。
+ * 一条地址只要被焐热过一次，之后 8 天内任何访客都不会撞上冷渲染。
  *
  * ⚠️ **为什么长尾 URL 会「永远冷」（2026-11-03 查明的死循环）**
  *
@@ -120,6 +129,15 @@
  *   的服务端输出改成**与 id 无关**，缓存键按语言折叠成一条（`downloadKeyPath`）——
  *   冷的只剩 18 条，`pnpm warm:edge` 一把就能焐热。详情页那一族**没有**这么处理
  *   （它的 HTML 里全是这一款的内容，折叠不了），仍靠「热门 + 预热 + 重复访问」慢慢暖。
+ *
+ *   ✅ **2026-11-21 补：开局页和登录页也摘出来了**。同一天的 CF 日志里 45 次
+ *   1102 有 18 次是 `/games/<id>/play`、10 次是 `/login`，全落在冷 URL 上。
+ *   做法同下载页：开局页的 metadata 不再带游戏名（id 由客户端从 pathname 读）、
+ *   登录页不再在服务端读 cookie，两页的 HTML 于是逐语言相同，缓存键折叠成
+ *   `playKeyPath` / `loginKeyPath` 两条。叠加 `TTL_PAGE_SWR` 之后，这两族
+ *   **只要被焐热过一次就基本不会再出现 1102**。
+ *   详情页（`/games/<id>`）仍然是唯一必须逐 URL 渲染的一族 —— 它才是 SEO 入口，
+ *   有正文、有 JSON-LD，折叠不了。
  *
  * ⚠️ **静态资产不走这里**：`assets` 绑定的文件（`/_next/static`、`/cores`、
  *    `/sprites`…）由 Cloudflare 直接服务、不进 Worker，免费额度也不计入请求。
@@ -156,10 +174,38 @@ import { default as handler } from './.open-next/worker.js';
  * 2026-11-03 从 30 分钟拉到 24 小时：这层缓存是免费版 10ms CPU 下唯一能救命的东西，
  * 而 30 分钟意味着**每天每页要重渲染 48 次**，每一次都是一次赌 —— 渲染没跑完就拿不到
  * 响应、`cache.put` 也就不执行，那一页从此永远冷（见下面「为什么长尾永远冷」那段）。
- * 页面内容只有后台上传游戏时才变，数据层本来就有 7 天缓存，24 小时的陈旧窗口
+ * 页面内容只有后台上传游戏时才变，数据层本来就有 30 天缓存，24 小时的陈旧窗口
  * 对用户和爬虫都无感；要立刻生效就仪表盘 purge 一次。
  */
 const TTL_PAGE = 86400;
+/**
+ * 页面副本过期后还能「接着供」多久（秒），以及后台刷新失败时继续供多久。
+ *
+ * 2026-11-21 加。起因是日志里 446 次 Worker 调用中 45 次 1102，**全部落在冷 URL 上**：
+ * 成功渲染的那批要 100–490ms CPU，而被砍的那批只跑到 ~10ms —— 说明能不能活下来
+ * 取决于「这条地址是不是刚被渲染过」，不是页面本身快慢。
+ *
+ * 于是「TTL 到期 = 这条地址的下一批访客必然要吃一次现场 SSR」就成了一个必输的赌局：
+ * 免费版装不下一次 SSR，赌输那次既没响应、也不会写副本，地址从此一直冷。
+ * RFC 5861 的两个指令正好治这个：
+ *
+ *   · `stale-while-revalidate` —— 过期后**照发旧副本**，同时后台刷新。刷新成功就换新的；
+ *     失败（比如这次渲染又被 CPU 砍了）就继续供旧的，访客一次都感知不到。
+ *   · `stale-if-error` —— 后台刷新拿到 5xx 时同样继续供旧的，不把错误吐给访客。
+ *
+ * 净效果：一条地址只要被焐热过一次，之后 **8 天内任何人（含爬虫）都不会撞上冷渲染**。
+ * 旧副本最长 7 天不换 —— 页面正文只有后台上传游戏时才变，而那条路本来就有
+ * `revalidateTag` 兜底，可接受。
+ *
+ * ⚠️ 只加在**整页 HTML**（`variant === 'html'`）上。flight 一律 `no-store`
+ *    （它的地址带随机 `_rsc=`，存了就是垃圾）；接口那层用自己的 `TTL_API_SWR`，不叠加。
+ * ⚠️ 404 给 1 天而不是 7 天：它挡的是扫描器，但万一某条地址后来真的有了页面，
+ *    也别让它顶着一个 404 顶一周。
+ */
+const TTL_PAGE_SWR = 7 * 24 * 60 * 60;
+const TTL_PAGE_SIE = 24 * 60 * 60;
+/** 404 副本的 SWR（见上）。 */
+const TTL_NOT_FOUND_SWR = 24 * 60 * 60;
 /** 404 副本的 TTL（秒）。2026-11-03 从 5 分钟拉到 1 小时 —— 它挡的是扫描器，
  *  而扫描器的特征是「同一个不存在的地址反复来」，5 分钟刚好让它每次都穿透。 */
 const TTL_NOT_FOUND = 3600;
@@ -197,8 +243,15 @@ const CACHEABLE_CONTENT_TYPES =
 /** 缓存键里要剥掉的追踪参数。 */
 const TRACKING_PARAM = /^(utm_|fbclid|gclid|msclkid)/i;
 
-/** 需要逐字节新鲜 / 带登录态的路径：`/account`、`/login`，允许带一层语言前缀。 */
-const PRIVATE_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?(?:account|login)(?:\/|$)/;
+/**
+ * 需要逐字节新鲜 / 带登录态的路径：只剩 `/account`，允许带一层语言前缀。
+ *
+ * ⚠️ **2026-11-21 起 `/login` 不在这里了**：那一页已经**静态化**（服务端不再读
+ * cookie 判登录态，改成挂载后由 `components/LoginPanel.tsx` 问一次 `/api/user/login`
+ * 再决定要不要跳走）。于是它对所有人是同一份 HTML，可以正常进两层缓存 ——
+ * 这是日志里 10/45 次 1102 的来源，别再把它加回来。
+ */
+const PRIVATE_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?account(?:\/|$)/;
 
 /** 可以短缓存一次的公开接口：在线游戏库弹窗（列表 / 单款）。评论接口不在此列。 */
 const PUBLIC_API = /^\/api\/games(?:\/[^/]+)?$/;
@@ -207,15 +260,26 @@ const PUBLIC_API = /^\/api\/games(?:\/[^/]+)?$/;
 const ROM_API = /^\/api\/games\/[^/]+\/rom$/;
 
 /**
- * `/play` 与 `/games/<id>/play` 的 HTML 都与查询串无关（见文件头那段）：
- * `room` / `mode` / `lang` 全由客户端读。允许带一层语言前缀：
- * `/play`、`/zh/play`、`/games/x/play`、`/zh/games/x/play`。
- *
- * ⚠️ 2026-11-17 路径化迁移后 `<id>` 那段**不折叠**：新开局页的 metadata 里带
- * 游戏名，HTML 已逐 id 不同，下载页那种按语言折叠（`downloadKeyPath`）做不了。
- * 副本量从「每语言 1 份」变「每 id × 语言 1 份」，都是几 KB 空壳，接受的代价。
+ * `/play` 与 `/games/<id>/play`：HTML 与查询串无关（`room` / `mode` / `lang` 全由
+ * 客户端读）。允许带一层语言前缀：`/play`、`/zh/play`、`/games/x/play`。
  */
 const PLAY_PATH = /^\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?\/)?(?:play|games\/[^/]+\/play)$/;
+
+/**
+ * `/games/<id>/play` 专用，**带捕获组**：缓存键要把中间那段 `<id>` 整个吃掉
+ * （见 `playKeyPath`）。裸 `/play` 不属于这一条 —— 它是「加入房间 / 本机文件」的
+ * 入口，没有游戏上下文，和这一族不是同一个页面。
+ */
+const PLAY_GAME_PATH = /^(\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?))?\/games\/[^/]+\/play$/;
+
+/**
+ * `/login`：**带捕获组**，理由同 `PLAY_GAME_PATH`。
+ *
+ * 查询串整个不要、`<id>` 也没有 —— 登录页的 `?next=` 只活在浏览器里
+ * （`LoginPanel` 挂载后自己读），服务端 HTML 逐语言逐字节相同。
+ * 不剥的话每个 `?next=` 都是新键，爬虫随手造一个就能在 Cache API 里留一条。
+ */
+const LOGIN_PATH = /^(\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?))?\/login$/;
 
 /**
  * 下载页：`/<locale>/games/<id>/download`，语言前缀可省。
@@ -239,6 +303,34 @@ const DOWNLOAD_PATH = /^(\/(?:[a-z]{2,5}(?:-[A-Za-z]{2,4})?))?\/games\/[^/]+\/do
  */
 function downloadKeyPath(localePrefix: string | undefined): string {
   return `${localePrefix ?? ''}/__nesload_download`;
+}
+
+/**
+ * 开局页折叠后的缓存键路径（每语言一份）。
+ *
+ * 2026-11-21：`/games/<id>/play` 的服务端输出改成**与 id 无关**了 ——
+ * 页面的 `<title>` / canonical 不再带游戏名，页面子树整个挂在
+ * `<Suspense fallback={null}>` 里（id 由 `StaticPlay` 挂载后从 `usePathname()`
+ * 读，见那个组件顶上那段）。理由和下载页完全一样：
+ *
+ *   2110 款 × 18 语言 ≈ 3.8 万条 URL，每条都要先有一次**成功的完整 SSR** 才存得进
+ *   缓存；而在 10ms CPU 下那次渲染大概率被砍，砍了就没有副本，这条地址从此永远冷。
+ *   折叠后只剩 18 份副本，一次渲染成功就全语言恒热 —— 这是唯一能真正止损的做法，
+ *   微优化单次渲染没有意义（一次 SSR 就是 100–500ms）。
+ *
+ * ⚠️ **只对整页 HTML 折叠**，和 `downloadKeyPath` 一样：flight 是逐 URL 的
+ * （载荷里带着这次导航的路由树），把 A 游戏的 flight 喂给 B 游戏属于拿不准的事。
+ */
+function playKeyPath(localePrefix: string | undefined): string {
+  return `${localePrefix ?? ''}/__nesload_play`;
+}
+
+/**
+ * 登录页折叠后的缓存键路径（每语言一份），理由同上：`?next=` 只活在浏览器里
+ * （`LoginPanel` 挂载后自己读），服务端 HTML 逐语言逐字节相同。
+ */
+function loginKeyPath(localePrefix: string | undefined): string {
+  return `${localePrefix ?? ''}/__nesload_login`;
 }
 
 function isPrivatePath(pathname: string): boolean {
@@ -288,8 +380,8 @@ function cacheVersion(env: unknown): string {
  * 不直接用原 request：键要和「分享链接上带了追踪参数」「Next 给 RSC 地址
  * 追加了 `_rsc`」这两种情况对齐。
  *
- * `version` 见 `cacheVersion()`：**必须加在最后**，因为 `/play` 和下载页那两处会
- * 把整个查询串清空，早加就被一起清掉了。
+ * `version` 见 `cacheVersion()`：**必须加在最后**，因为下面开局页 / 下载页 / 登录页
+ * 那三处会把整个查询串清空，早加就被一起清掉了。
  */
 function cacheKey(
   request: Request,
@@ -302,6 +394,16 @@ function cacheKey(
   }
   if (PLAY_PATH.test(url.pathname)) url.search = '';
   /*
+   * 开局页 `/games/<id>/play`：查询串本来就与 HTML 无关（`room` / `mode` / `lang`
+   * 由客户端读），整页 HTML 再把 `<id>` 那段折叠掉 —— 2110 款 × 18 语言共用 18 份
+   * 副本。它和下载页是同一套理由，见 `playKeyPath`。
+   */
+  const play = PLAY_GAME_PATH.exec(url.pathname);
+  if (play) {
+    url.search = '';
+    if (variant === 'html') url.pathname = playKeyPath(play[1]);
+  }
+  /*
    * 下载页：查询串整个不要（它是死参数，见 `GameLanguageActions` 里下载钮那段），
    * 整页 HTML 再把 `<id>` 那段折叠掉 —— 一套语言一份副本服务这一族的全部 URL。
    * flight 不折叠，理由见 `downloadKeyPath`。
@@ -310,6 +412,15 @@ function cacheKey(
   if (download) {
     url.search = '';
     if (variant === 'html') url.pathname = downloadKeyPath(download[1]);
+  }
+  /*
+   * 登录页：`?next=` 由客户端读（见 `loginKeyPath`），HTML 逐语言逐字节相同 ——
+   * 查询串整个剥掉再折叠，免得每个 `?next=` 都占一条键。
+   */
+  const login = LOGIN_PATH.exec(url.pathname);
+  if (login) {
+    url.search = '';
+    if (variant === 'html') url.pathname = loginKeyPath(login[1]);
   }
   if (variant !== 'html') url.searchParams.set('__nesload_rsc', variant === 'prefetch' ? '2' : '1');
   if (version) url.searchParams.set('__v', version);
@@ -322,7 +433,8 @@ function cacheKey(
  * ⚠️ **不改写 Cache-Control 就没用**：`Cache.put()` 只认响应头里的 `Cache-Control`
  *    （和 `Expires`），它**没有第三个参数** —— `{ cacheTtl }` 是 `fetch()` 的 `cf`
  *    选项，`Cache.put` 收到也会丢掉。而 Next 的页面响应带的是
- *    `s-maxage=<ISR revalidate>`，约 7 天。原样存进去，边缘就按 7 天陈旧。
+ *    `s-maxage=<ISR revalidate>`，约 30 天。原样存进去，边缘就按 30 天陈旧。
+ *    （2026-11-21 前是 7 天；R2 Class A 超额后 ISR 抬到 30 天，这行注释跟着改。）
  *
  * ⚠️ **`Vary` 必须删**：OpenNext 给页面响应带
  *    `vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch, …`，
@@ -387,12 +499,17 @@ function noStore(response: Response): Response {
  *
  * ⚠️ 只用于 `variant === 'html'` 的那一份。flight / prefetch 一律走 `noStore` ——
  *    它们的地址带随机 `_rsc=`，存进去就是几万条只读一次的垃圾，还会挤掉真正有用的页。
+ *
+ * `staleWhileRevalidate` / `staleIfError` 是 RFC 5861 的两个「过期后继续供」指令，
+ * 页面那一路的取值见 `TTL_PAGE_SWR`；接口那一路只给 SWR，不给 SIE（接口出错宁愿
+ * 让客户端重试，也不要悄悄喂一份可能已经删掉的数据）。
  */
 function withCdnHeaders(
   response: Response,
   ttl: number,
   browserMaxAge = 0,
-  staleWhileRevalidate = 0
+  staleWhileRevalidate = 0,
+  staleIfError = 0
 ): Response {
   const headers = new Headers(response.headers);
   /*
@@ -401,6 +518,7 @@ function withCdnHeaders(
    */
   const parts = ['public', `max-age=${browserMaxAge}`, `s-maxage=${ttl}`];
   if (staleWhileRevalidate > 0) parts.push(`stale-while-revalidate=${staleWhileRevalidate}`);
+  if (staleIfError > 0) parts.push(`stale-if-error=${staleIfError}`);
   headers.set('cache-control', parts.join(', '));
   headers.set('vary', 'RSC');
   /*
@@ -414,6 +532,34 @@ function withCdnHeaders(
     statusText: response.statusText,
     headers,
   });
+}
+
+/**
+ * 一份副本该带什么缓存策略（`s-maxage` / 浏览器 / SWR / SIE）。
+ *
+ * **必须只在这里算一次**：同一份副本有两条出口 —— 「Cache API 刚命中」和「现场渲染
+ * 刚刚好」—— 两条给出的头必须逐字一样。否则同一条地址在暖的时候和刚渲染完的时候
+ * 行为不同，线上排查时根本分不清是哪一层在说话（2026-11-21 之前就是这样：
+ * 命中那条只写 `s-maxage`，没有 SWR）。
+ *
+ * `ttl === 0` 表示这份不该存（重定向 / 5xx），调用方据此走 `noStore`。
+ */
+function pagePolicy(status: number, isApi: boolean): {
+  ttl: number;
+  browser: number;
+  swr: number;
+  sie: number;
+} {
+  if (isApi) {
+    return { ttl: TTL_API, browser: TTL_API_BROWSER, swr: TTL_API_SWR, sie: 0 };
+  }
+  if (status === 404) {
+    return { ttl: TTL_NOT_FOUND, browser: 0, swr: TTL_NOT_FOUND_SWR, sie: 0 };
+  }
+  if (status === 200) {
+    return { ttl: TTL_PAGE, browser: 0, swr: TTL_PAGE_SWR, sie: TTL_PAGE_SIE };
+  }
+  return { ttl: 0, browser: 0, swr: 0, sie: 0 };
 }
 
 const edgeCacheWrapper = {
@@ -430,8 +576,13 @@ const edgeCacheWrapper = {
 
     const url = new URL(request.url);
     const { pathname } = url;
-    /** 下载页整族共用一份副本（见 `downloadKeyPath`）—— 下面存副本时要按它区别对待。 */
+    /**
+     * 这三族**整族共用一份副本**（见 `downloadKeyPath` / `playKeyPath` /
+     * `loginKeyPath`）—— 下面存副本时要按它们区别对待：非 200 一律不能写进
+     * 那条共享的键，否则一条 404 / 500 会被当成这一族所有 URL 的结果发出去。
+     */
     const isDownload = DOWNLOAD_PATH.test(pathname);
+    const isFolded = isDownload || PLAY_GAME_PATH.test(pathname) || LOGIN_PATH.test(pathname);
 
     if (isPrivatePath(pathname)) return noStore(await handler.fetch(request, env, ctx));
 
@@ -500,15 +651,13 @@ const edgeCacheWrapper = {
          * 这条副本的 `Vary` 被 `withEdgeTtl` 删过（Cache API 靠键里的 `__nesload_rsc`
          * 变体标记区分，不需要它），但 **Workers Caching 只认 `Vary`** —— 原样返回
          * 会让它把 flight 和整页 HTML 当成同一份互相覆盖。所以出这扇门之前补回来。
+         *
+         * 缓存头和全新渲染那条出口**必须同源**（见 `pagePolicy` 的注释）：命中这份
+         * 也要带上 SWR / SIE，否则一次命中就把这条地址的「7 天不断供」缩回 24 小时。
          */
-        const hitTtl = hit.status === 404 ? TTL_NOT_FOUND : isApi ? TTL_API : TTL_PAGE;
+        const policy = pagePolicy(hit.status, isApi);
         return variant === 'html'
-          ? withCdnHeaders(
-              copy,
-              hitTtl,
-              isApi ? TTL_API_BROWSER : 0,
-              isApi ? TTL_API_SWR : 0
-            )
+          ? withCdnHeaders(copy, policy.ttl, policy.browser, policy.swr, policy.sie)
           : noStore(copy);
       }
     } catch (error) {
@@ -518,24 +667,19 @@ const edgeCacheWrapper = {
     const response = await handler.fetch(request, env, ctx);
 
     /*
-     * 下载页那一族的副本是**整族共用的**（`downloadKeyPath`）⇒ 非 200 一律不能存：
-     * 一条 404 会被当成这一族所有游戏的结果发出去。这里连 Cache API 一起跳过后
-     * 直接 `noStore`，别让 Workers Caching 按原 URL 再单独存一份坏的。
-     * （正文已经不查库判存在性了，正常不该再出 404；这条守的是语言段非法之类的边界。）
+     * 下载页 / 开局页 / 登录页这三族的副本都是**整族共用的**（见上面 `isFolded`
+     * 与那三个 `*KeyPath`）⇒ 非 200 一律不能存：一条 404 会被当成这一族所有 URL
+     * 的结果发出去（比如语言段非法时 `readLocaleParam` 会 `notFound()`，那是一条
+     * 挂在 `/xx/login` 上的 404）。这里连 Cache API 一起跳过后直接 `noStore`，
+     * 别让 Workers Caching 按原 URL 再单独存一份坏的。
      */
-    if (isDownload && response.status !== 200) return noStore(response);
+    if (isFolded && response.status !== 200) return noStore(response);
 
-    const ttl =
-      response.status === 200
-        ? isApi
-          ? TTL_API
-          : TTL_PAGE
-        : response.status === 404
-          ? TTL_NOT_FOUND
-          : 0;
+    /* 缓存策略只算一次，`ttl` 同时决定「存不存」（见 `pagePolicy`）。 */
+    const policy = pagePolicy(response.status, isApi);
     const contentType = response.headers.get('content-type') ?? '';
     const storable =
-      ttl > 0 &&
+      policy.ttl > 0 &&
       !response.headers.has('set-cookie') &&
       CACHEABLE_CONTENT_TYPES.test(contentType);
 
@@ -552,7 +696,7 @@ const edgeCacheWrapper = {
      */
     try {
       ctx.waitUntil(
-        cache.put(key, withEdgeTtl(response.clone(), ttl)).catch((error) => {
+        cache.put(key, withEdgeTtl(response.clone(), policy.ttl)).catch((error) => {
           // 存不进去只是这次没缓存，别把已经渲染好的页面打成 500
           console.error('[edge-cache] 写入失败', pathname, error);
         })
@@ -567,12 +711,14 @@ const edgeCacheWrapper = {
      *
      *    整页 HTML（含 404）盖上 Workers Caching 认的头，让它在 Worker **外面**
      *    被命中 —— 那一步连 isolate 都不启动，是免费版 10ms 下唯一能真正止损的地方。
+     *    这一份必须带 SWR / SIE（见 `TTL_PAGE_SWR`）：它是**唯一**会被 Workers Caching
+     *    原样存下来的头，漏了它就等于这条地址 24 小时后照样回到冷渲染。
      *
      *    flight / prefetch 一律 `no-store`：它们每条地址都带随机的 `_rsc=`，
      *    进了缓存就是几万条只读一次的垃圾，还会按 `Next-Router-State-Tree` 分叉。
      */
     return variant === 'html'
-      ? withCdnHeaders(response, ttl, isApi ? TTL_API_BROWSER : 0, isApi ? TTL_API_SWR : 0)
+      ? withCdnHeaders(response, policy.ttl, policy.browser, policy.swr, policy.sie)
       : noStore(response);
   },
 };

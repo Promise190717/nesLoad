@@ -800,6 +800,10 @@ export const id: Record<MessageKey, string> = {
   /* 点「开始游戏 / 联机游戏」时那个选语言版本的弹框标题 */
   'gamesPage.selectLanguage': 'Pilih bahasa',
   /* 全站 404：和 `gamesPage.notFoundTitle`（游戏没了）是两件事 */
+  'error.title': 'Halaman gagal dimuat',
+  'error.description':
+    'Server sedang menerima banyak permintaan saat ini. Tunggu beberapa detik lalu muat ulang — biasanya halaman terbuka.',
+  'error.refresh': 'Muat ulang',
   'notFound.title': 'Halaman tidak ditemukan',
   'notFound.description':
     'Alamat itu tidak ada di {site}. Periksa tautannya, atau kembali ke halaman utama.',
@@ -849,14 +853,4 @@ export const id: Record<MessageKey, string> = {
   'deepLink.title': 'Memuat game',
   'deepLink.loading': 'Mengunduh ROM…',
   'deepLink.hint': 'Mulai otomatis setelah unduhan selesai.',
-  /* H5 小游戏专栏 */
-  'h5.title': 'Game H5',
-  'h5.intro': 'Minigame yang langsung berjalan di browser, tanpa unduhan atau plugin. Saat ini {count}.',
-  'h5.play': 'Main',
-  'h5.note': 'Semua ini minigame orisinal yang dibuat untuk situs ini. Pengaturan dan kode room hanya tersimpan di browser Anda, tidak diunggah.',
-  'h5.badge.online': 'Multipemain LAN',
-  'h5.badge.bots': 'Lawan bot',
-  'h5.badge.touch': 'Dukungan sentuh',
-  'h5.seo.title': 'Game H5: main langsung di browser',
-  'h5.seo.description': 'Minigame browser orisinal: penembak sudut pandang orang pertama dengan tiga senjata, multipemain LAN, dan pertandingan lawan bot. Tanpa unduhan.',
 };

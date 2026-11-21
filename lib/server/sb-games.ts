@@ -51,13 +51,17 @@ export {
 export const MAX_PAGE_SIZE = 100;
 
 /*
- * 前台读缓存的 TTL（秒）= 7 天。
+ * 前台读缓存的 TTL（秒）= 30 天。
  *
  * 2026-10-22 用户决定迁到 Vercel、**页面级 ISR 全部去掉**（见各页面里的
  * `force-dynamic`），数据缓存成了唯一一层：页面每次请求都渲染，取数走这里，
  * 7 天自然过期。此前是 30 天（2026-10-20 定的）。
  *
- * 代价是后台改完数据最坏要等 7 天才自然过期 —— 所以后台写路径**必须**继续
+ * 2026-11-21 回到 30 天：R2 的 Class A（PutObject）超了免费额度 100 万/月，
+ * 而每一条过期重写都是一次 PutObject。游戏资料本身几乎不变（名字 / 封面 / 简介），
+ * 新鲜度早由下面的 tag 失效保证，7 天过期纯属白写。**别再压回 7 天**。
+ *
+ * 代价是后台改完数据最坏要等 30 天才自然过期 —— 所以后台写路径**必须**继续
  * `revalidateTag('games', { expire: 0 })`（`games-admin.ts` 那三处）。
  * 三份分开是因为键与失效方式不同，但时长有意保持一致。
  *
@@ -65,9 +69,9 @@ export const MAX_PAGE_SIZE = 100;
  *    （2026-10-20 加）。没有页面级缓存兜底之后，tag 是「后台一改就立刻可见」的
  *    唯一手段，漏一个就是「新游戏上线一周后前台才出现」。
  */
-export const GAMES_PAGE_REVALIDATE_SECONDS = 604800;
-export const GAME_DETAIL_REVALIDATE_SECONDS = 604800;
-export const HOME_REVALIDATE_SECONDS = 604800;
+export const GAMES_PAGE_REVALIDATE_SECONDS = 2592000;
+export const GAME_DETAIL_REVALIDATE_SECONDS = 2592000;
+export const HOME_REVALIDATE_SECONDS = 2592000;
 /** sitemap 的 stub 读取仍按天走，理由见 `listGameStubsCached`。 */
 const SITEMAP_STUBS_REVALIDATE_SECONDS = 86400;
 
@@ -843,9 +847,9 @@ export const listGamesByDeveloperCached = cached(
  *
  * 推荐结果的键本质是「这一款游戏」—— 每款游戏的标签集不同，缓存键基数 =
  * 游戏数。这和 `countFavorites` 2026-10-23 被拆掉是同一条教训：长尾详情页
- * 一天顶多被渲染一两次（整页还有 7 天 ISR 兜着），unstable_cache 条目
+ * 一天顶多被渲染一两次（整页还有 30 天 ISR 兜着），unstable_cache 条目
  * **几乎每次都走完整的 miss 路径**（R2 GET + 查询 + R2 PUT + tag DO 通知），
- * 比直查一次还贵。直查，让整页 ISR（`revalidate = 604800`）负责别重复算。
+ * 比直查一次还贵。直查，让整页 ISR（`revalidate = 2592000`）负责别重复算。
  *
  * ⚠️ 标签集**内联成 SQL 字面量**（`ARRAY['格斗','动作']::text[]`）：
  *    `query()` 的 `bindParams` 对数组参数直接抛错（见 lib/server/pg.ts），
@@ -884,7 +888,7 @@ export async function listRelatedGames(
 
     /*
      * 重叠数现算现排：`unnest` 各自展开后 `INTERSECT`，`cardinality` 数一下。
-     * 结果必须确定性（重叠数 DESC → created_at DESC → slug DESC），整页 7 天 ISR
+     * 结果必须确定性（重叠数 DESC → created_at DESC → slug DESC），整页 30 天 ISR
      * 经不起两次渲染两个顺序。重叠数相同的排新的在前 —— 和列表页的时序口径一致。
      */
     const rows = await query<GameBaseRow & { overlap: number | string }>(

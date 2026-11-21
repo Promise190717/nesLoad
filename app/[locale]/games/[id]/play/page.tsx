@@ -1,68 +1,76 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
-import { cache } from 'react';
+import { Suspense } from 'react';
 import { SITE_NAME, alternatesFor, localePath, ogLocale, otherLocales, translate } from '@/lib/i18n';
-import { getGameCached, localizeGame } from '@/lib/server/sb-games';
 import { readLocaleParam } from '@/lib/server/locale';
 import StaticPlay from '@/components/StaticPlay';
 
 /**
  * `/games/[id]/play` —— 开局页（2026-11-17 从 `/play?id=` 路径化迁来）。
  *
- * id 进了路径段，服务端**第一次知道自己在开哪一款**：metadata 能真正按游戏出标题
- * （空壳时代标题全靠客户端补写，见 `StaticPlay` 里的那段）。noindex 性质不变 ——
- * 正文还是只有一块 canvas（`StaticPlay` 是客户端组件），被收录仍是薄页，
+ * 🔴 **2026-11-21：这一页的服务端输出改成「与 id 无关」了，不要往回加。**
+ *
+ * 起因是 CF 日志：45 次 1102 里有 18 次落在这一族，全是最冷的那次渲染被 CPU 砍掉。
+ * 病根是「2110 款 × 18 语言 = 3.8 万条 URL，每条都要先有一次成功的完整 SSR 才进得了
+ * 缓存」，而一次 SSR 要 100–500ms CPU，砍了就没有副本，那条地址从此永远冷。
+ *
+ * 所以现在的分工：
+ *   · **服务端**只输出一份逐语言相同的空壳 —— 没有游戏名（`seo.play.title`）、
+ *     没有带 id 的 canonical / hreflang、不查库、不判 404；
+ *   · **id 由客户端读**：`StaticPlay` 挂载后从 `usePathname()` 里剥出 `<id>`，
+ *     再去 `/api/games/<id>` 取资料、写 `document.title`。
+ *   于是 `worker.ts` 能把缓存键折叠成 `/<locale>/__nesload_play`（见 `playKeyPath`），
+ *   3.8 万条 URL 共用 18 份副本，一次渲染成功就全语言恒热。
+ *
+ * 代价（已知并接受）：
+ *   · 标签页标题先通用、几百毫秒后才变成游戏名（`StaticPlay` 里那段 effect）；
+ *   · 乱造的 id 不再 404 —— 空壳照发，客户端取不到资料就是「查无此款」的表现。
+ *
+ * ⚠️ 正文挂在 `<Suspense fallback={null}>` 里是**必须的**：`StaticPlay` 用了
+ *    `useSearchParams()`（`room` / `mode` / `lang`），静态渲染的页面必须给它一个
+ *    边界，否则构建直接报错。裸 `/play` 一直是这个写法（见那条路由），
+ *    两页现在的形态一致：HTML 是空壳，正文全靠客户端。
+ *
+ * noindex 性质不变（2026-11-16 起）：正文只有一块 canvas，被收录就是给 Google 的
+ * 「低价值内容」评分喂薄页。`follow: true` 保留 —— 页内链接照常可被顺着走。
  * sitemap 也照旧不列（见 app/sitemap.ts 顶上「薄壳页」那段）。
  *
- * 为什么还是空壳 + 按需 ISR：正文对同一个 id + 语言逐字节相同，`room` / `mode` /
- * `lang` 三个参数全由客户端读。查询串不进缓存键（`worker.ts` 把它们整个剥掉，
- * 否则每个房间码都存一份 HTML）；`<id>` 那段**不折叠** —— 标题里带游戏名之后
- * HTML 已经逐 id 不同，下载页那种按语言折叠（`downloadKeyPath`）在这里做不到。
- * 副本量从「每语言 1 份」变成「每 id × 语言 1 份」，都是几 KB 的空壳，量级可接受。
- *
- * ⚠️ 裸 `/play`（不带 id）**仍然保留**：首页「加入房间」表单和本机文件入口没有
- * 游戏上下文，到不了这条带 id 的路由。带 id 的旧深链由 middleware 301 到这里
- * （见 middleware.ts `publicRoute` 里那段）。
+ * canonical 只能指 `/play`（这一族现在的公共地址）：它不能再带 id，否则 HTML 又
+ * 逐 id 不同、折叠就白做了。noindex 页上 canonical 本来就被引擎忽略，这样写只是
+ * 为了不继承根布局那份 `/`。
  */
-const loadGame = cache(async (id: string, locale: string) => getGameCached(id, locale));
-
-export async function generateMetadata({ params }: { params: Promise<{ locale: string; id: string }> }): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const locale = await readLocaleParam(params);
-  const { id } = await params;
-  const game = await loadGame(id, locale);
-  /* 查无此款时兜回默认标题 —— 正文那边会 notFound()，这里只是别让 404 页缺标题。 */
-  const title = game ? localizeGame(game, locale).title : translate(locale, 'seo.play.title');
+  const title = translate(locale, 'seo.play.title');
   const description = translate(locale, 'seo.play.description');
-  /*
-   * noindex（2026-11-16 起，原 `/play` 页的判词原样带来）：这一页的 HTML 是空壳
-   * （正文只有一块 canvas，文案全靠客户端挂载），被收录就是给 Google 的
-   * 「低价值内容」评分喂薄页 —— AdSense 那次判词之后的收缩动作之一。
-   * `follow: true` 保留：页面上的链接（顶栏 / 返回）照常可被顺着走。
-   * ⚠️ robots.txt 别加 Disallow：挡掉抓取就连 noindex 一起挡了，已收录的地址收不回去。
-   */
-  return { title, description, robots: { index: false, follow: true }, alternates: alternatesFor(locale, `/games/${id}/play`), openGraph: {
-    type: 'website', url: localePath(locale, `/games/${id}/play`), siteName: SITE_NAME[locale], title, description,
-    locale: ogLocale(locale), alternateLocale: otherLocales(locale).map(ogLocale),
-  } };
+  return {
+    title,
+    description,
+    robots: { index: false, follow: true },
+    alternates: alternatesFor(locale, '/play'),
+    openGraph: {
+      type: 'website',
+      url: localePath(locale, '/play'),
+      siteName: SITE_NAME[locale],
+      title,
+      description,
+      locale: ogLocale(locale),
+      alternateLocale: otherLocales(locale).map(ogLocale),
+    },
+  };
 }
 
 /*
- * 按需 ISR（和旧 `/play` 同一个理由）：这一页是访问量最大的一页，每个玩家每次
- * 开一局都要过一次，`force-dynamic` 等于把最热的请求钉死在免费版 10ms CPU 上。
- * 发版后的「HTML 指向已换掉的 chunk」循环有两道保险：
- *   · `/_next/static/*` 是 `max-age=0, must-revalidate`（next.config.js）；
- *   · OpenNext 增量缓存的 key 里带 `OPEN_NEXT_BUILD_ID`，新版本上线即换一套缓存。
+ * 按需 ISR：这一页现在是纯空壳（服务端不查库、不读 cookie），渲染成本只剩
+ * 「铺一次 Suspense 边界 + 布局」。`revalidate` 留着是为了让 R2 那份最多 30 天
+ * 自然重写一次，和别的内容页同一口径（见 lib/server/sb-games.ts 顶上那段）。
+ * 真正决定线上命中率的是 `worker.ts` 的折叠键，不是这里。
  */
-export const revalidate = 604800;
+export const revalidate = 2592000;
 
-export default async function Page({ params }: { params: Promise<{ locale: string; id: string }> }) {
-  const locale = await readLocaleParam(params);
-  const { id } = await params;
-  /*
-   * 查无此款直接 404：这条地址只该由详情页 / 分享链接到达，乱造的 id 不值得给它
-   * 留一个能被缓存的空壳（404 也进 worker 缓存 1 小时，正好挡扫描器）。
-   * 「不认识 id 也照常服务」的入口是裸 `/play`，两个地址各司其职。
-   */
-  if (!(await loadGame(id, locale))) notFound();
-  return <StaticPlay gameId={id} />;
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <StaticPlay />
+    </Suspense>
+  );
 }

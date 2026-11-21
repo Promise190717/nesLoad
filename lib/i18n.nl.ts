@@ -702,6 +702,10 @@ export const nl: Record<MessageKey, string> = {
   'gamesPage.showLess': 'Minder tonen',
   'gamesPage.selectLanguage': 'Kies taal',
 
+  'error.title': 'Pagina kon niet worden geladen',
+  'error.description':
+    'De server krijgt op dit moment veel verzoeken. Wacht een paar seconden en herlaad — dan opent de pagina meestal.',
+  'error.refresh': 'Herladen',
   'notFound.title': 'Pagina niet gevonden',
   'notFound.description':
     'Dat adres bestaat niet op {site}. Controleer de link of ga terug naar de startpagina.',
@@ -746,14 +750,4 @@ export const nl: Record<MessageKey, string> = {
   'deepLink.title': 'Game laden',
   'deepLink.loading': 'ROM downloaden…',
   'deepLink.hint': 'Start automatisch zodra de download klaar is.',
-  /* H5 小游戏专栏 */
-  'h5.title': 'H5-games',
-  'h5.intro': 'Kleine spellen die direct in de browser draaien, zonder download of plugin. Nu {count}.',
-  'h5.play': 'Spelen',
-  'h5.note': 'Deze minigames zijn speciaal voor deze site gemaakt. Instellingen en kamercodes blijven in je browser; er wordt niets verstuurd.',
-  'h5.badge.online': 'LAN-multiplayer',
-  'h5.badge.bots': 'Tegen bots',
-  'h5.badge.touch': 'Aanraakbediening',
-  'h5.seo.title': 'H5-games: direct in de browser spelen',
-  'h5.seo.description': 'Originele browserspelletjes: een first-person shooter met drie wapens, LAN-multiplayer en potjes tegen bots. Geen download nodig.',
 };

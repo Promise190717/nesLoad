@@ -1,7 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode
+} from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { fetchCurrentUser, type AuthUser } from '@/lib/current-user';
 import { splitLocalePath } from '@/lib/i18n';
@@ -52,7 +58,13 @@ import LocaleSwitcher from './LocaleSwitcher';
  * 宿主那边用 `hidden sm:flex` 把移动端那份藏掉，所以同一个节点在 DOM 里会出现两次
  * —— 一次给窄屏、一次给宽屏，**同一时刻只有一份可见**。
  */
-function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNode }) {
+function TopBarContent({
+  showTheme,
+  left
+}: {
+  showTheme: boolean;
+  left?: ReactNode;
+}) {
   const { t, href: localeHref } = useI18n();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -67,6 +79,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
       setUser(current);
       setLoading(false);
     });
+
     return () => {
       cancelled = true;
     };
@@ -173,7 +186,10 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
           改 2px 后残余波动只剩 2↔3 物理像素（12% vs 原先 50%），肉眼基本看不出。
           全站这一排的分隔线共用这套类，改粗细只动这里的四条 span。
         */}
-        <span aria-hidden className="hidden h-[10px] w-[2px] shrink-0 bg-ink-500 sm:block" />
+        <span
+          aria-hidden
+          className="hidden h-[10px] w-[2px] shrink-0 bg-ink-500 sm:block"
+        />
       </div>
 
       <nav
@@ -217,18 +233,6 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         </Link>
 
         {/*
-          H5 小游戏入口（2026-11-16 用户要求「关闭 h5 游戏的入口」再次摘掉）。
-
-          历史：2026-11-12 加 → 当晚注释掉 → 2026-11-13 用户要求开放 → 2026-11-16 再关。
-          关的只是**顶栏这一格**，`/h5` 与 `/h5/transport-ship` 两条路由仍然在线上可达
-          （`app/sitemap.ts` 也还列着），旧外链打进来还能玩。要彻底下线得另外动路由和
-          sitemap，别把这里当成全站开关。
-
-          ⚠️ **分隔线和链接是一对**：这一格连它前面那条竖线一起解开，只解一个会在
-          「游戏库」和「账号」之间留一条孤零零的竖线。
-        */}
-
-        {/*
           账号那一格（2026-10-14 用户要求挪到「游戏库」**后面**：组顺序为
           语言 → 首页 → 游戏库 → 账号）。原先它排在首页和游戏库之间。
 
@@ -238,7 +242,10 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         */}
         {!loading && (
           <>
-            <span aria-hidden className="h-[10px] w-[2px] shrink-0 bg-ink-500" />
+            <span
+              aria-hidden
+              className="h-[10px] w-[2px] shrink-0 bg-ink-500"
+            />
             {user ? (
               /*
                * ⚠️ **这两颗（个人中心 / 登录页）都关掉了预取**（`prefetch={false}`，2026-10-19）。
@@ -279,7 +286,10 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
         */}
         {showTheme && (
           <>
-            <span aria-hidden className="h-[10px] w-[2px] shrink-0 bg-ink-500" />
+            <span
+              aria-hidden
+              className="h-[10px] w-[2px] shrink-0 bg-ink-500"
+            />
             {/*
               ⚠️ **方钮 + 圆润月牙**（2026-11-10，用户定的形态：「还是底座加图标，
               图标使用 play 页面的那个」）。这一格当天来回试过三版，别再自己发挥：
@@ -315,7 +325,9 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
               type="button"
               onClick={toggleTheme}
               title={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
-              aria-label={theme === 'light' ? t('theme.toDark') : t('theme.toLight')}
+              aria-label={
+                theme === 'light' ? t('theme.toDark') : t('theme.toLight')
+              }
               className="theme-toggle ml-2 shrink-0 rounded-[2px] bg-ink-800 p-0.5 text-ink-300 transition-colors hover:bg-ink-700 hover:text-accent"
             >
               {/* 图标画的是**切过去之后**的那一颗，和 title 同方向 */}
@@ -335,7 +347,7 @@ function TopBarContent({ showTheme, left }: { showTheme: boolean; left?: ReactNo
 
 export default function TopBar({
   showTheme = true,
-  left,
+  left
 }: {
   showTheme?: boolean;
   left?: ReactNode;

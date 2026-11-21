@@ -247,7 +247,7 @@ function parseQuery(raw: SearchParams): {
  * 本页要的数据。
  *
  * **两层缓存，各管一件事**：
- *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 7 天）——
+ *   ① 内层 `listGamesPageCached`（`unstable_cache`，跨请求，TTL 30 天）——
  *      请求根本没打到数据库。它内部那个 `total` 还另有 `countGamesCached` 一层
  *      （键里没有 offset，所以翻多少页都只数一次全表）。TTL 与理由见
  *      `lib/server/sb-games.ts` 那三个常量。

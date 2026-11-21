@@ -34,7 +34,7 @@ export async function generateMetadata({
 }
 
 /* 同 `/privacy`：按需 ISR。文案是死的，语言来自 URL，没有逐请求渲染的理由。 */
-export const revalidate = 604800;
+export const revalidate = 2592000;
 
 export default async function TermsOfServicePage({
   params,

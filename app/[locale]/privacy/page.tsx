@@ -60,7 +60,7 @@ export async function generateMetadata({
  * 被每一页的页脚链着，是爬虫最常抓的一批地址，每次抓取都要在免费版 10ms CPU 里
  * 现场跑一遍 React SSR。文案是死的、语言来自 URL，没有任何理由逐请求渲染。
  */
-export const revalidate = 604800;
+export const revalidate = 2592000;
 
 export default async function PrivacyPolicyPage({
   params,

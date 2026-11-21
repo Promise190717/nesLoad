@@ -7,7 +7,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/developer
  * 和列表页同一条规矩 —— 真路由才能软导航（起因见 `lib/catalog-route.ts` 文件头）。
  */
 
-export const revalidate = 604800; // = DEVELOPERS_PAGE_REVALIDATE_SECONDS(lib/server/developers.ts)；Next 的段配置只认字面量，别改回常量导入
+export const revalidate = 2592000; // = DEVELOPERS_PAGE_REVALIDATE_SECONDS(lib/server/developers.ts)；Next 的段配置只认字面量，别改回常量导入
 
 type Props = { params: Promise<{ locale: string; id: string; n: string }> };
 

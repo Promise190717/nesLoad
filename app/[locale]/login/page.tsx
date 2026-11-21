@@ -1,7 +1,5 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import BackLink from '@/components/BackLink';
 import LocaleSwitcher from '@/components/LocaleSwitcher';
 import LoginBackdrop from '@/components/LoginBackdrop';
@@ -15,7 +13,6 @@ import {
   translate,
   type MessageKey,
 } from '@/lib/i18n';
-import { USER_SESSION_COOKIE, verifyUserSession } from '@/lib/server/app-session';
 import { readLocaleParam } from '@/lib/server/locale';
 
 /**
@@ -36,8 +33,21 @@ import { readLocaleParam } from '@/lib/server/locale';
  * ⚠️ **这一页是 `noindex, follow`**：它是一张表单，没有可索引的正文 —— 收录进去
  *    只会是「一页和首页抢同一个词的空壳」。`follow` 留着，页脚 / 返回那些链接照旧能爬。
  *
- * ⚠️ **不写 `export const dynamic`**：下面读了 cookie（判登录态），本来就是动态渲染，
- *    再声明一次是多余的（和 GamesShell 那三页同一个理由）。
+ * 🔴 **2026-11-21：整页静态化（服务端不再读 cookie）**。
+ *
+ * 之前这里 `await cookies()` + `verifyUserSession()` 判「已登录就跳走」，代价是
+ * **每个请求都要现场跑一次 SSR**：CF 日志里 45 次 1102 有 10 次是 `/login`，
+ * 而且全带 `?next=`（每个取值都是一条新 URL，谁都暖不到别人），一次 SSR 要
+ * 100–500ms CPU，冷的那次直接被砍。
+ *
+ * 现在这一页对所有人是同一份 HTML（登录态由 `LoginPanel` 挂载后问一次
+ * `/api/user/login` 再决定跳不跳），于是：
+ *   · Next 在构建期就把 18 个语言版本预渲染好，运行时**根本不用渲染**；
+ *   · `worker.ts` 把 `?next=` 整个剥掉、缓存键折叠成 `/<locale>/__nesload_login`
+ *     （见 `loginKeyPath`），这一族从 10/45 次超时归零。
+ * 代价只有一个：已登录的人打开 `/login` 会**闪一帧表单**再被送去目标页
+ * （原来服务端那一跳是连一帧都没有的）。这是明知的取舍，别为了躲那一帧把
+ * `cookies()` 加回来 —— 加回来就等于把这一页重新钉死在现场渲染上。
  */
 export async function generateMetadata({
   params: routeParams,
@@ -72,57 +82,28 @@ export async function generateMetadata({
 }
 
 /**
- * `?next=` 的**白名单校验**。
+ * `?next=` 的白名单校验**搬去 `components/LoginPanel.tsx` 了**（2026-11-21）。
  *
- * 这是登录页上唯一一处「用户可控的跳转目标」，不校验就是一个开放重定向
- * （`?next=https://evil.example` 能把人从我们的域名带走）。
+ * 搬家原因：这一页静态化之后不能再有 `searchParams`（读到它就等于声明动态渲染），
+ * `?next=` 只能由客户端读。校验规则本身**一个字没改** —— 只接受站内绝对路径，
+ * 挡 `//evil.com` 与 `/\evil.com`，不能指回 `/login` 自己。
  *
- * 规则：只接受**站内绝对路径** ——
- *   · 必须以单个 `/` 开头（`//evil.com` 是协议相对地址，等于外站，挡掉）
- *   · `/\evil.com` 也挡（有些浏览器把反斜杠当 `/`）
- *   · 不能指回 `/login` 自己（否则登录成功原地打转）
- * 不合法一律返回 `null`，调用方走默认落点 `/`。
- *
- * 约定：**`next` 不带语言前缀**（`/account`，不是 `/zh/account`）——
- * 顶栏和 `/account` 的守卫都按这个约定生成，拼前缀是登录页自己的事
- * （见 `components/LoginPanel.tsx`）。
+ * ⚠️ 别为了「服务端也校验一次更安全」把它加回来：那需要 `searchParams`，
+ *    代价是把整页重新钉在动态渲染上。这个值只用于客户端 `router.replace`，
+ *    服务端从来不信它，没有第二道防线的必要。
  */
-function parseNext(value: string | string[] | undefined): string | null {
-  if (typeof value !== 'string') return null;
-
-  const next = value.trim();
-  if (!next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\')) return null;
-
-  /* 去掉 query / hash 之后只看路径，用来挡「指回登录页自己」 */
-  const path = next.split(/[?#]/)[0];
-  if (path === '/login' || path.endsWith('/login')) return null;
-
-  return next;
-}
 
 export default async function LoginPage({
   params: routeParams,
-  searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [locale, params] = await Promise.all([readLocaleParam(routeParams), searchParams]);
-  const next = parseNext(params.next);
+  const locale = await readLocaleParam(routeParams);
 
   /*
-   * 已经登录的人不该看见登录表单 —— 直接送去他本来要去的地方。
-   *
-   * 放在**服务端**判（而不是客户端拉一次 `/api/user/login`）：
-   * 客户端判会先画一帧表单再「啪」地跳走，服务端判连那一帧都没有。
-   * 手法和 `/account` 的守卫一样（见 app/[locale]/account/layout.tsx）。
-   *
-   * ⚠️ 这里只验签名、**不查库复核封禁** —— 和 account layout 同一个取舍：
-   *    把 D1 查询拖进首屏渲染路径不值当，封禁那道闸在各 API 的 `assertUser` 里。
+   * 🔴 这里**故意什么都不判**：登录态、`?next=` 全在客户端（`components/LoginPanel.tsx`）。
+   * 往这里加一次 `cookies()` 就会把整页打回动态渲染，10 次/样本的 1102 就是这么来的。
    */
-  const store = await cookies();
-  const session = await verifyUserSession(store.get(USER_SESSION_COOKIE)?.value);
-  if (session) redirect(localePath(locale, next ?? '/'));
 
   const t = (key: MessageKey) => translate(locale, key);
 
@@ -188,7 +169,7 @@ export default async function LoginPage({
         {/* 卡片壳和屋里那个浮层同一套（bg-ink-800 + pixel-edge），里面是共用的 AuthForm。
             内衬 2026-10-13 从 `p-4` 提到 `p-5` —— 用户要求表单整体高一点，输入框不动、靠留白撑。 */}
         <div className="mt-6 bg-ink-800 pixel-edge pxw-4 pxc-600 p-5">
-          <LoginPanel next={next} />
+          <LoginPanel />
         </div>
       </div>
     </main>

@@ -20,7 +20,7 @@ import { getGameCached, localizeGame } from '@/lib/server/sb-games';
  * - **`noindex, follow` + canonical 指回详情页**：这一页是同一款游戏的第二种排版，
  *   让它自己参与排名只会和详情页抢同一个词。canonical 明确说「正主是
  *   `/games/<id>`」，索引权归那边。
- * - **按需 ISR 7 天**：嵌入页会被很多第三方页面引用，每次请求现场查库毫无意义；
+ * - **按需 ISR 30 天**：嵌入页会被很多第三方页面引用，每次请求现场查库毫无意义；
  *   数据变化靠后台的 `revalidateTag('games')` 失效（和详情页同一条路）。
  * - **`autoStart`**：嵌入方已经用 iframe 表达了「我要玩这一款」，再让访客点一次
  *   「开始」是多余的。真正的用户手势（键盘 / 手柄）在画面出来后自然发生。
@@ -28,7 +28,7 @@ import { getGameCached, localizeGame } from '@/lib/server/sb-games';
  * ⚠️ 这一页**不做任何防嵌入限制**（没有 `X-Frame-Options` / CSP `frame-ancestors`，
  *    全站本来就没设）。要收回这个能力时，改的是嵌入代码那一块，不是这里。
  */
-export const revalidate = 604800;
+export const revalidate = 2592000;
 /** 动态段按需生成（理由同详情页：构建期不预渲染任何一款）。 */
 export const dynamicParams = true;
 

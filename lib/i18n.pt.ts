@@ -722,6 +722,10 @@ export const pt: Record<MessageKey, string> = {
   'gamesPage.showLess': 'Mostrar menos',
   'gamesPage.selectLanguage': 'Escolher idioma',
 
+  'error.title': 'Não foi possível carregar a página',
+  'error.description':
+    'O servidor está recebendo muitas solicitações agora. Espere alguns segundos e recarregue: normalmente carrega.',
+  'error.refresh': 'Recarregar',
   'notFound.title': 'Página não encontrada',
   'notFound.description':
     'Esse endereço não existe em {site}. Confira o link ou volte para a página inicial.',
@@ -767,14 +771,4 @@ export const pt: Record<MessageKey, string> = {
   'deepLink.title': 'Carregando jogo',
   'deepLink.loading': 'Baixando a ROM…',
   'deepLink.hint': 'Começa automaticamente quando o download terminar.',
-  /* H5 小游戏专栏 */
-  'h5.title': 'Jogos H5',
-  'h5.intro': 'Minijogos que rodam no navegador, sem download nem plugin. Por enquanto {count}.',
-  'h5.play': 'Jogar',
-  'h5.note': 'São minijogos originais feitos para este site. As configurações e os códigos de sala ficam no seu navegador; nada é enviado.',
-  'h5.badge.online': 'Multijogador LAN',
-  'h5.badge.bots': 'Contra bots',
-  'h5.badge.touch': 'Toque',
-  'h5.seo.title': 'Jogos H5: jogue no navegador',
-  'h5.seo.description': 'Minijogos originais para navegador: um FPS com três armas, multijogador LAN e partidas contra bots. Sem download.',
 };

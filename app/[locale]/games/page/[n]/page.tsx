@@ -10,7 +10,7 @@ import Page, { generateMetadata as metadata } from '@/lib/server/pages/games';
  * 改动的起因见 `lib/catalog-route.ts` 文件头。
  */
 
-export const revalidate = 604800; // = GAMES_PAGE_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
+export const revalidate = 2592000; // = GAMES_PAGE_REVALIDATE_SECONDS(lib/server/sb-games.ts)；Next 的段配置只认字面量，别改回常量导入
 
 /*
  * 动态段要进按需 ISR 必须有这个钩子：返回空数组 = 构建期一个参数组合都不预渲染，
